@@ -7,6 +7,9 @@ import os
 st.set_page_config(page_title="Bhagyabantapur PS Management", layout="wide")
 date_today = datetime.now().strftime("%Y-%m-%d")
 
+# --- PASSWORD CONFIGURATION ---
+SECRET_PASSWORD = "bpsAPP@2026"
+
 # Student Database Load karein
 if os.path.exists('students.csv'):
     students_df = pd.read_csv('students.csv')
@@ -66,94 +69,100 @@ if role == "Assistant Teacher (MDM)":
 
 # --- ROLE: HEAD TEACHER (ATTENDANCE) ---
 elif role == "Head Teacher (Attendance)":
-    st.sidebar.markdown(f"**Head Teacher:** SUKHAMAY KISKU")
-    tabs = st.tabs(["📋 Attendance", "📊 Daily Summary", "🍱 MDM Data", "📑 Monthly Reports"])
-
-    # 1. MARK ATTENDANCE
-    with tabs[0]:
-        st.header("Official Attendance Checklist")
-        sel_class_ht = st.selectbox("Class Chunnein", students_df['Class'].unique())
-        current_list = students_df[students_df['Class'] == sel_class_ht].copy()
-        current_list['Present'] = False
+    # --- PASSWORD CHECK START ---
+    st.sidebar.divider()
+    pw_input = st.sidebar.text_input("Admin Password Dalein", type="password")
+    
+    if pw_input == SECRET_PASSWORD:
+        st.sidebar.success("Access Granted!")
+        st.sidebar.markdown(f"**Head Teacher:** SUKHAMAY KISKU")
         
-        edited_att = st.data_editor(
-            current_list[['Roll', 'Name', 'Present']],
-            column_config={"Present": st.column_config.CheckboxColumn("Present", default=False)},
-            disabled=["Roll", "Name"],
-            hide_index=True,
-            use_container_width=True,
-            key=f"ht_att_{sel_class_ht}"
-        )
-        
-        if st.button("Official Attendance Save Karein"):
-            att_data = edited_att.copy()
-            att_data['Date'] = date_today
-            att_data['Class'] = sel_class_ht
-            # Hum saara data save karenge (Present aur Absent dono) taaki reports ban sakein
-            att_data.to_csv('attendance_log.csv', mode='a', index=False, header=not os.path.exists('attendance_log.csv'))
-            st.success("Attendance save ho gayi!")
+        # --- SARAA HT CONTENT IS IF BLOCK KE ANDAR RAHEGA ---
+        tabs = st.tabs(["📋 Attendance", "📊 Daily Summary", "🍱 MDM Data", "📑 Monthly Reports"])
 
-    # 2. DAILY SUMMARY
-    with tabs[1]:
-        st.header("School Reporting Summary")
-        if os.path.exists('attendance_log.csv'):
-            df_att = pd.read_csv('attendance_log.csv')
-            today = df_att[(df_att['Date'] == date_today) & (df_att['Present'] == True)]
+        # 1. MARK ATTENDANCE
+        with tabs[0]:
+            st.header("Official Attendance Checklist")
+            sel_class_ht = st.selectbox("Class Chunnein", students_df['Class'].unique())
+            current_list = students_df[students_df['Class'] == sel_class_ht].copy()
+            current_list['Present'] = False
             
-            if not today.empty:
-                pp = len(today[today['Class'] == 'PP'])
-                c1_4 = len(today[today['Class'].isin(['CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV'])])
-                c5 = len(today[today['Class'] == 'CLASS V'])
-                grand_total = len(today)
-                perc = (grand_total / len(students_df)) * 100
-
-                st.subheader(f"Aaj ki Stithi: {date_today}")
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Class PP", pp)
-                c2.metric("Class 1 to 4", c1_4)
-                c3.metric("Class 5", c5)
-                st.divider()
-                st.write(f"### **GRAND TOTAL:** {grand_total} | **PERCENTAGE:** {perc:.2f}%")
-            else: st.info("Aaj ki attendance abhi tak nahi bhari gayi.")
-
-    # 3. MDM VIEW
-    with tabs[2]:
-        st.header("Assistant Teachers ki MDM Entry")
-        if os.path.exists('mdm_log.csv'):
-            df_mdm = pd.read_csv('mdm_log.csv')
-            st.dataframe(df_mdm[df_mdm['Date'] == date_today], use_container_width=True)
-
-    # 4. MONTHLY REPORTS & ABSENTEE LIST
-    with tabs[3]:
-        st.header("📑 Monthly Analysis & Absentee List")
-        if os.path.exists('attendance_log.csv'):
-            full_att = pd.read_csv('attendance_log.csv')
-            full_att['Date'] = pd.to_datetime(full_att['Date'])
-            full_att['Month_Year'] = full_att['Date'].dt.strftime('%B %Y')
+            edited_att = st.data_editor(
+                current_list[['Roll', 'Name', 'Present']],
+                column_config={"Present": st.column_config.CheckboxColumn("Present", default=False)},
+                disabled=["Roll", "Name"],
+                hide_index=True,
+                use_container_width=True,
+                key=f"ht_att_{sel_class_ht}"
+            )
             
-            selected_month = st.selectbox("Mahina Chunnein", full_att['Month_Year'].unique())
-            monthly_data = full_att[full_att['Month_Year'] == selected_month]
+            if st.button("Official Attendance Save Karein"):
+                att_data = edited_att.copy()
+                att_data['Date'] = date_today
+                att_data['Class'] = sel_class_ht
+                att_data.to_csv('attendance_log.csv', mode='a', index=False, header=not os.path.exists('attendance_log.csv'))
+                st.success("Attendance save ho gayi!")
 
-            # --- Absentee List Section ---
-            st.subheader(f"🔴 {selected_month} ki Absentee Report")
-            
-            # Un bacchon ko filter karein jo absent the
-            absent_data = monthly_data[monthly_data['Present'] == False]
-            
-            if not absent_data.empty:
-                # Count karein ki kaun kitni baar absent raha
-                absent_summary = absent_data.groupby(['Name', 'Class']).size().reset_index(name='Days Absent')
-                absent_summary = absent_summary.sort_values(by='Days Absent', ascending=False)
+        # 2. DAILY SUMMARY
+        with tabs[1]:
+            st.header("School Reporting Summary")
+            if os.path.exists('attendance_log.csv'):
+                df_att = pd.read_csv('attendance_log.csv')
+                today_att = df_att[(df_att['Date'] == date_today) & (df_att['Present'] == True)]
                 
-                st.warning("Niche un bacchon ki list hai jo is mahine absent rahe hain (Zyada chutti wale upar hain):")
-                st.dataframe(absent_summary, use_container_width=True, hide_index=True)
-            else:
-                st.success("Is mahine koi bhi absent nahi raha!")
+                if not today_att.empty:
+                    pp = len(today_att[today_att['Class'] == 'PP'])
+                    c1_4 = len(today_att[today_att['Class'].isin(['CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV'])])
+                    c5 = len(today_att[today_att['Class'] == 'CLASS V'])
+                    grand_total = len(today_att)
+                    perc = (grand_total / len(students_df)) * 100
 
-            st.divider()
-            
-            # Download Button
-            csv_data = monthly_data.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Download Full Monthly Data", csv_data, f"Report_{selected_month}.csv", "text/csv")
-        else:
-            st.info("Data available nahi hai.")
+                    st.subheader(f"Aaj ki Stithi: {date_today}")
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Class PP", pp)
+                    c2.metric("Class 1 to 4", c1_4)
+                    c3.metric("Class 5", c5)
+                    st.divider()
+                    st.write(f"### **GRAND TOTAL:** {grand_total} | **PERCENTAGE:** {perc:.2f}%")
+                else: st.info("Aaj ki attendance abhi tak nahi bhari gayi.")
+
+        # 3. MDM VIEW
+        with tabs[2]:
+            st.header("Assistant Teachers ki MDM Entry")
+            if os.path.exists('mdm_log.csv'):
+                df_mdm = pd.read_csv('mdm_log.csv')
+                st.dataframe(df_mdm[df_mdm['Date'] == date_today], use_container_width=True)
+
+        # 4. MONTHLY REPORTS & ABSENTEE LIST
+        with tabs[3]:
+            st.header("📑 Monthly Analysis & Absentee List")
+            if os.path.exists('attendance_log.csv'):
+                full_att = pd.read_csv('attendance_log.csv')
+                full_att['Date'] = pd.to_datetime(full_att['Date'])
+                full_att['Month_Year'] = full_att['Date'].dt.strftime('%B %Y')
+                
+                selected_month = st.selectbox("Mahina Chunnein", full_att['Month_Year'].unique())
+                monthly_data = full_att[full_att['Month_Year'] == selected_month]
+
+                st.subheader(f"🔴 {selected_month} ki Absentee Report")
+                absent_data = monthly_data[monthly_data['Present'] == False]
+                
+                if not absent_data.empty:
+                    absent_summary = absent_data.groupby(['Name', 'Class']).size().reset_index(name='Days Absent')
+                    absent_summary = absent_summary.sort_values(by='Days Absent', ascending=False)
+                    st.warning("Zyada chutti wale bache:")
+                    st.dataframe(absent_summary, use_container_width=True, hide_index=True)
+                else:
+                    st.success("Is mahine sab present rahe!")
+
+                st.divider()
+                csv_data = monthly_data.to_csv(index=False).encode('utf-8')
+                st.download_button("📥 Download Monthly Data", csv_data, f"Report_{selected_month}.csv", "text/csv")
+            else:
+                st.info("Data available nahi hai.")
+    
+    # Password galat hone par error message
+    elif pw_input != "" and pw_input != SECRET_PASSWORD:
+        st.error("Ghalat Password! Kripya sahi password dalein.")
+    else:
+        st.info("Head Teacher options dekhne ke liye sidebar mein password dalein.")

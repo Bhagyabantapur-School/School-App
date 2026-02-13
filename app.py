@@ -69,7 +69,6 @@ if role == "Assistant Teacher (MDM)":
 
 # --- ROLE: HEAD TEACHER (ATTENDANCE) ---
 elif role == "Head Teacher (Attendance)":
-    # --- PASSWORD CHECK START ---
     st.sidebar.divider()
     pw_input = st.sidebar.text_input("Admin Password Dalein", type="password")
     
@@ -77,31 +76,45 @@ elif role == "Head Teacher (Attendance)":
         st.sidebar.success("Access Granted!")
         st.sidebar.markdown(f"**Head Teacher:** SUKHAMAY KISKU")
         
-        # --- SARAA HT CONTENT IS IF BLOCK KE ANDAR RAHEGA ---
         tabs = st.tabs(["📋 Attendance", "📊 Daily Summary", "🍱 MDM Data", "📑 Monthly Reports"])
 
-        # 1. MARK ATTENDANCE
+        # 1. MARK ATTENDANCE (Updated with Section Dropdown)
         with tabs[0]:
             st.header("Official Attendance Checklist")
-            sel_class_ht = st.selectbox("Class Chunnein", students_df['Class'].unique())
-            current_list = students_df[students_df['Class'] == sel_class_ht].copy()
-            current_list['Present'] = False
             
-            edited_att = st.data_editor(
-                current_list[['Roll', 'Name', 'Present']],
-                column_config={"Present": st.column_config.CheckboxColumn("Present", default=False)},
-                disabled=["Roll", "Name"],
-                hide_index=True,
-                use_container_width=True,
-                key=f"ht_att_{sel_class_ht}"
-            )
+            c1, c2 = st.columns(2)
+            with c1:
+                sel_class_ht = st.selectbox("Class Chunnein", students_df['Class'].unique(), key="ht_class")
+            with c2:
+                # Section dropdown added here
+                sections_ht = students_df[students_df['Class'] == sel_class_ht]['Section'].unique()
+                sel_section_ht = st.selectbox("Section Chunnein", sections_ht, key="ht_sec")
+
+            # Filter current list by both Class and Section
+            current_list = students_df[(students_df['Class'] == sel_class_ht) & 
+                                       (students_df['Section'] == sel_section_ht)].copy()
             
-            if st.button("Official Attendance Save Karein"):
-                att_data = edited_att.copy()
-                att_data['Date'] = date_today
-                att_data['Class'] = sel_class_ht
-                att_data.to_csv('attendance_log.csv', mode='a', index=False, header=not os.path.exists('attendance_log.csv'))
-                st.success("Attendance save ho gayi!")
+            if not current_list.empty:
+                current_list['Present'] = False
+                
+                edited_att = st.data_editor(
+                    current_list[['Roll', 'Name', 'Present']],
+                    column_config={"Present": st.column_config.CheckboxColumn("Present", default=False)},
+                    disabled=["Roll", "Name"],
+                    hide_index=True,
+                    use_container_width=True,
+                    key=f"ht_att_{sel_class_ht}_{sel_section_ht}"
+                )
+                
+                if st.button("Official Attendance Save Karein"):
+                    att_data = edited_att.copy()
+                    att_data['Date'] = date_today
+                    att_data['Class'] = sel_class_ht
+                    att_data['Section'] = sel_section_ht
+                    att_data.to_csv('attendance_log.csv', mode='a', index=False, header=not os.path.exists('attendance_log.csv'))
+                    st.success(f"Attendance for {sel_class_ht}-{sel_section_ht} save ho gayi!")
+            else:
+                st.info("Is section mein koi baccha nahi mila.")
 
         # 2. DAILY SUMMARY
         with tabs[1]:
@@ -118,10 +131,10 @@ elif role == "Head Teacher (Attendance)":
                     perc = (grand_total / len(students_df)) * 100
 
                     st.subheader(f"Aaj ki Stithi: {date_today}")
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("Class PP", pp)
-                    c2.metric("Class 1 to 4", c1_4)
-                    c3.metric("Class 5", c5)
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Class PP", pp)
+                    col2.metric("Class 1 to 4", c1_4)
+                    col3.metric("Class 5", c5)
                     st.divider()
                     st.write(f"### **GRAND TOTAL:** {grand_total} | **PERCENTAGE:** {perc:.2f}%")
                 else: st.info("Aaj ki attendance abhi tak nahi bhari gayi.")
@@ -133,7 +146,7 @@ elif role == "Head Teacher (Attendance)":
                 df_mdm = pd.read_csv('mdm_log.csv')
                 st.dataframe(df_mdm[df_mdm['Date'] == date_today], use_container_width=True)
 
-        # 4. MONTHLY REPORTS & ABSENTEE LIST
+        # 4. MONTHLY REPORTS
         with tabs[3]:
             st.header("📑 Monthly Analysis & Absentee List")
             if os.path.exists('attendance_log.csv'):
@@ -161,8 +174,7 @@ elif role == "Head Teacher (Attendance)":
             else:
                 st.info("Data available nahi hai.")
     
-    # Password galat hone par error message
     elif pw_input != "" and pw_input != SECRET_PASSWORD:
-        st.error("Ghalat Password! Kripya sahi password dalein.")
+        st.error("Ghalat Password!")
     else:
-        st.info("Head Teacher options dekhne ke liye sidebar mein password dalein.")
+        st.info("Head Teacher options ke liye password dalein.")

@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime
 import os
 import time
+import random
 from streamlit_qrcode_scanner import qrcode_scanner
 
 # --- 1. CONFIGURATION ---
@@ -12,13 +13,23 @@ st.set_page_config(
     layout="centered"
 )
 
-# Professional CSS
+# Professional CSS for Branding and Layout
 st.markdown(
     """
     <style>
         #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
         [data-testid="stSidebar"] {display: none;}
         .block-container { padding-top: 1rem; max-width: 600px; }
+        
+        /* Side-by-side Logo and Name */
+        .header-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 5px;
+        }
+        
         .stButton>button {
             width: 100%; border-radius: 12px; height: 3.5em;
             background-color: #007bff; color: white; font-weight: bold; border: none;
@@ -57,67 +68,77 @@ TEACHER_CREDS = {
     "TAPAN KUMAR MANDAL": {"id": "TKM", "pw": "tkm26"},
     "MANJUMA KHATUN": {"id": "MK", "pw": "mk26"}
 }
+rev_mapping = {v['id']: k for k, v in TEACHER_CREDS.items()}
 
-# --- 3. HEADER ---
+# --- 3. HEADER (Logo beside School Name) ---
 head_col1, head_col2 = st.columns([1, 4])
 with head_col1:
     if os.path.exists("logo.png"): st.image("logo.png", width=70)
 with head_col2:
     st.markdown("<h3 style='margin:0; padding-top:10px;'>Bhagyabantapur Primary School</h3>", unsafe_allow_html=True)
+st.markdown(f"<p style='text-align: center; color: gray;'>{date_today_str} | {day_name}</p>", unsafe_allow_html=True)
 st.divider()
 
 # --- 4. NAVIGATION ---
+# Restored "Holiday List" to the main menu
 page = st.selectbox("Navigation Menu", ["Teacher Dashboard", "Admin Panel", "📅 View Holiday List"])
 
 # --- 5. PAGES ---
 
-if page == "Admin Panel":
+# A. HOLIDAY LIST (RESTORED)
+if page == "📅 View Holiday List":
+    st.subheader("🗓️ School Holiday Calendar 2026")
+    if holidays_df is not None:
+        # Display as a clean, simple table
+        st.table(holidays_df[['Date', 'Occasion']])
+    else:
+        st.error("Error: 'holidays.csv' not found in your GitHub folder.")
+
+# B. ADMIN PANEL
+elif page == "Admin Panel":
     admin_pw = st.text_input("Master Password", type="password")
     if admin_pw == "bpsAPP@2026":
-        # RESTORED: Staff Attendance is now Tab #1
         adm_tabs = st.tabs(["👨‍🏫 Staff Attendance", "🦅 Bird's Eye View", "🔄 Substitution"])
         
         with adm_tabs[0]:
             st.subheader(f"Staff Attendance - {date_today_str}")
-            # Create a dataframe for the attendance table
-            teachers = list(TEACHER_CREDS.keys())
-            att_df = pd.DataFrame({"Teacher Name": teachers, "Present": True})
-            
-            # Data editor to mark attendance
+            att_df = pd.DataFrame({"Teacher Name": list(TEACHER_CREDS.keys()), "Present": True})
             edited_att = st.data_editor(att_df, hide_index=True, use_container_width=True)
-            
             if st.button("Save Official Attendance"):
                 final_att = edited_att.copy()
                 final_att['Date'] = date_today_str
                 final_att.to_csv('staff_attendance_log.csv', mode='a', index=False, header=not os.path.exists('staff_attendance_log.csv'))
-                st.success("Attendance saved! Absent teachers are now locked out.")
+                st.success("Attendance Saved.")
 
         with adm_tabs[1]:
-            st.subheader("Live School Map")
-            # (Bird's Eye View Logic...)
-            st.info("Showing real-time class assignments.")
+            st.subheader("📍 Real-time School Status")
+            if routine_df is not None:
+                today_routine = routine_df[routine_df['Day'] == day_name].copy()
+                for _, row in today_routine.iterrows():
+                    orig = row['Teacher']
+                    curr = st.session_state.sub_map.get(orig, orig)
+                    st.info(f"**Class {row['Class']}**: {rev_mapping.get(curr, curr)} (Sub: {orig != curr})")
 
         with adm_tabs[2]:
             st.subheader("Manage Substitution")
             abs_t = st.selectbox("Absent Teacher", ["None"] + list(TEACHER_CREDS.keys()))
-            sub_t = st.selectbox("Assign Classes To", ["None"] + list(TEACHER_CREDS.keys()))
-            if st.button("Apply Substitution"):
-                if abs_t != "None" and sub_t != "None":
-                    st.session_state.sub_map[TEACHER_CREDS[abs_t]["id"]] = TEACHER_CREDS[sub_t]["id"]
-                    st.success(f"Classes for {abs_t} moved to {sub_t}")
+            sub_t = st.selectbox("Substitute To", ["None"] + list(TEACHER_CREDS.keys()))
+            if st.button("Apply"):
+                st.session_state.sub_map[TEACHER_CREDS[abs_t]["id"]] = TEACHER_CREDS[sub_t]["id"]
+                st.success("Done.")
 
+# C. TEACHER DASHBOARD
 elif page == "Teacher Dashboard":
-    selected_teacher = st.selectbox("Select Teacher Name", list(TEACHER_CREDS.keys()))
+    selected_teacher = st.selectbox("Teacher Name", list(TEACHER_CREDS.keys()))
     entered_pw = st.text_input("Password", type="password")
 
     if entered_pw == TEACHER_CREDS[selected_teacher]["pw"]:
-        # CHECK ATTENDANCE BEFORE PROCEEDING
+        # Block if absent
         if os.path.exists('staff_attendance_log.csv'):
             log = pd.read_csv('staff_attendance_log.csv')
-            # Look for today's record for this teacher
             today_rec = log[(log['Date'] == date_today_str) & (log['Teacher Name'] == selected_teacher)]
             if not today_rec.empty and today_rec.iloc[-1]['Present'] == False:
-                st.error("🚫 Access Blocked: You have been marked ABSENT for today.")
+                st.error("🚫 Access Blocked: You are marked ABSENT today.")
                 st.stop()
 
         st.success(f"Welcome {selected_teacher}!")

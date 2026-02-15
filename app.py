@@ -2,23 +2,35 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
+import time
 from streamlit_qrcode_scanner import qrcode_scanner
 
-# --- 1. APP CONFIGURATION (PLAY STORE STYLE) ---
+# --- 1. PWA & PLAY STORE STYLE CONFIG ---
 st.set_page_config(
-    page_title="BPS Digital Manager",
+    page_title="BPS Digital",
     page_icon="logo.png" if os.path.exists("logo.png") else "🏫",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- HIDE STREAMLIT BRANDING (MOBILE APP LOOK) ---
+# Link the manifest.json for PWA installation
+st.markdown('<link rel="manifest" href="manifest.json">', unsafe_allow_html=True)
+
+# Hide Streamlit elements to look like a native app
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
             footer {visibility: hidden;}
             header {visibility: hidden;}
-            .block-container { padding-top: 1rem; padding-bottom: 1rem; }
+            .block-container { padding-top: 2rem; }
+            /* Make buttons look like mobile app buttons */
+            .stButton>button {
+                width: 100%;
+                border-radius: 10px;
+                height: 3em;
+                background-color: #007bff;
+                color: white;
+            }
             </style>
             """
 st.markdown(hide_st_style, unsafe_allow_html=True)
@@ -32,7 +44,10 @@ day_name = date_today_dt.strftime('%A')
 @st.cache_data
 def load_school_data(file):
     if os.path.exists(file):
-        return pd.read_csv(file, encoding='utf-8-sig')
+        try:
+            return pd.read_csv(file, encoding='utf-8-sig')
+        except:
+            return pd.read_csv(file)
     return None
 
 students_df = load_school_data('students.csv')
@@ -81,14 +96,17 @@ if 'sub_map' not in st.session_state:
 if os.path.exists("logo.png"):
     st.sidebar.image("logo.png", use_container_width=True)
 else:
-    st.sidebar.title("🏫 BPS Digital")
+    st.sidebar.title("🏫 Bhagyabantapur PS")
 
-# Last Submission Time-stamp
+# Display Last Submission Timestamp
 if os.path.exists('mdm_log.csv'):
-    df_recent = pd.read_csv('mdm_log.csv')
-    if not df_recent.empty:
-        last_row = df_recent.iloc[-1]
-        st.sidebar.caption(f"✅ Last Submit: {last_row['Time']} ({last_row['Date']})")
+    try:
+        df_recent = pd.read_csv('mdm_log.csv')
+        if not df_recent.empty:
+            last_row = df_recent.iloc[-1]
+            st.sidebar.info(f"✅ Last Submit: {last_row['Time']} ({last_row['Date']})")
+    except:
+        pass
 
 st.sidebar.divider()
 st.sidebar.write(f"📅 **Date:** {date_today_str}")
@@ -99,15 +117,17 @@ if days_until_next is not None and not is_holiday:
 
 role = st.sidebar.radio("Go To:", ["Assistant Teacher (MDM)", "Head Teacher (Admin)", "📅 View Holiday List"])
 
-# --- OPTION: VIEW HOLIDAYS ---
+# --- NAVIGATION LOGIC ---
+
+# A. VIEW HOLIDAY LIST
 if role == "📅 View Holiday List":
     st.header("🗓️ School Holiday Calendar 2026")
     if holidays_df is not None:
-        st.dataframe(holidays_df[['Date', 'Occasion']], use_container_width=True, hide_index=True)
+        st.table(holidays_df[['Date', 'Occasion']])
     else:
-        st.warning("holidays.csv missing.")
+        st.warning("Holiday list (holidays.csv) not found.")
 
-# --- ROLE: ASSISTANT TEACHER ---
+# B. ASSISTANT TEACHER DASHBOARD
 elif role == "Assistant Teacher (MDM)":
     if is_holiday:
         st.error(f"🚫 ACCESS RESTRICTED: School is closed for **{holiday_reason}**.")
@@ -118,9 +138,7 @@ elif role == "Assistant Teacher (MDM)":
     entered_pw = st.text_input("Enter Password", type="password")
 
     if entered_pw == TEACHER_DATA[selected_teacher]["pw"]:
-        st.success(f"Welcome, {selected_teacher}!")
-        
-        # Absent Check
+        # Staff Attendance Check
         if os.path.exists('staff_attendance_log.csv'):
             staff_att = pd.read_csv('staff_attendance_log.csv')
             today_rec = staff_att[(staff_att['Date'] == date_today_str) & (staff_att['Teacher Name'] == selected_teacher)]
@@ -128,31 +146,33 @@ elif role == "Assistant Teacher (MDM)":
                 st.error("🚫 Access Blocked: You are marked as ABSENT today.")
                 st.stop()
 
-        # Routine / Substitution
         my_init = TEACHER_DATA[selected_teacher]["id"]
         all_my_inits = [my_init]
         for absent, sub in st.session_state.sub_map.items():
             if sub == my_init: all_my_inits.append(absent)
 
+        # Class Filter
         active_periods = routine_df[(routine_df['Day'] == day_name) & (routine_df['Teacher'].isin(all_my_inits))]
         if not active_periods.empty:
-            options = [f"{r['Class']} - {r['Subject']} ({r['Teacher']})" for _, r in active_periods.iterrows()]
+            options = [f"Class {r['Class']} - {r['Subject']} ({r['Teacher']})" for _, r in active_periods.iterrows()]
             choice = st.selectbox("Current Period", options)
             selected_row = active_periods.iloc[options.index(choice)]
             sel_class, sel_section = selected_row['Class'], selected_row['Section']
         else:
-            st.warning("No scheduled classes.")
-            sel_class = st.selectbox("Manual Class", students_df['Class'].unique())
-            sel_section = st.selectbox("Manual Section", ["A", "B"])
+            st.warning("No scheduled classes found for this time.")
+            sel_class = st.selectbox("Manual Class Select", students_df['Class'].unique())
+            sel_section = "A"
 
-        # QR Scanner
+        # Optional QR Scanner
+        st.subheader("📸 Scan Student ID")
         scanned_id = qrcode_scanner(key='mdm_scan')
         if scanned_id:
             std = students_df[students_df['Student Code'].astype(str) == str(scanned_id)]
             if not std.empty: st.info(f"✅ Scanned: {std.iloc[0]['Name']}")
 
+        # Data Entry
         st.divider()
-        class_list = students_df[(students_df['Class'] == sel_class) & (students_df['Section'] == sel_section)].copy()
+        class_list = students_df[(students_df['Class'] == sel_class)].copy()
         if not class_list.empty:
             class_list['Ate_MDM'] = False
             edited = st.data_editor(class_list[['Roll', 'Name', 'Ate_MDM']], hide_index=True, use_container_width=True)
@@ -169,33 +189,34 @@ elif role == "Assistant Teacher (MDM)":
     elif entered_pw != "":
         st.error("❌ Incorrect Password.")
 
-# --- ROLE: HEAD TEACHER (ADMIN) ---
+# C. HEAD TEACHER ADMIN
 elif role == "Head Teacher (Admin)":
     pw = st.sidebar.text_input("Admin Password", type="password")
     if pw == SECRET_PASSWORD:
-        tabs = st.tabs(["👨‍🏫 Staff Attendance", "🔄 Substitution", "📊 Reports", "🔄 System"])
+        st.sidebar.success("Welcome HT!")
+        tabs = st.tabs(["👨‍🏫 Staff Attendance", "🔄 Substitution", "📊 Reports", "⚙️ System"])
         
         with tabs[0]: 
-            st.header(f"👨‍🏫 Staff Register - {date_today_str}")
-            teachers = list(TEACHER_DATA.keys())
-            t_data = pd.DataFrame({"Teacher Name": teachers, "Present": True})
-            edited_t = st.data_editor(t_data, hide_index=True, use_container_width=True, key="t_editor")
+            st.header(f"👨‍🏫 Teacher Attendance - {date_today_str}")
+            t_data = pd.DataFrame({"Teacher Name": list(TEACHER_DATA.keys()), "Present": True})
+            edited_t = st.data_editor(t_data, hide_index=True, use_container_width=True)
             if st.button("Save Official Attendance"):
                 staff_log = edited_t.copy()
                 staff_log['Date'] = date_today_str
-                staff_log['Time_Stamp'] = datetime.now().strftime("%H:%M:%S")
                 staff_log.to_csv('staff_attendance_log.csv', mode='a', index=False, header=not os.path.exists('staff_attendance_log.csv'))
-                st.success("Attendance saved!")
+                st.success("Staff Register Updated.")
 
         with tabs[1]:
             st.header("🔄 Substitution Manager")
-            abs_t = st.selectbox("Who is Absent?", ["None"] + list(TEACHER_DATA.keys()))
-            sub_t = st.selectbox("Who will take class?", ["None"] + list(TEACHER_MAP.keys()))
-            if st.button("Activate"):
+            abs_t = st.selectbox("Absent Teacher", ["None"] + list(TEACHER_DATA.keys()))
+            sub_t = st.selectbox("Substitute To", ["None"] + list(TEACHER_DATA.keys()))
+            if st.button("Confirm Substitution"):
                 st.session_state.sub_map[TEACHER_DATA[abs_t]["id"]] = TEACHER_DATA[sub_t]["id"]
-                st.success("Substituted!")
+                st.success(f"Classes for {abs_t} moved to {sub_t}")
 
         with tabs[3]:
-            if st.button("🔄 Refresh System"):
+            if st.button("🔄 Reload All Data"):
                 st.cache_data.clear()
                 st.rerun()
+    else:
+        st.info("Please enter the Admin Password in the sidebar.")

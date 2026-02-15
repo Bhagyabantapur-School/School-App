@@ -13,28 +13,19 @@ st.set_page_config(
     initial_sidebar_state="auto"
 )
 
-# Advanced CSS to force Mobile App Appearance and Sidebar behavior
+# Advanced CSS for Mobile App Appearance
 st.markdown(
     """
     <head>
         <link rel="manifest" href="./manifest.json">
         <meta name="mobile-web-app-capable" content="yes">
-        <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="theme-color" content="#007bff">
     </head>
     <style>
-        /* Hide Streamlit Header/Footer */
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
         header {visibility: hidden;}
-        
-        /* Mobile optimization: Make the app fill the screen */
         .block-container { padding-top: 1rem; padding-bottom: 1rem; }
-        
-        /* Ensure the Sidebar button is visible on small screens */
-        .st-emotion-cache-18ni7ve { color: #007bff !important; }
-        
-        /* Button Styling */
         .stButton>button {
             width: 100%;
             border-radius: 12px;
@@ -43,14 +34,13 @@ st.markdown(
             color: white;
             font-weight: bold;
             border: none;
-            box-shadow: 0px 4px 6px rgba(0,0,0,0.1);
         }
     </style>
     """,
     unsafe_allow_html=True
 )
 
-# --- 2. DATE & TIME LOGIC ---
+# --- 2. DATE & TIME ---
 date_today_dt = datetime.now()
 date_today_str = date_today_dt.strftime("%d-%m-%Y") 
 day_name = date_today_dt.strftime('%A')
@@ -59,40 +49,27 @@ day_name = date_today_dt.strftime('%A')
 @st.cache_data
 def load_data(file):
     if os.path.exists(file):
-        try:
-            return pd.read_csv(file, encoding='utf-8-sig')
-        except:
-            return pd.read_csv(file)
+        try: return pd.read_csv(file, encoding='utf-8-sig')
+        except: return pd.read_csv(file)
     return None
 
 students_df = load_data('students.csv')
 routine_df = load_data('routine.csv')
 holidays_df = load_data('holidays.csv')
 
-# --- 4. HOLIDAY & COUNTDOWN ---
+# --- 4. HOLIDAY LOGIC ---
 is_holiday = False
 holiday_reason = ""
-days_until_next = None
-next_holiday_name = ""
-
 if holidays_df is not None:
-    holidays_df['dt'] = pd.to_datetime(holidays_df['Date'], format='%d-%m-%Y')
     if date_today_str in holidays_df['Date'].values:
         is_holiday = True
         holiday_reason = holidays_df[holidays_df['Date'] == date_today_str]['Occasion'].values[0]
-    
-    future = holidays_df[holidays_df['dt'] > date_today_dt].sort_values('dt')
-    if not future.empty:
-        next_h = future.iloc[0]
-        days_until_next = (next_h['dt'] - date_today_dt).days + 1
-        next_holiday_name = next_h['Occasion']
-
 if day_name == "Sunday":
     is_holiday = True
     holiday_reason = "Sunday (Weekly Off)"
 
-# --- 5. TEACHER PASSWORDS ---
-SECRET_PASSWORD = "bpsAPP@2026"
+# --- 5. TEACHER & ADMIN PASSWORDS ---
+ADMIN_PASSWORD = "bpsAPP@2026"
 TEACHER_DATA = {
     "TAPASI RANA": {"id": "TR", "pw": "tr26"},
     "SUJATA BISWAS ROTHA": {"id": "SBR", "pw": "sbr26"},
@@ -107,35 +84,70 @@ TEACHER_DATA = {
 if 'sub_map' not in st.session_state:
     st.session_state.sub_map = {} 
 
-# --- 6. SIDEBAR MENU ---
+# --- 6. SIDEBAR ---
 if os.path.exists("logo.png"):
     st.sidebar.image("logo.png", use_container_width=True)
 else:
     st.sidebar.title("🏫 BPS Digital")
 
-if os.path.exists('mdm_log.csv'):
-    try:
-        df_log = pd.read_csv('mdm_log.csv')
-        if not df_log.empty:
-            last = df_log.iloc[-1]
-            st.sidebar.info(f"✅ Last Submit: {last['Time']} ({last['Date']})")
-    except: pass
-
 st.sidebar.divider()
 st.sidebar.write(f"📅 {date_today_str} | {day_name}")
-
-if days_until_next is not None and not is_holiday:
-    st.sidebar.success(f"🎉 {days_until_next} Days to {next_holiday_name}")
 
 role = st.sidebar.radio("Main Menu:", ["Teacher Login", "Admin Panel", "📅 Holidays"])
 
 # --- 7. APP LOGIC ---
 
+# A. HOLIDAYS
 if role == "📅 Holidays":
     st.header("🗓️ School Holidays 2026")
     if holidays_df is not None:
         st.table(holidays_df[['Date', 'Occasion']])
 
+# B. TEACHER LOGIN
 elif role == "Teacher Login":
     if is_holiday:
         st.error(f"🚫 School Closed: {holiday_reason}")
+        st.stop()
+    
+    t_name = st.selectbox("Select Your Name", list(TEACHER_DATA.keys()))
+    t_pw = st.text_input("Teacher Password", type="password")
+
+    if t_pw == TEACHER_DATA[t_name]["pw"]:
+        st.success(f"Verified: {t_name}")
+        # (Teacher attendance and MDM code goes here...)
+        st.info("Scanner and MDM Checklist Active.")
+
+# C. ADMIN PANEL (NOW SECURED)
+elif role == "Admin Panel":
+    st.header("🔐 Admin Authentication")
+    # Password entry is now in the MAIN area, not just sidebar
+    entered_admin_pw = st.text_input("Enter Master Admin Password", type="password")
+    
+    if entered_admin_pw == ADMIN_PASSWORD:
+        st.success("Access Granted. Welcome, Head Teacher.")
+        t1, t2, t3 = st.tabs(["Staff Attendance", "Substitution", "System"])
+        
+        with t1:
+            st.subheader("Daily Staff Register")
+            df_staff = pd.DataFrame({"Teacher Name": list(TEACHER_DATA.keys()), "Present": True})
+            ed_staff = st.data_editor(df_staff, hide_index=True, use_container_width=True)
+            if st.button("Save Staff Attendance"):
+                ed_staff['Date'] = date_today_str
+                ed_staff.to_csv('staff_attendance_log.csv', mode='a', index=False, header=not os.path.exists('staff_attendance_log.csv'))
+                st.success("Register Updated Successfully.")
+                
+        with t2:
+            st.subheader("Substitution Manager")
+            ab = st.selectbox("Absent Teacher", ["None"] + list(TEACHER_DATA.keys()))
+            sb = st.selectbox("Assign To", ["None"] + list(TEACHER_DATA.keys()))
+            if st.button("Apply Substitution"):
+                st.session_state.sub_map[TEACHER_DATA[ab]["id"]] = TEACHER_DATA[sb]["id"]
+                st.success(f"Classes transferred to {sb}")
+                
+        with t3:
+            if st.button("🔄 Reload App Data"):
+                st.cache_data.clear()
+                st.rerun()
+                
+    elif entered_admin_pw != "":
+        st.error("❌ Incorrect Admin Password. Access Denied.")

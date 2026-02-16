@@ -11,7 +11,7 @@ st.set_page_config(
     layout="centered"
 )
 
-# Professional CSS for Specific Branding Layout
+# Professional CSS for Branding
 st.markdown(
     """
     <style>
@@ -19,13 +19,6 @@ st.markdown(
         [data-testid="stSidebar"] {display: none;}
         .block-container { padding-top: 1rem; max-width: 600px; }
         
-        /* HEADER LAYOUT */
-        .header-wrapper {
-            display: flex;
-            align-items: center;
-            justify-content: flex-start;
-            gap: 20px;
-        }
         .logo-box {
             display: flex;
             flex-direction: column;
@@ -40,93 +33,80 @@ st.markdown(
             letter-spacing: 1px;
         }
         .school-title {
-            font-size: 26px !important;
+            font-size: 24px !important;
             font-weight: 900 !important;
             color: #1a1a1a;
             margin: 0;
             line-height: 1.1;
         }
-
-        /* SUMMARY CARD */
-        .summary-card {
-            background-color: #ffffff;
-            border: 2px solid #007bff;
-            border-radius: 15px;
-            padding: 20px;
-            box-shadow: 0px 4px 10px rgba(0,0,0,0.05);
-        }
-        .summary-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 8px 0;
-            border-bottom: 1px solid #f0f2f6;
-            font-size: 18px;
-        }
-        .summary-val { color: #007bff; font-weight: 900; font-size: 22px; }
-        .grand-total-box {
-            margin-top: 15px;
-            background-color: #d4edda;
-            padding: 10px;
-            border-radius: 10px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .grand-total-num { font-size: 30px; font-weight: 900; color: #155724; }
     </style>
     """,
     unsafe_allow_html=True
 )
 
-# --- 2. THE BRANDED HEADER ---
-# This creates the Side-by-Side Logo/Name and Subtext under Logo
+# --- 2. TEACHER LIST ---
+TEACHER_CREDS = {
+    "TAPASI RANA": {"id": "TR", "pw": "tr26"},
+    "SUJATA BISWAS ROTHA": {"id": "SBR", "pw": "sbr26"},
+    "ROHINI SINGH": {"id": "RS", "pw": "rs26"},
+    "UDAY NARAYAN JANA": {"id": "UNJ", "pw": "unj26"},
+    "BIMAL KUMAR PATRA": {"id": "BKP", "pw": "bkp26"},
+    "SUSMITA PAUL": {"id": "SP", "pw": "sp26"},
+    "TAPAN KUMAR MANDAL": {"id": "TKM", "pw": "tkm26"},
+    "MANJUMA KHATUN": {"id": "MK", "pw": "mk26"}
+}
+
+# --- 3. THE BRANDED HEADER ---
 col_header = st.columns([1, 4])
 
 with col_header[0]:
-    # Logo and BPS Digital Subtext
     st.markdown('<div class="logo-box">', unsafe_allow_html=True)
     if os.path.exists("logo.png"): 
-        st.image("logo.png", width=80) # Decreased size to 80px
+        st.image("logo.png", width=80) 
     else: 
         st.markdown("<h2 style='margin:0;'>🏫</h2>", unsafe_allow_html=True)
     st.markdown('<p class="bps-subtext">BPS Digital</p>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 with col_header[1]:
-    # School Name beside the logo
     st.markdown('<p class="school-title">Bhagyabantapur<br>Primary School</p>', unsafe_allow_html=True)
 
-# Date and Day
-date_str = datetime.now().strftime("%d-%m-%Y") 
-day_str = datetime.now().strftime('%A')
-st.markdown(f"<p style='text-align: right; color: #666; font-weight:bold;'>{date_str} | {day_str}</p>", unsafe_allow_html=True)
 st.divider()
 
-# --- 3. NAVIGATION & LOGIC ---
-page = st.selectbox("CHOOSE ACTION", ["Teacher MDM Entry", "Admin (Attendance & HT Tools)", "📅 View Holiday List"])
+# --- 4. NAVIGATION ---
+page = st.selectbox("CHOOSE ACTION", ["Assistant Teacher MDM Entry", "Admin Panel", "📅 View Holiday List"])
 
-# (Admin Summary logic remains optimized for PP, I-IV, and V grouping)
-if page == "Admin (Attendance & HT Tools)":
-    admin_pw = st.text_input("Master Password", type="password")
+# --- 5. ASSISTANT TEACHER SECTION (FIXED DROPDOWN) ---
+if page == "Assistant Teacher MDM Entry":
+    st.subheader("🍱 MDM Daily Entry")
+    
+    # DROPDOWN FOR TEACHER SELECTION
+    teacher_name = st.selectbox("Select Your Name (Assistant Teacher)", list(TEACHER_CREDS.keys()))
+    
+    teacher_pw = st.text_input("Enter Your Password", type="password")
+
+    if teacher_pw == TEACHER_CREDS[teacher_name]["pw"]:
+        st.success(f"Verified: {teacher_name}")
+        
+        selected_class = st.selectbox("Select Class", ["PP", "1", "2", "3", "4", "5"])
+        mdm_count = st.number_input("Enter MDM Student Count", min_value=0, max_value=150)
+        
+        if st.button("Submit MDM Count"):
+            date_str = datetime.now().strftime("%d-%m-%Y")
+            now_time = datetime.now().strftime("%I:%M %p")
+            
+            # Save to MDM Log
+            log = pd.DataFrame([{"Date": date_str, "Time": now_time, "Class": selected_class, "Count": mdm_count, "Teacher": teacher_name}])
+            log.to_csv('mdm_log.csv', mode='a', index=False, header=not os.path.exists('mdm_log.csv'))
+            
+            st.success("MDM Count submitted successfully!")
+            st.balloons()
+    elif teacher_pw != "":
+        st.error("Incorrect Password. Please try again.")
+
+# --- 6. ADMIN PANEL ---
+elif page == "Admin Panel":
+    admin_pw = st.text_input("Enter Admin Password", type="password")
     if admin_pw == "bpsAPP@2026":
-        tabs = st.tabs(["📊 Summary", "🖋️ Students", "👨‍🏫 Staff"])
-        with tabs[0]:
-            if os.path.exists('student_attendance_master.csv'):
-                df = pd.read_csv('student_attendance_master.csv')
-                today = df[df['Date'] == date_str]
-                if not today.empty:
-                    pp = today[today['Class'].astype(str).str.upper() == 'PP']['Present'].sum()
-                    i_iv = today[today['Class'].astype(str).isin(['1', '2', '3', '4'])]['Present'].sum()
-                    v = today[today['Class'].astype(str) == '5']['Present'].sum()
-                    
-                    st.markdown(f"""
-                    <div class="summary-card">
-                        <div class="summary-row"><span>Class PP</span><span class="summary-val">{pp}</span></div>
-                        <div class="summary-row"><span>Class I - IV</span><span class="summary-val">{i_iv}</span></div>
-                        <div class="summary-row"><span>Class V</span><span class="summary-val">{v}</span></div>
-                        <div class="grand-total-box">
-                            <span style="font-weight:900;">GRAND TOTAL</span>
-                            <span class="grand-total-num">{pp + i_iv + v}</span>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
+        st.success("Welcome, Head Teacher.")
+        # Summary and Student Attendance logic here

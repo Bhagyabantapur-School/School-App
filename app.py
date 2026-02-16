@@ -161,7 +161,7 @@ elif page == "Assistant Teacher Login":
                                             st.success("MDM Submitted Successfully!")
                                         else: st.warning("No students selected.")
 
-                # --- TAB 2: ROUTINE (With Countdown) ---
+                # --- TAB 2: ROUTINE (With Countdown & Section) ---
                 with at_tabs[1]:
                     st.subheader("Live Class Status")
                     routine = get_csv('routine.csv')
@@ -195,9 +195,11 @@ elif page == "Assistant Teacher Login":
 
                             # Display Current Class
                             if current_class is not None:
+                                # Safe get section
+                                sec = current_class['Section'] if 'Section' in current_class else ''
                                 st.markdown(f"""
                                 <div class="routine-card">
-                                    <h3 style="margin:0; color:#0d47a1;">🔴 NOW: {current_class['Class']}</h3>
+                                    <h3 style="margin:0; color:#0d47a1;">🔴 NOW: {current_class['Class']} - {sec}</h3>
                                     <p style="margin:0; font-size:18px;"><b>Subject:</b> {current_class['Subject']}</p>
                                     <p style="margin:0; color:gray;">Ends at {current_class['End_Time']}</p>
                                 </div>
@@ -212,9 +214,10 @@ elif page == "Assistant Teacher Login":
                                 c_dt = datetime.combine(datetime.today(), curr_time)
                                 diff_mins = int((n_dt - c_dt).total_seconds() / 60)
                                 
+                                sec_next = next_class['Section'] if 'Section' in next_class else ''
                                 st.markdown(f"""
                                 <div style="background-color:#fff3cd; padding:15px; border-radius:10px; border-left:5px solid #ffc107; margin-bottom:10px;">
-                                    <h4 style="margin:0; color:#856404;">🔜 NEXT: {next_class['Class']}</h4>
+                                    <h4 style="margin:0; color:#856404;">🔜 NEXT: {next_class['Class']} - {sec_next}</h4>
                                     <p>Starts in <b>{diff_mins} mins</b> ({next_class['Start_Time']})</p>
                                 </div>
                                 """, unsafe_allow_html=True)
@@ -223,7 +226,8 @@ elif page == "Assistant Teacher Login":
 
                             st.divider()
                             st.write("Full Schedule Today:")
-                            st.dataframe(my_today[['Start_Time', 'End_Time', 'Class', 'Subject']], hide_index=True)
+                            # UPDATED: Now includes 'Section'
+                            st.dataframe(my_today[['Start_Time', 'End_Time', 'Class', 'Section', 'Subject']], hide_index=True)
                         else:
                             st.info(f"No classes scheduled for {today_day}.")
                     else: 

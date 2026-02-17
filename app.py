@@ -45,9 +45,8 @@ CLASS_LOAD = {
 
 CLASS_OPTIONS = ["Select Class...", "CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V"]
 
-# --- 3. ROBUST FILE INITIALIZATION (The Fix) ---
+# --- 3. ROBUST FILE INITIALIZATION (FIXED RECOVERY) ---
 def init_files():
-    # Define expected columns for each critical file
     files_structure = {
         'mdm_log.csv': ['Date', 'Teacher', 'Class', 'Roll', 'Name', 'Time'],
         'student_attendance_master.csv': ['Date', 'Class', 'Roll', 'Name', 'Status'],
@@ -57,32 +56,22 @@ def init_files():
     }
     
     for f, content in files_structure.items():
-        # Case A: File doesn't exist -> Create it
         if not os.path.exists(f):
-            if f.endswith('.csv'):
-                pd.DataFrame(columns=content).to_csv(f, index=False)
-            else:
-                with open(f, 'w') as txt: txt.write(content)
-        
-        # Case B: File exists but might be empty or wrong -> Repair it
+            if f.endswith('.csv'): pd.DataFrame(columns=content).to_csv(f, index=False)
+            else: with open(f, 'w') as txt: txt.write(content)
         elif f.endswith('.csv'):
             try:
-                # Try reading
                 df = pd.read_csv(f)
-                # If columns don't match or file is empty
+                # Check for Header Mismatch (Ghost Data)
                 if list(df.columns) != content:
-                    # If data exists, try to keep it by reindexing
-                    if not df.empty:
-                        df = df.reindex(columns=content)
+                    # If columns count matches, just rename headers (Restores lost data)
+                    if len(df.columns) == len(content):
+                        df.columns = content
                         df.to_csv(f, index=False)
-                    else:
-                        # If empty, just reset headers
+                    # If empty, just reset
+                    elif df.empty:
                         pd.DataFrame(columns=content).to_csv(f, index=False)
-            except pd.errors.EmptyDataError:
-                # File is 0 bytes -> Reset headers
-                pd.DataFrame(columns=content).to_csv(f, index=False)
-            except Exception:
-                pass
+            except: pass
 
 init_files()
 
@@ -95,10 +84,7 @@ MDM_START, MDM_END = time(11, 15), time(12, 30)
 
 def get_csv(file):
     if os.path.exists(file): 
-        try: 
-            df = pd.read_csv(file)
-            # Extra safety: if df comes back without columns (rare), return empty DF with generic structure
-            return df
+        try: return pd.read_csv(file)
         except: return pd.DataFrame()
     return pd.DataFrame()
 
@@ -152,11 +138,12 @@ elif page == "Assistant Teacher Login":
                 # --- TAB 1: MDM ENTRY ---
                 with at_tabs[0]:
                     mdm_log = get_csv('mdm_log.csv')
-                    # Safe check for columns before access
+                    # Data Cleaning for Comparison
                     if 'Date' in mdm_log.columns and 'Teacher' in mdm_log.columns:
+                        mdm_log['Date'] = mdm_log['Date'].astype(str).str.strip()
+                        mdm_log['Teacher'] = mdm_log['Teacher'].astype(str).str.strip()
                         already_sub = not mdm_log[(mdm_log['Date'] == curr_date_str) & (mdm_log['Teacher'] == t_name_select)].empty
-                    else:
-                        already_sub = False # Log file was just reset
+                    else: already_sub = False
 
                     if already_sub:
                         st.success("✅ You have already submitted MDM for today.")
@@ -188,7 +175,9 @@ elif page == "Assistant Teacher Login":
                                                 'Name': r['Name'], 'Time': now.strftime("%H:%M")
                                             })
                                         if new_rows:
-                                            pd.DataFrame(new_rows).to_csv('mdm_log.csv', mode='a', index=False, header=False)
+                                            # Safer Save: Check if header exists
+                                            need_header = not os.path.exists('mdm_log.csv') or os.stat('mdm_log.csv').st_size == 0
+                                            pd.DataFrame(new_rows).to_csv('mdm_log.csv', mode='a', index=False, header=need_header)
                                             st.balloons()
                                             st.success("MDM Submitted Successfully!")
                                         else: st.warning("No students selected.")
@@ -197,7 +186,6 @@ elif page == "Assistant Teacher Login":
                 with at_tabs[1]:
                     st.subheader("Live Class Status")
                     routine = get_csv('routine.csv')
-                    
                     if not routine.empty and 'Teacher' in routine.columns:
                         my_code = TEACHER_INITIALS.get(t_name_select, t_name_select)
                         today_day = now.strftime('%A')
@@ -206,62 +194,41 @@ elif page == "Assistant Teacher Login":
                         if not my_today.empty:
                             my_today['Start_Obj'] = my_today['Start_Time'].apply(parse_time_safe)
                             my_today = my_today.dropna(subset=['Start_Obj']).sort_values('Start_Obj')
-                            
                             current_class = None
                             next_class = None
-                            
                             for _, row in my_today.iterrows():
                                 s_time = row['Start_Obj']
                                 e_time = parse_time_safe(row['End_Time'])
                                 if s_time and e_time:
-                                    if s_time <= curr_time <= e_time:
-                                        current_class = row
+                                    if s_time <= curr_time <= e_time: current_class = row
                                     elif s_time > curr_time:
                                         next_class = row
                                         break
-
                             if current_class is not None:
-                                sec = current_class['Section'] if 'Section' in current_class else ''
-                                st.markdown(f"""
-                                <div class="routine-card" style="border-left: 5px solid #28a745;">
-                                    <h3 style="margin:0; color:#155724;">🔴 NOW: {current_class['Class']} - {sec}</h3>
-                                    <p style="margin:0; font-size:18px;"><b>Subject:</b> {current_class['Subject']}</p>
-                                    <p style="margin:0; color:gray;">Ends at {current_class['End_Time']}</p>
-                                </div>
-                                """, unsafe_allow_html=True)
-                            else:
-                                st.info("☕ No class ongoing right now.")
-
+                                sec = current_class.get('Section', '')
+                                st.markdown(f"<div class='routine-card' style='border-left:5px solid #28a745;'><h3 style='margin:0; color:#155724;'>🔴 NOW: {current_class['Class']} - {sec}</h3><p style='margin:0;'>{current_class['Subject']}</p><p style='color:gray;'>Ends {current_class['End_Time']}</p></div>", unsafe_allow_html=True)
+                            else: st.info("☕ No class ongoing.")
                             if next_class is not None:
                                 try:
-                                    n_dt = datetime.combine(datetime.today(), next_class['Start_Obj'])
-                                    c_dt = datetime.combine(datetime.today(), curr_time)
-                                    diff_mins = int((n_dt - c_dt).total_seconds() / 60)
-                                    sec_next = next_class['Section'] if 'Section' in next_class else ''
-                                    st.markdown(f"""
-                                    <div style="background-color:#fff3cd; padding:15px; border-radius:10px; border-left:5px solid #ffc107; margin-bottom:10px;">
-                                        <h4 style="margin:0; color:#856404;">🔜 NEXT: {next_class['Class']} - {sec_next}</h4>
-                                        <p>Starts in <b>{diff_mins} mins</b> ({next_class['Start_Time']})</p>
-                                    </div>
-                                    """, unsafe_allow_html=True)
+                                    mins = int((datetime.combine(datetime.today(), next_class['Start_Obj']) - datetime.combine(datetime.today(), curr_time)).total_seconds() / 60)
+                                    sec_n = next_class.get('Section', '')
+                                    st.markdown(f"<div style='background:#fff3cd; padding:10px; border-radius:10px; border-left:5px solid #ffc107;'><h4 style='color:#856404; margin:0;'>🔜 NEXT: {next_class['Class']} - {sec_n}</h4><p>Starts in <b>{mins} min</b></p></div>", unsafe_allow_html=True)
                                 except: pass
-                            
                             st.divider()
-                            st.write("Full Schedule Today:")
                             st.dataframe(my_today[['Start_Time', 'End_Time', 'Class', 'Section', 'Subject']], hide_index=True)
-                        else: st.info(f"No classes scheduled for {today_day}.")
+                        else: st.info(f"No classes today ({today_day}).")
 
                 # --- TAB 3: LEAVE STATUS ---
                 with at_tabs[2]:
-                    st.subheader("My Leave Record")
+                    st.subheader("My Leaves")
                     leave_log = get_csv('teacher_leave.csv')
                     if not leave_log.empty and 'Teacher' in leave_log.columns:
                         my_leaves = leave_log[leave_log['Teacher'] == t_name_select]
-                        cl_count = len(my_leaves[my_leaves['Type'] == 'CL'])
-                        sl_count = len(my_leaves[my_leaves['Type'] == 'SL'])
+                        cl_c = len(my_leaves[my_leaves['Type'] == 'CL'])
+                        sl_c = len(my_leaves[my_leaves['Type'] == 'SL'])
                         c1, c2 = st.columns(2)
-                        c1.metric("CL Remaining", f"{14 - cl_count} / 14")
-                        c2.metric("SL (Duty) Taken", f"{sl_count}")
+                        c1.metric("CL Left", f"{14 - cl_c}")
+                        c2.metric("SL Taken", f"{sl_c}")
                         st.dataframe(my_leaves[['Date', 'Type', 'Substitute']], hide_index=True)
 
 # ==========================================
@@ -270,57 +237,62 @@ elif page == "Assistant Teacher Login":
 elif page == "Head Teacher Login":
     admin_pw = st.text_input("Master Password", type="password")
     if admin_pw == "bpsAPP@2026":
-        tabs = st.tabs(["📊 Summary", "📝 Attendance", "👨‍🏫 Leaves & Sub", "👟 Shoes", "🆔 Cards", "📢 Notice"])
+        tabs = st.tabs(["📊 Summary", "📝 Attendance", "👨‍🏫 Leaves", "👟 Shoes", "🆔 Cards", "📢 Notice"])
         
-        # --- TAB 1: SUMMARY ---
+        # --- TAB 1: SUMMARY (FIXED MDM CHECK) ---
         with tabs[0]: 
             st.subheader(f"Status: {curr_date_str}")
             mdm_log = get_csv('mdm_log.csv')
             
             sub_teachers = []
             if 'Date' in mdm_log.columns and 'Teacher' in mdm_log.columns:
+                # Robust Cleaning
+                mdm_log['Date'] = mdm_log['Date'].astype(str).str.strip()
+                mdm_log['Teacher'] = mdm_log['Teacher'].astype(str).str.strip()
+                
                 today_mdm = mdm_log[mdm_log['Date'] == curr_date_str]
-                sub_teachers = today_mdm['Teacher'].unique() if not today_mdm.empty else []
+                sub_teachers = today_mdm['Teacher'].unique().tolist()
             
+            # Compare cleaned names
             missing = [t for t in TEACHER_CREDS.keys() if t not in sub_teachers]
             h_df = get_csv('holidays.csv')
             is_h = not h_df[h_df['Date'] == curr_date_str].empty if not h_df.empty else False
 
             if missing and not is_h and now.strftime('%A') != 'Sunday':
                 st.markdown(f"<div class='warning-box'>⚠️ Pending MDM Entry: {', '.join(missing)}</div>", unsafe_allow_html=True)
+            elif not missing:
+                st.success("✅ All Teachers Submitted MDM!")
 
             att_master = get_csv('student_attendance_master.csv')
             if not att_master.empty and 'Status' in att_master.columns:
                 today = att_master[att_master['Date'] == curr_date_str]
                 today_p = today[today['Status'] == True]
-                pp_t = today_p[today_p['Class'] == 'CLASS PP'].shape[0]
-                i_iv_t = today_p[today_p['Class'].isin(['CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV'])].shape[0]
-                v_t = today_p[today_p['Class'] == 'CLASS V'].shape[0]
-                st.markdown(f"""<div class="summary-card"><div class="summary-row"><span>Class PP</span><span class="summary-val">{pp_t}</span></div><div class="summary-row"><span>Class I - IV</span><span class="summary-val">{i_iv_t}</span></div><div class="summary-row"><span>Class V</span><span class="summary-val">{v_t}</span></div><div class="summary-row" style="border:none; margin-top:15px; background-color:#d4edda; padding:10px; border-radius:10px;"><span style="font-weight:900;">GRAND TOTAL</span><span style="font-size:30px; font-weight:900;">{pp_t + i_iv_t + v_t}</span></div></div>""", unsafe_allow_html=True)
-            else: st.info("No attendance marked today.")
+                pp = today_p[today_p['Class'] == 'CLASS PP'].shape[0]
+                i_iv = today_p[today_p['Class'].isin(['CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV'])].shape[0]
+                v = today_p[today_p['Class'] == 'CLASS V'].shape[0]
+                st.markdown(f"<div class='summary-card'><b>Class PP:</b> {pp} | <b>I-IV:</b> {i_iv} | <b>V:</b> {v}<hr><h3>Total: {pp+i_iv+v}</h3></div>", unsafe_allow_html=True)
 
         # --- TAB 2: ATTENDANCE ---
         with tabs[1]:
-            st.subheader("Mark Student Attendance")
-            sel_c = st.selectbox("Class", CLASS_OPTIONS, key='ht_att_c')
+            st.subheader("Student Attendance")
+            sel_c = st.selectbox("Class", CLASS_OPTIONS, key='ht_att')
             if sel_c != "Select Class...":
                 students = get_csv('students.csv')
                 if not students.empty:
                     roster = students[students['Class'] == sel_c].copy()
                     if not roster.empty:
                         roster['Present'] = True
-                        ed_att = st.data_editor(roster[['Roll', 'Name', 'Present']], hide_index=True, use_container_width=True)
-                        if st.button(f"Save {sel_c} Attendance"):
-                            recs = ed_att.copy()
+                        ed = st.data_editor(roster[['Roll', 'Name', 'Present']], hide_index=True, use_container_width=True)
+                        if st.button("Save"):
+                            recs = ed.copy()
                             save_df = pd.DataFrame({'Date': curr_date_str, 'Class': sel_c, 'Roll': recs['Roll'], 'Name': recs['Name'], 'Status': recs['Present']})
                             save_df.to_csv('student_attendance_master.csv', mode='a', index=False, header=False)
-                            st.success("Attendance Saved!")
+                            st.success("Saved!")
 
         # --- TAB 3: SMART SUBSTITUTION ---
         with tabs[2]:
-            st.subheader("Advanced Substitution Planner")
-            abs_t = st.selectbox("Select Absent Teacher", ["Select..."] + list(TEACHER_CREDS.keys()))
-            
+            st.subheader("Substitution Planner")
+            abs_t = st.selectbox("Absent Teacher", ["Select..."] + list(TEACHER_CREDS.keys()))
             if abs_t != "Select...":
                 routine = get_csv('routine.csv')
                 my_code = TEACHER_INITIALS.get(abs_t, abs_t)
@@ -328,120 +300,76 @@ elif page == "Head Teacher Login":
                 absent_classes = routine[(routine['Teacher'] == my_code) & (routine['Day'] == today_day)].copy()
                 
                 if not absent_classes.empty:
-                    st.warning(f"⚠️ {abs_t} has {len(absent_classes)} classes today ({today_day}).")
-                    st.write("Assign substitutes:")
-                    assignments = [] 
-                    
+                    st.warning(f"{abs_t} has {len(absent_classes)} classes.")
+                    assignments = []
                     for idx, row in absent_classes.iterrows():
-                        slot_start = str(row['Start_Time']).strip()
-                        
-                        # LOGIC: Find Busy vs Leisure
-                        busy_now = routine[(routine['Day'] == today_day) & (routine['Start_Time'] == slot_start)]
+                        slot = str(row['Start_Time']).strip()
+                        # Find Leisure
+                        busy_now = routine[(routine['Day'] == today_day) & (routine['Start_Time'] == slot)]
                         busy_codes = busy_now['Teacher'].tolist()
+                        all_staff = {v: k for k, v in TEACHER_INITIALS.items()}
+                        leisure = [n for c, n in all_staff.items() if c not in busy_codes and c != my_code]
                         
-                        all_staff_codes = {v: k for k, v in TEACHER_INITIALS.items()} 
-                        leisure_teachers = []
-                        for code, full_name in all_staff_codes.items():
-                            if code not in busy_codes and code != my_code:
-                                leisure_teachers.append(full_name)
+                        st.markdown(f"<div class='routine-card'><b>{slot}</b> | {row['Class']}</div>", unsafe_allow_html=True)
+                        opts = ["Select...", "Staff"] + [f"{t} (Free)" for t in leisure] + [f"{t} (Busy)" for t in TEACHER_CREDS if t not in leisure and t != abs_t]
                         
-                        busy_loads = []
-                        for _, b_row in busy_now.iterrows():
-                            if b_row['Teacher'] != my_code:
-                                str_val = CLASS_LOAD.get(b_row['Class'], 30)
-                                b_name = all_staff_codes.get(b_row['Teacher'], b_row['Teacher'])
-                                busy_loads.append((b_name, str_val))
-                        busy_loads.sort(key=lambda x: x[1])
-
-                        st.markdown(f"""<div class='routine-card'><b>{row['Start_Time']} - {row['End_Time']}</b> | {row['Class']} {row['Section']} ({row['Subject']})</div>""", unsafe_allow_html=True)
-                        
-                        s_options = ["Select...", "Staff/Internal"]
-                        for t in leisure_teachers: s_options.append(f"{t} (✅ Leisure)")
-                        for t, load in busy_loads: s_options.append(f"{t} (⭐ {load} Students)")
-
-                        choice_raw = st.selectbox(f"Substitute for {row['Start_Time']}", s_options, key=f"sub_{idx}")
-                        if choice_raw != "Select...": assignments.append(f"{row['Start_Time']}: {choice_raw.split(' (')[0]}")
-
+                        ch = st.selectbox(f"Sub for {slot}", opts, key=f"s_{idx}")
+                        if ch != "Select...": assignments.append(f"{slot}: {ch.split(' (')[0]}")
+                    
                     st.divider()
                     l_type = st.selectbox("Leave Type", ["CL", "SL", "Medical"])
-                    if st.button("Confirm Multiple Substitutes"):
-                        sub_details = " | ".join(assignments)
-                        new_l = pd.DataFrame([{
-                            "Date": curr_date_str, "Teacher": abs_t, "Type": l_type, 
-                            "Substitute": "Multiple", "Detailed_Sub_Log": sub_details
-                        }])
-                        # Ensure 'Detailed_Sub_Log' exists in file
-                        df_check = get_csv('teacher_leave.csv')
-                        if 'Detailed_Sub_Log' not in df_check.columns:
-                            df_check['Detailed_Sub_Log'] = ""
-                            df_check.to_csv('teacher_leave.csv', index=False)
-                            
+                    if st.button("Confirm"):
+                        new_l = pd.DataFrame([{"Date": curr_date_str, "Teacher": abs_t, "Type": l_type, "Substitute": "Multiple", "Detailed_Sub_Log": " | ".join(assignments)}])
                         new_l.to_csv('teacher_leave.csv', mode='a', index=False, header=False)
-                        st.success(f"Absence Recorded. Substitutes Assigned: {len(assignments)} periods covered.")
+                        st.success("Saved!")
                 else:
-                    st.info("No classes scheduled for this teacher today.")
-                    l_type = st.selectbox("Leave Type", ["CL", "SL"])
-                    if st.button("Confirm Absence"):
-                        new_l = pd.DataFrame([{"Date": curr_date_str, "Teacher": abs_t, "Type": l_type, "Substitute": "None", "Detailed_Sub_Log": "No Classes"}])
-                        new_l.to_csv('teacher_leave.csv', mode='a', index=False, header=False)
-                        st.success("Recorded.")
+                    st.info("No classes today.")
+                    if st.button("Mark Absent"):
+                         pd.DataFrame([{"Date": curr_date_str, "Teacher": abs_t, "Type": "CL", "Substitute": "None", "Detailed_Sub_Log": "None"}]).to_csv('teacher_leave.csv', mode='a', index=False, header=False)
+                         st.success("Saved!")
 
-        # --- TAB 4: SHOES ---
-        with tabs[3]:
-            st.subheader("Shoe Distribution")
-            s_class = st.selectbox("Class", CLASS_OPTIONS, key='shoe_c')
-            if s_class != "Select Class...":
-                students = get_csv('students.csv')
-                shoe_log = get_csv('shoe_log.csv')
-                if not students.empty:
-                    roster = students[students['Class'] == s_class].copy()
-                    rec_rolls = shoe_log[shoe_log['Class'] == s_class]['Roll'].tolist() if not shoe_log.empty else []
-                    roster['Received_Before'] = roster['Roll'].isin(rec_rolls)
-                    roster['Mark_Received'] = False
-                    roster['Remark'] = ""
-                    ed_shoe = st.data_editor(roster[['Roll', 'Name', 'Received_Before', 'Mark_Received', 'Remark']], disabled=['Roll', 'Name', 'Received_Before'], hide_index=True, use_container_width=True)
-                    if st.button("Update Shoe Records"):
-                        new_rec = ed_shoe[ed_shoe['Mark_Received'] == True]
-                        if not new_rec.empty:
-                            save_s = pd.DataFrame({'Roll': new_rec['Roll'], 'Name': new_rec['Name'], 'Class': s_class, 'Received': True, 'Date': curr_date_str, 'Remark': new_rec['Remark']})
-                            save_s.to_csv('shoe_log.csv', mode='a', index=False, header=False)
-                            st.success("Updated Successfully.")
+        # --- TAB 4 & 5 & 6 (Standard) ---
+        with tabs[3]: # Shoes
+            s_c = st.selectbox("Class", CLASS_OPTIONS, key='s_c')
+            if s_c != "Select Class...":
+                std = get_csv('students.csv')
+                log = get_csv('shoe_log.csv')
+                if not std.empty:
+                    ros = std[std['Class'] == s_c].copy()
+                    done = log[log['Class'] == s_c]['Roll'].tolist() if not log.empty else []
+                    ros['Received_Before'] = ros['Roll'].isin(done)
+                    ros['Mark'] = False
+                    ros['Remark'] = ""
+                    ed = st.data_editor(ros[['Roll', 'Name', 'Received_Before', 'Mark', 'Remark']], disabled=['Roll','Name','Received_Before'], hide_index=True)
+                    if st.button("Update"):
+                        new = ed[ed['Mark'] == True]
+                        if not new.empty:
+                            pd.DataFrame({'Roll': new['Roll'], 'Name': new['Name'], 'Class': s_c, 'Received': True, 'Date': curr_date_str, 'Remark': new['Remark']}).to_csv('shoe_log.csv', mode='a', index=False, header=False)
+                            st.success("Updated!")
 
-        # --- TAB 5: ID CARDS ---
-        with tabs[4]:
-            st.subheader("Generate ID Cards")
-            id_c = st.selectbox("Class", CLASS_OPTIONS, key='id_c')
-            if id_c != "Select Class...":
-                students = get_csv('students.csv')
-                if not students.empty:
-                    roster = students[students['Class'] == id_c]
-                    sel_stds = st.multiselect("Select Students", roster['Name'].tolist())
+        with tabs[4]: # IDs
+            i_c = st.selectbox("Class", CLASS_OPTIONS, key='i_c')
+            if i_c != "Select Class...":
+                std = get_csv('students.csv')
+                if not std.empty:
+                    ros = std[std['Class'] == i_c]
+                    sels = st.multiselect("Select", ros['Name'].tolist())
                     if st.button("Download PDF"):
-                        if sel_stds:
-                            pdf = FPDF()
-                            for name in sel_stds:
-                                row = roster[roster['Name'] == name].iloc[0]
-                                pdf.add_page()
-                                pdf.set_font("Arial", 'B', 16)
-                                pdf.cell(0, 10, "Bhagyabantapur Primary School", 0, 1, 'C')
-                                pdf.set_font("Arial", '', 12)
-                                pdf.ln(10)
-                                pdf.cell(0, 10, f"Name: {row['Name']}", 0, 1)
-                                pdf.cell(0, 10, f"Class: {row['Class']} | Roll: {row['Roll']}", 0, 1)
-                                qr_data = f"{row['Roll']}-{row['Name']}-{row['Class']}"
-                                qr = qrcode.make(qr_data)
-                                qr.save("temp_qr.png")
-                                pdf.image("temp_qr.png", x=150, y=30, w=40)
-                            pdf_out = pdf.output(dest='S').encode('latin-1')
-                            st.download_button("Download PDF", pdf_out, "ID_Cards.pdf", "application/pdf")
+                        pdf = FPDF()
+                        for n in sels:
+                            r = ros[ros['Name'] == n].iloc[0]
+                            pdf.add_page(); pdf.set_font("Arial", 'B', 16)
+                            pdf.cell(0, 10, "BPS ID CARD", 0, 1, 'C')
+                            pdf.cell(0, 10, f"Name: {r['Name']} | Roll: {r['Roll']}", 0, 1)
+                            qr = qrcode.make(f"{r['Roll']}-{r['Name']}")
+                            qr.save("q.png"); pdf.image("q.png", x=150, y=30, w=40)
+                        st.download_button("Download", pdf.output(dest='S').encode('latin-1'), "ids.pdf")
 
-        # --- TAB 6: NOTICE ---
-        with tabs[5]:
-            st.subheader("Notice Board")
+        with tabs[5]: # Notice
             if os.path.exists('notice.txt'):
-                with open('notice.txt', 'r') as f: cur_n = f.read()
-            else: cur_n = ""
-            new_n = st.text_area("Message to Teachers", cur_n)
-            if st.button("Update Notice"):
-                with open('notice.txt', 'w') as f: f.write(new_n)
-                st.success("Notice Published!")
+                with open('notice.txt') as f: c = f.read()
+            else: c = ""
+            n = st.text_area("Notice", c)
+            if st.button("Publish"):
+                with open('notice.txt', 'w') as f: f.write(n)
+                st.success("Published")

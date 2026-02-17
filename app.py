@@ -211,7 +211,6 @@ elif page == "Assistant Teacher Login":
                             
                             if current_class is not None:
                                 sec = current_class.get('Section', '')
-                                # Use safe HTML formatting
                                 html_now = f"""
                                 <div class="routine-card" style="border-left: 5px solid #28a745;">
                                     <h3 style="margin:0; color:#155724;">🔴 NOW: {current_class['Class']} - {sec}</h3>
@@ -373,25 +372,28 @@ elif page == "Head Teacher Login":
 
                     st.divider()
                     l_type = st.selectbox("Leave Type", ["CL", "SL", "Medical"])
+                    
                     if st.button("Confirm Multiple Substitutes"):
                         sub_details = " | ".join(assignments)
                         new_l = pd.DataFrame([{
                             "Date": curr_date_str, "Teacher": abs_t, "Type": l_type, 
                             "Substitute": "Multiple", "Detailed_Sub_Log": sub_details
                         }])
-                        # Ensure 'Detailed_Sub_Log' exists in file
-                        df_check = get_csv('teacher_leave.csv')
-                        if 'Detailed_Sub_Log' not in df_check.columns:
-                            df_check['Detailed_Sub_Log'] = ""
-                            df_check.to_csv('teacher_leave.csv', index=False)
-                        new_l.to_csv('teacher_leave.csv', mode='a', index=False, header=False)
+                        
+                        # FORCE HEADER CHECK
+                        header_needed = not os.path.exists('teacher_leave.csv') or os.stat('teacher_leave.csv').st_size == 0
+                        
+                        new_l.to_csv('teacher_leave.csv', mode='a', index=False, header=header_needed)
                         st.success(f"Absence Recorded. Substitutes Assigned.")
                 else:
                     st.info("No classes scheduled for this teacher today.")
                     l_type = st.selectbox("Leave Type", ["CL", "SL"])
                     if st.button("Confirm Absence"):
                         new_l = pd.DataFrame([{"Date": curr_date_str, "Teacher": abs_t, "Type": l_type, "Substitute": "None", "Detailed_Sub_Log": "No Classes"}])
-                        new_l.to_csv('teacher_leave.csv', mode='a', index=False, header=False)
+                        
+                        header_needed = not os.path.exists('teacher_leave.csv') or os.stat('teacher_leave.csv').st_size == 0
+                        
+                        new_l.to_csv('teacher_leave.csv', mode='a', index=False, header=header_needed)
                         st.success("Recorded.")
 
         # --- TAB 4: SHOES ---

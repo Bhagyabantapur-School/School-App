@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 import qrcode
 from fpdf import FPDF
 from streamlit_qrcode_scanner import qrcode_scanner
@@ -53,7 +53,6 @@ def init_files():
         'mdm_log.csv': ['Date', 'Teacher', 'Class', 'Roll', 'Name', 'Time'],
         'student_attendance_master.csv': ['Date', 'Class', 'Roll', 'Name', 'Status'],
         'shoe_log.csv': ['Roll', 'Name', 'Class', 'Received', 'Date', 'Remark'],
-        # Added 'Detailed_Sub_Log' to track multiple teachers per day
         'teacher_leave.csv': ['Date', 'Teacher', 'Type', 'Substitute', 'Detailed_Sub_Log'],
         'notice.txt': 'Welcome to BPS Digital'
     }
@@ -65,7 +64,11 @@ def init_files():
 
 init_files()
 
-now = datetime.now()
+# --- TIMEZONE FIX (INDIA IST) ---
+# Streamlit Cloud is UTC, so we add 5h 30m
+utc_now = datetime.utcnow()
+now = utc_now + timedelta(hours=5, minutes=30)
+
 curr_date_str = now.strftime("%d-%m-%Y")
 curr_time = now.time()
 MDM_START, MDM_END = time(11, 15), time(12, 30)
@@ -177,8 +180,13 @@ elif page == "Assistant Teacher Login":
                             
                             for _, row in my_today.iterrows():
                                 try:
-                                    s_time = datetime.strptime(row['Start_Time'], '%H:%M').time()
-                                    e_time = datetime.strptime(row['End_Time'], '%H:%M').time()
+                                    # Fix: Strip spaces from Time Strings before parsing
+                                    s_time_str = str(row['Start_Time']).strip()
+                                    e_time_str = str(row['End_Time']).strip()
+                                    
+                                    s_time = datetime.strptime(s_time_str, '%H:%M').time()
+                                    e_time = datetime.strptime(e_time_str, '%H:%M').time()
+                                    
                                     if s_time <= curr_time <= e_time:
                                         current_class = row
                                     elif s_time > curr_time:
@@ -199,16 +207,18 @@ elif page == "Assistant Teacher Login":
                                 st.info("☕ No class ongoing right now.")
 
                             if next_class is not None:
-                                n_dt = datetime.combine(datetime.today(), datetime.strptime(next_class['Start_Time'], '%H:%M').time())
-                                c_dt = datetime.combine(datetime.today(), curr_time)
-                                diff_mins = int((n_dt - c_dt).total_seconds() / 60)
-                                sec_next = next_class['Section'] if 'Section' in next_class else ''
-                                st.markdown(f"""
-                                <div style="background-color:#fff3cd; padding:15px; border-radius:10px; border-left:5px solid #ffc107; margin-bottom:10px;">
-                                    <h4 style="margin:0; color:#856404;">🔜 NEXT: {next_class['Class']} - {sec_next}</h4>
-                                    <p>Starts in <b>{diff_mins} mins</b> ({next_class['Start_Time']})</p>
-                                </div>
-                                """, unsafe_allow_html=True)
+                                try:
+                                    n_dt = datetime.combine(datetime.today(), datetime.strptime(str(next_class['Start_Time']).strip(), '%H:%M').time())
+                                    c_dt = datetime.combine(datetime.today(), curr_time)
+                                    diff_mins = int((n_dt - c_dt).total_seconds() / 60)
+                                    sec_next = next_class['Section'] if 'Section' in next_class else ''
+                                    st.markdown(f"""
+                                    <div style="background-color:#fff3cd; padding:15px; border-radius:10px; border-left:5px solid #ffc107; margin-bottom:10px;">
+                                        <h4 style="margin:0; color:#856404;">🔜 NEXT: {next_class['Class']} - {sec_next}</h4>
+                                        <p>Starts in <b>{diff_mins} mins</b> ({next_class['Start_Time']})</p>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                except: pass
                             
                             st.divider()
                             st.write("Full Schedule Today:")
@@ -297,57 +307,41 @@ elif page == "Head Teacher Login":
                     st.warning(f"⚠️ {abs_t} has {len(absent_classes)} classes today ({today_day}).")
                     
                     st.write("Assign substitutes for each period:")
-                    # Dictionary to hold the substitute selected for each period
                     assignments = [] 
                     
-                    # Loop through every class the teacher is missing
                     for idx, row in absent_classes.iterrows():
-                        slot_start = row['Start_Time']
+                        slot_start = str(row['Start_Time']).strip()
                         
                         # --- SMART FINDER LOGIC ---
-                        # 1. Who is BUSY?
                         busy_now = routine[(routine['Day'] == today_day) & (routine['Start_Time'] == slot_start)]
                         busy_codes = busy_now['Teacher'].tolist()
                         
-                        # 2. Who is LEISURE? (All Staff - Busy Staff - Absent Teacher)
                         all_staff_codes = {v: k for k, v in TEACHER_INITIALS.items()} 
                         leisure_teachers = []
                         for code, full_name in all_staff_codes.items():
                             if code not in busy_codes and code != my_code:
                                 leisure_teachers.append(full_name)
                         
-                        # 3. Who is LOW LOAD? (Busy teachers in classes with few students)
                         busy_loads = []
                         for _, b_row in busy_now.iterrows():
                             if b_row['Teacher'] != my_code:
                                 str_val = CLASS_LOAD.get(b_row['Class'], 30)
                                 b_name = all_staff_codes.get(b_row['Teacher'], b_row['Teacher'])
                                 busy_loads.append((b_name, str_val))
-                        busy_loads.sort(key=lambda x: x[1]) # Sort by lowest strength
+                        busy_loads.sort(key=lambda x: x[1]) 
                         
-                        # --- UI CARD ---
                         st.markdown(f"""
                         <div class='routine-card'>
                             <b>{row['Start_Time']} - {row['End_Time']}</b> | {row['Class']} {row['Section']} ({row['Subject']})
                         </div>
                         """, unsafe_allow_html=True)
                         
-                        # Prepare Dropdown Options with Visual Cues
-                        # Options: ["Select...", "Staff/Internal", [Leisure Teachers], [Busy Teachers]]
-                        
-                        # We build the list manually to put suggestions at top
                         s_options = ["Select...", "Staff/Internal"]
-                        
-                        # Add Leisure (Green)
                         for t in leisure_teachers: s_options.append(f"{t} (✅ Leisure)")
-                            
-                        # Add Low Load (Yellow)
                         for t, load in busy_loads: s_options.append(f"{t} (⭐ In {b_row['Class']} - {load} Students)")
 
-                        # Helper to strip the tags for saving
                         def clean_name(n): return n.split(' (')[0]
 
-                        # Selection Box
                         choice_raw = st.selectbox(f"Substitute for {row['Start_Time']}", s_options, key=f"sub_{idx}")
                         
                         if choice_raw != "Select...":
@@ -357,9 +351,7 @@ elif page == "Head Teacher Login":
                     l_type = st.selectbox("Leave Type (for Official Record)", ["CL", "SL", "Medical"])
                     
                     if st.button("Confirm Multiple Substitutes"):
-                        # We save ONE row for the "Day Count" but put details in the new column
                         sub_details = " | ".join(assignments)
-                        
                         new_l = pd.DataFrame([{
                             "Date": curr_date_str, 
                             "Teacher": abs_t, 
@@ -369,9 +361,7 @@ elif page == "Head Teacher Login":
                         }])
                         # Ensure header exists for new column if file is old
                         if 'Detailed_Sub_Log' not in get_csv('teacher_leave.csv').columns:
-                             # Simple hack to append column if missing, practically just overwrite for this demo
                              pass
-
                         new_l.to_csv('teacher_leave.csv', mode='a', index=False, header=False)
                         st.success(f"Absence Recorded. Substitutes Assigned: {len(assignments)} periods covered.")
                         

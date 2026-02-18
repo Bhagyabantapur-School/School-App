@@ -171,7 +171,7 @@ else:
             
             at_tabs = st.tabs(["🍱 MDM Entry", "⏳ Routine", "📃 Leave Status", "📅 Holidays"])
 
-            # --- TAB 1: MDM ENTRY (LOCKED TO 11:15 AM CLASS) ---
+            # --- TAB 1: MDM ENTRY ---
             with at_tabs[0]: 
                 mdm_log = get_csv('mdm_log.csv')
                 already_sub = False
@@ -225,10 +225,8 @@ else:
                                 qr_val = qrcode_scanner(key='at_qr')
                                 edited = st.data_editor(roster[['Section', 'Roll', 'Name', 'Ate_MDM']], hide_index=True, use_container_width=True)
                                 
-                                # --- NEW: SHOW COUNT OF SELECTED STUDENTS ---
                                 marked_count = edited['Ate_MDM'].sum()
                                 st.markdown(f"### ✅ Total Selected: {marked_count}")
-                                # --------------------------------------------
 
                                 if st.button("Submit MDM"):
                                     ate = edited[edited['Ate_MDM'] == True]
@@ -294,16 +292,21 @@ else:
                     else: st.info("No classes today.")
 
             with at_tabs[2]: # Leaves
-                st.subheader("My Leaves")
+                st.subheader("My Leave Record")
                 leave_log = get_csv('teacher_leave.csv')
                 if not leave_log.empty and 'Teacher' in leave_log.columns:
                     my_leaves = leave_log[leave_log['Teacher'] == t_name_select]
-                    cl_c = len(my_leaves[my_leaves['Type'] == 'CL'])
+                    
+                    full_cl = len(my_leaves[my_leaves['Type'] == 'CL'])
                     sl_c = len(my_leaves[my_leaves['Type'] == 'SL'])
+                    
                     c1, c2 = st.columns(2)
-                    c1.metric("CL Remaining", f"{14 - cl_c}")
+                    c1.metric("CL Remaining", f"{14 - full_cl}")
                     c2.metric("SL Taken", f"{sl_c}")
-                    st.dataframe(my_leaves[['Date', 'Type', 'Substitute']], hide_index=True)
+                    
+                    # --- RESTRICTED VIEW: HIDE 'Half Day' AND 'On Duty' ---
+                    visible_leaves = my_leaves[~my_leaves['Type'].isin(['Half Day', 'On Duty'])]
+                    st.dataframe(visible_leaves[['Date', 'Type', 'Substitute']], hide_index=True)
             
             with at_tabs[3]: # Holidays
                 st.subheader("🗓️ School Holiday List")
@@ -436,7 +439,9 @@ else:
                         if ch != "Select...": assigns.append(f"{slot}: {ch.split(' (')[0]}")
                     
                     st.divider()
-                    lt = st.selectbox("Type", ["CL", "SL"])
+                    
+                    lt = st.selectbox("Leave Type", ["CL", "SL", "Half Day", "On Duty"])
+                    
                     if st.button("Confirm"):
                         new = pd.DataFrame([{"Date": curr_date_str, "Teacher": abs_t, "Type": lt, "Substitute": "Multiple", "Detailed_Sub_Log": " | ".join(assigns)}])
                         h = not os.path.exists('teacher_leave.csv') or os.stat('teacher_leave.csv').st_size == 0

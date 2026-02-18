@@ -431,7 +431,7 @@ else:
                         
                         if not ros.empty:
                             mdm_eaters = []
-                            today_mdm = pd.DataFrame() # Init for count check
+                            today_mdm = pd.DataFrame() 
                             if not mdm_log.empty and 'Date' in mdm_log.columns:
                                 mdm_log['Date'] = mdm_log['Date'].astype(str).str.strip()
                                 today_mdm = mdm_log[
@@ -451,32 +451,42 @@ else:
                                 disabled=["Roll", "Name", "MDM (Ate)"]
                             )
                             
-                            # --- STATS DISPLAY ---
+                            # --- STATS ---
                             total_present = ed['Present'].sum()
                             mdm_val = len(today_mdm)
-                            
                             mdm_text = f"MDM Entry: {mdm_val}" if not today_mdm.empty else "MDM Entry: Wait"
                             mdm_class = "att-done" if not today_mdm.empty else "att-wait"
                             
                             c1, c2 = st.columns(2)
-                            with c1:
-                                st.markdown(f"<div class='att-badge att-neutral'>✅ Total Selected: {total_present}</div>", unsafe_allow_html=True)
-                            with c2:
-                                st.markdown(f"<div class='att-badge {mdm_class}'>{mdm_text}</div>", unsafe_allow_html=True)
-                            # ---------------------
+                            with c1: st.markdown(f"<div class='att-badge att-neutral'>✅ Total Selected: {total_present}</div>", unsafe_allow_html=True)
+                            with c2: st.markdown(f"<div class='att-badge {mdm_class}'>{mdm_text}</div>", unsafe_allow_html=True)
+                            # -------------
 
-                            if st.button(f"Save Attendance for {t_class} - {t_sec}"):
-                                rec = ed.copy()
-                                df = pd.DataFrame({
-                                    'Date': curr_date_str, 
-                                    'Class': t_class, 
-                                    'Section': t_sec, 
-                                    'Roll': rec['Roll'], 
-                                    'Name': rec['Name'], 
-                                    'Status': rec['Present']
-                                })
-                                df.to_csv('student_attendance_master.csv', mode='a', index=False, header=False)
-                                st.success("Attendance Submitted for today.") # CUSTOM MESSAGE
+                            # --- DUPLICATE CHECK ---
+                            att_check = get_csv('student_attendance_master.csv')
+                            is_submitted = False
+                            if not att_check.empty and 'Date' in att_check.columns:
+                                # Ensure Section col exists for checking
+                                if 'Section' not in att_check.columns: att_check['Section'] = 'A'
+                                if not att_check[(att_check['Date'] == curr_date_str) & (att_check['Class'] == t_class) & (att_check['Section'] == t_sec)].empty:
+                                    is_submitted = True
+                            
+                            if is_submitted:
+                                st.info(f"🔒 Attendance for {t_class} - {t_sec} is already submitted today.")
+                            else:
+                                if st.button(f"Save Attendance for {t_class} - {t_sec}"):
+                                    rec = ed.copy()
+                                    df = pd.DataFrame({
+                                        'Date': curr_date_str, 
+                                        'Class': t_class, 
+                                        'Section': t_sec, 
+                                        'Roll': rec['Roll'], 
+                                        'Name': rec['Name'], 
+                                        'Status': rec['Present']
+                                    })
+                                    df.to_csv('student_attendance_master.csv', mode='a', index=False, header=False)
+                                    st.success("✅ Attendance Submitted for today.") # UPDATED MSG
+                                    st.rerun()
                         else:
                             st.warning(f"No students found for {t_class} Section {t_sec}")
                 else:

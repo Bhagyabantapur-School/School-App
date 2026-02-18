@@ -90,6 +90,7 @@ utc_now = datetime.utcnow()
 now = utc_now + timedelta(hours=5, minutes=30)
 curr_date_str = now.strftime("%d-%m-%Y")
 curr_time = now.time()
+MDM_START, MDM_END = time(11, 15), time(12, 30)
 
 def get_csv(file):
     if os.path.exists(file): 
@@ -98,7 +99,6 @@ def get_csv(file):
     return pd.DataFrame()
 
 def parse_time_safe(t_str):
-    # Robust parser for both "11:15" and "11:15 AM"
     t_str = str(t_str).strip()
     for fmt in ('%H:%M', '%I:%M %p', '%H:%M:%S'):
         try: return datetime.strptime(t_str, fmt).time()
@@ -187,7 +187,6 @@ else:
                 else:
                     st.subheader("Student MDM Entry")
                     
-                    # --- DETECT 11:15 AM CLASS ---
                     routine = get_csv('routine.csv')
                     my_code = TEACHER_INITIALS.get(t_name_select, t_name_select)
                     today_day = now.strftime('%A')
@@ -201,8 +200,6 @@ else:
                     
                     if not my_sched.empty:
                         my_sched['Start_Obj'] = my_sched['Start_Time'].apply(parse_time_safe)
-                        
-                        # STRICT MATCH FOR 11:15 OR 11:15 AM
                         target_rows = my_sched[my_sched['Start_Obj'] == time(11, 15)]
                         
                         if not target_rows.empty:
@@ -228,6 +225,11 @@ else:
                                 qr_val = qrcode_scanner(key='at_qr')
                                 edited = st.data_editor(roster[['Section', 'Roll', 'Name', 'Ate_MDM']], hide_index=True, use_container_width=True)
                                 
+                                # --- NEW: SHOW COUNT OF SELECTED STUDENTS ---
+                                marked_count = edited['Ate_MDM'].sum()
+                                st.markdown(f"### ✅ Total Selected: {marked_count}")
+                                # --------------------------------------------
+
                                 if st.button("Submit MDM"):
                                     ate = edited[edited['Ate_MDM'] == True]
                                     new_rows = []
@@ -246,7 +248,7 @@ else:
                                         df_new = pd.DataFrame(new_rows)[cols]
                                         h = not os.path.exists('mdm_log.csv') or os.stat('mdm_log.csv').st_size == 0
                                         df_new.to_csv('mdm_log.csv', mode='a', index=False, header=h)
-                                        st.success("Submitted!")
+                                        st.success(f"Submitted {len(new_rows)} students successfully!")
                                         st.rerun()
                                     else: st.warning("No students selected.")
                             else:

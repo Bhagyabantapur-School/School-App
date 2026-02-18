@@ -403,7 +403,18 @@ else:
 
             st.divider()
             
-            with st.expander("⚠ Emergency Reset"):
+            # --- CLEAR TODAY'S MDM BUTTON ---
+            if st.button("🗑️ Clear Today's MDM Data"):
+                if not mdm_log.empty and 'Date' in mdm_log.columns:
+                    mdm_log = mdm_log[mdm_log['Date'] != curr_date_str] # Filter out today
+                    mdm_log.to_csv('mdm_log.csv', index=False)
+                    st.success("Today's MDM Data Cleared!")
+                    st.rerun()
+                else:
+                    st.warning("No data to clear.")
+            # --------------------------------
+            
+            with st.expander("⚠ Emergency Reset (MDM Database)"):
                 if st.button("Reset MDM Database"):
                     try:
                         os.remove("mdm_log.csv")
@@ -466,7 +477,6 @@ else:
                             att_check = get_csv('student_attendance_master.csv')
                             is_submitted = False
                             if not att_check.empty and 'Date' in att_check.columns:
-                                # Ensure Section col exists for checking
                                 if 'Section' not in att_check.columns: att_check['Section'] = 'A'
                                 if not att_check[(att_check['Date'] == curr_date_str) & (att_check['Class'] == t_class) & (att_check['Section'] == t_sec)].empty:
                                     is_submitted = True
@@ -485,7 +495,7 @@ else:
                                         'Status': rec['Present']
                                     })
                                     df.to_csv('student_attendance_master.csv', mode='a', index=False, header=False)
-                                    st.success("✅ Attendance Submitted for today.") # UPDATED MSG
+                                    st.success("✅ Attendance Submitted for today.")
                                     st.rerun()
                         else:
                             st.warning(f"No students found for {t_class} Section {t_sec}")
@@ -511,6 +521,26 @@ else:
                     st.download_button("📥 Download Log", att_log.to_csv(index=False).encode('utf-8'), f"attendance_{att_view_date}.csv", "text/csv")
                 else: st.info(f"No attendance for {att_view_date}.")
             else: st.info("Attendance Log empty.")
+            
+            # --- NEW: CLEAR TODAY'S ATTENDANCE BUTTON ---
+            if st.button("🗑️ Clear Today's Attendance"):
+                if not att_log.empty and 'Date' in att_log.columns:
+                    att_log['Date'] = att_log['Date'].astype(str).str.strip()
+                    att_log = att_log[att_log['Date'] != curr_date_str] # Filter out today
+                    att_log.to_csv('student_attendance_master.csv', index=False)
+                    st.success("Today's Attendance Cleared!")
+                    st.rerun()
+                else:
+                    st.warning("No data to clear.")
+            # ---------------------------------------------
+            
+            with st.expander("⚠ Emergency Reset (Attendance Database)"):
+                if st.button("Reset Attendance Database"):
+                    try:
+                        os.remove("student_attendance_master.csv")
+                        st.success("Database Reset. Reloading...")
+                        st.rerun()
+                    except: st.error("Error resetting.")
 
         # --- TAB 3: LEAVES ---
         with tabs[2]: # Leaves

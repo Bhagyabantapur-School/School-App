@@ -68,8 +68,11 @@ def init_files():
     }
     for f, content in files_structure.items():
         if not os.path.exists(f):
-            if f.endswith('.csv'): pd.DataFrame(columns=content).to_csv(f, index=False)
-            else: with open(f, 'w') as txt: txt.write(content)
+            if f.endswith('.csv'): 
+                pd.DataFrame(columns=content).to_csv(f, index=False)
+            else: 
+                with open(f, 'w') as txt: 
+                    txt.write(content)
         elif f.endswith('.csv'):
             try:
                 df = pd.read_csv(f)
@@ -163,7 +166,6 @@ else:
         if is_h or now.strftime('%A') == 'Sunday':
             st.warning("🏖️ School is closed today.")
         else:
-            # Notice is also shown here as a reminder
             if os.path.exists('notice.txt'):
                 with open('notice.txt', 'r') as f: 
                     n_text = f.read()

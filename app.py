@@ -173,6 +173,7 @@ else:
                     n_text = f.read()
                     if n_text.strip(): st.info(f"📢 NOTICE: {n_text}")
             
+            # REMOVED ATTENDANCE TAB FOR TEACHERS
             at_tabs = st.tabs(["🍱 MDM Entry", "⏳ Routine", "📃 Leave Status", "📅 Holidays"])
 
             with at_tabs[0]: # MDM

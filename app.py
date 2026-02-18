@@ -27,6 +27,7 @@ st.markdown("""
         .att-wait { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
         .att-done { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
         .att-neutral { background-color: #e2e6ea; color: #333; border: 1px solid #ccc; }
+        .sub-card { background-color: #e3f2fd; padding: 10px; border-radius: 8px; margin-bottom: 5px; border-left: 4px solid #2196f3; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -190,6 +191,7 @@ else:
                 mdm_log = get_csv('mdm_log.csv')
                 already_sub = False
                 
+                # Check if I have already submitted today
                 if not mdm_log.empty and 'Date' in mdm_log.columns and 'Teacher' in mdm_log.columns:
                     mdm_log['Date'] = mdm_log['Date'].astype(str).str.strip()
                     mdm_log['Teacher'] = mdm_log['Teacher'].astype(str).str.strip()
@@ -205,24 +207,58 @@ else:
                     my_code = TEACHER_INITIALS.get(t_name_select, t_name_select)
                     today_day = now.strftime('%A')
                     
-                    my_sched = pd.DataFrame()
-                    if not routine.empty and 'Teacher' in routine.columns:
-                        my_sched = routine[(routine['Teacher'] == my_code) & (routine['Day'] == today_day)].copy()
-                    
+                    # --- INTELLIGENT CLASS DETECTION (OWN + SUBSTITUTE) ---
                     target_class = None
                     target_section = None
+                    is_substituting = False
+                    absent_teacher_name = ""
+
+                    # 1. Check if I am a SUBSTITUTE at 11:15
+                    leave_log = get_csv('teacher_leave.csv')
+                    if not leave_log.empty and 'Date' in leave_log.columns:
+                        today_leaves = leave_log[leave_log['Date'] == curr_date_str]
+                        for _, row in today_leaves.iterrows():
+                            log = str(row.get('Detailed_Sub_Log', ''))
+                            # Look for "11:15: MY NAME" pattern
+                            if f"11:15: {t_name_select}" in log or f"11:15 AM: {t_name_select}" in log:
+                                is_substituting = True
+                                absent_teacher_name = row['Teacher']
+                                absent_code = TEACHER_INITIALS.get(absent_teacher_name, "")
+                                
+                                # Find the absent teacher's 11:15 class
+                                absent_routine = routine[
+                                    (routine['Teacher'] == absent_code) & 
+                                    (routine['Day'] == today_day)
+                                ].copy()
+                                absent_routine['Start_Obj'] = absent_routine['Start_Time'].apply(parse_time_safe)
+                                match = absent_routine[absent_routine['Start_Obj'] == time(11, 15)]
+                                
+                                if not match.empty:
+                                    r = match.iloc[0]
+                                    target_class = r['Class']
+                                    target_section = r.get('Section', 'A')
+                                break
                     
-                    if not my_sched.empty:
-                        my_sched['Start_Obj'] = my_sched['Start_Time'].apply(parse_time_safe)
-                        target_rows = my_sched[my_sched['Start_Obj'] == time(11, 15)]
+                    # 2. If NOT substituting, check my OWN routine
+                    if not target_class:
+                        my_sched = pd.DataFrame()
+                        if not routine.empty and 'Teacher' in routine.columns:
+                            my_sched = routine[(routine['Teacher'] == my_code) & (routine['Day'] == today_day)].copy()
                         
-                        if not target_rows.empty:
-                            row = target_rows.iloc[0]
-                            target_class = row['Class']
-                            target_section = row['Section'] if 'Section' in row else 'A'
-                    
+                        if not my_sched.empty:
+                            my_sched['Start_Obj'] = my_sched['Start_Time'].apply(parse_time_safe)
+                            target_rows = my_sched[my_sched['Start_Obj'] == time(11, 15)]
+                            if not target_rows.empty:
+                                row = target_rows.iloc[0]
+                                target_class = row['Class']
+                                target_section = row.get('Section', 'A')
+
+                    # --- DISPLAY LOGIC ---
                     if target_class:
-                        st.info(f"📌 You are assigned the **11:15 AM** class: **{target_class} - {target_section}**")
+                        if is_substituting:
+                            st.info(f"🔄 **SUBSTITUTION:** You are covering MDM for **{absent_teacher_name}** ({target_class} - {target_section})")
+                        else:
+                            st.info(f"📌 You are assigned the **11:15 AM** class: **{target_class} - {target_section}**")
                         
                         students = get_csv('students.csv')
                         if not students.empty:
@@ -290,22 +326,97 @@ else:
                             else:
                                 st.warning(f"No students found for {target_class} - {target_section}.")
                     else:
-                        st.warning(f"⚠️ You do not have a class at 11:15 AM on {today_day}. MDM Entry disabled.")
+                        st.warning(f"⚠️ You do not have a class (or substitution) at 11:15 AM on {today_day}. MDM Entry disabled.")
 
             with at_tabs[1]: # Routine
                 st.subheader("Live Class Status")
+                leave_log = get_csv('teacher_leave.csv')
                 routine = get_csv('routine.csv')
-                if not routine.empty and 'Teacher' in routine.columns:
+                
+                # Check if logged-in teacher is absent
+                on_leave = False
+                leave_details = None
+                if not leave_log.empty and 'Date' in leave_log.columns:
+                    my_today_leave = leave_log[
+                        (leave_log['Date'] == curr_date_str) & 
+                        (leave_log['Teacher'] == t_name_select)
+                    ]
+                    if not my_today_leave.empty:
+                        on_leave = True
+                        leave_details = my_today_leave.iloc[0]
+                
+                if on_leave:
+                    st.warning(f"🏖️ You are marked **{leave_details['Type']}** today.")
+                    raw_subs = str(leave_details.get('Detailed_Sub_Log', ''))
+                    if raw_subs and raw_subs != "None":
+                        st.markdown("### 🤝 Substitution Plan")
+                        assignments = raw_subs.split(" | ")
+                        for assign in assignments:
+                            parts = assign.split(": ")
+                            if len(parts) == 2:
+                                st.markdown(f"<div class='sub-card'><b>{parts[0].strip()}</b> covered by <b>{parts[1].strip()}</b></div>", unsafe_allow_html=True)
+                    else:
+                        st.info("No specific substitutes assigned yet.")
+                        
+                else:
+                    # --- MERGE REGULAR + SUBSTITUTION CLASSES ---
                     my_code = TEACHER_INITIALS.get(t_name_select, t_name_select)
                     today_day = now.strftime('%A')
-                    my_today = routine[(routine['Teacher'] == my_code) & (routine['Day'] == today_day)].copy()
                     
-                    if not my_today.empty:
-                        my_today['Start_Obj'] = my_today['Start_Time'].apply(parse_time_safe)
-                        my_today = my_today.dropna(subset=['Start_Obj']).sort_values('Start_Obj')
+                    # 1. Regular Classes
+                    my_schedule = pd.DataFrame()
+                    if not routine.empty and 'Teacher' in routine.columns:
+                        my_schedule = routine[(routine['Teacher'] == my_code) & (routine['Day'] == today_day)].copy()
+                        my_schedule['Is_Sub'] = False
+                    
+                    # 2. Substitution Classes
+                    sub_duties = []
+                    if not leave_log.empty:
+                        today_absent_records = leave_log[leave_log['Date'] == curr_date_str]
+                        for _, row in today_absent_records.iterrows():
+                            absent_t = row['Teacher']
+                            absent_code = TEACHER_INITIALS.get(absent_t, "")
+                            log = str(row['Detailed_Sub_Log'])
+                            
+                            if t_name_select in log: # Am I mentioned?
+                                assignments = log.split(" | ")
+                                for assign in assignments:
+                                    if f": {t_name_select}" in assign:
+                                        parts = assign.split(": ")
+                                        if len(parts) == 2:
+                                            slot_time = parts[0].strip()
+                                            
+                                            orig_class = routine[
+                                                (routine['Teacher'] == absent_code) & 
+                                                (routine['Day'] == today_day) & 
+                                                (routine['Start_Time'] == slot_time)
+                                            ]
+                                            
+                                            if not orig_class.empty:
+                                                r = orig_class.iloc[0]
+                                                sub_duties.append({
+                                                    'Start_Time': r['Start_Time'],
+                                                    'End_Time': r['End_Time'],
+                                                    'Class': r['Class'],
+                                                    'Section': r.get('Section', 'A'),
+                                                    'Subject': f"🔄 Sub for {absent_t}",
+                                                    'Teacher': my_code,
+                                                    'Day': today_day,
+                                                    'Is_Sub': True
+                                                })
+                    
+                    if sub_duties:
+                        sub_df = pd.DataFrame(sub_duties)
+                        my_schedule = pd.concat([my_schedule, sub_df], ignore_index=True)
+                    
+                    if not my_schedule.empty:
+                        my_schedule['Start_Obj'] = my_schedule['Start_Time'].apply(parse_time_safe)
+                        my_schedule = my_schedule.dropna(subset=['Start_Obj']).sort_values('Start_Obj')
+                        
                         current_class = None
                         next_class = None
-                        for _, row in my_today.iterrows():
+                        
+                        for _, row in my_schedule.iterrows():
                             s_time = row['Start_Obj']
                             e_time = parse_time_safe(row['End_Time'])
                             if s_time and e_time:
@@ -313,20 +424,31 @@ else:
                                 elif s_time > curr_time:
                                     next_class = row
                                     break
+                        
                         if current_class is not None:
                             sec = current_class.get('Section', '')
-                            html_now = f"""<div class="routine-card" style="border-left: 5px solid #28a745;"><h3 style="margin:0; color:#155724;">🔴 NOW: {current_class['Class']} - {sec}</h3><p>{current_class['Subject']}</p><p style="color:gray;">Ends {current_class['End_Time']}</p></div>"""
+                            style = "border-left: 5px solid #ffc107; background-color:#fff3cd;" if current_class['Is_Sub'] else "border-left: 5px solid #28a745;"
+                            title_prefix = "🔄 SUB: " if current_class['Is_Sub'] else "🔴 NOW: "
+                            
+                            html_now = f"""<div class="routine-card" style="{style}"><h3 style="margin:0; color:#333;">{title_prefix}{current_class['Class']} - {sec}</h3><p>{current_class['Subject']}</p><p style="color:gray;">Ends {current_class['End_Time']}</p></div>"""
                             st.markdown(html_now, unsafe_allow_html=True)
                         else: st.info("☕ No class ongoing.")
 
                         if next_class is not None:
                             try:
                                 diff = int((datetime.combine(datetime.today(), next_class['Start_Obj']) - datetime.combine(datetime.today(), curr_time)).total_seconds() / 60)
-                                html_next = f"""<div style="background:#fff3cd; padding:10px; border-radius:10px;"><h4 style="margin:0; color:#856404;">🔜 NEXT: {next_class['Class']}</h4><p>Starts in <b>{diff} mins</b></p></div>"""
+                                next_style = "background:#fff3cd;" if next_class['Is_Sub'] else "background:#e2e6ea;"
+                                next_prefix = "🔄 SUB: " if next_class['Is_Sub'] else "🔜 NEXT: "
+                                
+                                html_next = f"""<div style="{next_style} padding:10px; border-radius:10px;"><h4 style="margin:0; color:#333;">{next_prefix}{next_class['Class']}</h4><p>Starts in <b>{diff} mins</b></p></div>"""
                                 st.markdown(html_next, unsafe_allow_html=True)
                             except: pass
+                        
                         st.divider()
-                        st.dataframe(my_today[['Start_Time', 'End_Time', 'Class', 'Section', 'Subject']], hide_index=True)
+                        def highlight_subs(row):
+                            return ['background-color: #fff3cd'] * len(row) if row['Subject'].startswith('🔄') else [''] * len(row)
+                        
+                        st.dataframe(my_schedule[['Start_Time', 'End_Time', 'Class', 'Section', 'Subject']].style.apply(highlight_subs, axis=1), hide_index=True)
                     else: st.info("No classes today.")
 
             with at_tabs[2]: # Leaves
@@ -568,14 +690,31 @@ else:
                 day = now.strftime('%A')
                 missed = routine[(routine['Teacher'] == code) & (routine['Day'] == day)].copy()
                 
+                # --- PRE-LOAD TODAY'S SUB ASSIGNMENTS ---
+                busy_subs = {}
+                leave_log = get_csv('teacher_leave.csv')
+                if not leave_log.empty and 'Date' in leave_log.columns:
+                    today_leaves = leave_log[leave_log['Date'] == curr_date_str]
+                    for _, row in today_leaves.iterrows():
+                        raw_log = str(row.get('Detailed_Sub_Log', ''))
+                        if raw_log and raw_log != "None":
+                            assignments = raw_log.split(" | ")
+                            for assignment in assignments:
+                                parts = assignment.split(": ")
+                                if len(parts) == 2:
+                                    t_slot = parts[0].strip()
+                                    t_sub_name = parts[1].strip()
+                                    if t_slot not in busy_subs: busy_subs[t_slot] = []
+                                    busy_subs[t_slot].append(t_sub_name)
+                # ----------------------------------------
+
                 if not missed.empty:
                     st.warning(f"{abs_t} has {len(missed)} classes.")
                     assigns = []
-                    # --- UPGRADED SUBSTITUTE SELECTION LOGIC ---
+                    
                     for idx, row in missed.iterrows():
                         slot = str(row['Start_Time']).strip()
                         
-                        # Find who is busy at this specific slot
                         busy_at_slot_codes = routine[
                             (routine['Day'] == day) & 
                             (routine['Start_Time'] == slot)
@@ -585,31 +724,33 @@ else:
                         busy_options = []
                         
                         for t_name in TEACHER_LIST:
-                            if t_name == abs_t: continue # Skip absent teacher
+                            if t_name == abs_t: continue 
                             t_code = TEACHER_INITIALS.get(t_name, "")
                             
-                            if t_code not in busy_at_slot_codes:
+                            is_already_sub = False
+                            if slot in busy_subs and t_name in busy_subs[slot]:
+                                is_already_sub = True
+                            
+                            if is_already_sub:
+                                busy_options.append(f"⛔ {t_name} (Already Subbing)")
+                            elif t_code not in busy_at_slot_codes:
                                 free_options.append(f"✅ {t_name} (Free)")
                             else:
-                                # Find where they are busy
                                 busy_info = routine[
                                     (routine['Teacher'] == t_code) & 
                                     (routine['Day'] == day) & 
                                     (routine['Start_Time'] == slot)
                                 ]
-                                if not busy_info.empty:
-                                    b_class = busy_info.iloc[0]['Class']
-                                    busy_options.append(f"⚠️ {t_name} (Busy in {b_class})")
+                                b_class = busy_info.iloc[0]['Class'] if not busy_info.empty else "Class"
+                                busy_options.append(f"⚠️ {t_name} (Busy in {b_class})")
                         
                         st.markdown(f"<div class='routine-card'><b>{slot}</b> | {row['Class']}</div>", unsafe_allow_html=True)
                         
-                        # Dropdown with grouped options
                         all_opts = ["Select Substitute..."] + free_options + busy_options
                         choice = st.selectbox(f"Sub for {slot}", all_opts, key=f"s_{idx}")
                         
                         if choice != "Select Substitute...":
-                            # Extract just the name for saving
-                            clean_name = choice.split(" (")[0].replace("✅ ", "").replace("⚠️ ", "")
+                            clean_name = choice.split(" (")[0].replace("✅ ", "").replace("⚠️ ", "").replace("⛔ ", "")
                             assigns.append(f"{slot}: {clean_name}")
                     
                     st.divider()

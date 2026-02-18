@@ -57,8 +57,9 @@ if 'user_role' not in st.session_state:
 if 'user_name' not in st.session_state:
     st.session_state.user_name = None
 
-# --- 4. FILE SYSTEM (Includes 'Section') ---
+# --- 4. FILE SYSTEM (AUTO-REPAIR) ---
 def init_files():
+    # Define EXACT structure for all files
     files_structure = {
         'mdm_log.csv': ['Date', 'Teacher', 'Class', 'Section', 'Roll', 'Name', 'Time'],
         'student_attendance_master.csv': ['Date', 'Class', 'Roll', 'Name', 'Status'],
@@ -66,6 +67,7 @@ def init_files():
         'teacher_leave.csv': ['Date', 'Teacher', 'Type', 'Substitute', 'Detailed_Sub_Log'],
         'notice.txt': 'Welcome to BPS Digital'
     }
+    
     for f, content in files_structure.items():
         if not os.path.exists(f):
             if f.endswith('.csv'): 
@@ -75,12 +77,29 @@ def init_files():
                     txt.write(content)
         elif f.endswith('.csv'):
             try:
+                # REPAIR MODE: Fix columns if they don't match
                 df = pd.read_csv(f)
-                # Auto-Add 'Section' column if missing in old logs
-                if 'Section' not in df.columns and 'mdm_log' in f:
-                    df['Section'] = 'A' # Default for old records
+                current_cols = list(df.columns)
+                
+                # If columns are missing (e.g. 'Section' is missing)
+                if current_cols != content:
+                    # 1. Add missing columns
+                    for c in content:
+                        if c not in df.columns:
+                            df[c] = 'A' if c == 'Section' else 'None'
+                    
+                    # 2. Drop extra columns (cleanup)
+                    df = df[[c for c in content if c in df.columns]]
+                    
+                    # 3. Reorder exactly as required
+                    df = df[content]
+                    
+                    # 4. Save fixed file
                     df.to_csv(f, index=False)
-            except: pass
+            except:
+                # If file is totally broken, reset it (Last Resort)
+                pass # We don't auto-delete to prevent data loss, manually handle via Admin
+
 init_files()
 
 # --- 5. TIME HELPERS ---
@@ -110,10 +129,9 @@ with hcol2:
 st.divider()
 
 # ==========================================
-# LOGIN SCREEN (PUBLIC AREA)
+# LOGIN SCREEN
 # ==========================================
 if not st.session_state.authenticated:
-    
     if os.path.exists('notice.txt'):
         with open('notice.txt', 'r') as f:
             public_notice = f.read()
@@ -136,7 +154,6 @@ if not st.session_state.authenticated:
                     st.rerun()
                 else: st.error("❌ Incorrect Password")
             else: st.error("❌ Username not found")
-    st.info("💡 Tip: Save password in browser for auto-login.")
     
     with st.expander("📅 View Holiday List (Public)"):
         h_df = get_csv('holidays.csv')
@@ -150,7 +167,7 @@ else:
         st.rerun()
 
     # ==========================================
-    # ASSISTANT TEACHER DASHBOARD
+    # ASSISTANT TEACHER PANEL
     # ==========================================
     if st.session_state.user_role == "teacher":
         t_name_select = st.session_state.user_name
@@ -165,7 +182,6 @@ else:
                     n_text = f.read()
                     if n_text.strip(): st.info(f"📢 NOTICE: {n_text}")
             
-            # --- TABS (Attendance removed for AT) ---
             at_tabs = st.tabs(["🍱 MDM Entry", "⏳ Routine", "📃 Leave Status", "📅 Holidays"])
 
             with at_tabs[0]: # MDM
@@ -185,18 +201,12 @@ else:
                     if sel_class != "Select Class...":
                         students = get_csv('students.csv')
                         if not students.empty:
-                            # Filter students by class
                             roster = students[students['Class'] == sel_class].copy()
+                            if 'Section' not in roster.columns: roster['Section'] = 'A'
                             
-                            # Ensure Section column exists (Default to 'A' if missing)
-                            if 'Section' not in roster.columns:
-                                roster['Section'] = 'A'
-                                
                             roster['Ate_MDM'] = False
                             st.write("Mark Students:")
                             qr_val = qrcode_scanner(key='at_qr')
-                            
-                            # Show Section in Editor
                             edited = st.data_editor(roster[['Section', 'Roll', 'Name', 'Ate_MDM']], hide_index=True, use_container_width=True)
                             
                             if st.button("Submit MDM"):
@@ -207,14 +217,18 @@ else:
                                         'Date': curr_date_str, 
                                         'Teacher': t_name_select, 
                                         'Class': sel_class, 
-                                        'Section': r['Section'], # Capture Section
+                                        'Section': r['Section'], # Correctly capturing section
                                         'Roll': r['Roll'], 
                                         'Name': r['Name'], 
                                         'Time': now.strftime("%H:%M")
                                     })
                                 if new_rows:
+                                    # Ensure we write strictly ordered columns
+                                    cols = ['Date', 'Teacher', 'Class', 'Section', 'Roll', 'Name', 'Time']
+                                    df_new = pd.DataFrame(new_rows)[cols]
+                                    
                                     h = not os.path.exists('mdm_log.csv') or os.stat('mdm_log.csv').st_size == 0
-                                    pd.DataFrame(new_rows).to_csv('mdm_log.csv', mode='a', index=False, header=h)
+                                    df_new.to_csv('mdm_log.csv', mode='a', index=False, header=h)
                                     st.success("Submitted!")
                                     st.rerun()
                                 else: st.warning("No students selected.")
@@ -286,7 +300,6 @@ else:
             
             mdm_log = get_csv('mdm_log.csv')
             
-            # --- FILTER SECTION ---
             col1, col2 = st.columns([2, 1])
             with col1:
                 view_date_obj = st.date_input("Select Date", datetime.now())
@@ -301,28 +314,25 @@ else:
                 else: filtered_mdm = mdm_log[mdm_log['Date'] == view_date]
                 
                 if not filtered_mdm.empty:
-                    # --- FIX: Group by Class AND Section ---
-                    # Fill missing sections if any
-                    if 'Section' not in filtered_mdm.columns:
-                        filtered_mdm['Section'] = 'A'
+                    # Fill missing sections for display
+                    if 'Section' not in filtered_mdm.columns: filtered_mdm['Section'] = 'A'
                     
-                    # Create a Combined "Class - Section" Column for display
-                    filtered_mdm['Class_Sec'] = filtered_mdm['Class'] + " - " + filtered_mdm['Section'].astype(str)
-                    
-                    # Summary Table
+                    # GROUP BY CLASS AND SECTION
                     class_summary = filtered_mdm.groupby(['Class', 'Section']).size().reset_index(name='Students Ate')
-                    
                     st.markdown(f"##### 🏫 Breakdown for {view_date if not show_all else 'All Time'}")
                     st.dataframe(class_summary, hide_index=True, use_container_width=True)
                     
-                    # Detailed View
                     st.markdown("##### 📄 Detailed List")
-                    c_filter = st.selectbox("Filter Class", ["All"] + sorted(filtered_mdm['Class'].unique().tolist()))
+                    # Filter combining Class and Section
+                    unique_groups = filtered_mdm['Class'].unique()
+                    c_filter = st.selectbox("Filter Class", ["All"] + sorted(unique_groups))
+                    
                     if c_filter != "All":
-                        st.dataframe(filtered_mdm[filtered_mdm['Class'] == c_filter][['Date', 'Section', 'Roll', 'Name']], hide_index=True)
+                        display_df = filtered_mdm[filtered_mdm['Class'] == c_filter]
                     else:
-                        st.dataframe(filtered_mdm[['Date', 'Class', 'Section', 'Roll', 'Name']], hide_index=True)
-                        
+                        display_df = filtered_mdm
+                    
+                    st.dataframe(display_df[['Date', 'Class', 'Section', 'Roll', 'Name']], hide_index=True)
                     st.download_button("📥 Download This Report", filtered_mdm.to_csv(index=False).encode('utf-8'), "MDM_Report.csv", "text/csv")
                 else:
                     st.warning(f"No MDM entries found for {view_date}.")
@@ -331,26 +341,18 @@ else:
 
             st.divider()
             
-            # Missing Teachers Logic (Only relevant for Today)
-            if view_date == curr_date_str:
-                sub_teachers = []
-                if not mdm_log.empty and 'Teacher' in mdm_log.columns:
-                    mdm_log['Teacher'] = mdm_log['Teacher'].astype(str).str.strip()
-                    sub_teachers = mdm_log[mdm_log['Date'] == curr_date_str]['Teacher'].unique().tolist()
-                
-                missing = [t for t in TEACHER_LIST if t not in sub_teachers]
-                h_df = get_csv('holidays.csv')
-                is_h = not h_df[h_df['Date'] == curr_date_str].empty if not h_df.empty else False
-
-                if missing and not is_h and now.strftime('%A') != 'Sunday':
-                    st.markdown(f"<div class='warning-box'>⚠️ Pending Today: {', '.join(missing)}</div>", unsafe_allow_html=True)
-                elif not missing: st.success("✅ All Teachers Submitted Today!")
+            # --- EMERGENCY RESET BUTTON ---
+            with st.expander("⚠ Emergency Reset (Use only if data is corrupted)"):
+                if st.button("Reset MDM Database"):
+                    try:
+                        os.remove("mdm_log.csv")
+                        st.success("Database Reset. Reloading...")
+                        st.rerun()
+                    except: st.error("Error resetting.")
 
         # --- TAB 2: ATTENDANCE REPORT ---
         with tabs[1]:
             st.subheader("Student Attendance")
-            
-            # Mark Attendance
             sel_c = st.selectbox("Mark Attendance for Class", CLASS_OPTIONS, key='ht_att')
             if sel_c != "Select Class...":
                 std = get_csv('students.csv')
@@ -366,39 +368,23 @@ else:
             
             st.divider()
             
-            # --- SPECIFIC ATTENDANCE REPORT ---
             st.subheader("📊 Daily Attendance Report")
             att_log = get_csv('student_attendance_master.csv')
-            
-            # Date Picker for Attendance
             att_view_date = st.date_input("Report Date", datetime.now(), key="att_d").strftime("%d-%m-%Y")
             
             if not att_log.empty and 'Status' in att_log.columns:
                 target_att = att_log[(att_log['Date'] == att_view_date) & (att_log['Status'] == True)]
-                
                 if not target_att.empty:
-                    # Logic for Groups
                     pp_count = target_att[target_att['Class'] == 'CLASS PP'].shape[0]
                     i_iv_count = target_att[target_att['Class'].isin(['CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV'])].shape[0]
                     v_count = target_att[target_att['Class'] == 'CLASS V'].shape[0]
                     total = pp_count + i_iv_count + v_count
                     
-                    # Report Table
-                    tbl_html = f"""
-                    <table class='report-table'>
-                        <tr><th>Category</th><th>Present Students</th></tr>
-                        <tr><td>Class PP</td><td>{pp_count}</td></tr>
-                        <tr><td>Class I - IV</td><td>{i_iv_count}</td></tr>
-                        <tr><td>Class V</td><td>{v_count}</td></tr>
-                        <tr style='font-weight:bold; background-color:#f0f2f6;'><td>TOTAL</td><td>{total}</td></tr>
-                    </table>
-                    """
+                    tbl_html = f"""<table class='report-table'><tr><th>Category</th><th>Present</th></tr><tr><td>Class PP</td><td>{pp_count}</td></tr><tr><td>Class I - IV</td><td>{i_iv_count}</td></tr><tr><td>Class V</td><td>{v_count}</td></tr><tr style='font-weight:bold; background:#f0f2f6;'><td>TOTAL</td><td>{total}</td></tr></table>"""
                     st.markdown(tbl_html, unsafe_allow_html=True)
-                    st.download_button("📥 Download Attendance Log", att_log.to_csv(index=False).encode('utf-8'), f"attendance_{att_view_date}.csv", "text/csv")
-                else:
-                    st.info(f"No attendance marked for {att_view_date}.")
-            else:
-                st.info("Attendance Log empty.")
+                    st.download_button("📥 Download Log", att_log.to_csv(index=False).encode('utf-8'), f"attendance_{att_view_date}.csv", "text/csv")
+                else: st.info(f"No attendance for {att_view_date}.")
+            else: st.info("Attendance Log empty.")
 
         # --- TAB 3: LEAVES ---
         with tabs[2]: # Leaves

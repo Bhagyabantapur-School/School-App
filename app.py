@@ -68,17 +68,23 @@ def init_files():
     }
     for f, content in files_structure.items():
         if not os.path.exists(f):
-            if f.endswith('.csv'): pd.DataFrame(columns=content).to_csv(f, index=False)
-            else: with open(f, 'w') as txt: txt.write(content)
+            if f.endswith('.csv'):
+                pd.DataFrame(columns=content).to_csv(f, index=False)
+            else:
+                with open(f, 'w') as txt:
+                    txt.write(content)
         elif f.endswith('.csv'):
             try:
                 df = pd.read_csv(f)
                 if list(df.columns) != content:
-                    if len(df.columns) == len(content): df.columns = content
-                    elif df.empty: pd.DataFrame(columns=content).to_csv(f, index=False)
+                    if len(df.columns) == len(content):
+                        df.columns = content
+                    elif df.empty:
+                        pd.DataFrame(columns=content).to_csv(f, index=False)
                     else:
                         for c in content:
-                            if c not in df.columns: df[c] = ""
+                            if c not in df.columns:
+                                df[c] = ""
                         df = df[content]
                     df.to_csv(f, index=False)
             except: pass
@@ -89,6 +95,7 @@ utc_now = datetime.utcnow()
 now = utc_now + timedelta(hours=5, minutes=30)
 curr_date_str = now.strftime("%d-%m-%Y")
 curr_time = now.time()
+MDM_START, MDM_END = time(11, 15), time(12, 30)
 
 def get_csv(file):
     if os.path.exists(file): 
@@ -114,13 +121,12 @@ st.divider()
 # ==========================================
 if not st.session_state.authenticated:
     
-    # --- 📢 PUBLIC NOTICE (VISIBLE WITHOUT LOGIN) ---
+    # --- 📢 PUBLIC NOTICE ---
     if os.path.exists('notice.txt'):
         with open('notice.txt', 'r') as f:
             public_notice = f.read()
         if public_notice.strip():
             st.info(f"📢 NOTICE: {public_notice}")
-    # -----------------------------------------------
 
     st.markdown("<div class='login-box'><h3>🔐 Staff Login</h3><p>Please enter your Username & Password.</p></div>", unsafe_allow_html=True)
     with st.form("login_form"):
@@ -181,7 +187,6 @@ else:
                 if already_sub: 
                     st.success("✅ MDM Submitted for today.")
                 else:
-                    # TIME BARRIER REMOVED HERE
                     st.subheader("Student MDM Entry")
                     sel_class = st.selectbox("Class", CLASS_OPTIONS)
                     if sel_class != "Select Class...":

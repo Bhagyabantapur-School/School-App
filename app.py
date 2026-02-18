@@ -121,7 +121,6 @@ st.divider()
 # ==========================================
 if not st.session_state.authenticated:
     
-    # --- 📢 PUBLIC NOTICE ---
     if os.path.exists('notice.txt'):
         with open('notice.txt', 'r') as f:
             public_notice = f.read()
@@ -173,7 +172,7 @@ else:
                     n_text = f.read()
                     if n_text.strip(): st.info(f"📢 NOTICE: {n_text}")
             
-            # REMOVED ATTENDANCE TAB FOR TEACHERS
+            # REMOVED ATTENDANCE TAB FOR TEACHERS (As per instruction)
             at_tabs = st.tabs(["🍱 MDM Entry", "⏳ Routine", "📃 Leave Status", "📅 Holidays"])
 
             with at_tabs[0]: # MDM
@@ -271,52 +270,68 @@ else:
     elif st.session_state.user_role == "admin":
         tabs = st.tabs(["📊 Summary & MDM", "📝 Attendance Report", "👨‍🏫 Leaves", "👟 Shoes", "🆔 Cards", "📢 Notice", "📅 Holidays"])
         
-        # --- TAB 1: SUMMARY & MDM REPORT ---
+        # --- TAB 1: SUMMARY & MDM REPORT (FIXED VISIBILITY) ---
         with tabs[0]: 
             st.subheader(f"MDM Status: {curr_date_str}")
             
             mdm_log = get_csv('mdm_log.csv')
             
-            # 1. MDM CLASS WISE VIEW
+            # --- FILTER SECTION ---
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                # Calendar Picker
+                view_date_obj = st.date_input("Select Date to View", datetime.now())
+                view_date = view_date_obj.strftime("%d-%m-%Y")
+            with col2:
+                # Toggle for Full History
+                show_all = st.checkbox("Show All History")
+
             if not mdm_log.empty and 'Date' in mdm_log.columns:
                 mdm_log['Date'] = mdm_log['Date'].astype(str).str.strip()
-                today_mdm = mdm_log[mdm_log['Date'] == curr_date_str]
                 
-                if not today_mdm.empty:
+                # Apply Filter
+                if show_all:
+                    filtered_mdm = mdm_log
+                    st.info(f"Showing all {len(mdm_log)} entries in database.")
+                else:
+                    filtered_mdm = mdm_log[mdm_log['Date'] == view_date]
+                
+                if not filtered_mdm.empty:
                     # Summary Table
-                    class_summary = today_mdm.groupby('Class').size().reset_index(name='Students Ate')
-                    st.markdown("##### 🏫 Class-wise Breakdown")
+                    class_summary = filtered_mdm.groupby('Class').size().reset_index(name='Students Ate')
+                    st.markdown(f"##### 🏫 Breakdown for {view_date if not show_all else 'All Time'}")
                     st.dataframe(class_summary, hide_index=True, use_container_width=True)
                     
                     # Detailed View
-                    st.markdown("##### 📄 Class Wise Detailed List")
-                    c_filter = st.selectbox("Select Class to View Details", ["All"] + sorted(today_mdm['Class'].unique().tolist()))
+                    st.markdown("##### 📄 Detailed List")
+                    c_filter = st.selectbox("Filter Class", ["All"] + sorted(filtered_mdm['Class'].unique().tolist()))
                     if c_filter != "All":
-                        st.dataframe(today_mdm[today_mdm['Class'] == c_filter][['Roll', 'Name', 'Time']], hide_index=True)
+                        st.dataframe(filtered_mdm[filtered_mdm['Class'] == c_filter][['Date', 'Roll', 'Name', 'Time']], hide_index=True)
                     else:
-                        st.dataframe(today_mdm[['Class', 'Roll', 'Name', 'Time']], hide_index=True)
+                        st.dataframe(filtered_mdm[['Date', 'Class', 'Roll', 'Name', 'Time']], hide_index=True)
                         
-                    st.download_button("📥 Download Today's MDM Report", today_mdm.to_csv(index=False).encode('utf-8'), f"MDM_{curr_date_str}.csv", "text/csv")
+                    st.download_button("📥 Download This Report", filtered_mdm.to_csv(index=False).encode('utf-8'), "MDM_Report.csv", "text/csv")
                 else:
-                    st.info("No MDM entries for today yet.")
+                    st.warning(f"No MDM entries found for {view_date}.")
             else:
                 st.info("MDM Log is empty.")
 
             st.divider()
             
-            # Missing Teachers Logic
-            sub_teachers = []
-            if 'Date' in mdm_log.columns:
-                mdm_log['Teacher'] = mdm_log['Teacher'].astype(str).str.strip()
-                sub_teachers = mdm_log[mdm_log['Date'] == curr_date_str]['Teacher'].unique().tolist()
-            
-            missing = [t for t in TEACHER_LIST if t not in sub_teachers]
-            h_df = get_csv('holidays.csv')
-            is_h = not h_df[h_df['Date'] == curr_date_str].empty if not h_df.empty else False
+            # Missing Teachers Logic (Only relevant for Today)
+            if view_date == curr_date_str:
+                sub_teachers = []
+                if not mdm_log.empty and 'Teacher' in mdm_log.columns:
+                    mdm_log['Teacher'] = mdm_log['Teacher'].astype(str).str.strip()
+                    sub_teachers = mdm_log[mdm_log['Date'] == curr_date_str]['Teacher'].unique().tolist()
+                
+                missing = [t for t in TEACHER_LIST if t not in sub_teachers]
+                h_df = get_csv('holidays.csv')
+                is_h = not h_df[h_df['Date'] == curr_date_str].empty if not h_df.empty else False
 
-            if missing and not is_h and now.strftime('%A') != 'Sunday':
-                st.markdown(f"<div class='warning-box'>⚠️ Pending MDM: {', '.join(missing)}</div>", unsafe_allow_html=True)
-            elif not missing: st.success("✅ All Teachers Submitted MDM!")
+                if missing and not is_h and now.strftime('%A') != 'Sunday':
+                    st.markdown(f"<div class='warning-box'>⚠️ Pending Today: {', '.join(missing)}</div>", unsafe_allow_html=True)
+                elif not missing: st.success("✅ All Teachers Submitted Today!")
 
         # --- TAB 2: ATTENDANCE REPORT ---
         with tabs[1]:
@@ -341,30 +356,36 @@ else:
             # --- SPECIFIC ATTENDANCE REPORT ---
             st.subheader("📊 Daily Attendance Report")
             att_log = get_csv('student_attendance_master.csv')
+            
+            # Date Picker for Attendance
+            att_view_date = st.date_input("Report Date", datetime.now(), key="att_d").strftime("%d-%m-%Y")
+            
             if not att_log.empty and 'Status' in att_log.columns:
-                today_att = att_log[(att_log['Date'] == curr_date_str) & (att_log['Status'] == True)]
+                target_att = att_log[(att_log['Date'] == att_view_date) & (att_log['Status'] == True)]
                 
-                # Logic for Groups
-                pp_count = today_att[today_att['Class'] == 'CLASS PP'].shape[0]
-                i_iv_count = today_att[today_att['Class'].isin(['CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV'])].shape[0]
-                v_count = today_att[today_att['Class'] == 'CLASS V'].shape[0]
-                total = pp_count + i_iv_count + v_count
-                
-                # Report Table
-                tbl_html = f"""
-                <table class='report-table'>
-                    <tr><th>Category</th><th>Present Students</th></tr>
-                    <tr><td>Class PP</td><td>{pp_count}</td></tr>
-                    <tr><td>Class I - IV</td><td>{i_iv_count}</td></tr>
-                    <tr><td>Class V</td><td>{v_count}</td></tr>
-                    <tr style='font-weight:bold; background-color:#f0f2f6;'><td>TOTAL</td><td>{total}</td></tr>
-                </table>
-                """
-                st.markdown(tbl_html, unsafe_allow_html=True)
-                
-                st.download_button("📥 Download Attendance Log", att_log.to_csv(index=False).encode('utf-8'), f"attendance_{curr_date_str}.csv", "text/csv")
+                if not target_att.empty:
+                    # Logic for Groups
+                    pp_count = target_att[target_att['Class'] == 'CLASS PP'].shape[0]
+                    i_iv_count = target_att[target_att['Class'].isin(['CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV'])].shape[0]
+                    v_count = target_att[target_att['Class'] == 'CLASS V'].shape[0]
+                    total = pp_count + i_iv_count + v_count
+                    
+                    # Report Table
+                    tbl_html = f"""
+                    <table class='report-table'>
+                        <tr><th>Category</th><th>Present Students</th></tr>
+                        <tr><td>Class PP</td><td>{pp_count}</td></tr>
+                        <tr><td>Class I - IV</td><td>{i_iv_count}</td></tr>
+                        <tr><td>Class V</td><td>{v_count}</td></tr>
+                        <tr style='font-weight:bold; background-color:#f0f2f6;'><td>TOTAL</td><td>{total}</td></tr>
+                    </table>
+                    """
+                    st.markdown(tbl_html, unsafe_allow_html=True)
+                    st.download_button("📥 Download Attendance Log", att_log.to_csv(index=False).encode('utf-8'), f"attendance_{att_view_date}.csv", "text/csv")
+                else:
+                    st.info(f"No attendance marked for {att_view_date}.")
             else:
-                st.info("No attendance marked for today yet.")
+                st.info("Attendance Log empty.")
 
         # --- TAB 3: LEAVES ---
         with tabs[2]: # Leaves

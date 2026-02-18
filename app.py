@@ -68,11 +68,8 @@ def init_files():
     }
     for f, content in files_structure.items():
         if not os.path.exists(f):
-            if f.endswith('.csv'): 
-                pd.DataFrame(columns=content).to_csv(f, index=False)
-            else: 
-                with open(f, 'w') as txt: 
-                    txt.write(content)
+            if f.endswith('.csv'): pd.DataFrame(columns=content).to_csv(f, index=False)
+            else: with open(f, 'w') as txt: txt.write(content)
         elif f.endswith('.csv'):
             try:
                 df = pd.read_csv(f)
@@ -92,7 +89,6 @@ utc_now = datetime.utcnow()
 now = utc_now + timedelta(hours=5, minutes=30)
 curr_date_str = now.strftime("%d-%m-%Y")
 curr_time = now.time()
-MDM_START, MDM_END = time(11, 15), time(12, 30)
 
 def get_csv(file):
     if os.path.exists(file): 
@@ -182,9 +178,10 @@ else:
                     if not mdm_log[(mdm_log['Date'] == curr_date_str) & (mdm_log['Teacher'] == t_name_select)].empty:
                         already_sub = True
 
-                if already_sub: st.success("✅ MDM Submitted.")
-                elif not (MDM_START <= curr_time <= MDM_END): st.error("⏰ MDM Entry Closed.")
+                if already_sub: 
+                    st.success("✅ MDM Submitted for today.")
                 else:
+                    # TIME BARRIER REMOVED HERE
                     st.subheader("Student MDM Entry")
                     sel_class = st.selectbox("Class", CLASS_OPTIONS)
                     if sel_class != "Select Class...":

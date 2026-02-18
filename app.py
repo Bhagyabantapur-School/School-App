@@ -264,7 +264,6 @@ else:
                                         st.rerun()
                                     else: st.warning("No students selected.")
                                 
-                                # --- ATTENDANCE STATUS UNDER SUBMIT ---
                                 att_status_html = ""
                                 att_df = get_csv('student_attendance_master.csv')
                                 att_count = 0
@@ -287,7 +286,6 @@ else:
                                     att_status_html = "<div class='att-badge att-wait'>⏳ Attendance: Wait</div>"
                                 
                                 st.markdown(att_status_html, unsafe_allow_html=True)
-                                # --------------------------------------
 
                             else:
                                 st.warning(f"No students found for {target_class} - {target_section}.")
@@ -373,48 +371,39 @@ else:
             with col2:
                 show_all = st.checkbox("Show All History")
 
-            # Filter MDM
             if not mdm_log.empty and 'Date' in mdm_log.columns:
                 mdm_log['Date'] = mdm_log['Date'].astype(str).str.strip()
                 if show_all: filtered_mdm = mdm_log
                 else: filtered_mdm = mdm_log[mdm_log['Date'] == view_date]
             else: filtered_mdm = pd.DataFrame()
 
-            # Filter Attendance
             if not att_log.empty and 'Date' in att_log.columns:
                 att_log['Date'] = att_log['Date'].astype(str).str.strip()
                 if show_all: filtered_att = att_log[att_log['Status'] == True]
                 else: filtered_att = att_log[(att_log['Date'] == view_date) & (att_log['Status'] == True)]
             else: filtered_att = pd.DataFrame()
 
-            # Process Data for Summary Table
             if not filtered_mdm.empty or not filtered_att.empty:
-                # 1. MDM Counts
                 if not filtered_mdm.empty:
                     if 'Section' not in filtered_mdm.columns: filtered_mdm['Section'] = 'A'
                     mdm_counts = filtered_mdm.groupby(['Class', 'Section']).size().reset_index(name='MDM Entry')
                 else:
                     mdm_counts = pd.DataFrame(columns=['Class', 'Section', 'MDM Entry'])
 
-                # 2. Attendance Counts
                 if not filtered_att.empty:
                     if 'Section' not in filtered_att.columns: filtered_att['Section'] = 'A'
                     att_counts = filtered_att.groupby(['Class', 'Section']).size().reset_index(name='Attendance')
                 else:
                     att_counts = pd.DataFrame(columns=['Class', 'Section', 'Attendance'])
 
-                # 3. Merge both DataFrames
                 summary_df = pd.merge(att_counts, mdm_counts, on=['Class', 'Section'], how='outer').fillna(0)
                 summary_df['Attendance'] = summary_df['Attendance'].astype(int)
                 summary_df['MDM Entry'] = summary_df['MDM Entry'].astype(int)
-                
-                # Sort alphabetically
                 summary_df.sort_values(by=['Class', 'Section'], inplace=True)
 
                 st.markdown(f"##### 🏫 Breakdown for {view_date if not show_all else 'All Time'}")
                 st.dataframe(summary_df, hide_index=True, use_container_width=True)
                 
-                # ... Detailed List logic follows ...
                 st.markdown("##### 📄 Detailed List")
                 unique_groups = filtered_mdm['Class'].unique() if not filtered_mdm.empty else []
                 c_filter = st.selectbox("Filter Class", ["All"] + sorted(unique_groups))
@@ -489,7 +478,6 @@ else:
                                 disabled=["Roll", "Name", "MDM (Ate)"]
                             )
                             
-                            # --- STATS ---
                             total_present = ed['Present'].sum()
                             mdm_val = len(today_mdm)
                             mdm_text = f"MDM Entry: {mdm_val}" if not today_mdm.empty else "MDM Entry: Wait"
@@ -498,7 +486,6 @@ else:
                             c1, c2 = st.columns(2)
                             with c1: st.markdown(f"<div class='att-badge att-neutral'>✅ Total Selected: {total_present}</div>", unsafe_allow_html=True)
                             with c2: st.markdown(f"<div class='att-badge {mdm_class}'>{mdm_text}</div>", unsafe_allow_html=True)
-                            # -------------
 
                             # --- DUPLICATE CHECK ---
                             att_check = get_csv('student_attendance_master.csv')
@@ -549,7 +536,6 @@ else:
                 else: st.info(f"No attendance for {att_view_date}.")
             else: st.info("Attendance Log empty.")
             
-            # --- CLEAR ATTENDANCE BUTTON ---
             if st.button("🗑️ Clear Today's Attendance"):
                 if not att_log.empty and 'Date' in att_log.columns:
                     att_log['Date'] = att_log['Date'].astype(str).str.strip()
@@ -585,17 +571,46 @@ else:
                 if not missed.empty:
                     st.warning(f"{abs_t} has {len(missed)} classes.")
                     assigns = []
+                    # --- UPGRADED SUBSTITUTE SELECTION LOGIC ---
                     for idx, row in missed.iterrows():
                         slot = str(row['Start_Time']).strip()
-                        busy = routine[(routine['Day'] == day) & (routine['Start_Time'] == slot)]['Teacher'].tolist()
-                        inv_map = {v: k for k, v in TEACHER_INITIALS.items()}
-                        leisure = [n for c, n in inv_map.items() if c not in busy and c != code]
+                        
+                        # Find who is busy at this specific slot
+                        busy_at_slot_codes = routine[
+                            (routine['Day'] == day) & 
+                            (routine['Start_Time'] == slot)
+                        ]['Teacher'].tolist()
+                        
+                        free_options = []
+                        busy_options = []
+                        
+                        for t_name in TEACHER_LIST:
+                            if t_name == abs_t: continue # Skip absent teacher
+                            t_code = TEACHER_INITIALS.get(t_name, "")
+                            
+                            if t_code not in busy_at_slot_codes:
+                                free_options.append(f"✅ {t_name} (Free)")
+                            else:
+                                # Find where they are busy
+                                busy_info = routine[
+                                    (routine['Teacher'] == t_code) & 
+                                    (routine['Day'] == day) & 
+                                    (routine['Start_Time'] == slot)
+                                ]
+                                if not busy_info.empty:
+                                    b_class = busy_info.iloc[0]['Class']
+                                    busy_options.append(f"⚠️ {t_name} (Busy in {b_class})")
                         
                         st.markdown(f"<div class='routine-card'><b>{slot}</b> | {row['Class']}</div>", unsafe_allow_html=True)
-                        opts = ["Select...", "Staff"] + [f"{t} (Free)" for t in leisure] + [f"{t} (Busy)" for t in TEACHER_LIST if t not in leisure and t != abs_t]
                         
-                        ch = st.selectbox(f"Sub for {slot}", opts, key=f"s_{idx}")
-                        if ch != "Select...": assigns.append(f"{slot}: {ch.split(' (')[0]}")
+                        # Dropdown with grouped options
+                        all_opts = ["Select Substitute..."] + free_options + busy_options
+                        choice = st.selectbox(f"Sub for {slot}", all_opts, key=f"s_{idx}")
+                        
+                        if choice != "Select Substitute...":
+                            # Extract just the name for saving
+                            clean_name = choice.split(" (")[0].replace("✅ ", "").replace("⚠️ ", "")
+                            assigns.append(f"{slot}: {clean_name}")
                     
                     st.divider()
                     

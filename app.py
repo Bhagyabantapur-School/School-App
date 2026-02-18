@@ -23,6 +23,9 @@ st.markdown("""
         .report-table { width: 100%; border-collapse: collapse; }
         .report-table td, .report-table th { border: 1px solid #ddd; padding: 8px; text-align: center; }
         .report-table th { background-color: #007bff; color: white; }
+        .att-badge { padding: 8px 12px; border-radius: 8px; font-weight: bold; font-size: 16px; display: block; text-align: center; margin-top: 15px; }
+        .att-wait { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .att-done { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -46,9 +49,7 @@ TEACHER_INITIALS = {
 }
 
 TEACHER_LIST = [u["name"] for k, u in USERS.items() if u["role"] == "teacher"]
-# Generic options for other modules
 CLASS_OPTIONS = ["Select Class...", "CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V"]
-# Specific options for Attendance Entry
 ATTENDANCE_OPTIONS = [
     "Select Class...", 
     "CLASS PP A", 
@@ -261,6 +262,32 @@ else:
                                         st.success(f"Submitted {len(new_rows)} students successfully!")
                                         st.rerun()
                                     else: st.warning("No students selected.")
+                                
+                                # --- NEW LOCATION: ATTENDANCE STATUS UNDER SUBMIT BUTTON ---
+                                att_status_html = ""
+                                att_df = get_csv('student_attendance_master.csv')
+                                att_count = 0
+                                is_att_marked = False
+                                
+                                if not att_df.empty and 'Date' in att_df.columns:
+                                    todays_att = att_df[
+                                        (att_df['Date'] == curr_date_str) & 
+                                        (att_df['Class'] == target_class) & 
+                                        (att_df['Section'] == target_section) &
+                                        (att_df['Status'] == True)
+                                    ]
+                                    if not todays_att.empty:
+                                        is_att_marked = True
+                                        att_count = len(todays_att)
+                                
+                                if is_att_marked:
+                                    att_status_html = f"<div class='att-badge att-done'>✅ Attendance: {att_count}</div>"
+                                else:
+                                    att_status_html = "<div class='att-badge att-wait'>⏳ Attendance: Wait</div>"
+                                
+                                st.markdown(att_status_html, unsafe_allow_html=True)
+                                # -----------------------------------------------------------
+
                             else:
                                 st.warning(f"No students found for {target_class} - {target_section}.")
                     else:
@@ -383,7 +410,7 @@ else:
                         st.rerun()
                     except: st.error("Error resetting.")
 
-        # --- TAB 2: ATTENDANCE REPORT (UPDATED WITH MDM COLUMN) ---
+        # --- TAB 2: ATTENDANCE REPORT ---
         with tabs[1]:
             st.subheader("Student Attendance")
             sel_c = st.selectbox("Mark Attendance for Class", ATTENDANCE_OPTIONS, key='ht_att')
@@ -394,7 +421,7 @@ else:
                     t_class, t_sec = parts[0], parts[1]
                     
                     std = get_csv('students.csv')
-                    mdm_log = get_csv('mdm_log.csv') # Load MDM Data
+                    mdm_log = get_csv('mdm_log.csv') 
                     
                     if not std.empty:
                         if 'Section' not in std.columns: std['Section'] = 'A'
@@ -402,8 +429,6 @@ else:
                         ros = std[(std['Class'] == t_class) & (std['Section'] == t_sec)].copy()
                         
                         if not ros.empty:
-                            # --- MERGE MDM DATA ---
-                            # Get list of rolls who ate today
                             mdm_eaters = []
                             if not mdm_log.empty and 'Date' in mdm_log.columns:
                                 mdm_log['Date'] = mdm_log['Date'].astype(str).str.strip()
@@ -414,16 +439,14 @@ else:
                                 ]
                                 mdm_eaters = today_mdm['Roll'].astype(str).tolist()
                             
-                            # Add MDM Column (Read-Only Logic via disabled config)
                             ros['Present'] = True
                             ros['MDM (Ate)'] = ros['Roll'].astype(str).isin(mdm_eaters)
                             
-                            # Display Editor
                             ed = st.data_editor(
                                 ros[['Roll', 'Name', 'Present', 'MDM (Ate)']], 
                                 hide_index=True, 
                                 use_container_width=True,
-                                disabled=["Roll", "Name", "MDM (Ate)"] # Lock MDM column so HT can't edit it here
+                                disabled=["Roll", "Name", "MDM (Ate)"]
                             )
                             
                             if st.button(f"Save Attendance for {t_class} - {t_sec}"):

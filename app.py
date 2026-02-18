@@ -57,10 +57,10 @@ if 'user_role' not in st.session_state:
 if 'user_name' not in st.session_state:
     st.session_state.user_name = None
 
-# --- 4. FILE SYSTEM ---
+# --- 4. FILE SYSTEM (Includes 'Section') ---
 def init_files():
     files_structure = {
-        'mdm_log.csv': ['Date', 'Teacher', 'Class', 'Roll', 'Name', 'Time'],
+        'mdm_log.csv': ['Date', 'Teacher', 'Class', 'Section', 'Roll', 'Name', 'Time'],
         'student_attendance_master.csv': ['Date', 'Class', 'Roll', 'Name', 'Status'],
         'shoe_log.csv': ['Roll', 'Name', 'Class', 'Received', 'Date', 'Remark'],
         'teacher_leave.csv': ['Date', 'Teacher', 'Type', 'Substitute', 'Detailed_Sub_Log'],
@@ -68,24 +68,17 @@ def init_files():
     }
     for f, content in files_structure.items():
         if not os.path.exists(f):
-            if f.endswith('.csv'):
+            if f.endswith('.csv'): 
                 pd.DataFrame(columns=content).to_csv(f, index=False)
-            else:
-                with open(f, 'w') as txt:
+            else: 
+                with open(f, 'w') as txt: 
                     txt.write(content)
         elif f.endswith('.csv'):
             try:
                 df = pd.read_csv(f)
-                if list(df.columns) != content:
-                    if len(df.columns) == len(content):
-                        df.columns = content
-                    elif df.empty:
-                        pd.DataFrame(columns=content).to_csv(f, index=False)
-                    else:
-                        for c in content:
-                            if c not in df.columns:
-                                df[c] = ""
-                        df = df[content]
+                # Auto-Add 'Section' column if missing in old logs
+                if 'Section' not in df.columns and 'mdm_log' in f:
+                    df['Section'] = 'A' # Default for old records
                     df.to_csv(f, index=False)
             except: pass
 init_files()
@@ -172,7 +165,7 @@ else:
                     n_text = f.read()
                     if n_text.strip(): st.info(f"📢 NOTICE: {n_text}")
             
-            # REMOVED ATTENDANCE TAB FOR TEACHERS (As per instruction)
+            # --- TABS (Attendance removed for AT) ---
             at_tabs = st.tabs(["🍱 MDM Entry", "⏳ Routine", "📃 Leave Status", "📅 Holidays"])
 
             with at_tabs[0]: # MDM
@@ -192,16 +185,33 @@ else:
                     if sel_class != "Select Class...":
                         students = get_csv('students.csv')
                         if not students.empty:
+                            # Filter students by class
                             roster = students[students['Class'] == sel_class].copy()
+                            
+                            # Ensure Section column exists (Default to 'A' if missing)
+                            if 'Section' not in roster.columns:
+                                roster['Section'] = 'A'
+                                
                             roster['Ate_MDM'] = False
                             st.write("Mark Students:")
                             qr_val = qrcode_scanner(key='at_qr')
-                            edited = st.data_editor(roster[['Roll', 'Name', 'Ate_MDM']], hide_index=True, use_container_width=True)
+                            
+                            # Show Section in Editor
+                            edited = st.data_editor(roster[['Section', 'Roll', 'Name', 'Ate_MDM']], hide_index=True, use_container_width=True)
+                            
                             if st.button("Submit MDM"):
                                 ate = edited[edited['Ate_MDM'] == True]
                                 new_rows = []
                                 for _, r in ate.iterrows():
-                                    new_rows.append({'Date': curr_date_str, 'Teacher': t_name_select, 'Class': sel_class, 'Roll': r['Roll'], 'Name': r['Name'], 'Time': now.strftime("%H:%M")})
+                                    new_rows.append({
+                                        'Date': curr_date_str, 
+                                        'Teacher': t_name_select, 
+                                        'Class': sel_class, 
+                                        'Section': r['Section'], # Capture Section
+                                        'Roll': r['Roll'], 
+                                        'Name': r['Name'], 
+                                        'Time': now.strftime("%H:%M")
+                                    })
                                 if new_rows:
                                     h = not os.path.exists('mdm_log.csv') or os.stat('mdm_log.csv').st_size == 0
                                     pd.DataFrame(new_rows).to_csv('mdm_log.csv', mode='a', index=False, header=h)
@@ -270,7 +280,7 @@ else:
     elif st.session_state.user_role == "admin":
         tabs = st.tabs(["📊 Summary & MDM", "📝 Attendance Report", "👨‍🏫 Leaves", "👟 Shoes", "🆔 Cards", "📢 Notice", "📅 Holidays"])
         
-        # --- TAB 1: SUMMARY & MDM REPORT (FIXED VISIBILITY) ---
+        # --- TAB 1: SUMMARY & MDM REPORT ---
         with tabs[0]: 
             st.subheader(f"MDM Status: {curr_date_str}")
             
@@ -279,26 +289,29 @@ else:
             # --- FILTER SECTION ---
             col1, col2 = st.columns([2, 1])
             with col1:
-                # Calendar Picker
-                view_date_obj = st.date_input("Select Date to View", datetime.now())
+                view_date_obj = st.date_input("Select Date", datetime.now())
                 view_date = view_date_obj.strftime("%d-%m-%Y")
             with col2:
-                # Toggle for Full History
                 show_all = st.checkbox("Show All History")
 
             if not mdm_log.empty and 'Date' in mdm_log.columns:
                 mdm_log['Date'] = mdm_log['Date'].astype(str).str.strip()
                 
-                # Apply Filter
-                if show_all:
-                    filtered_mdm = mdm_log
-                    st.info(f"Showing all {len(mdm_log)} entries in database.")
-                else:
-                    filtered_mdm = mdm_log[mdm_log['Date'] == view_date]
+                if show_all: filtered_mdm = mdm_log
+                else: filtered_mdm = mdm_log[mdm_log['Date'] == view_date]
                 
                 if not filtered_mdm.empty:
+                    # --- FIX: Group by Class AND Section ---
+                    # Fill missing sections if any
+                    if 'Section' not in filtered_mdm.columns:
+                        filtered_mdm['Section'] = 'A'
+                    
+                    # Create a Combined "Class - Section" Column for display
+                    filtered_mdm['Class_Sec'] = filtered_mdm['Class'] + " - " + filtered_mdm['Section'].astype(str)
+                    
                     # Summary Table
-                    class_summary = filtered_mdm.groupby('Class').size().reset_index(name='Students Ate')
+                    class_summary = filtered_mdm.groupby(['Class', 'Section']).size().reset_index(name='Students Ate')
+                    
                     st.markdown(f"##### 🏫 Breakdown for {view_date if not show_all else 'All Time'}")
                     st.dataframe(class_summary, hide_index=True, use_container_width=True)
                     
@@ -306,9 +319,9 @@ else:
                     st.markdown("##### 📄 Detailed List")
                     c_filter = st.selectbox("Filter Class", ["All"] + sorted(filtered_mdm['Class'].unique().tolist()))
                     if c_filter != "All":
-                        st.dataframe(filtered_mdm[filtered_mdm['Class'] == c_filter][['Date', 'Roll', 'Name', 'Time']], hide_index=True)
+                        st.dataframe(filtered_mdm[filtered_mdm['Class'] == c_filter][['Date', 'Section', 'Roll', 'Name']], hide_index=True)
                     else:
-                        st.dataframe(filtered_mdm[['Date', 'Class', 'Roll', 'Name', 'Time']], hide_index=True)
+                        st.dataframe(filtered_mdm[['Date', 'Class', 'Section', 'Roll', 'Name']], hide_index=True)
                         
                     st.download_button("📥 Download This Report", filtered_mdm.to_csv(index=False).encode('utf-8'), "MDM_Report.csv", "text/csv")
                 else:

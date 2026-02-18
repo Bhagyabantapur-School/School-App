@@ -46,7 +46,19 @@ TEACHER_INITIALS = {
 }
 
 TEACHER_LIST = [u["name"] for k, u in USERS.items() if u["role"] == "teacher"]
+# Generic options for other modules
 CLASS_OPTIONS = ["Select Class...", "CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V"]
+# Specific options for Attendance Entry
+ATTENDANCE_OPTIONS = [
+    "Select Class...", 
+    "CLASS PP A", 
+    "CLASS I A", 
+    "CLASS II A", 
+    "CLASS III A", 
+    "CLASS IV A", 
+    "CLASS IV B", 
+    "CLASS V A"
+]
 CLASS_LOAD = {"CLASS PP": 40, "CLASS I": 35, "CLASS II": 30, "CLASS III": 30, "CLASS IV": 25, "CLASS V": 15}
 
 # --- 3. SESSION STATE ---
@@ -61,7 +73,7 @@ if 'user_name' not in st.session_state:
 def init_files():
     files_structure = {
         'mdm_log.csv': ['Date', 'Teacher', 'Class', 'Section', 'Roll', 'Name', 'Time'],
-        'student_attendance_master.csv': ['Date', 'Class', 'Roll', 'Name', 'Status'],
+        'student_attendance_master.csv': ['Date', 'Class', 'Section', 'Roll', 'Name', 'Status'], # Added Section
         'shoe_log.csv': ['Roll', 'Name', 'Class', 'Received', 'Date', 'Remark'],
         'teacher_leave.csv': ['Date', 'Teacher', 'Type', 'Substitute', 'Detailed_Sub_Log'],
         'notice.txt': 'Welcome to BPS Digital'
@@ -79,6 +91,7 @@ def init_files():
                 if list(df.columns) != content:
                     for c in content:
                         if c not in df.columns:
+                            # Default 'A' for Section, 'None' for others
                             df[c] = 'A' if c == 'Section' else 'None'
                     df = df[content]
                     df.to_csv(f, index=False)
@@ -304,7 +317,6 @@ else:
                     c1.metric("CL Remaining", f"{14 - full_cl}")
                     c2.metric("SL Taken", f"{sl_c}")
                     
-                    # --- RESTRICTED VIEW: HIDE 'Half Day' AND 'On Duty' ---
                     visible_leaves = my_leaves[~my_leaves['Type'].isin(['Half Day', 'On Duty'])]
                     st.dataframe(visible_leaves[['Date', 'Type', 'Substitute']], hide_index=True)
             
@@ -375,18 +387,43 @@ else:
         # --- TAB 2: ATTENDANCE REPORT ---
         with tabs[1]:
             st.subheader("Student Attendance")
-            sel_c = st.selectbox("Mark Attendance for Class", CLASS_OPTIONS, key='ht_att')
+            # --- UPDATED SELECTION LOGIC ---
+            sel_c = st.selectbox("Mark Attendance for Class", ATTENDANCE_OPTIONS, key='ht_att')
+            
             if sel_c != "Select Class...":
-                std = get_csv('students.csv')
-                if not std.empty:
-                    ros = std[std['Class'] == sel_c].copy()
-                    ros['Present'] = True
-                    ed = st.data_editor(ros[['Roll', 'Name', 'Present']], hide_index=True, use_container_width=True)
-                    if st.button("Save Attendance"):
-                        rec = ed.copy()
-                        df = pd.DataFrame({'Date': curr_date_str, 'Class': sel_c, 'Roll': rec['Roll'], 'Name': rec['Name'], 'Status': rec['Present']})
-                        df.to_csv('student_attendance_master.csv', mode='a', index=False, header=False)
-                        st.success("Saved!")
+                # SPLIT LOGIC: "CLASS IV B" -> Class="CLASS IV", Section="B"
+                parts = sel_c.rsplit(' ', 1)
+                if len(parts) == 2:
+                    t_class, t_sec = parts[0], parts[1]
+                    
+                    std = get_csv('students.csv')
+                    if not std.empty:
+                        # Ensure Section exists
+                        if 'Section' not in std.columns: std['Section'] = 'A'
+                        
+                        # Filter by BOTH Class and Section
+                        ros = std[(std['Class'] == t_class) & (std['Section'] == t_sec)].copy()
+                        
+                        if not ros.empty:
+                            ros['Present'] = True
+                            ed = st.data_editor(ros[['Roll', 'Name', 'Present']], hide_index=True, use_container_width=True)
+                            
+                            if st.button(f"Save Attendance for {t_class} - {t_sec}"):
+                                rec = ed.copy()
+                                df = pd.DataFrame({
+                                    'Date': curr_date_str, 
+                                    'Class': t_class, 
+                                    'Section': t_sec,  # Saving Section explicitly
+                                    'Roll': rec['Roll'], 
+                                    'Name': rec['Name'], 
+                                    'Status': rec['Present']
+                                })
+                                df.to_csv('student_attendance_master.csv', mode='a', index=False, header=False)
+                                st.success("Saved Successfully!")
+                        else:
+                            st.warning(f"No students found for {t_class} Section {t_sec}")
+                else:
+                    st.error("Invalid Class Format selected.")
             
             st.divider()
             

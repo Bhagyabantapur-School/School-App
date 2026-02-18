@@ -364,6 +364,7 @@ else:
             st.subheader(f"MDM Status: {curr_date_str}")
             
             mdm_log = get_csv('mdm_log.csv')
+            att_log = get_csv('student_attendance_master.csv') # Load Attendance
             
             col1, col2 = st.columns([2, 1])
             with col1:
@@ -372,47 +373,73 @@ else:
             with col2:
                 show_all = st.checkbox("Show All History")
 
+            # Filter MDM
             if not mdm_log.empty and 'Date' in mdm_log.columns:
                 mdm_log['Date'] = mdm_log['Date'].astype(str).str.strip()
-                
                 if show_all: filtered_mdm = mdm_log
                 else: filtered_mdm = mdm_log[mdm_log['Date'] == view_date]
-                
+            else: filtered_mdm = pd.DataFrame()
+
+            # Filter Attendance
+            if not att_log.empty and 'Date' in att_log.columns:
+                att_log['Date'] = att_log['Date'].astype(str).str.strip()
+                if show_all: filtered_att = att_log[att_log['Status'] == True]
+                else: filtered_att = att_log[(att_log['Date'] == view_date) & (att_log['Status'] == True)]
+            else: filtered_att = pd.DataFrame()
+
+            # Process Data for Summary Table
+            if not filtered_mdm.empty or not filtered_att.empty:
+                # 1. MDM Counts
                 if not filtered_mdm.empty:
                     if 'Section' not in filtered_mdm.columns: filtered_mdm['Section'] = 'A'
-                    
-                    class_summary = filtered_mdm.groupby(['Class', 'Section']).size().reset_index(name='Students Ate')
-                    st.markdown(f"##### 🏫 Breakdown for {view_date if not show_all else 'All Time'}")
-                    st.dataframe(class_summary, hide_index=True, use_container_width=True)
-                    
-                    st.markdown("##### 📄 Detailed List")
-                    unique_groups = filtered_mdm['Class'].unique()
-                    c_filter = st.selectbox("Filter Class", ["All"] + sorted(unique_groups))
-                    
+                    mdm_counts = filtered_mdm.groupby(['Class', 'Section']).size().reset_index(name='MDM Entry')
+                else:
+                    mdm_counts = pd.DataFrame(columns=['Class', 'Section', 'MDM Entry'])
+
+                # 2. Attendance Counts
+                if not filtered_att.empty:
+                    if 'Section' not in filtered_att.columns: filtered_att['Section'] = 'A'
+                    att_counts = filtered_att.groupby(['Class', 'Section']).size().reset_index(name='Attendance')
+                else:
+                    att_counts = pd.DataFrame(columns=['Class', 'Section', 'Attendance'])
+
+                # 3. Merge both DataFrames
+                summary_df = pd.merge(att_counts, mdm_counts, on=['Class', 'Section'], how='outer').fillna(0)
+                summary_df['Attendance'] = summary_df['Attendance'].astype(int)
+                summary_df['MDM Entry'] = summary_df['MDM Entry'].astype(int)
+                
+                # Sort alphabetically
+                summary_df.sort_values(by=['Class', 'Section'], inplace=True)
+
+                st.markdown(f"##### 🏫 Breakdown for {view_date if not show_all else 'All Time'}")
+                st.dataframe(summary_df, hide_index=True, use_container_width=True)
+                
+                # ... Detailed List logic follows ...
+                st.markdown("##### 📄 Detailed List")
+                unique_groups = filtered_mdm['Class'].unique() if not filtered_mdm.empty else []
+                c_filter = st.selectbox("Filter Class", ["All"] + sorted(unique_groups))
+                
+                if not filtered_mdm.empty:
                     if c_filter != "All":
                         display_df = filtered_mdm[filtered_mdm['Class'] == c_filter]
                     else:
                         display_df = filtered_mdm
-                    
                     st.dataframe(display_df[['Date', 'Class', 'Section', 'Roll', 'Name']], hide_index=True)
                     st.download_button("📥 Download This Report", filtered_mdm.to_csv(index=False).encode('utf-8'), "MDM_Report.csv", "text/csv")
                 else:
                     st.warning(f"No MDM entries found for {view_date}.")
             else:
-                st.info("MDM Log is empty.")
+                st.info("No data available for this date.")
 
             st.divider()
             
-            # --- CLEAR TODAY'S MDM BUTTON ---
             if st.button("🗑️ Clear Today's MDM Data"):
                 if not mdm_log.empty and 'Date' in mdm_log.columns:
-                    mdm_log = mdm_log[mdm_log['Date'] != curr_date_str] # Filter out today
+                    mdm_log = mdm_log[mdm_log['Date'] != curr_date_str]
                     mdm_log.to_csv('mdm_log.csv', index=False)
                     st.success("Today's MDM Data Cleared!")
                     st.rerun()
-                else:
-                    st.warning("No data to clear.")
-            # --------------------------------
+                else: st.warning("No data to clear.")
             
             with st.expander("⚠ Emergency Reset (MDM Database)"):
                 if st.button("Reset MDM Database"):
@@ -522,17 +549,15 @@ else:
                 else: st.info(f"No attendance for {att_view_date}.")
             else: st.info("Attendance Log empty.")
             
-            # --- NEW: CLEAR TODAY'S ATTENDANCE BUTTON ---
+            # --- CLEAR ATTENDANCE BUTTON ---
             if st.button("🗑️ Clear Today's Attendance"):
                 if not att_log.empty and 'Date' in att_log.columns:
                     att_log['Date'] = att_log['Date'].astype(str).str.strip()
-                    att_log = att_log[att_log['Date'] != curr_date_str] # Filter out today
+                    att_log = att_log[att_log['Date'] != curr_date_str] 
                     att_log.to_csv('student_attendance_master.csv', index=False)
                     st.success("Today's Attendance Cleared!")
                     st.rerun()
-                else:
-                    st.warning("No data to clear.")
-            # ---------------------------------------------
+                else: st.warning("No data to clear.")
             
             with st.expander("⚠ Emergency Reset (Attendance Database)"):
                 if st.button("Reset Attendance Database"):

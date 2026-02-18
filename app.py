@@ -73,7 +73,7 @@ if 'user_name' not in st.session_state:
 def init_files():
     files_structure = {
         'mdm_log.csv': ['Date', 'Teacher', 'Class', 'Section', 'Roll', 'Name', 'Time'],
-        'student_attendance_master.csv': ['Date', 'Class', 'Section', 'Roll', 'Name', 'Status'], # Added Section
+        'student_attendance_master.csv': ['Date', 'Class', 'Section', 'Roll', 'Name', 'Status'],
         'shoe_log.csv': ['Roll', 'Name', 'Class', 'Received', 'Date', 'Remark'],
         'teacher_leave.csv': ['Date', 'Teacher', 'Type', 'Substitute', 'Detailed_Sub_Log'],
         'notice.txt': 'Welcome to BPS Digital'
@@ -91,7 +91,6 @@ def init_files():
                 if list(df.columns) != content:
                     for c in content:
                         if c not in df.columns:
-                            # Default 'A' for Section, 'None' for others
                             df[c] = 'A' if c == 'Section' else 'None'
                     df = df[content]
                     df.to_csv(f, index=False)
@@ -384,36 +383,55 @@ else:
                         st.rerun()
                     except: st.error("Error resetting.")
 
-        # --- TAB 2: ATTENDANCE REPORT ---
+        # --- TAB 2: ATTENDANCE REPORT (UPDATED WITH MDM COLUMN) ---
         with tabs[1]:
             st.subheader("Student Attendance")
-            # --- UPDATED SELECTION LOGIC ---
             sel_c = st.selectbox("Mark Attendance for Class", ATTENDANCE_OPTIONS, key='ht_att')
             
             if sel_c != "Select Class...":
-                # SPLIT LOGIC: "CLASS IV B" -> Class="CLASS IV", Section="B"
                 parts = sel_c.rsplit(' ', 1)
                 if len(parts) == 2:
                     t_class, t_sec = parts[0], parts[1]
                     
                     std = get_csv('students.csv')
+                    mdm_log = get_csv('mdm_log.csv') # Load MDM Data
+                    
                     if not std.empty:
-                        # Ensure Section exists
                         if 'Section' not in std.columns: std['Section'] = 'A'
                         
-                        # Filter by BOTH Class and Section
                         ros = std[(std['Class'] == t_class) & (std['Section'] == t_sec)].copy()
                         
                         if not ros.empty:
+                            # --- MERGE MDM DATA ---
+                            # Get list of rolls who ate today
+                            mdm_eaters = []
+                            if not mdm_log.empty and 'Date' in mdm_log.columns:
+                                mdm_log['Date'] = mdm_log['Date'].astype(str).str.strip()
+                                today_mdm = mdm_log[
+                                    (mdm_log['Date'] == curr_date_str) & 
+                                    (mdm_log['Class'] == t_class) & 
+                                    (mdm_log['Section'] == t_sec)
+                                ]
+                                mdm_eaters = today_mdm['Roll'].astype(str).tolist()
+                            
+                            # Add MDM Column (Read-Only Logic via disabled config)
                             ros['Present'] = True
-                            ed = st.data_editor(ros[['Roll', 'Name', 'Present']], hide_index=True, use_container_width=True)
+                            ros['MDM (Ate)'] = ros['Roll'].astype(str).isin(mdm_eaters)
+                            
+                            # Display Editor
+                            ed = st.data_editor(
+                                ros[['Roll', 'Name', 'Present', 'MDM (Ate)']], 
+                                hide_index=True, 
+                                use_container_width=True,
+                                disabled=["Roll", "Name", "MDM (Ate)"] # Lock MDM column so HT can't edit it here
+                            )
                             
                             if st.button(f"Save Attendance for {t_class} - {t_sec}"):
                                 rec = ed.copy()
                                 df = pd.DataFrame({
                                     'Date': curr_date_str, 
                                     'Class': t_class, 
-                                    'Section': t_sec,  # Saving Section explicitly
+                                    'Section': t_sec, 
                                     'Roll': rec['Roll'], 
                                     'Name': rec['Name'], 
                                     'Status': rec['Present']

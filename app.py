@@ -451,7 +451,7 @@ else:
                                 disabled=["Roll", "Name", "MDM (Ate)"]
                             )
                             
-                            # --- NEW: STATS DISPLAY UNDER EDITOR ---
+                            # --- STATS DISPLAY ---
                             total_present = ed['Present'].sum()
                             mdm_val = len(today_mdm)
                             
@@ -463,7 +463,7 @@ else:
                                 st.markdown(f"<div class='att-badge att-neutral'>✅ Total Selected: {total_present}</div>", unsafe_allow_html=True)
                             with c2:
                                 st.markdown(f"<div class='att-badge {mdm_class}'>{mdm_text}</div>", unsafe_allow_html=True)
-                            # ---------------------------------------
+                            # ---------------------
 
                             if st.button(f"Save Attendance for {t_class} - {t_sec}"):
                                 rec = ed.copy()
@@ -476,7 +476,7 @@ else:
                                     'Status': rec['Present']
                                 })
                                 df.to_csv('student_attendance_master.csv', mode='a', index=False, header=False)
-                                st.success("Saved Successfully!")
+                                st.success("Attendance Submitted for today.") # CUSTOM MESSAGE
                         else:
                             st.warning(f"No students found for {t_class} Section {t_sec}")
                 else:

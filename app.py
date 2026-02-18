@@ -23,9 +23,10 @@ st.markdown("""
         .report-table { width: 100%; border-collapse: collapse; }
         .report-table td, .report-table th { border: 1px solid #ddd; padding: 8px; text-align: center; }
         .report-table th { background-color: #007bff; color: white; }
-        .att-badge { padding: 8px 12px; border-radius: 8px; font-weight: bold; font-size: 16px; display: block; text-align: center; margin-top: 15px; }
-        .att-wait { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .att-badge { padding: 8px 12px; border-radius: 8px; font-weight: bold; font-size: 15px; display: block; text-align: center; margin-top: 5px; margin-bottom: 5px;}
+        .att-wait { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
         .att-done { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .att-neutral { background-color: #e2e6ea; color: #333; border: 1px solid #ccc; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -263,7 +264,7 @@ else:
                                         st.rerun()
                                     else: st.warning("No students selected.")
                                 
-                                # --- NEW LOCATION: ATTENDANCE STATUS UNDER SUBMIT BUTTON ---
+                                # --- ATTENDANCE STATUS UNDER SUBMIT ---
                                 att_status_html = ""
                                 att_df = get_csv('student_attendance_master.csv')
                                 att_count = 0
@@ -286,7 +287,7 @@ else:
                                     att_status_html = "<div class='att-badge att-wait'>⏳ Attendance: Wait</div>"
                                 
                                 st.markdown(att_status_html, unsafe_allow_html=True)
-                                # -----------------------------------------------------------
+                                # --------------------------------------
 
                             else:
                                 st.warning(f"No students found for {target_class} - {target_section}.")
@@ -430,6 +431,7 @@ else:
                         
                         if not ros.empty:
                             mdm_eaters = []
+                            today_mdm = pd.DataFrame() # Init for count check
                             if not mdm_log.empty and 'Date' in mdm_log.columns:
                                 mdm_log['Date'] = mdm_log['Date'].astype(str).str.strip()
                                 today_mdm = mdm_log[
@@ -449,6 +451,20 @@ else:
                                 disabled=["Roll", "Name", "MDM (Ate)"]
                             )
                             
+                            # --- NEW: STATS DISPLAY UNDER EDITOR ---
+                            total_present = ed['Present'].sum()
+                            mdm_val = len(today_mdm)
+                            
+                            mdm_text = f"MDM Entry: {mdm_val}" if not today_mdm.empty else "MDM Entry: Wait"
+                            mdm_class = "att-done" if not today_mdm.empty else "att-wait"
+                            
+                            c1, c2 = st.columns(2)
+                            with c1:
+                                st.markdown(f"<div class='att-badge att-neutral'>✅ Total Selected: {total_present}</div>", unsafe_allow_html=True)
+                            with c2:
+                                st.markdown(f"<div class='att-badge {mdm_class}'>{mdm_text}</div>", unsafe_allow_html=True)
+                            # ---------------------------------------
+
                             if st.button(f"Save Attendance for {t_class} - {t_sec}"):
                                 rec = ed.copy()
                                 df = pd.DataFrame({

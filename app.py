@@ -57,9 +57,8 @@ if 'user_role' not in st.session_state:
 if 'user_name' not in st.session_state:
     st.session_state.user_name = None
 
-# --- 4. FILE SYSTEM (AUTO-REPAIR) ---
+# --- 4. FILE SYSTEM ---
 def init_files():
-    # Define EXACT structure for all files
     files_structure = {
         'mdm_log.csv': ['Date', 'Teacher', 'Class', 'Section', 'Roll', 'Name', 'Time'],
         'student_attendance_master.csv': ['Date', 'Class', 'Roll', 'Name', 'Status'],
@@ -67,7 +66,6 @@ def init_files():
         'teacher_leave.csv': ['Date', 'Teacher', 'Type', 'Substitute', 'Detailed_Sub_Log'],
         'notice.txt': 'Welcome to BPS Digital'
     }
-    
     for f, content in files_structure.items():
         if not os.path.exists(f):
             if f.endswith('.csv'): 
@@ -77,29 +75,15 @@ def init_files():
                     txt.write(content)
         elif f.endswith('.csv'):
             try:
-                # REPAIR MODE: Fix columns if they don't match
                 df = pd.read_csv(f)
-                current_cols = list(df.columns)
-                
-                # If columns are missing (e.g. 'Section' is missing)
-                if current_cols != content:
-                    # 1. Add missing columns
+                # Auto-repair columns
+                if list(df.columns) != content:
                     for c in content:
                         if c not in df.columns:
                             df[c] = 'A' if c == 'Section' else 'None'
-                    
-                    # 2. Drop extra columns (cleanup)
-                    df = df[[c for c in content if c in df.columns]]
-                    
-                    # 3. Reorder exactly as required
                     df = df[content]
-                    
-                    # 4. Save fixed file
                     df.to_csv(f, index=False)
-            except:
-                # If file is totally broken, reset it (Last Resort)
-                pass # We don't auto-delete to prevent data loss, manually handle via Admin
-
+            except: pass
 init_files()
 
 # --- 5. TIME HELPERS ---
@@ -132,6 +116,7 @@ st.divider()
 # LOGIN SCREEN
 # ==========================================
 if not st.session_state.authenticated:
+    
     if os.path.exists('notice.txt'):
         with open('notice.txt', 'r') as f:
             public_notice = f.read()
@@ -167,7 +152,7 @@ else:
         st.rerun()
 
     # ==========================================
-    # ASSISTANT TEACHER PANEL
+    # ASSISTANT TEACHER DASHBOARD
     # ==========================================
     if st.session_state.user_role == "teacher":
         t_name_select = st.session_state.user_name
@@ -184,10 +169,13 @@ else:
             
             at_tabs = st.tabs(["🍱 MDM Entry", "⏳ Routine", "📃 Leave Status", "📅 Holidays"])
 
-            with at_tabs[0]: # MDM
+            # --- TAB 1: MDM ENTRY (LOCKED TO 1st CLASS) ---
+            with at_tabs[0]: 
                 mdm_log = get_csv('mdm_log.csv')
                 already_sub = False
-                if 'Date' in mdm_log.columns and 'Teacher' in mdm_log.columns:
+                
+                # Check previous submission
+                if not mdm_log.empty and 'Date' in mdm_log.columns and 'Teacher' in mdm_log.columns:
                     mdm_log['Date'] = mdm_log['Date'].astype(str).str.strip()
                     mdm_log['Teacher'] = mdm_log['Teacher'].astype(str).str.strip()
                     if not mdm_log[(mdm_log['Date'] == curr_date_str) & (mdm_log['Teacher'] == t_name_select)].empty:
@@ -197,41 +185,79 @@ else:
                     st.success("✅ MDM Submitted for today.")
                 else:
                     st.subheader("Student MDM Entry")
-                    sel_class = st.selectbox("Class", CLASS_OPTIONS)
-                    if sel_class != "Select Class...":
+                    
+                    # --- AUTO-DETECT 1ST CLASS LOGIC ---
+                    routine = get_csv('routine.csv')
+                    my_code = TEACHER_INITIALS.get(t_name_select, t_name_select)
+                    today_day = now.strftime('%A')
+                    
+                    # Filter routine for this teacher & day
+                    my_sched = pd.DataFrame()
+                    if not routine.empty and 'Teacher' in routine.columns:
+                        my_sched = routine[(routine['Teacher'] == my_code) & (routine['Day'] == today_day)].copy()
+                    
+                    target_class = None
+                    target_section = None
+                    
+                    if not my_sched.empty:
+                        # Sort by time to find the first one
+                        my_sched['Start_Obj'] = my_sched['Start_Time'].apply(parse_time_safe)
+                        my_sched = my_sched.dropna(subset=['Start_Obj']).sort_values('Start_Obj')
+                        
+                        if not my_sched.empty:
+                            first_class_row = my_sched.iloc[0]
+                            target_class = first_class_row['Class']
+                            target_section = first_class_row['Section'] if 'Section' in first_class_row else 'A'
+                    
+                    # --- DISPLAY LOGIC ---
+                    if target_class:
+                        st.info(f"📌 You are assigned to: **{target_class} - Section {target_section}** (Your 1st Class)")
+                        
                         students = get_csv('students.csv')
                         if not students.empty:
-                            roster = students[students['Class'] == sel_class].copy()
-                            if 'Section' not in roster.columns: roster['Section'] = 'A'
+                            # Filter by BOTH Class AND Section
+                            # Ensure Section column exists in students.csv for filtering
+                            if 'Section' not in students.columns:
+                                students['Section'] = 'A' # Fallback
+                                
+                            roster = students[
+                                (students['Class'] == target_class) & 
+                                (students['Section'] == target_section)
+                            ].copy()
                             
-                            roster['Ate_MDM'] = False
-                            st.write("Mark Students:")
-                            qr_val = qrcode_scanner(key='at_qr')
-                            edited = st.data_editor(roster[['Section', 'Roll', 'Name', 'Ate_MDM']], hide_index=True, use_container_width=True)
-                            
-                            if st.button("Submit MDM"):
-                                ate = edited[edited['Ate_MDM'] == True]
-                                new_rows = []
-                                for _, r in ate.iterrows():
-                                    new_rows.append({
-                                        'Date': curr_date_str, 
-                                        'Teacher': t_name_select, 
-                                        'Class': sel_class, 
-                                        'Section': r['Section'], # Correctly capturing section
-                                        'Roll': r['Roll'], 
-                                        'Name': r['Name'], 
-                                        'Time': now.strftime("%H:%M")
-                                    })
-                                if new_rows:
-                                    # Ensure we write strictly ordered columns
-                                    cols = ['Date', 'Teacher', 'Class', 'Section', 'Roll', 'Name', 'Time']
-                                    df_new = pd.DataFrame(new_rows)[cols]
-                                    
-                                    h = not os.path.exists('mdm_log.csv') or os.stat('mdm_log.csv').st_size == 0
-                                    df_new.to_csv('mdm_log.csv', mode='a', index=False, header=h)
-                                    st.success("Submitted!")
-                                    st.rerun()
-                                else: st.warning("No students selected.")
+                            if not roster.empty:
+                                roster['Ate_MDM'] = False
+                                st.write("Mark Students:")
+                                qr_val = qrcode_scanner(key='at_qr')
+                                edited = st.data_editor(roster[['Roll', 'Name', 'Ate_MDM']], hide_index=True, use_container_width=True)
+                                
+                                if st.button("Submit MDM"):
+                                    ate = edited[edited['Ate_MDM'] == True]
+                                    new_rows = []
+                                    for _, r in ate.iterrows():
+                                        new_rows.append({
+                                            'Date': curr_date_str, 
+                                            'Teacher': t_name_select, 
+                                            'Class': target_class, 
+                                            'Section': target_section,
+                                            'Roll': r['Roll'], 
+                                            'Name': r['Name'], 
+                                            'Time': now.strftime("%H:%M")
+                                        })
+                                    if new_rows:
+                                        # Strict Column Order Save
+                                        cols = ['Date', 'Teacher', 'Class', 'Section', 'Roll', 'Name', 'Time']
+                                        df_new = pd.DataFrame(new_rows)[cols]
+                                        
+                                        h = not os.path.exists('mdm_log.csv') or os.stat('mdm_log.csv').st_size == 0
+                                        df_new.to_csv('mdm_log.csv', mode='a', index=False, header=h)
+                                        st.success("Submitted!")
+                                        st.rerun()
+                                    else: st.warning("No students marked.")
+                            else:
+                                st.warning(f"No students found in list for {target_class} - {target_section}.")
+                    else:
+                        st.warning("📅 No classes scheduled for you today in the routine.")
 
             with at_tabs[1]: # Routine
                 st.subheader("Live Class Status")

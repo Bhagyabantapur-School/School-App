@@ -57,7 +57,6 @@ def generate_pdf(students_list):
     row = 0
     
     for student in students_list:
-        # Calculate position
         x = x_start + (col * (card_w + gap))
         y = y_start + (row * (card_h + gap))
         
@@ -75,8 +74,6 @@ def generate_pdf(students_list):
             
         pdf.set_font("Arial", 'B', 8.5)
         pdf.set_text_color(255, 255, 255)
-        
-        # Shift text right to avoid overlapping the logo
         pdf.set_xy(x + 10, y + 1.5)
         pdf.cell(card_w - 10, 5, "BHAGYABANTAPUR PRIMARY SCHOOL", 0, 1, 'C')
         pdf.set_font("Arial", '', 6)
@@ -167,6 +164,12 @@ def generate_pdf(students_list):
     return pdf.output(dest='S').encode('latin-1')
 
 # --- 4. APP LAYOUT ---
+# Header Area
+col_a, col_b, col_c = st.columns([1, 2, 1])
+with col_b:
+    if os.path.exists('logo.png'):
+        st.image('logo.png', use_container_width=True)
+
 st.markdown('<p class="main-header">🪪 BPS Student ID Card Generator</p>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Select students, update details, and attach photos</p>', unsafe_allow_html=True)
 
@@ -221,4 +224,56 @@ if not df.empty:
     
     # --- PHOTO UPLOAD SECTION ---
     if not selected_students.empty:
-        st.markdown
+        st.markdown('### 📸 Upload Student Photos')
+        st.write("Tap 'Browse files' to open your mobile gallery or camera.")
+        
+        selected_students['PhotoPath'] = "" 
+        
+        for index, student in selected_students.iterrows():
+            student_id = student.get('Sl', index)
+            student_roll = student.get('Roll', '0')
+            
+            with st.expander(f"Upload Photo: {student.get('Name', 'Unknown')} (Class: {student.get('Class', '')}, Roll: {student_roll})"):
+                photo = st.file_uploader(
+                    "Choose Image", 
+                    type=['jpg', 'jpeg', 'png'], 
+                    key=f"photo_{student_id}_{student_roll}"
+                )
+                
+                if photo is not None:
+                    temp_path = tempfile.mktemp(suffix=".jpg")
+                    with open(temp_path, "wb") as f:
+                        f.write(photo.getbuffer())
+                    
+                    selected_students.at[index, 'PhotoPath'] = temp_path
+                    st.image(photo, width=150)
+                    st.success("Photo attached!")
+
+    st.divider()
+    
+    # --- GENERATION BUTTONS ---
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        if st.button("Select All in Filtered List"):
+            selected_students = edited_df.copy()
+            selected_students['PhotoPath'] = ""
+            st.success(f"Selected all {len(filtered_df)} students! (Note: Photos must be uploaded manually above).")
+
+    with c2:
+        if not selected_students.empty:
+            if st.button(f"🖨️ Generate PDF for {len(selected_students)} Students"):
+                with st.spinner("Generating ID Cards..."):
+                    student_data = selected_students.to_dict('records')
+                    pdf_bytes = generate_pdf(student_data)
+                    
+                    st.download_button(
+                        label="📥 Download ID Cards (PDF)",
+                        data=pdf_bytes,
+                        file_name="bps_id_cards.pdf",
+                        mime="application/pdf"
+                    )
+        else:
+            st.warning("Please select at least one student from the table above.")
+
+else:
+    st.error("❌ 'students.csv' file not found or is empty. Please ensure it is in the same folder.")

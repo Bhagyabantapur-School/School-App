@@ -8,6 +8,7 @@ import json
 import io
 import base64
 import requests
+from PIL import Image
 
 # --- GOOGLE DRIVE API IMPORTS ---
 from google.oauth2 import service_account
@@ -55,25 +56,28 @@ def get_all_drive_photos(service, folder_id):
 def upload_to_drive(service, file_name, file_bytes, existing_file_id=None):
     """Uploads a compressed photo via the secure Google Apps Script backdoor."""
     try:
-        from PIL import Image
-        import base64
-        import requests
-        
+        if "gas_url" not in st.secrets:
+            raise Exception("Google Apps Script URL is missing from Secrets.")
+            
         gas_url = st.secrets["gas_url"]
         
         # --- THE SHRINK RAY ---
-        # Shrink the massive phone photo to a tiny, fast ID card size
+        # 1. Open the image from bytes
         image = Image.open(io.BytesIO(file_bytes))
-        image.thumbnail((400, 400)) # Resize to max 400x400 pixels
-        img_byte_arr = io.BytesIO()
         
-        # Convert to RGB to prevent transparency errors, then save as JPEG
+        # 2. Convert to RGB (fixes issues with PNG transparency)
         if image.mode != 'RGB':
             image = image.convert('RGB')
+            
+        # 3. Resize to max 400x400 pixels (Perfect for ID cards, tiny file size)
+        image.thumbnail((400, 400)) 
+        
+        # 4. Save to a byte stream as JPEG
+        img_byte_arr = io.BytesIO()
         image.save(img_byte_arr, format='JPEG', quality=85)
         compressed_bytes = img_byte_arr.getvalue()
         
-        # Package the newly shrunk image
+        # 5. Encode for sending
         base64_data = base64.b64encode(compressed_bytes).decode('utf-8')
         
         payload = {
@@ -82,29 +86,23 @@ def upload_to_drive(service, file_name, file_bytes, existing_file_id=None):
             "fileData": base64_data
         }
         
-        # Delete old photo if it exists
+        # Delete old photo if it exists (using the Service Account)
         if existing_file_id and service:
             try:
                 service.files().delete(fileId=existing_file_id).execute()
             except:
                 pass
                 
-        # Send to Google Drive
+        # Send to Google Drive via Apps Script
         response = requests.post(gas_url, json=payload, allow_redirects=True)
         
         if response.status_code != 200:
-            raise Exception(f"Script Error: HTTP {response.status_code}")
+            raise Exception(f"Script Error: HTTP {response.status_code} - {response.text}")
             
-    except Exception as e:
-        raise Exception(f"Upload failed: {e}")
-                pass
-                
-        # Send the new photo to the Google Apps Script Catcher
-        response = requests.post(gas_url, json=payload, allow_redirects=True)
-        
-        if response.status_code != 200:
-            raise Exception(f"Script Error: HTTP {response.status_code}")
-            
+        response_json = response.json()
+        if response_json.get("status") == "error":
+             raise Exception(f"Script Error: {response_json.get('message')}")
+
     except Exception as e:
         raise Exception(f"Upload failed: {e}")
 
@@ -337,16 +335,17 @@ if not df.empty:
                 )
                 
                 if photo is not None and "gas_url" in st.secrets:
-                    with st.spinner("Uploading securely to Google Drive..."):
+                    with st.spinner("Compressing & Uploading securely to Google Drive..."):
                         file_bytes = photo.getvalue()
                         existing_id = drive_files_map.get(photo_name)
                         try:
                             upload_to_drive(drive_service, photo_name, file_bytes, existing_id)
+                            # Force a refresh of the file list
                             drive_files_map = get_all_drive_photos(drive_service, drive_folder_id)
                             st.success("Successfully synced to Google Drive!")
-                            st.image(photo, width=150)
+                            st.rerun() # Refresh the app to show the green checkmark immediately
                         except Exception as e:
-                            st.error(f"🛑 Failed to upload: {e}")
+                            st.error(f"🛑 {e}")
 
     st.divider()
     
@@ -374,4 +373,3 @@ if not df.empty:
 
 else:
     st.error("❌ 'students.csv' file not found.")
-

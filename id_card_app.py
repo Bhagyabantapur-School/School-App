@@ -6,11 +6,13 @@ from fpdf import FPDF
 import tempfile
 import json
 import io
+import base64
+import requests
 
 # --- GOOGLE DRIVE API IMPORTS ---
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
+from googleapiclient.http import MediaIoBaseDownload
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="BPS ID Card Generator", page_icon="🪪", layout="centered")
@@ -27,9 +29,8 @@ st.markdown("""
 # --- 3. GOOGLE DRIVE HELPER FUNCTIONS ---
 @st.cache_resource
 def get_drive_service():
-    """Authenticates and returns the Google Drive Service using Streamlit Secrets."""
+    """Authenticates the Google Drive Service for READING files only."""
     try:
-        # Check if secrets exist to avoid crash
         if "gcp_credentials" not in st.secrets:
             return None
         creds_json = json.loads(st.secrets["gcp_credentials"])
@@ -37,7 +38,7 @@ def get_drive_service():
         creds = service_account.Credentials.from_service_account_info(creds_json, scopes=scopes)
         return build('drive', 'v3', credentials=creds)
     except Exception as e:
-        st.error(f"🛑 Google Drive Connection Error: {e}")
+        st.error(f"🛑 Google Drive Read Connection Error: {e}")
         return None
 
 def get_all_drive_photos(service, folder_id):
@@ -51,14 +52,33 @@ def get_all_drive_photos(service, folder_id):
         st.error(f"🛑 Drive API Blocked (Check Folder ID & Sharing): {e}")
         return {}
 
-def upload_to_drive(service, folder_id, file_name, file_bytes, existing_file_id=None):
-    """Uploads a new photo or overwrites an existing one in Google Drive."""
-    media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype='image/jpeg', resumable=True)
-    if existing_file_id:
-        service.files().update(fileId=existing_file_id, media_body=media).execute()
-    else:
-        file_metadata = {'name': file_name, 'parents': [folder_id]}
-        service.files().create(body=file_metadata, media_body=media).execute()
+def upload_to_drive(service, file_name, file_bytes, existing_file_id=None):
+    """Uploads a new photo via the secure Google Apps Script backdoor."""
+    try:
+        gas_url = st.secrets["gas_url"]
+        base64_data = base64.b64encode(file_bytes).decode('utf-8')
+        
+        payload = {
+            "password": "BPS-Secure-2026",
+            "fileName": file_name,
+            "fileData": base64_data
+        }
+        
+        # If a photo already exists, delete the old one first using the read service
+        if existing_file_id and service:
+            try:
+                service.files().delete(fileId=existing_file_id).execute()
+            except:
+                pass
+                
+        # Send the new photo to the Google Apps Script Catcher
+        response = requests.post(gas_url, json=payload, allow_redirects=True)
+        
+        if response.status_code != 200:
+            raise Exception(f"Script Error: HTTP {response.status_code}")
+            
+    except Exception as e:
+        raise Exception(f"Upload failed: {e}")
 
 def download_from_drive(service, file_id, local_path):
     """Downloads a photo from Drive to a temporary local file for the PDF."""
@@ -207,7 +227,7 @@ def generate_pdf(students_list, drive_service, drive_folder_id, drive_files_map)
 
 # --- 5. APP INIT & CLOUD CHECK ---
 drive_service = get_drive_service()
-# safely get the folder ID, default to empty string
+
 try:
     drive_folder_id = st.secrets["drive_folder_id"]
 except:
@@ -225,7 +245,9 @@ st.markdown('<p class="main-header">🪪 BPS Student ID Card Generator</p>', uns
 st.markdown('<p class="sub-header">Cloud-Synced Photo Database</p>', unsafe_allow_html=True)
 
 if not drive_service:
-    st.warning("⚠️ Google Drive is not connected. Check Streamlit Secrets.")
+    st.warning("⚠️ Google Drive Read Access is not connected. Check Streamlit Secrets.")
+if "gas_url" not in st.secrets:
+    st.warning("⚠️ Google Apps Script URL is missing. Photos cannot be saved. Check Streamlit Secrets.")
 
 df = get_students()
 
@@ -286,12 +308,12 @@ if not df.empty:
                     key=f"photo_{student_id}_{student_roll}"
                 )
                 
-                if photo is not None and drive_service:
-                    with st.spinner("Uploading to Google Drive..."):
+                if photo is not None and "gas_url" in st.secrets:
+                    with st.spinner("Uploading securely to Google Drive..."):
                         file_bytes = photo.getvalue()
                         existing_id = drive_files_map.get(photo_name)
                         try:
-                            upload_to_drive(drive_service, drive_folder_id, photo_name, file_bytes, existing_id)
+                            upload_to_drive(drive_service, photo_name, file_bytes, existing_id)
                             drive_files_map = get_all_drive_photos(drive_service, drive_folder_id)
                             st.success("Successfully synced to Google Drive!")
                             st.image(photo, width=150)

@@ -4,20 +4,23 @@ import qrcode
 import os
 from fpdf import FPDF
 import tempfile
+from datetime import datetime
+
+# --- IMPORT THE SCANNER ---
+try:
+    from streamlit_qrcode_scanner import qrcode_scanner
+except ImportError:
+    st.error("Please add 'streamlit-qrcode-scanner' to your requirements.txt")
+    st.stop()
 
 # --- 1. CONFIGURATION ---
-st.set_page_config(page_title="BPS ID Card Generator", page_icon="🪪", layout="centered")
+st.set_page_config(page_title="BPS Smart School", page_icon="🏫", layout="centered")
 
-# --- 2. STYLING ---
-st.markdown("""
-    <style>
-        .main-header { font-size: 30px; font-weight: bold; color: #007bff; text-align: center; }
-        .sub-header { font-size: 18px; color: #555; text-align: center; margin-bottom: 20px; }
-        .stButton>button { width: 100%; background-color: #28a745; color: white; }
-    </style>
-""", unsafe_allow_html=True)
+# --- 2. SESSION STATE (To remember scans) ---
+if 'attendance_log' not in st.session_state:
+    st.session_state['attendance_log'] = pd.DataFrame(columns=['Time', 'Name', 'Roll', 'Mobile', 'Status', 'MDM'])
 
-# --- 3. DATA HELPER FUNCTIONS ---
+# --- 3. HELPER FUNCTIONS ---
 @st.cache_data
 def get_students():
     if os.path.exists('students.csv'):
@@ -34,205 +37,179 @@ def get_students():
             return pd.DataFrame()
     return pd.DataFrame()
 
+def parse_qr_data(qr_string):
+    """Parses the QR string: 'Name:Suborno|Roll:12|Mob:987...'"""
+    try:
+        data = {}
+        parts = qr_string.split('|')
+        for part in parts:
+            key, value = part.split(':')
+            data[key.strip()] = value.strip()
+        return data
+    except:
+        return None
+
 def generate_pdf(students_list, photo_dict):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.set_auto_page_break(auto=True, margin=10)
     pdf.add_page()
-    
-    x_start, y_start = 10, 10
-    card_w, card_h = 86, 54
-    gap = 8
+    x_start, y_start, card_w, card_h, gap = 10, 10, 86, 54, 8
     col, row = 0, 0
     
     for student in students_list:
         x = x_start + (col * (card_w + gap))
         y = y_start + (row * (card_h + gap))
         
-        # 1. Card Border
-        pdf.set_draw_color(0, 0, 0)
-        pdf.set_line_width(0.3)
-        pdf.rect(x, y, card_w, card_h)
+        # Draw Card
+        pdf.set_draw_color(0, 0, 0); pdf.set_line_width(0.3); pdf.rect(x, y, card_w, card_h)
+        pdf.set_fill_color(0, 123, 255); pdf.rect(x, y, card_w, 11, 'F')
         
-        # 2. Header
-        pdf.set_fill_color(0, 123, 255)
-        pdf.rect(x, y, card_w, 11, 'F')
-        
-        if os.path.exists('logo.png'):
-            pdf.image('logo.png', x=x + 2, y=y + 1.5, w=8, h=8)
+        if os.path.exists('logo.png'): pdf.image('logo.png', x=x+2, y=y+1.5, w=8, h=8)
             
-        pdf.set_font("Arial", 'B', 8.5)
-        pdf.set_text_color(255, 255, 255)
-        pdf.set_xy(x + 10, y + 1.5)
-        pdf.cell(card_w - 10, 5, "BHAGYABANTAPUR PRIMARY SCHOOL", 0, 1, 'C')
+        pdf.set_font("Arial", 'B', 8.5); pdf.set_text_color(255, 255, 255)
+        pdf.set_xy(x+10, y+1.5); pdf.cell(card_w-10, 5, "BHAGYABANTAPUR PRIMARY SCHOOL", 0, 1, 'C')
         pdf.set_font("Arial", '', 6)
-        pdf.set_xy(x + 10, y + 6.5)
-        pdf.cell(card_w - 10, 3, "ID CARD - SESSION 2026", 0, 1, 'C')
+        pdf.set_xy(x+10, y+6.5); pdf.cell(card_w-10, 3, "ID CARD - SESSION 2026", 0, 1, 'C')
         
-        pdf.set_text_color(0, 0, 0)
-        
-        # 3. Photo Logic (Local Only)
-        photo_x, photo_y, photo_w, photo_h = x + 3, y + 14, 18, 22
+        # Photo
+        photo_x, photo_y, photo_w, photo_h = x+3, y+14, 18, 22
         student_id = str(student.get('Sl', 0)) + "_" + str(student.get('Roll', '0'))
         
         if student_id in photo_dict:
-            # Temporarily save the uploaded bytes to place on PDF
             temp_path = tempfile.mktemp(suffix=".jpg")
-            with open(temp_path, "wb") as f:
-                f.write(photo_dict[student_id])
+            with open(temp_path, "wb") as f: f.write(photo_dict[student_id])
             try:
                 pdf.image(temp_path, x=photo_x, y=photo_y, w=photo_w, h=photo_h)
-                pdf.set_draw_color(0, 0, 0)
-                pdf.rect(photo_x, photo_y, photo_w, photo_h)
-            except:
-                pass
+                pdf.set_draw_color(0, 0, 0); pdf.rect(photo_x, photo_y, photo_w, photo_h)
+            except: pass
         else:
-            pdf.set_draw_color(200, 200, 200)
-            pdf.rect(photo_x, photo_y, photo_w, photo_h) 
-            pdf.set_text_color(150, 150, 150)
-            pdf.set_font("Arial", '', 5)
-            pdf.set_xy(photo_x, photo_y + 8)
-            pdf.cell(photo_w, 5, "NO", 0, 1, 'C')
-            pdf.set_xy(photo_x, photo_y + 11)
-            pdf.cell(photo_w, 5, "PHOTO", 0, 0, 'C')
+            pdf.set_draw_color(200); pdf.rect(photo_x, photo_y, photo_w, photo_h) 
+            pdf.set_text_color(150); pdf.set_font("Arial", '', 5)
+            pdf.set_xy(photo_x, y+20); pdf.cell(photo_w, 5, "NO PHOTO", 0, 0, 'C')
         
-        # 4. Student Details
-        pdf.set_text_color(0, 0, 0)
-        detail_x = x + 24
-        curr_y = y + 14
-        line_h = 4
-        
-        pdf.set_font("Arial", 'B', 9)
-        pdf.set_xy(detail_x, curr_y)
-        pdf.cell(50, line_h, f"{student.get('Name', '')}".upper()[:25], 0, 1)
-        curr_y += 4.5
-
+        # Details
+        pdf.set_text_color(0); detail_x, curr_y, line_h = x+24, y+14, 4
+        pdf.set_font("Arial", 'B', 9); pdf.set_xy(detail_x, curr_y)
+        pdf.cell(50, line_h, f"{student.get('Name', '')}".upper()[:25], 0, 1); curr_y += 4.5
         pdf.set_font("Arial", '', 7)
-        pdf.set_xy(detail_x, curr_y)
-        pdf.cell(50, line_h, f"Father: {student.get('Father', 'N/A')}", 0, 1)
-        curr_y += line_h
-        pdf.set_xy(detail_x, curr_y)
-        pdf.cell(50, line_h, f"Class: {student.get('Class', '')} | Sec: {student.get('Section', 'A')}", 0, 1)
-        curr_y += line_h
-        pdf.set_xy(detail_x, curr_y)
-        pdf.cell(50, line_h, f"Roll: {student.get('Roll', '')} | Sex: {student.get('Gender', 'N/A')}", 0, 1)
-        curr_y += line_h
-        pdf.set_xy(detail_x, curr_y)
-        pdf.cell(50, line_h, f"DOB: {student.get('DOB', 'N/A')} | Blood: {student.get('BloodGroup', 'N/A')}", 0, 1)
-        curr_y += line_h
-        pdf.set_xy(detail_x, curr_y)
-        pdf.set_font("Arial", 'B', 7)
-        pdf.cell(50, line_h, f"Mob: {student.get('Mobile', 'N/A')}", 0, 1)
-        
-        # 5. QR Code
+        for label, val in [("Father", student.get('Father', '')), ("Class", f"{student.get('Class', '')} | Sec: {student.get('Section', 'A')}"), ("Roll", f"{student.get('Roll', '')} | Sex: {student.get('Gender', '')}"), ("DOB", f"{student.get('DOB', '')} | Blood: {student.get('BloodGroup', '')}")]:
+            pdf.set_xy(detail_x, curr_y); pdf.cell(50, line_h, f"{label}: {val}", 0, 1); curr_y += line_h
+        pdf.set_xy(detail_x, curr_y); pdf.set_font("Arial", 'B', 7); pdf.cell(50, line_h, f"Mob: {student.get('Mobile', '')}", 0, 1)
+
+        # QR & Sig
         qr_data = f"Name:{student.get('Name', '')}|Roll:{student.get('Roll', '')}|Mob:{student.get('Mobile', '')}"
-        qr = qrcode.make(qr_data)
-        qr_path = tempfile.mktemp(suffix=".png")
-        qr.save(qr_path)
-        pdf.image(qr_path, x=x + 4.5, y=y + 37, w=15, h=15)
+        qr = qrcode.make(qr_data); qr_path = tempfile.mktemp(suffix=".png"); qr.save(qr_path)
+        pdf.image(qr_path, x=x+4.5, y=y+37, w=15, h=15)
+        if os.path.exists('signature.png'): pdf.image('signature.png', x=x+58, y=y+41, w=22, h=8)
         
-        # 6. Signature Area
-        if os.path.exists('signature.png'):
-            pdf.image('signature.png', x=x + 58, y=y + 41, w=22, h=8)
-            
-        pdf.set_font("Arial", 'I', 6)
-        pdf.set_xy(x, y + 49)
-        pdf.cell(card_w - 5, 3, "Sukhamay Kisku", 0, 1, 'R')
-        pdf.set_font("Arial", '', 5)
-        pdf.set_xy(x, y + 51)
-        pdf.cell(card_w - 5, 2, "Head Teacher", 0, 0, 'R')
+        pdf.set_font("Arial", 'I', 6); pdf.set_xy(x, y+49); pdf.cell(card_w-5, 3, "Sukhamay Kisku", 0, 1, 'R')
+        pdf.set_font("Arial", '', 5); pdf.set_xy(x, y+51); pdf.cell(card_w-5, 2, "Head Teacher", 0, 0, 'R')
         
         col += 1
-        if col >= 2:
-            col, row = 0, row + 1
-        if row >= 5:
-            pdf.add_page()
-            col, row = 0, 0
+        if col >= 2: col, row = 0, row + 1
+        if row >= 5: pdf.add_page(); col, row = 0, 0
             
     return pdf.output(dest='S').encode('latin-1')
 
-# --- 4. APP LAYOUT ---
-col_a, col_b, col_c = st.columns([1, 2, 1])
-with col_b:
-    if os.path.exists('logo.png'):
-        st.image('logo.png', use_container_width=True)
 
-st.markdown('<p class="main-header">🪪 BPS Student ID Card Generator</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Fast Batch Printing Mode</p>', unsafe_allow_html=True)
+# --- 4. TABS LAYOUT ---
+tab1, tab2 = st.tabs(["🖨️ ID Card Generator", "📸 MDM & Attendance Scanner"])
 
-df = get_students()
+# ==========================================
+# TAB 1: ID CARD GENERATOR (Existing Logic)
+# ==========================================
+with tab1:
+    col_a, col_b, col_c = st.columns([1, 2, 1])
+    with col_b:
+        if os.path.exists('logo.png'): st.image('logo.png', use_container_width=True)
+    st.markdown('<h3 style="text-align:center; color:#007bff;">BPS Student ID Card Generator</h3>', unsafe_allow_html=True)
 
-if not df.empty:
-    col1, col2 = st.columns(2)
-    with col1:
-        classes = ["All"] + sorted(df['Class'].dropna().unique().tolist())
-        selected_class = st.selectbox("Filter by Class", classes)
-    with col2:
-        sections = ["All"] + sorted(df['Section'].dropna().unique().tolist())
-        selected_section = st.selectbox("Filter by Section", sections)
+    df = get_students()
+    if not df.empty:
+        c1, c2 = st.columns(2)
+        with c1: selected_class = st.selectbox("Class", ["All"] + sorted(df['Class'].dropna().unique().tolist()))
+        with c2: selected_section = st.selectbox("Section", ["All"] + sorted(df['Section'].dropna().unique().tolist()))
 
-    filtered_df = df.copy()
-    if selected_class != "All": filtered_df = filtered_df[filtered_df['Class'] == selected_class]
-    if selected_section != "All": filtered_df = filtered_df[filtered_df['Section'] == selected_section]
+        filtered_df = df.copy()
+        if selected_class != "All": filtered_df = filtered_df[filtered_df['Class'] == selected_class]
+        if selected_section != "All": filtered_df = filtered_df[filtered_df['Section'] == selected_section]
         
-    st.divider()
-    
-    st.write(f"Found **{len(filtered_df)}** students. Select students to print.")
-    filtered_df.insert(0, "Select", False)
-    disabled_cols = filtered_df.columns.drop(["Select", "BloodGroup"])
-    
-    edited_df = st.data_editor(
-        filtered_df,
-        hide_index=True,
-        column_config={
-            "Select": st.column_config.CheckboxColumn(required=True),
-            "BloodGroup": st.column_config.SelectboxColumn("Blood Group", options=["A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-", "N/A"])
-        },
-        disabled=disabled_cols,
-        use_container_width=True
-    )
-    
-    selected_students = edited_df[edited_df["Select"] == True].copy()
-    
-    st.divider()
-    
-    # --- BATCH PHOTO UPLOAD SECTION ---
-    uploaded_photos = {}
-    
-    if not selected_students.empty:
-        st.markdown('### 📷 Add Photos for Selected Students')
-        st.info("Upload photos here. They will be placed on the ID cards immediately when you click Generate.")
+        filtered_df.insert(0, "Select", False)
+        edited_df = st.data_editor(filtered_df, hide_index=True, column_config={"Select": st.column_config.CheckboxColumn(required=True)}, disabled=filtered_df.columns.drop("Select"), use_container_width=True)
+        selected_students = edited_df[edited_df["Select"] == True].copy()
         
-        for index, student in selected_students.iterrows():
-            student_id = str(student.get('Sl', index)) + "_" + str(student.get('Roll', '0'))
+        uploaded_photos = {}
+        if not selected_students.empty:
+            st.divider()
+            st.info(f"Selected {len(selected_students)} students. Upload photos below.")
+            for index, student in selected_students.iterrows():
+                sid = str(student.get('Sl', index)) + "_" + str(student.get('Roll', '0'))
+                with st.expander(f"{student.get('Name')} (Roll: {student.get('Roll')})"):
+                    photo = st.file_uploader("Image", type=['jpg','png'], key=f"p_{sid}")
+                    if photo: uploaded_photos[sid] = photo.getvalue()
             
-            with st.expander(f"Photo: {student.get('Name', 'Unknown')} (Class: {student.get('Class', '')}, Roll: {student.get('Roll', '0')})"):
-                photo = st.file_uploader("Choose Image", type=['jpg', 'jpeg', 'png'], key=f"photo_{student_id}")
-                if photo is not None:
-                    uploaded_photos[student_id] = photo.getvalue()
-                    st.image(photo, width=150)
-
-        st.divider()
-        
-        # --- GENERATION BUTTON ---
-        c1, c2 = st.columns([1, 2])
-        with c1:
-            if st.button("Select All in Filtered List"):
-                st.info("Tip: Click the checkbox at the very top of the 'Select' column in the table to select all.")
-
-        with c2:
-            if st.button(f"🖨️ Generate PDF for {len(selected_students)} Students"):
-                with st.spinner("Building PDF..."):
-                    student_data = selected_students.to_dict('records')
-                    pdf_bytes = generate_pdf(student_data, uploaded_photos)
-                    
-                    st.download_button(
-                        label="📥 Download Ready! Click to Save PDF",
-                        data=pdf_bytes,
-                        file_name="bps_id_cards_batch.pdf",
-                        mime="application/pdf"
-                    )
+            if st.button("Generate PDF"):
+                pdf_bytes = generate_pdf(selected_students.to_dict('records'), uploaded_photos)
+                st.download_button("📥 Download PDF", pdf_bytes, "bps_cards.pdf", "application/pdf")
     else:
-        st.warning("Please select at least one student from the table above.")
+        st.error("students.csv not found")
 
-else:
-    st.error("❌ 'students.csv' file not found.")
+# ==========================================
+# TAB 2: MDM SCANNER (New Logic)
+# ==========================================
+with tab2:
+    st.markdown('<h3 style="text-align:center; color:#28a745;">📸 MDM & Attendance</h3>', unsafe_allow_html=True)
+    st.write("Scan a student ID card to mark them **Present** and record **MDM Taken**.")
+    
+    # 1. The Scanner Component
+    qr_code = qrcode_scanner(key='mdm_scanner')
+    
+    # 2. Process the Scan
+    if qr_code:
+        data = parse_qr_data(qr_code)
+        if data:
+            student_name = data.get('Name', 'Unknown')
+            student_roll = data.get('Roll', 'Unknown')
+            
+            # Check if already scanned today to prevent double entry
+            existing = st.session_state['attendance_log'][
+                (st.session_state['attendance_log']['Name'] == student_name) & 
+                (st.session_state['attendance_log']['Roll'] == student_roll)
+            ]
+            
+            if not existing.empty:
+                st.warning(f"⚠️ {student_name} is already marked present today!")
+            else:
+                # Add to session state
+                new_entry = pd.DataFrame([{
+                    'Time': datetime.now().strftime("%H:%M:%S"),
+                    'Name': student_name,
+                    'Roll': student_roll,
+                    'Mobile': data.get('Mob', 'N/A'),
+                    'Status': 'Present',
+                    'MDM': 'Yes'
+                }])
+                st.session_state['attendance_log'] = pd.concat([st.session_state['attendance_log'], new_entry], ignore_index=True)
+                st.success(f"✅ **{student_name}** marked PRESENT & MDM TAKEN!")
+                # Force refresh to show updated table immediately? (Optional, Streamlit auto-reruns on interaction)
+        else:
+            st.error("Invalid QR Code Format. Please scan a valid BPS ID Card.")
+
+    st.divider()
+    
+    # 3. Show Today's Log
+    st.markdown("### 📋 Today's Log")
+    if not st.session_state['attendance_log'].empty:
+        st.dataframe(st.session_state['attendance_log'], use_container_width=True)
+        
+        # 4. Download Report
+        csv = st.session_state['attendance_log'].to_csv(index=False).encode('utf-8')
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        st.download_button(
+            label="📥 Download Daily MDM Report (CSV)",
+            data=csv,
+            file_name=f"BPS_MDM_Report_{date_str}.csv",
+            mime='text/csv',
+        )
+    else:
+        st.info("No students scanned yet today. Use the camera above to start.")

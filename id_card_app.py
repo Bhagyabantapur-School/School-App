@@ -53,10 +53,28 @@ def get_all_drive_photos(service, folder_id):
         return {}
 
 def upload_to_drive(service, file_name, file_bytes, existing_file_id=None):
-    """Uploads a new photo via the secure Google Apps Script backdoor."""
+    """Uploads a compressed photo via the secure Google Apps Script backdoor."""
     try:
+        from PIL import Image
+        import base64
+        import requests
+        
         gas_url = st.secrets["gas_url"]
-        base64_data = base64.b64encode(file_bytes).decode('utf-8')
+        
+        # --- THE SHRINK RAY ---
+        # Shrink the massive phone photo to a tiny, fast ID card size
+        image = Image.open(io.BytesIO(file_bytes))
+        image.thumbnail((400, 400)) # Resize to max 400x400 pixels
+        img_byte_arr = io.BytesIO()
+        
+        # Convert to RGB to prevent transparency errors, then save as JPEG
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        image.save(img_byte_arr, format='JPEG', quality=85)
+        compressed_bytes = img_byte_arr.getvalue()
+        
+        # Package the newly shrunk image
+        base64_data = base64.b64encode(compressed_bytes).decode('utf-8')
         
         payload = {
             "password": "BPS-Secure-2026",
@@ -64,11 +82,21 @@ def upload_to_drive(service, file_name, file_bytes, existing_file_id=None):
             "fileData": base64_data
         }
         
-        # If a photo already exists, delete the old one first using the read service
+        # Delete old photo if it exists
         if existing_file_id and service:
             try:
                 service.files().delete(fileId=existing_file_id).execute()
             except:
+                pass
+                
+        # Send to Google Drive
+        response = requests.post(gas_url, json=payload, allow_redirects=True)
+        
+        if response.status_code != 200:
+            raise Exception(f"Script Error: HTTP {response.status_code}")
+            
+    except Exception as e:
+        raise Exception(f"Upload failed: {e}")
                 pass
                 
         # Send the new photo to the Google Apps Script Catcher
@@ -346,3 +374,4 @@ if not df.empty:
 
 else:
     st.error("❌ 'students.csv' file not found.")
+

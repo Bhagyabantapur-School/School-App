@@ -3,6 +3,4 @@ pandas
 fpdf
 qrcode
 streamlit-qrcode-scanner
-google-api-python-client
-google-auth
 Pillow

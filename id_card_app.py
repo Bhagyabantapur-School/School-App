@@ -4,16 +4,6 @@ import qrcode
 import os
 from fpdf import FPDF
 import tempfile
-import json
-import io
-import base64
-import requests
-from PIL import Image
-
-# --- GOOGLE DRIVE API IMPORTS ---
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="BPS ID Card Generator", page_icon="🪪", layout="centered")
@@ -27,95 +17,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. GOOGLE DRIVE HELPER FUNCTIONS ---
-@st.cache_resource
-def get_drive_service():
-    """Authenticates the Google Drive Service for READING files only."""
-    try:
-        if "gcp_credentials" not in st.secrets:
-            return None
-        creds_json = json.loads(st.secrets["gcp_credentials"])
-        scopes = ['https://www.googleapis.com/auth/drive']
-        creds = service_account.Credentials.from_service_account_info(creds_json, scopes=scopes)
-        return build('drive', 'v3', credentials=creds)
-    except Exception as e:
-        st.error(f"🛑 Google Drive Read Connection Error: {e}")
-        return None
-
-def get_all_drive_photos(service, folder_id):
-    """Fetches a list of all photos currently saved in your Drive folder."""
-    if not service or not folder_id: return {}
-    try:
-        query = f"'{folder_id}' in parents and trashed=false"
-        results = service.files().list(q=query, fields="files(id, name)", pageSize=1000).execute()
-        return {item['name']: item['id'] for item in results.get('files', [])}
-    except Exception as e:
-        st.error(f"🛑 Drive API Blocked (Check Folder ID & Sharing): {e}")
-        return {}
-
-def upload_to_drive(service, file_name, file_bytes, existing_file_id=None):
-    """Uploads a compressed photo via the secure Google Apps Script backdoor."""
-    try:
-        if "gas_url" not in st.secrets:
-            raise Exception("Google Apps Script URL is missing from Secrets.")
-            
-        gas_url = st.secrets["gas_url"]
-        
-        # --- THE SHRINK RAY ---
-        # 1. Open the image from bytes
-        image = Image.open(io.BytesIO(file_bytes))
-        
-        # 2. Convert to RGB (fixes issues with PNG transparency)
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
-            
-        # 3. Resize to max 400x400 pixels (Perfect for ID cards, tiny file size)
-        image.thumbnail((400, 400)) 
-        
-        # 4. Save to a byte stream as JPEG
-        img_byte_arr = io.BytesIO()
-        image.save(img_byte_arr, format='JPEG', quality=85)
-        compressed_bytes = img_byte_arr.getvalue()
-        
-        # 5. Encode for sending
-        base64_data = base64.b64encode(compressed_bytes).decode('utf-8')
-        
-        payload = {
-            "password": "BPS-Secure-2026",
-            "fileName": file_name,
-            "fileData": base64_data
-        }
-        
-        # Delete old photo if it exists (using the Service Account)
-        if existing_file_id and service:
-            try:
-                service.files().delete(fileId=existing_file_id).execute()
-            except:
-                pass
-                
-        # Send to Google Drive via Apps Script
-        response = requests.post(gas_url, json=payload, allow_redirects=True)
-        
-        if response.status_code != 200:
-            raise Exception(f"Script Error: HTTP {response.status_code} - {response.text}")
-            
-        response_json = response.json()
-        if response_json.get("status") == "error":
-             raise Exception(f"Script Error: {response_json.get('message')}")
-
-    except Exception as e:
-        raise Exception(f"Upload failed: {e}")
-
-def download_from_drive(service, file_id, local_path):
-    """Downloads a photo from Drive to a temporary local file for the PDF."""
-    request = service.files().get_media(fileId=file_id)
-    with open(local_path, 'wb') as fh:
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while done is False:
-            status, done = downloader.next_chunk()
-
-# --- 4. DATA HELPER FUNCTIONS ---
+# --- 3. DATA HELPER FUNCTIONS ---
 @st.cache_data
 def get_students():
     if os.path.exists('students.csv'):
@@ -132,7 +34,7 @@ def get_students():
             return pd.DataFrame()
     return pd.DataFrame()
 
-def generate_pdf(students_list, drive_service, drive_folder_id, drive_files_map):
+def generate_pdf(students_list, photo_dict):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.set_auto_page_break(auto=True, margin=10)
     pdf.add_page()
@@ -168,25 +70,22 @@ def generate_pdf(students_list, drive_service, drive_folder_id, drive_files_map)
         
         pdf.set_text_color(0, 0, 0)
         
-        # 3. Photo Fetching Logic
+        # 3. Photo Logic (Local Only)
         photo_x, photo_y, photo_w, photo_h = x + 3, y + 14, 18, 22
-        student_id = student.get('Sl', 0)
-        student_roll = student.get('Roll', '0')
-        expected_photo_name = f"BPS_Photo_{student_id}_{student_roll}.jpg"
+        student_id = str(student.get('Sl', 0)) + "_" + str(student.get('Roll', '0'))
         
-        photo_downloaded = False
-        if drive_service and expected_photo_name in drive_files_map:
+        if student_id in photo_dict:
+            # Temporarily save the uploaded bytes to place on PDF
             temp_path = tempfile.mktemp(suffix=".jpg")
+            with open(temp_path, "wb") as f:
+                f.write(photo_dict[student_id])
             try:
-                download_from_drive(drive_service, drive_files_map[expected_photo_name], temp_path)
                 pdf.image(temp_path, x=photo_x, y=photo_y, w=photo_w, h=photo_h)
                 pdf.set_draw_color(0, 0, 0)
                 pdf.rect(photo_x, photo_y, photo_w, photo_h)
-                photo_downloaded = True
             except:
                 pass
-
-        if not photo_downloaded:
+        else:
             pdf.set_draw_color(200, 200, 200)
             pdf.rect(photo_x, photo_y, photo_w, photo_h) 
             pdf.set_text_color(150, 150, 150)
@@ -251,29 +150,14 @@ def generate_pdf(students_list, drive_service, drive_folder_id, drive_files_map)
             
     return pdf.output(dest='S').encode('latin-1')
 
-# --- 5. APP INIT & CLOUD CHECK ---
-drive_service = get_drive_service()
-
-try:
-    drive_folder_id = st.secrets["drive_folder_id"]
-except:
-    drive_folder_id = ""
-    
-drive_files_map = get_all_drive_photos(drive_service, drive_folder_id) if drive_service else {}
-
-# --- 6. APP LAYOUT ---
+# --- 4. APP LAYOUT ---
 col_a, col_b, col_c = st.columns([1, 2, 1])
 with col_b:
     if os.path.exists('logo.png'):
         st.image('logo.png', use_container_width=True)
 
 st.markdown('<p class="main-header">🪪 BPS Student ID Card Generator</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Cloud-Synced Photo Database</p>', unsafe_allow_html=True)
-
-if not drive_service:
-    st.warning("⚠️ Google Drive Read Access is not connected. Check Streamlit Secrets.")
-if "gas_url" not in st.secrets:
-    st.warning("⚠️ Google Apps Script URL is missing. Photos cannot be saved. Check Streamlit Secrets.")
+st.markdown('<p class="sub-header">Fast Batch Printing Mode</p>', unsafe_allow_html=True)
 
 df = get_students()
 
@@ -292,7 +176,7 @@ if not df.empty:
         
     st.divider()
     
-    st.write(f"Found **{len(filtered_df)}** students. Select students to manage or print.")
+    st.write(f"Found **{len(filtered_df)}** students. Select students to print.")
     filtered_df.insert(0, "Select", False)
     disabled_cols = filtered_df.columns.drop(["Select", "BloodGroup"])
     
@@ -311,65 +195,44 @@ if not df.empty:
     
     st.divider()
     
-    # --- CLOUD PHOTO UPLOAD SECTION ---
+    # --- BATCH PHOTO UPLOAD SECTION ---
+    uploaded_photos = {}
+    
     if not selected_students.empty:
-        st.markdown('### ☁️ Manage Cloud Photos')
+        st.markdown('### 📷 Add Photos for Selected Students')
+        st.info("Upload photos here. They will be placed on the ID cards immediately when you click Generate.")
         
         for index, student in selected_students.iterrows():
-            student_id = student.get('Sl', index)
-            student_roll = student.get('Roll', '0')
-            photo_name = f"BPS_Photo_{student_id}_{student_roll}.jpg"
+            student_id = str(student.get('Sl', index)) + "_" + str(student.get('Roll', '0'))
             
-            has_cloud_photo = photo_name in drive_files_map
-            status_icon = "✅" if has_cloud_photo else "📷"
-            
-            with st.expander(f"{status_icon} Photo: {student.get('Name', 'Unknown')} (Class: {student.get('Class', '')}, Roll: {student_roll})"):
-                
-                if has_cloud_photo:
-                    st.success("Photo is securely saved in Google Drive!")
-                
-                photo = st.file_uploader(
-                    "Upload New Photo to Drive" if has_cloud_photo else "Choose Image", 
-                    type=['jpg', 'jpeg', 'png'], 
-                    key=f"photo_{student_id}_{student_roll}"
-                )
-                
-                if photo is not None and "gas_url" in st.secrets:
-                    with st.spinner("Compressing & Uploading securely to Google Drive..."):
-                        file_bytes = photo.getvalue()
-                        existing_id = drive_files_map.get(photo_name)
-                        try:
-                            upload_to_drive(drive_service, photo_name, file_bytes, existing_id)
-                            # Force a refresh of the file list
-                            drive_files_map = get_all_drive_photos(drive_service, drive_folder_id)
-                            st.success("Successfully synced to Google Drive!")
-                            st.rerun() # Refresh the app to show the green checkmark immediately
-                        except Exception as e:
-                            st.error(f"🛑 {e}")
+            with st.expander(f"Photo: {student.get('Name', 'Unknown')} (Class: {student.get('Class', '')}, Roll: {student.get('Roll', '0')})"):
+                photo = st.file_uploader("Choose Image", type=['jpg', 'jpeg', 'png'], key=f"photo_{student_id}")
+                if photo is not None:
+                    uploaded_photos[student_id] = photo.getvalue()
+                    st.image(photo, width=150)
 
-    st.divider()
-    
-    # --- GENERATION BUTTONS ---
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        if st.button("Select All in Filtered List"):
-            st.info("Tip: Click the checkbox at the very top of the 'Select' column in the table to select all.")
+        st.divider()
+        
+        # --- GENERATION BUTTON ---
+        c1, c2 = st.columns([1, 2])
+        with c1:
+            if st.button("Select All in Filtered List"):
+                st.info("Tip: Click the checkbox at the very top of the 'Select' column in the table to select all.")
 
-    with c2:
-        if not selected_students.empty:
-            if st.button(f"🖨️ Fetch Photos & Generate PDF for {len(selected_students)} Students"):
-                with st.spinner("Syncing photos from Drive and building PDF..."):
+        with c2:
+            if st.button(f"🖨️ Generate PDF for {len(selected_students)} Students"):
+                with st.spinner("Building PDF..."):
                     student_data = selected_students.to_dict('records')
-                    pdf_bytes = generate_pdf(student_data, drive_service, drive_folder_id, drive_files_map)
+                    pdf_bytes = generate_pdf(student_data, uploaded_photos)
                     
                     st.download_button(
                         label="📥 Download Ready! Click to Save PDF",
                         data=pdf_bytes,
-                        file_name="bps_id_cards.pdf",
+                        file_name="bps_id_cards_batch.pdf",
                         mime="application/pdf"
                     )
-        else:
-            st.warning("Please select at least one student from the table above.")
+    else:
+        st.warning("Please select at least one student from the table above.")
 
 else:
     st.error("❌ 'students.csv' file not found.")

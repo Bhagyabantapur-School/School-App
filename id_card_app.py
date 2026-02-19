@@ -64,12 +64,16 @@ def generate_pdf(students_list, photo_dict):
         pdf.set_draw_color(0, 0, 0); pdf.set_line_width(0.3); pdf.rect(x, y, card_w, card_h)
         pdf.set_fill_color(0, 123, 255); pdf.rect(x, y, card_w, 11, 'F')
         
-        if os.path.exists('logo.png'): pdf.image('logo.png', x=x+2, y=y+1.5, w=8, h=8)
+        # --- BIGGER LOGO LOGIC ---
+        if os.path.exists('logo.png'): 
+            # Increased size to 10x10mm and centered it vertically in the header
+            pdf.image('logo.png', x=x+1.5, y=y+0.5, w=10, h=10)
             
         pdf.set_font("Arial", 'B', 8.5); pdf.set_text_color(255, 255, 255)
-        pdf.set_xy(x+10, y+1.5); pdf.cell(card_w-10, 5, "BHAGYABANTAPUR PRIMARY SCHOOL", 0, 1, 'C')
+        # Shifted text slightly right (x+13) to make room for bigger logo
+        pdf.set_xy(x+13, y+1.5); pdf.cell(card_w-13, 5, "BHAGYABANTAPUR PRIMARY SCHOOL", 0, 1, 'C')
         pdf.set_font("Arial", '', 6)
-        pdf.set_xy(x+10, y+6.5); pdf.cell(card_w-10, 3, "ID CARD - SESSION 2026", 0, 1, 'C')
+        pdf.set_xy(x+13, y+6.5); pdf.cell(card_w-13, 3, "ID CARD - SESSION 2026", 0, 1, 'C')
         
         # Photo
         photo_x, photo_y, photo_w, photo_h = x+3, y+14, 18, 22

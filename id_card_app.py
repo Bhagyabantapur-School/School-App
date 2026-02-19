@@ -29,8 +29,9 @@ def get_students():
                 df['Class'] = df['Class'].replace('CALSS IV', 'CLASS IV')
             
             # Ensure necessary columns exist to prevent errors
-            if 'Section' not in df.columns: df['Section'] = 'A'
-            if 'BloodGroup' not in df.columns: df['BloodGroup'] = 'N/A'
+            for col in ['Section', 'BloodGroup', 'Father', 'Gender', 'DOB', 'Mobile']:
+                if col not in df.columns:
+                    df[col] = 'N/A'
             
             return df
         except Exception as e:
@@ -65,16 +66,22 @@ def generate_pdf(students_list):
         pdf.set_line_width(0.3)
         pdf.rect(x, y, card_w, card_h)
         
-        # 2. Header (School Name)
+        # 2. Header (School Name & Logo)
         pdf.set_fill_color(0, 123, 255) # Blue Header
         pdf.rect(x, y, card_w, 11, 'F')
-        pdf.set_font("Arial", 'B', 10)
+        
+        if os.path.exists('logo.png'):
+            pdf.image('logo.png', x=x + 2, y=y + 1.5, w=8, h=8)
+            
+        pdf.set_font("Arial", 'B', 8.5)
         pdf.set_text_color(255, 255, 255)
-        pdf.set_xy(x, y + 1.5)
-        pdf.cell(card_w, 5, "BHAGYABANTAPUR PRIMARY SCHOOL", 0, 1, 'C')
+        
+        # Shift text right to avoid overlapping the logo
+        pdf.set_xy(x + 10, y + 1.5)
+        pdf.cell(card_w - 10, 5, "BHAGYABANTAPUR PRIMARY SCHOOL", 0, 1, 'C')
         pdf.set_font("Arial", '', 6)
-        pdf.set_xy(x, y + 6.5)
-        pdf.cell(card_w, 3, "ID CARD - SESSION 2026", 0, 1, 'C')
+        pdf.set_xy(x + 10, y + 6.5)
+        pdf.cell(card_w - 10, 3, "ID CARD - SESSION 2026", 0, 1, 'C')
         
         # Reset colors for body
         pdf.set_text_color(0, 0, 0)
@@ -103,7 +110,7 @@ def generate_pdf(students_list):
         
         pdf.set_font("Arial", 'B', 9)
         pdf.set_xy(detail_x, curr_y)
-        pdf.cell(50, line_h, f"{student['Name']}".upper()[:25], 0, 1)
+        pdf.cell(50, line_h, f"{student.get('Name', '')}".upper()[:25], 0, 1)
         curr_y += 4.5
 
         pdf.set_font("Arial", '', 7)
@@ -113,11 +120,11 @@ def generate_pdf(students_list):
         curr_y += line_h
         
         pdf.set_xy(detail_x, curr_y)
-        pdf.cell(50, line_h, f"Class: {student['Class']} | Sec: {student.get('Section', 'A')}", 0, 1)
+        pdf.cell(50, line_h, f"Class: {student.get('Class', '')} | Sec: {student.get('Section', 'A')}", 0, 1)
         curr_y += line_h
         
         pdf.set_xy(detail_x, curr_y)
-        pdf.cell(50, line_h, f"Roll: {student['Roll']} | Sex: {student.get('Gender', 'N/A')}", 0, 1)
+        pdf.cell(50, line_h, f"Roll: {student.get('Roll', '')} | Sex: {student.get('Gender', 'N/A')}", 0, 1)
         curr_y += line_h
         
         pdf.set_xy(detail_x, curr_y)
@@ -129,7 +136,7 @@ def generate_pdf(students_list):
         pdf.cell(50, line_h, f"Mob: {student.get('Mobile', 'N/A')}", 0, 1)
         
         # 5. QR Code
-        qr_data = f"Name:{student['Name']}|Roll:{student['Roll']}|Mob:{student.get('Mobile', '')}"
+        qr_data = f"Name:{student.get('Name', '')}|Roll:{student.get('Roll', '')}|Mob:{student.get('Mobile', '')}"
         qr = qrcode.make(qr_data)
         qr_path = tempfile.mktemp(suffix=".png")
         qr.save(qr_path)
@@ -173,7 +180,7 @@ if not df.empty:
         selected_class = st.selectbox("Filter by Class", classes)
     
     with col2:
-        sections = ["All"] + sorted(df['Section'].dropna().unique().tolist()) if 'Section' in df.columns else ["A"]
+        sections = ["All"] + sorted(df['Section'].dropna().unique().tolist())
         selected_section = st.selectbox("Filter by Section", sections)
 
     # Apply Filters
@@ -214,54 +221,4 @@ if not df.empty:
     
     # --- PHOTO UPLOAD SECTION ---
     if not selected_students.empty:
-        st.markdown('### 📸 Upload Student Photos')
-        st.write("Tap 'Browse files' to open your mobile gallery or camera.")
-        
-        selected_students['PhotoPath'] = "" 
-        
-        for index, student in selected_students.iterrows():
-            with st.expander(f"Upload Photo: {student['Name']} (Class: {student['Class']}, Roll: {student['Roll']})"):
-                photo = st.file_uploader(
-                    "Choose Image", 
-                    type=['jpg', 'jpeg', 'png'], 
-                    key=f"photo_{student['Sl']}_{student['Roll']}"
-                )
-                
-                if photo is not None:
-                    # Save uploaded photo to a temporary file
-                    temp_path = tempfile.mktemp(suffix=".jpg")
-                    with open(temp_path, "wb") as f:
-                        f.write(photo.getbuffer())
-                    
-                    selected_students.at[index, 'PhotoPath'] = temp_path
-                    st.image(photo, width=150)
-                    st.success("Photo attached!")
-
-    st.divider()
-    
-    # --- GENERATION BUTTONS ---
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        if st.button("Select All in Filtered List"):
-            selected_students = edited_df.copy()
-            selected_students['PhotoPath'] = ""
-            st.success(f"Selected all {len(filtered_df)} students! (Note: Photos must be uploaded manually above).")
-
-    with c2:
-        if not selected_students.empty:
-            if st.button(f"🖨️ Generate PDF for {len(selected_students)} Students"):
-                with st.spinner("Generating ID Cards..."):
-                    student_data = selected_students.to_dict('records')
-                    pdf_bytes = generate_pdf(student_data)
-                    
-                    st.download_button(
-                        label="📥 Download ID Cards (PDF)",
-                        data=pdf_bytes,
-                        file_name="bps_id_cards.pdf",
-                        mime="application/pdf"
-                    )
-        else:
-            st.warning("Please select at least one student from the table above.")
-
-else:
-    st.error("❌ 'students.csv' file not found or is empty. Please ensure it is in the same folder.")
+        st.markdown

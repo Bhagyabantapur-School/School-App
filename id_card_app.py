@@ -132,16 +132,16 @@ def generate_pdf(students_list):
         pdf.set_font("Arial", 'B', 7)
         pdf.cell(50, line_h, f"Mob: {student.get('Mobile', 'N/A')}", 0, 1)
         
-        # 5. QR Code
+        # 5. QR Code (Moved left, under the photo)
         qr_data = f"Name:{student.get('Name', '')}|Roll:{student.get('Roll', '')}|Mob:{student.get('Mobile', '')}"
         qr = qrcode.make(qr_data)
         qr_path = tempfile.mktemp(suffix=".png")
         qr.save(qr_path)
-        pdf.image(qr_path, x=x + 68, y=y + 35, w=15, h=15)
+        pdf.image(qr_path, x=x + 4.5, y=y + 37, w=15, h=15)
         
-        # 6. Signature Area
+        # 6. Signature Area (Stays on the right)
         if os.path.exists('signature.png'):
-            pdf.image('signature.png', x=x + 58, y=y + 42, w=22, h=8)
+            pdf.image('signature.png', x=x + 58, y=y + 41, w=22, h=8)
             
         pdf.set_font("Arial", 'I', 6)
         pdf.set_xy(x, y + 49)
@@ -164,7 +164,7 @@ def generate_pdf(students_list):
     return pdf.output(dest='S').encode('latin-1')
 
 # --- 4. APP LAYOUT ---
-# Header Area
+# Display Logo in the web app header if it exists
 col_a, col_b, col_c = st.columns([1, 2, 1])
 with col_b:
     if os.path.exists('logo.png'):

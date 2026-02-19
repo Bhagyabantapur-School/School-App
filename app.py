@@ -2,34 +2,68 @@ import streamlit as st
 import pandas as pd
 import os
 from datetime import datetime, time, timedelta
-import qrcode
-from fpdf import FPDF
 from streamlit_qrcode_scanner import qrcode_scanner
+# Note: FPDF is imported inside the function where needed to avoid issues if not used
 
 # --- 1. CONFIGURATION & STYLING ---
 st.set_page_config(page_title="BPS Digital", page_icon="🏫", layout="centered")
 
-st.markdown("""
+# --- SECURITY & WATERMARK CSS ---
+# This CSS disables text selection, right-click, and adds a watermark
+def inject_security_css(user_name):
+    watermark_text = f"{user_name} - CONFIDENTIAL"
+    st.markdown(f"""
     <style>
-        #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
-        [data-testid="stSidebar"] {display: none;}
-        .block-container { padding-top: 1rem; max-width: 650px; }
-        .school-title { font-size: 26px !important; font-weight: 900 !important; color: #1a1a1a; margin: 0; line-height: 1.1; }
-        .bps-subtext { font-size: 14px; font-weight: 800; color: #007bff; margin-top: -5px; letter-spacing: 1px; }
-        .summary-card { background-color: #ffffff; border: 2px solid #007bff; border-radius: 15px; padding: 20px; margin-bottom: 20px; box-shadow: 0px 4px 10px rgba(0,0,0,0.05); }
-        .stButton>button { width: 100%; border-radius: 12px; height: 3.5em; background-color: #007bff; color: white; font-weight: bold; border: none; }
-        .routine-card { background-color: #f8f9fa; padding: 15px; border-radius: 10px; border-left: 5px solid #007bff; margin-bottom: 15px; border-right: 1px solid #ddd; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; }
-        .login-box { padding: 20px; border-radius: 15px; background-color: #f0f2f6; border: 1px solid #d1d5db; margin-top: 20px; }
-        .report-table { width: 100%; border-collapse: collapse; }
-        .report-table td, .report-table th { border: 1px solid #ddd; padding: 8px; text-align: center; }
-        .report-table th { background-color: #007bff; color: white; }
-        .att-badge { padding: 8px 12px; border-radius: 8px; font-weight: bold; font-size: 15px; display: block; text-align: center; margin-top: 5px; margin-bottom: 5px;}
-        .att-wait { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
-        .att-done { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .att-neutral { background-color: #e2e6ea; color: #333; border: 1px solid #ccc; }
-        .sub-card { background-color: #e3f2fd; padding: 10px; border-radius: 8px; margin-bottom: 5px; border-left: 4px solid #2196f3; }
+        /* 1. Disable Text Selection */
+        body {{
+            -webkit-user-select: none; /* Safari */
+            -ms-user-select: none; /* IE 10 and IE 11 */
+            user-select: none; /* Standard syntax */
+        }}
+        
+        /* 2. Watermark Layer */
+        .watermark {{
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none; /* Allows clicking through it */
+            z-index: 9999;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"><text x="50" y="150" fill="rgba(200, 200, 200, 0.25)" font-size="20" transform="rotate(-45 150 150)" font-family="Arial, sans-serif">{watermark_text}</text></svg>');
+            background-repeat: repeat;
+        }}
+
+        /* 3. Hide Streamlit Branding */
+        #MainMenu {{visibility: hidden;}}
+        footer {{visibility: hidden;}}
+        header {{visibility: hidden;}}
+        
+        [data-testid="stSidebar"] {{display: none;}}
+        .block-container {{ padding-top: 1rem; max-width: 650px; }}
+        
+        /* App Styling */
+        .school-title {{ font-size: 26px !important; font-weight: 900 !important; color: #1a1a1a; margin: 0; line-height: 1.1; }}
+        .bps-subtext {{ font-size: 14px; font-weight: 800; color: #007bff; margin-top: -5px; letter-spacing: 1px; }}
+        .summary-card {{ background-color: #ffffff; border: 2px solid #007bff; border-radius: 15px; padding: 20px; margin-bottom: 20px; box-shadow: 0px 4px 10px rgba(0,0,0,0.05); }}
+        .stButton>button {{ width: 100%; border-radius: 12px; height: 3.5em; background-color: #007bff; color: white; font-weight: bold; border: none; }}
+        .routine-card {{ background-color: #f8f9fa; padding: 15px; border-radius: 10px; border-left: 5px solid #007bff; margin-bottom: 15px; border-right: 1px solid #ddd; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; }}
+        .login-box {{ padding: 20px; border-radius: 15px; background-color: #f0f2f6; border: 1px solid #d1d5db; margin-top: 20px; }}
+        .report-table {{ width: 100%; border-collapse: collapse; }}
+        .report-table td, .report-table th {{ border: 1px solid #ddd; padding: 8px; text-align: center; }}
+        .report-table th {{ background-color: #007bff; color: white; }}
+        .att-badge {{ padding: 8px 12px; border-radius: 8px; font-weight: bold; font-size: 15px; display: block; text-align: center; margin-top: 5px; margin-bottom: 5px;}}
+        .att-wait {{ background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }}
+        .att-done {{ background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }}
+        .att-neutral {{ background-color: #e2e6ea; color: #333; border: 1px solid #ccc; }}
+        .sub-card {{ background-color: #e3f2fd; padding: 10px; border-radius: 8px; margin-bottom: 5px; border-left: 4px solid #2196f3; }}
+        .sub-row {{ background-color: #fff3cd !important; border-left: 5px solid #ffc107 !important; }}
     </style>
-""", unsafe_allow_html=True)
+    <script>
+    document.addEventListener('contextmenu', event => event.preventDefault());
+    </script>
+    <div class="watermark"></div>
+    """, unsafe_allow_html=True)
 
 # --- 2. USER DATABASE ---
 USERS = {
@@ -120,19 +154,13 @@ def parse_time_safe(t_str):
         except: continue
     return None
 
-# --- 6. HEADER ---
-hcol1, hcol2 = st.columns([1, 4])
-with hcol1:
-    if os.path.exists("logo.png"): st.image("logo.png", width=80)
-    st.markdown('<p class="bps-subtext">BPS Digital</p>', unsafe_allow_html=True)
-with hcol2:
-    st.markdown('<p class="school-title">Bhagyabantapur<br>Primary School</p>', unsafe_allow_html=True)
-st.divider()
-
 # ==========================================
 # LOGIN SCREEN
 # ==========================================
 if not st.session_state.authenticated:
+    
+    # Inject basic CSS without watermark for login
+    inject_security_css("BPS DIGITAL") 
     
     if os.path.exists('notice.txt'):
         with open('notice.txt', 'r') as f:
@@ -163,6 +191,9 @@ if not st.session_state.authenticated:
         else: st.info("No data.")
 
 else:
+    # --- INJECT SECURITY WITH USER NAME ---
+    inject_security_css(st.session_state.user_name)
+    
     st.success(f"👋 Welcome, {st.session_state.user_name}")
     if st.button("Log Out"):
         st.session_state.authenticated = False
@@ -191,7 +222,6 @@ else:
                 mdm_log = get_csv('mdm_log.csv')
                 already_sub = False
                 
-                # Check if I have already submitted today
                 if not mdm_log.empty and 'Date' in mdm_log.columns and 'Teacher' in mdm_log.columns:
                     mdm_log['Date'] = mdm_log['Date'].astype(str).str.strip()
                     mdm_log['Teacher'] = mdm_log['Teacher'].astype(str).str.strip()
@@ -207,25 +237,22 @@ else:
                     my_code = TEACHER_INITIALS.get(t_name_select, t_name_select)
                     today_day = now.strftime('%A')
                     
-                    # --- INTELLIGENT CLASS DETECTION (OWN + SUBSTITUTE) ---
                     target_class = None
                     target_section = None
                     is_substituting = False
                     absent_teacher_name = ""
 
-                    # 1. Check if I am a SUBSTITUTE at 11:15
+                    # 1. Check Substitution
                     leave_log = get_csv('teacher_leave.csv')
                     if not leave_log.empty and 'Date' in leave_log.columns:
                         today_leaves = leave_log[leave_log['Date'] == curr_date_str]
                         for _, row in today_leaves.iterrows():
                             log = str(row.get('Detailed_Sub_Log', ''))
-                            # Look for "11:15: MY NAME" pattern
                             if f"11:15: {t_name_select}" in log or f"11:15 AM: {t_name_select}" in log:
                                 is_substituting = True
                                 absent_teacher_name = row['Teacher']
                                 absent_code = TEACHER_INITIALS.get(absent_teacher_name, "")
                                 
-                                # Find the absent teacher's 11:15 class
                                 absent_routine = routine[
                                     (routine['Teacher'] == absent_code) & 
                                     (routine['Day'] == today_day)
@@ -239,7 +266,7 @@ else:
                                     target_section = r.get('Section', 'A')
                                 break
                     
-                    # 2. If NOT substituting, check my OWN routine
+                    # 2. Check Own Routine
                     if not target_class:
                         my_sched = pd.DataFrame()
                         if not routine.empty and 'Teacher' in routine.columns:
@@ -253,7 +280,6 @@ else:
                                 target_class = row['Class']
                                 target_section = row.get('Section', 'A')
 
-                    # --- DISPLAY LOGIC ---
                     if target_class:
                         if is_substituting:
                             st.info(f"🔄 **SUBSTITUTION:** You are covering MDM for **{absent_teacher_name}** ({target_class} - {target_section})")
@@ -326,14 +352,13 @@ else:
                             else:
                                 st.warning(f"No students found for {target_class} - {target_section}.")
                     else:
-                        st.warning(f"⚠️ You do not have a class (or substitution) at 11:15 AM on {today_day}. MDM Entry disabled.")
+                        st.warning(f"⚠️ You do not have a class at 11:15 AM on {today_day}. MDM Entry disabled.")
 
             with at_tabs[1]: # Routine
                 st.subheader("Live Class Status")
                 leave_log = get_csv('teacher_leave.csv')
                 routine = get_csv('routine.csv')
                 
-                # Check if logged-in teacher is absent
                 on_leave = False
                 leave_details = None
                 if not leave_log.empty and 'Date' in leave_log.columns:
@@ -359,17 +384,14 @@ else:
                         st.info("No specific substitutes assigned yet.")
                         
                 else:
-                    # --- MERGE REGULAR + SUBSTITUTION CLASSES ---
                     my_code = TEACHER_INITIALS.get(t_name_select, t_name_select)
                     today_day = now.strftime('%A')
                     
-                    # 1. Regular Classes
                     my_schedule = pd.DataFrame()
                     if not routine.empty and 'Teacher' in routine.columns:
                         my_schedule = routine[(routine['Teacher'] == my_code) & (routine['Day'] == today_day)].copy()
                         my_schedule['Is_Sub'] = False
                     
-                    # 2. Substitution Classes
                     sub_duties = []
                     if not leave_log.empty:
                         today_absent_records = leave_log[leave_log['Date'] == curr_date_str]
@@ -378,20 +400,18 @@ else:
                             absent_code = TEACHER_INITIALS.get(absent_t, "")
                             log = str(row['Detailed_Sub_Log'])
                             
-                            if t_name_select in log: # Am I mentioned?
+                            if t_name_select in log:
                                 assignments = log.split(" | ")
                                 for assign in assignments:
                                     if f": {t_name_select}" in assign:
                                         parts = assign.split(": ")
                                         if len(parts) == 2:
                                             slot_time = parts[0].strip()
-                                            
                                             orig_class = routine[
                                                 (routine['Teacher'] == absent_code) & 
                                                 (routine['Day'] == today_day) & 
                                                 (routine['Start_Time'] == slot_time)
                                             ]
-                                            
                                             if not orig_class.empty:
                                                 r = orig_class.iloc[0]
                                                 sub_duties.append({
@@ -412,10 +432,8 @@ else:
                     if not my_schedule.empty:
                         my_schedule['Start_Obj'] = my_schedule['Start_Time'].apply(parse_time_safe)
                         my_schedule = my_schedule.dropna(subset=['Start_Obj']).sort_values('Start_Obj')
-                        
                         current_class = None
                         next_class = None
-                        
                         for _, row in my_schedule.iterrows():
                             s_time = row['Start_Obj']
                             e_time = parse_time_safe(row['End_Time'])
@@ -429,7 +447,6 @@ else:
                             sec = current_class.get('Section', '')
                             style = "border-left: 5px solid #ffc107; background-color:#fff3cd;" if current_class['Is_Sub'] else "border-left: 5px solid #28a745;"
                             title_prefix = "🔄 SUB: " if current_class['Is_Sub'] else "🔴 NOW: "
-                            
                             html_now = f"""<div class="routine-card" style="{style}"><h3 style="margin:0; color:#333;">{title_prefix}{current_class['Class']} - {sec}</h3><p>{current_class['Subject']}</p><p style="color:gray;">Ends {current_class['End_Time']}</p></div>"""
                             st.markdown(html_now, unsafe_allow_html=True)
                         else: st.info("☕ No class ongoing.")
@@ -439,7 +456,6 @@ else:
                                 diff = int((datetime.combine(datetime.today(), next_class['Start_Obj']) - datetime.combine(datetime.today(), curr_time)).total_seconds() / 60)
                                 next_style = "background:#fff3cd;" if next_class['Is_Sub'] else "background:#e2e6ea;"
                                 next_prefix = "🔄 SUB: " if next_class['Is_Sub'] else "🔜 NEXT: "
-                                
                                 html_next = f"""<div style="{next_style} padding:10px; border-radius:10px;"><h4 style="margin:0; color:#333;">{next_prefix}{next_class['Class']}</h4><p>Starts in <b>{diff} mins</b></p></div>"""
                                 st.markdown(html_next, unsafe_allow_html=True)
                             except: pass
@@ -447,7 +463,6 @@ else:
                         st.divider()
                         def highlight_subs(row):
                             return ['background-color: #fff3cd'] * len(row) if row['Subject'].startswith('🔄') else [''] * len(row)
-                        
                         st.dataframe(my_schedule[['Start_Time', 'End_Time', 'Class', 'Section', 'Subject']].style.apply(highlight_subs, axis=1), hide_index=True)
                     else: st.info("No classes today.")
 

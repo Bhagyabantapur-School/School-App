@@ -29,30 +29,34 @@ st.markdown("""
 def get_drive_service():
     """Authenticates and returns the Google Drive Service using Streamlit Secrets."""
     try:
-        # Load the JSON string you pasted into Streamlit Secrets
+        # Check if secrets exist to avoid crash
+        if "gcp_credentials" not in st.secrets:
+            return None
         creds_json = json.loads(st.secrets["gcp_credentials"])
         scopes = ['https://www.googleapis.com/auth/drive']
         creds = service_account.Credentials.from_service_account_info(creds_json, scopes=scopes)
         return build('drive', 'v3', credentials=creds)
     except Exception as e:
+        st.error(f"🛑 Google Drive Connection Error: {e}")
         return None
 
 def get_all_drive_photos(service, folder_id):
     """Fetches a list of all photos currently saved in your Drive folder."""
-    if not service: return {}
-    query = f"'{folder_id}' in parents and trashed=false"
-    results = service.files().list(q=query, fields="files(id, name)", pageSize=1000).execute()
-    # Returns a dictionary like: {'BPS_Photo_1_12.jpg': 'drive_file_id_here'}
-    return {item['name']: item['id'] for item in results.get('files', [])}
+    if not service or not folder_id: return {}
+    try:
+        query = f"'{folder_id}' in parents and trashed=false"
+        results = service.files().list(q=query, fields="files(id, name)", pageSize=1000).execute()
+        return {item['name']: item['id'] for item in results.get('files', [])}
+    except Exception as e:
+        st.error(f"🛑 Drive API Blocked (Check Folder ID & Sharing): {e}")
+        return {}
 
 def upload_to_drive(service, folder_id, file_name, file_bytes, existing_file_id=None):
     """Uploads a new photo or overwrites an existing one in Google Drive."""
     media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype='image/jpeg', resumable=True)
     if existing_file_id:
-        # Update existing file
         service.files().update(fileId=existing_file_id, media_body=media).execute()
     else:
-        # Create new file
         file_metadata = {'name': file_name, 'parents': [folder_id]}
         service.files().create(body=file_metadata, media_body=media).execute()
 
@@ -126,7 +130,6 @@ def generate_pdf(students_list, drive_service, drive_folder_id, drive_files_map)
         
         photo_downloaded = False
         if drive_service and expected_photo_name in drive_files_map:
-            # Download the photo from Google Drive just for this PDF
             temp_path = tempfile.mktemp(suffix=".jpg")
             try:
                 download_from_drive(drive_service, drive_files_map[expected_photo_name], temp_path)
@@ -138,7 +141,6 @@ def generate_pdf(students_list, drive_service, drive_folder_id, drive_files_map)
                 pass
 
         if not photo_downloaded:
-            # Draw placeholder if no photo is in Drive
             pdf.set_draw_color(200, 200, 200)
             pdf.rect(photo_x, photo_y, photo_w, photo_h) 
             pdf.set_text_color(150, 150, 150)
@@ -176,14 +178,14 @@ def generate_pdf(students_list, drive_service, drive_folder_id, drive_files_map)
         pdf.set_font("Arial", 'B', 7)
         pdf.cell(50, line_h, f"Mob: {student.get('Mobile', 'N/A')}", 0, 1)
         
-        # 5. QR Code (Left aligned under photo)
+        # 5. QR Code
         qr_data = f"Name:{student.get('Name', '')}|Roll:{student.get('Roll', '')}|Mob:{student.get('Mobile', '')}"
         qr = qrcode.make(qr_data)
         qr_path = tempfile.mktemp(suffix=".png")
         qr.save(qr_path)
         pdf.image(qr_path, x=x + 4.5, y=y + 37, w=15, h=15)
         
-        # 6. Signature Area (Right aligned)
+        # 6. Signature Area
         if os.path.exists('signature.png'):
             pdf.image('signature.png', x=x + 58, y=y + 41, w=22, h=8)
             
@@ -205,7 +207,12 @@ def generate_pdf(students_list, drive_service, drive_folder_id, drive_files_map)
 
 # --- 5. APP INIT & CLOUD CHECK ---
 drive_service = get_drive_service()
-drive_folder_id = st.secrets.get("drive_folder_id", "")
+# safely get the folder ID, default to empty string
+try:
+    drive_folder_id = st.secrets["drive_folder_id"]
+except:
+    drive_folder_id = ""
+    
 drive_files_map = get_all_drive_photos(drive_service, drive_folder_id) if drive_service else {}
 
 # --- 6. APP LAYOUT ---
@@ -218,7 +225,7 @@ st.markdown('<p class="main-header">🪪 BPS Student ID Card Generator</p>', uns
 st.markdown('<p class="sub-header">Cloud-Synced Photo Database</p>', unsafe_allow_html=True)
 
 if not drive_service:
-    st.warning("⚠️ Google Drive is not connected. Photos will not be saved permanently. Check Streamlit Secrets.")
+    st.warning("⚠️ Google Drive is not connected. Check Streamlit Secrets.")
 
 df = get_students()
 
@@ -265,7 +272,6 @@ if not df.empty:
             student_roll = student.get('Roll', '0')
             photo_name = f"BPS_Photo_{student_id}_{student_roll}.jpg"
             
-            # Check if photo already exists in Google Drive
             has_cloud_photo = photo_name in drive_files_map
             status_icon = "✅" if has_cloud_photo else "📷"
             
@@ -284,12 +290,13 @@ if not df.empty:
                     with st.spinner("Uploading to Google Drive..."):
                         file_bytes = photo.getvalue()
                         existing_id = drive_files_map.get(photo_name)
-                        upload_to_drive(drive_service, drive_folder_id, photo_name, file_bytes, existing_id)
-                        
-                        # Refresh map so it shows success instantly
-                        drive_files_map = get_all_drive_photos(drive_service, drive_folder_id)
-                        st.success("Successfully synced to Google Drive!")
-                        st.image(photo, width=150)
+                        try:
+                            upload_to_drive(drive_service, drive_folder_id, photo_name, file_bytes, existing_id)
+                            drive_files_map = get_all_drive_photos(drive_service, drive_folder_id)
+                            st.success("Successfully synced to Google Drive!")
+                            st.image(photo, width=150)
+                        except Exception as e:
+                            st.error(f"🛑 Failed to upload: {e}")
 
     st.divider()
     
@@ -302,7 +309,7 @@ if not df.empty:
     with c2:
         if not selected_students.empty:
             if st.button(f"🖨️ Fetch Photos & Generate PDF for {len(selected_students)} Students"):
-                with st.spinner("Syncing photos from Drive and building PDF... (this may take a minute)"):
+                with st.spinner("Syncing photos from Drive and building PDF..."):
                     student_data = selected_students.to_dict('records')
                     pdf_bytes = generate_pdf(student_data, drive_service, drive_folder_id, drive_files_map)
                     

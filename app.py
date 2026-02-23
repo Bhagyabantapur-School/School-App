@@ -573,11 +573,19 @@ else:
 
             st.divider()
             
-            if st.button("🗑️ Clear Today's MDM Data"):
-                if not mdm_log.empty and 'Date' in mdm_log.columns:
-                    mdm_log = mdm_log[mdm_log['Date'] != curr_date_str]
-                    mdm_log.to_csv('mdm_log.csv', index=False)
-                    st.success("Today's MDM Data Cleared!")
+            # --- GRANULAR MDM CLEAR ---
+            del_label = f"🗑️ Clear Today's MDM Data for {c_filter}" if c_filter != "All" else "🗑️ Clear Today's MDM Data (All Classes)"
+            if st.button(del_label):
+                temp_mdm = get_csv('mdm_log.csv')
+                if not temp_mdm.empty and 'Date' in temp_mdm.columns:
+                    temp_mdm['Date'] = temp_mdm['Date'].astype(str).str.strip()
+                    if c_filter == "All":
+                        temp_mdm = temp_mdm[temp_mdm['Date'] != curr_date_str]
+                    else:
+                        mask = ~((temp_mdm['Date'] == curr_date_str) & (temp_mdm['Class'] == c_filter))
+                        temp_mdm = temp_mdm[mask]
+                    temp_mdm.to_csv('mdm_log.csv', index=False)
+                    st.success(f"Today's MDM Data Cleared for {c_filter}!")
                     st.rerun()
                 else: st.warning("No data to clear.")
             
@@ -647,6 +655,16 @@ else:
                             
                             if is_submitted:
                                 st.info(f"🔒 Attendance for {t_class} - {t_sec} is already submitted today.")
+                                # --- GRANULAR ATTENDANCE CLEAR ---
+                                if st.button(f"🗑️ Clear Today's Attendance for {t_class} - {t_sec}"):
+                                    temp_att = get_csv('student_attendance_master.csv')
+                                    if not temp_att.empty and 'Date' in temp_att.columns:
+                                        temp_att['Date'] = temp_att['Date'].astype(str).str.strip()
+                                        mask = ~((temp_att['Date'] == curr_date_str) & (temp_att['Class'] == t_class) & (temp_att['Section'] == t_sec))
+                                        temp_att = temp_att[mask]
+                                        temp_att.to_csv('student_attendance_master.csv', index=False)
+                                        st.success(f"Attendance Cleared for {t_class} - {t_sec}!")
+                                        st.rerun()
                             else:
                                 if st.button(f"Save Attendance for {t_class} - {t_sec}"):
                                     rec = ed.copy()
@@ -685,15 +703,6 @@ else:
                     st.download_button("📥 Download Log", att_log.to_csv(index=False).encode('utf-8'), f"attendance_{att_view_date}.csv", "text/csv")
                 else: st.info(f"No attendance for {att_view_date}.")
             else: st.info("Attendance Log empty.")
-            
-            if st.button("🗑️ Clear Today's Attendance"):
-                if not att_log.empty and 'Date' in att_log.columns:
-                    att_log['Date'] = att_log['Date'].astype(str).str.strip()
-                    att_log = att_log[att_log['Date'] != curr_date_str] 
-                    att_log.to_csv('student_attendance_master.csv', index=False)
-                    st.success("Today's Attendance Cleared!")
-                    st.rerun()
-                else: st.warning("No data to clear.")
             
             with st.expander("⚠ Emergency Reset (Attendance Database)"):
                 if st.button("Reset Attendance Database"):

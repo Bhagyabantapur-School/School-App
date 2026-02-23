@@ -103,7 +103,12 @@ def generate_pdf(students_list, photo_dict):
         qr = qrcode.make(qr_data); qr_path = tempfile.mktemp(suffix=".png"); qr.save(qr_path)
         pdf.image(qr_path, x=x+4.5, y=y+37, w=15, h=15)
         
-        # --- CLEAN, MODERN WATERMARK ---
+        # --- NEW FOOTER IMAGE ---
+        # Placed at the bottom, spanning the full width.
+        if os.path.exists('image_2.png'):
+            pdf.image('image_2.png', x=x, y=y+44, w=card_w, h=10)
+
+        # --- CLEAN, MODERN WATERMARK & SIGNATURE (Layered ON TOP of the footer image) ---
         wm_x = x + 55
         wm_y = y + 42
         
@@ -124,10 +129,11 @@ def generate_pdf(students_list, photo_dict):
         pdf.set_xy(wm_x, wm_y + 1)
         pdf.cell(27, 4, "BPS DIGITAL", 0, 0, 'C')
 
-        # Head Teacher Signature (Placed perfectly over the watermark)
+        # Head Teacher Signature
         if os.path.exists('signature.png'): 
             pdf.image('signature.png', x=x+58, y=y+40, w=22, h=8)
         
+        # Footer Text
         pdf.set_text_color(0) # Reset text color to black for the footer
         pdf.set_font("Arial", 'I', 6); pdf.set_xy(x, y+49); pdf.cell(card_w-5, 3, "Sukhamay Kisku", 0, 1, 'R')
         pdf.set_font("Arial", '', 5); pdf.set_xy(x, y+51); pdf.cell(card_w-5, 2, "Head Teacher", 0, 0, 'R')

@@ -3,7 +3,6 @@ import pandas as pd
 import os
 from datetime import datetime, time, timedelta
 from streamlit_qrcode_scanner import qrcode_scanner
-# Note: FPDF is imported inside the function where needed to avoid issues if not used
 
 # --- 1. CONFIGURATION & STYLING ---
 st.set_page_config(page_title="BPS Digital", page_icon="🏫", layout="centered")
@@ -496,7 +495,7 @@ else:
     # HEAD TEACHER (ADMIN) DASHBOARD
     # ==========================================
     elif st.session_state.user_role == "admin":
-        tabs = st.tabs(["📊 Summary & MDM", "📝 Attendance Report", "⏳ Live Classes", "👨‍🏫 Leaves", "👟 Shoes", "🆔 Cards", "📢 Notice", "📅 Holidays"])
+        tabs = st.tabs(["📊 Summary & MDM", "📝 Attendance Report", "⏳ Live Classes", "👨‍🏫 Leaves", "👟 Shoes", "📢 Notice", "📅 Holidays"])
         
         # --- TAB 1: SUMMARY & MDM REPORT ---
         with tabs[0]: 
@@ -1014,27 +1013,8 @@ else:
                             pd.DataFrame({'Roll': new['Roll'], 'Name': new['Name'], 'Class': s_c, 'Received': True, 'Date': curr_date_str, 'Remark': new['Remark']}).to_csv('shoe_log.csv', mode='a', index=False, header=False)
                             st.success("Updated!")
 
-        # --- TAB 6: IDS ---
+        # --- TAB 6: NOTICE ---
         with tabs[5]: 
-            i_c = st.selectbox("Class", CLASS_OPTIONS, key='id')
-            if i_c != "Select Class...":
-                std = get_csv('students.csv')
-                if not std.empty:
-                    ros = std[std['Class'] == i_c]
-                    sels = st.multiselect("Select", ros['Name'].tolist())
-                    if st.button("Download PDF"):
-                        pdf = FPDF()
-                        for n in sels:
-                            r = ros[ros['Name'] == n].iloc[0]
-                            pdf.add_page(); pdf.set_font("Arial", 'B', 16)
-                            pdf.cell(0, 10, "BPS ID CARD", 0, 1, 'C')
-                            pdf.cell(0, 10, f"Name: {r['Name']}", 0, 1)
-                            qr = qrcode.make(f"{r['Roll']}-{r['Name']}"); qr.save("q.png")
-                            pdf.image("q.png", x=150, y=30, w=40)
-                        st.download_button("Download", pdf.output(dest='S').encode('latin-1'), "ids.pdf")
-
-        # --- TAB 7: NOTICE ---
-        with tabs[6]: 
             c = ""
             if os.path.exists('notice.txt'):
                 with open('notice.txt') as f: c = f.read()
@@ -1043,8 +1023,8 @@ else:
                 with open('notice.txt', 'w') as f: f.write(n)
                 st.success("Published!")
         
-        # --- TAB 8: HOLIDAYS ---
-        with tabs[7]: 
+        # --- TAB 7: HOLIDAYS ---
+        with tabs[6]: 
             st.subheader("🗓️ School Holiday List")
             h_df = get_csv('holidays.csv')
             if not h_df.empty: st.data_editor(h_df, num_rows="dynamic", key="h_edit")

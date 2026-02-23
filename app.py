@@ -9,7 +9,6 @@ from streamlit_qrcode_scanner import qrcode_scanner
 st.set_page_config(page_title="BPS Digital", page_icon="🏫", layout="centered")
 
 # --- SECURITY & WATERMARK CSS ---
-# This CSS disables text selection, right-click, and adds a watermark
 def inject_security_css(user_name):
     watermark_text = f"{user_name} - CONFIDENTIAL"
     st.markdown(f"""
@@ -83,6 +82,7 @@ TEACHER_INITIALS = {
     "UDAY NARAYAN JANA": "UNJ", "BIMAL KUMAR PATRA": "BKP", "SUSMITA PAUL": "SP",
     "TAPAN KUMAR MANDAL": "TKM", "MANJUMA KHATUN": "MK"
 }
+INV_TEACHER_INITIALS = {v: k for k, v in TEACHER_INITIALS.items()}
 
 TEACHER_LIST = [u["name"] for k, u in USERS.items() if u["role"] == "teacher"]
 CLASS_OPTIONS = ["Select Class...", "CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V"]
@@ -159,7 +159,6 @@ def parse_time_safe(t_str):
 # ==========================================
 if not st.session_state.authenticated:
     
-    # Inject basic CSS without watermark for login
     inject_security_css("BPS DIGITAL") 
     
     if os.path.exists('notice.txt'):
@@ -191,7 +190,6 @@ if not st.session_state.authenticated:
         else: st.info("No data.")
 
 else:
-    # --- INJECT SECURITY WITH USER NAME ---
     inject_security_css(st.session_state.user_name)
     
     st.success(f"👋 Welcome, {st.session_state.user_name}")
@@ -242,7 +240,6 @@ else:
                     is_substituting = False
                     absent_teacher_name = ""
 
-                    # 1. Check Substitution
                     leave_log = get_csv('teacher_leave.csv')
                     if not leave_log.empty and 'Date' in leave_log.columns:
                         today_leaves = leave_log[leave_log['Date'] == curr_date_str]
@@ -266,7 +263,6 @@ else:
                                     target_section = r.get('Section', 'A')
                                 break
                     
-                    # 2. Check Own Routine
                     if not target_class:
                         my_sched = pd.DataFrame()
                         if not routine.empty and 'Teacher' in routine.columns:
@@ -492,14 +488,14 @@ else:
     # HEAD TEACHER (ADMIN) DASHBOARD
     # ==========================================
     elif st.session_state.user_role == "admin":
-        tabs = st.tabs(["📊 Summary & MDM", "📝 Attendance Report", "👨‍🏫 Leaves", "👟 Shoes", "🆔 Cards", "📢 Notice", "📅 Holidays"])
+        tabs = st.tabs(["📊 Summary & MDM", "📝 Attendance Report", "⏳ Live Classes", "👨‍🏫 Leaves", "👟 Shoes", "🆔 Cards", "📢 Notice", "📅 Holidays"])
         
         # --- TAB 1: SUMMARY & MDM REPORT ---
         with tabs[0]: 
             st.subheader(f"MDM Status: {curr_date_str}")
             
             mdm_log = get_csv('mdm_log.csv')
-            att_log = get_csv('student_attendance_master.csv') # Load Attendance
+            att_log = get_csv('student_attendance_master.csv') 
             
             col1, col2 = st.columns([2, 1])
             with col1:
@@ -624,7 +620,6 @@ else:
                             with c1: st.markdown(f"<div class='att-badge att-neutral'>✅ Total Selected: {total_present}</div>", unsafe_allow_html=True)
                             with c2: st.markdown(f"<div class='att-badge {mdm_class}'>{mdm_text}</div>", unsafe_allow_html=True)
 
-                            # --- DUPLICATE CHECK ---
                             att_check = get_csv('student_attendance_master.csv')
                             is_submitted = False
                             if not att_check.empty and 'Date' in att_check.columns:
@@ -690,8 +685,98 @@ else:
                         st.rerun()
                     except: st.error("Error resetting.")
 
-        # --- TAB 3: LEAVES ---
-        with tabs[2]: # Leaves
+        # --- TAB 3: LIVE CLASSES (HEAD TEACHER VIEW) ---
+        with tabs[2]: 
+            st.subheader(f"🏫 School Routine Status: {now.strftime('%A')}")
+            
+            routine = get_csv('routine.csv')
+            today_day = now.strftime('%A')
+            
+            if routine.empty:
+                st.info("Routine data not uploaded.")
+            else:
+                today_routine = routine[routine['Day'] == today_day].copy()
+                
+                if today_routine.empty:
+                    st.info("No classes scheduled for today.")
+                else:
+                    # 1. Apply Substitutions to the Head Teacher's Live View
+                    leave_log = get_csv('teacher_leave.csv')
+                    if not leave_log.empty and 'Date' in leave_log.columns:
+                        today_leaves = leave_log[leave_log['Date'] == curr_date_str]
+                        for _, l_row in today_leaves.iterrows():
+                            absent_t = l_row['Teacher']
+                            absent_code = TEACHER_INITIALS.get(absent_t, absent_t)
+                            sub_log = str(l_row.get('Detailed_Sub_Log', ''))
+                            if sub_log and sub_log != "None":
+                                assignments = sub_log.split(" | ")
+                                for assign in assignments:
+                                    parts = assign.split(": ")
+                                    if len(parts) == 2:
+                                        slot = parts[0].strip()
+                                        sub_name = parts[1].strip()
+                                        sub_code = TEACHER_INITIALS.get(sub_name, sub_name)
+                                        
+                                        # Update the routine to show the Substitute
+                                        mask = (today_routine['Teacher'] == absent_code) & (today_routine['Start_Time'].str.strip() == slot)
+                                        today_routine.loc[mask, 'Teacher'] = f"{sub_code} (Sub)"
+
+                    today_routine['Start_Obj'] = today_routine['Start_Time'].apply(parse_time_safe)
+                    today_routine['End_Obj'] = today_routine['End_Time'].apply(parse_time_safe)
+                    today_routine = today_routine.dropna(subset=['Start_Obj', 'End_Obj']).sort_values('Start_Obj')
+                    
+                    st.markdown("### 🔴 LIVE NOW")
+                    live_classes = []
+                    for _, row in today_routine.iterrows():
+                        if row['Start_Obj'] <= curr_time <= row['End_Obj']:
+                            live_classes.append(row)
+                    
+                    if live_classes:
+                        cols = st.columns(2)
+                        for i, r in enumerate(live_classes):
+                            sec = r.get('Section', '')
+                            t_code = r['Teacher']
+                            
+                            # Convert code back to readable name
+                            is_sub = "(Sub)" in t_code
+                            clean_code = t_code.replace(" (Sub)", "")
+                            t_name = INV_TEACHER_INITIALS.get(clean_code, clean_code)
+                            
+                            display_name = f"🔄 {t_name} (Sub)" if is_sub else f"👨‍🏫 {t_name}"
+                            border_color = "#ffc107" if is_sub else "#dc3545" # Yellow for sub, Red for normal live
+                            
+                            card_html = f"""
+                            <div class="routine-card" style="border-left: 5px solid {border_color};">
+                                <h4 style="margin:0; color:#333;">{r['Class']} {sec}</h4>
+                                <p style="margin:0; font-weight:bold;">{display_name}</p>
+                                <p style="margin:0; font-size:12px; color:gray;">{r['Subject']} | Ends: {r['End_Time']}</p>
+                            </div>
+                            """
+                            cols[i % 2].markdown(card_html, unsafe_allow_html=True)
+                    else:
+                        st.info("☕ No classes are currently ongoing.")
+                    
+                    st.divider()
+                    st.markdown("### 📅 Full Day Schedule")
+                    
+                    display_routine = today_routine[['Start_Time', 'End_Time', 'Class', 'Section', 'Subject', 'Teacher']].copy()
+                    
+                    def get_full_name(code):
+                        if "(Sub)" in code:
+                            clean_code = code.replace(" (Sub)", "")
+                            return f"🔄 {INV_TEACHER_INITIALS.get(clean_code, clean_code)} (Sub)"
+                        return INV_TEACHER_INITIALS.get(code, code)
+                        
+                    display_routine['Teacher'] = display_routine['Teacher'].apply(get_full_name)
+                    
+                    teacher_filter = st.selectbox("Filter by Teacher", ["All"] + TEACHER_LIST)
+                    if teacher_filter != "All":
+                        display_routine = display_routine[display_routine['Teacher'].str.contains(teacher_filter)]
+                    
+                    st.dataframe(display_routine, hide_index=True, use_container_width=True)
+
+        # --- TAB 4: LEAVES ---
+        with tabs[3]: 
             st.subheader("Substitution Manager")
             with st.expander("📂 Download Leave Database"):
                 live = get_csv('teacher_leave.csv')
@@ -705,7 +790,6 @@ else:
                 day = now.strftime('%A')
                 missed = routine[(routine['Teacher'] == code) & (routine['Day'] == day)].copy()
                 
-                # --- PRE-LOAD TODAY'S SUB ASSIGNMENTS ---
                 busy_subs = {}
                 leave_log = get_csv('teacher_leave.csv')
                 if not leave_log.empty and 'Date' in leave_log.columns:
@@ -721,7 +805,6 @@ else:
                                     t_sub_name = parts[1].strip()
                                     if t_slot not in busy_subs: busy_subs[t_slot] = []
                                     busy_subs[t_slot].append(t_sub_name)
-                # ----------------------------------------
 
                 if not missed.empty:
                     st.warning(f"{abs_t} has {len(missed)} classes.")
@@ -784,7 +867,8 @@ else:
                          pd.DataFrame([{"Date": curr_date_str, "Teacher": abs_t, "Type": "CL", "Substitute": "None", "Detailed_Sub_Log": "None"}]).to_csv('teacher_leave.csv', mode='a', index=False, header=h)
                          st.success("Saved!")
 
-        with tabs[3]: # Shoes
+        # --- TAB 5: SHOES ---
+        with tabs[4]: 
             s_c = st.selectbox("Class", CLASS_OPTIONS, key='shoe')
             if s_c != "Select Class...":
                 std = get_csv('students.csv')
@@ -802,7 +886,8 @@ else:
                             pd.DataFrame({'Roll': new['Roll'], 'Name': new['Name'], 'Class': s_c, 'Received': True, 'Date': curr_date_str, 'Remark': new['Remark']}).to_csv('shoe_log.csv', mode='a', index=False, header=False)
                             st.success("Updated!")
 
-        with tabs[4]: # IDs
+        # --- TAB 6: IDS ---
+        with tabs[5]: 
             i_c = st.selectbox("Class", CLASS_OPTIONS, key='id')
             if i_c != "Select Class...":
                 std = get_csv('students.csv')
@@ -820,7 +905,8 @@ else:
                             pdf.image("q.png", x=150, y=30, w=40)
                         st.download_button("Download", pdf.output(dest='S').encode('latin-1'), "ids.pdf")
 
-        with tabs[5]: # Notice
+        # --- TAB 7: NOTICE ---
+        with tabs[6]: 
             c = ""
             if os.path.exists('notice.txt'):
                 with open('notice.txt') as f: c = f.read()
@@ -829,7 +915,8 @@ else:
                 with open('notice.txt', 'w') as f: f.write(n)
                 st.success("Published!")
         
-        with tabs[6]: # Holidays
+        # --- TAB 8: HOLIDAYS ---
+        with tabs[7]: 
             st.subheader("🗓️ School Holiday List")
             h_df = get_csv('holidays.csv')
             if not h_df.empty: st.data_editor(h_df, num_rows="dynamic", key="h_edit")

@@ -524,6 +524,8 @@ else:
                 else: filtered_att = att_log[(att_log['Date'] == view_date) & (att_log['Status'] == True)]
             else: filtered_att = pd.DataFrame()
 
+            c_filter = "All"
+            
             if not filtered_mdm.empty or not filtered_att.empty:
                 if not filtered_mdm.empty:
                     if 'Section' not in filtered_mdm.columns: filtered_mdm['Section'] = 'A'
@@ -556,16 +558,27 @@ else:
                 st.dataframe(summary_df, hide_index=True, use_container_width=True)
                 
                 st.markdown("##### 📄 Detailed List")
-                unique_groups = filtered_mdm['Class'].unique() if not filtered_mdm.empty else []
+                
+                if not filtered_mdm.empty:
+                    if 'Section' not in filtered_mdm.columns:
+                        filtered_mdm['Section'] = 'A'
+                    filtered_mdm['Class_Sec'] = filtered_mdm['Class'].astype(str) + " " + filtered_mdm['Section'].astype(str)
+                    unique_groups = filtered_mdm['Class_Sec'].unique()
+                else:
+                    unique_groups = []
+                    
                 c_filter = st.selectbox("Filter Class", ["All"] + sorted(unique_groups))
                 
                 if not filtered_mdm.empty:
                     if c_filter != "All":
-                        display_df = filtered_mdm[filtered_mdm['Class'] == c_filter]
+                        display_df = filtered_mdm[filtered_mdm['Class_Sec'] == c_filter]
                     else:
                         display_df = filtered_mdm
+                        
                     st.dataframe(display_df[['Date', 'Class', 'Section', 'Roll', 'Name']], hide_index=True)
-                    st.download_button("📥 Download This Report", filtered_mdm.to_csv(index=False).encode('utf-8'), "MDM_Report.csv", "text/csv")
+                    
+                    download_df = filtered_mdm.drop(columns=['Class_Sec'], errors='ignore')
+                    st.download_button("📥 Download This Report", download_df.to_csv(index=False).encode('utf-8'), "MDM_Report.csv", "text/csv")
                 else:
                     st.warning(f"No MDM entries found for {view_date}.")
             else:
@@ -579,11 +592,15 @@ else:
                 temp_mdm = get_csv('mdm_log.csv')
                 if not temp_mdm.empty and 'Date' in temp_mdm.columns:
                     temp_mdm['Date'] = temp_mdm['Date'].astype(str).str.strip()
+                    
                     if c_filter == "All":
                         temp_mdm = temp_mdm[temp_mdm['Date'] != curr_date_str]
                     else:
-                        mask = ~((temp_mdm['Date'] == curr_date_str) & (temp_mdm['Class'] == c_filter))
+                        if 'Section' not in temp_mdm.columns: temp_mdm['Section'] = 'A'
+                        temp_class_sec = temp_mdm['Class'].astype(str) + " " + temp_mdm['Section'].astype(str)
+                        mask = ~((temp_mdm['Date'] == curr_date_str) & (temp_class_sec == c_filter))
                         temp_mdm = temp_mdm[mask]
+                        
                     temp_mdm.to_csv('mdm_log.csv', index=False)
                     st.success(f"Today's MDM Data Cleared for {c_filter}!")
                     st.rerun()

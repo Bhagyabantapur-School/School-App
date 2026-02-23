@@ -66,7 +66,7 @@ def inject_security_css(user_name):
 
 # --- 2. USER DATABASE ---
 USERS = {
-    "admin": {"name": "HEAD TEACHER", "role": "admin", "password": "bpsAPP@2026"},
+    "admin": {"name": "SUKHAMAY KISKU", "role": "admin", "password": "bpsAPP@2026"},
     "tr": {"name": "TAPASI RANA", "role": "teacher", "password": "tr26"},
     "sbr": {"name": "SUJATA BISWAS ROTHA", "role": "teacher", "password": "sbr26"},
     "rs": {"name": "ROHINI SINGH", "role": "teacher", "password": "rs26"},
@@ -78,13 +78,21 @@ USERS = {
 }
 
 TEACHER_INITIALS = {
-    "TAPASI RANA": "TR", "SUJATA BISWAS ROTHA": "SBR", "ROHINI SINGH": "RS",
-    "UDAY NARAYAN JANA": "UNJ", "BIMAL KUMAR PATRA": "BKP", "SUSMITA PAUL": "SP",
-    "TAPAN KUMAR MANDAL": "TKM", "MANJUMA KHATUN": "MK"
+    "SUKHAMAY KISKU": "SK",
+    "TAPASI RANA": "TR", 
+    "SUJATA BISWAS ROTHA": "SBR", 
+    "ROHINI SINGH": "RS",
+    "UDAY NARAYAN JANA": "UNJ", 
+    "BIMAL KUMAR PATRA": "BKP", 
+    "SUSMITA PAUL": "SP",
+    "TAPAN KUMAR MANDAL": "TKM", 
+    "MANJUMA KHATUN": "MK"
 }
 INV_TEACHER_INITIALS = {v: k for k, v in TEACHER_INITIALS.items()}
 
-TEACHER_LIST = [u["name"] for k, u in USERS.items() if u["role"] == "teacher"]
+# Includes ALL staff (Admin + Teachers) so the Head Teacher can take leaves and substitute
+TEACHER_LIST = [u["name"] for k, u in USERS.items()]
+
 CLASS_OPTIONS = ["Select Class...", "CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V"]
 ATTENDANCE_OPTIONS = [
     "Select Class...", 
@@ -866,12 +874,11 @@ else:
 
             st.divider()
             
-            # --- NEW: COMPREHENSIVE LEAVE REPORT ---
+            # --- COMPREHENSIVE LEAVE REPORT ---
             st.subheader("📊 Comprehensive Leave Report")
             
             leave_log = get_csv('teacher_leave.csv')
             if not leave_log.empty and 'Date' in leave_log.columns:
-                # Safely convert to datetime to extract month/year
                 leave_log['Date_Obj'] = pd.to_datetime(leave_log['Date'], format='%d-%m-%Y', errors='coerce')
                 valid_leaves = leave_log.dropna(subset=['Date_Obj']).copy()
                 

@@ -700,7 +700,6 @@ else:
                 if today_routine.empty:
                     st.info("No classes scheduled for today.")
                 else:
-                    # 1. Apply Substitutions to the Head Teacher's Live View
                     leave_log = get_csv('teacher_leave.csv')
                     if not leave_log.empty and 'Date' in leave_log.columns:
                         today_leaves = leave_log[leave_log['Date'] == curr_date_str]
@@ -717,7 +716,6 @@ else:
                                         sub_name = parts[1].strip()
                                         sub_code = TEACHER_INITIALS.get(sub_name, sub_name)
                                         
-                                        # Update the routine to show the Substitute
                                         mask = (today_routine['Teacher'] == absent_code) & (today_routine['Start_Time'].str.strip() == slot)
                                         today_routine.loc[mask, 'Teacher'] = f"{sub_code} (Sub)"
 
@@ -737,13 +735,12 @@ else:
                             sec = r.get('Section', '')
                             t_code = r['Teacher']
                             
-                            # Convert code back to readable name
                             is_sub = "(Sub)" in t_code
                             clean_code = t_code.replace(" (Sub)", "")
                             t_name = INV_TEACHER_INITIALS.get(clean_code, clean_code)
                             
                             display_name = f"🔄 {t_name} (Sub)" if is_sub else f"👨‍🏫 {t_name}"
-                            border_color = "#ffc107" if is_sub else "#dc3545" # Yellow for sub, Red for normal live
+                            border_color = "#ffc107" if is_sub else "#dc3545" 
                             
                             card_html = f"""
                             <div class="routine-card" style="border-left: 5px solid {border_color};">
@@ -866,6 +863,69 @@ else:
                          h = not os.path.exists('teacher_leave.csv') or os.stat('teacher_leave.csv').st_size == 0
                          pd.DataFrame([{"Date": curr_date_str, "Teacher": abs_t, "Type": "CL", "Substitute": "None", "Detailed_Sub_Log": "None"}]).to_csv('teacher_leave.csv', mode='a', index=False, header=h)
                          st.success("Saved!")
+
+            st.divider()
+            
+            # --- NEW: COMPREHENSIVE LEAVE REPORT ---
+            st.subheader("📊 Comprehensive Leave Report")
+            
+            leave_log = get_csv('teacher_leave.csv')
+            if not leave_log.empty and 'Date' in leave_log.columns:
+                # Safely convert to datetime to extract month/year
+                leave_log['Date_Obj'] = pd.to_datetime(leave_log['Date'], format='%d-%m-%Y', errors='coerce')
+                valid_leaves = leave_log.dropna(subset=['Date_Obj']).copy()
+                
+                curr_m = now.month
+                curr_y = now.year
+                
+                def get_period(d):
+                    if d.year == curr_y and d.month == curr_m:
+                        return 'curr'
+                    elif d.year < curr_y or (d.year == curr_y and d.month < curr_m):
+                        return 'prev'
+                    else:
+                        return 'future'
+                        
+                valid_leaves['Period'] = valid_leaves['Date_Obj'].apply(get_period)
+                
+                c1, c2 = st.columns([1, 2])
+                with c1:
+                    rep_teacher = st.selectbox("Select Teacher", ["All Teachers"] + TEACHER_LIST, key="rep_t")
+                
+                summary_data = []
+                target_teachers = [rep_teacher] if rep_teacher != "All Teachers" else TEACHER_LIST
+                
+                for t in target_teachers:
+                    t_data = valid_leaves[valid_leaves['Teacher'] == t]
+                    p_data = t_data[t_data['Period'] == 'prev']
+                    c_data = t_data[t_data['Period'] == 'curr']
+                    
+                    summary_data.append({
+                        'Teacher': t,
+                        'Prev CL': len(p_data[p_data['Type'] == 'CL']),
+                        'Prev SL': len(p_data[p_data['Type'] == 'SL']),
+                        'Prev Half Day': len(p_data[p_data['Type'] == 'Half Day']),
+                        'Prev On Duty': len(p_data[p_data['Type'] == 'On Duty']),
+                        'Curr CL': len(c_data[c_data['Type'] == 'CL']),
+                        'Curr SL': len(c_data[c_data['Type'] == 'SL']),
+                        'Curr Half Day': len(c_data[c_data['Type'] == 'Half Day']),
+                        'Curr On Duty': len(c_data[c_data['Type'] == 'On Duty'])
+                    })
+                    
+                st.markdown("#### 📈 Summary")
+                summary_df = pd.DataFrame(summary_data)
+                st.dataframe(summary_df, hide_index=True, use_container_width=True)
+                
+                st.markdown("#### 📅 Date-wise Leave Log")
+                if rep_teacher != "All Teachers":
+                    disp_leaves = valid_leaves[valid_leaves['Teacher'] == rep_teacher]
+                else:
+                    disp_leaves = valid_leaves
+                    
+                disp_leaves = disp_leaves.sort_values(by='Date_Obj', ascending=False)
+                st.dataframe(disp_leaves[['Date', 'Teacher', 'Type', 'Substitute']], hide_index=True, use_container_width=True)
+            else:
+                st.info("No leave data available to generate reports.")
 
         # --- TAB 5: SHOES ---
         with tabs[4]: 

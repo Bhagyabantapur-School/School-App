@@ -788,91 +788,114 @@ else:
                 st.dataframe(live)
                 st.download_button("Download CSV", live.to_csv(index=False).encode('utf-8'), "leaves.csv", "text/csv")
             
+            sub_date_obj = st.date_input("Select Date for Substitutions", datetime.now(), key="sub_date")
+            sub_date_str = sub_date_obj.strftime("%d-%m-%Y")
+            target_day = sub_date_obj.strftime('%A')
+            
             abs_t = st.selectbox("Absent Teacher", ["Select..."] + TEACHER_LIST)
+            
             if abs_t != "Select...":
                 routine = get_csv('routine.csv')
                 code = TEACHER_INITIALS.get(abs_t, abs_t)
-                day = now.strftime('%A')
-                missed = routine[(routine['Teacher'] == code) & (routine['Day'] == day)].copy()
                 
-                busy_subs = {}
+                missed = pd.DataFrame()
+                if not routine.empty and 'Teacher' in routine.columns:
+                    missed = routine[(routine['Teacher'] == code) & (routine['Day'] == target_day)].copy()
+                
+                # --- CHECK IF LEAVE IS ALREADY SUBMITTED ---
                 leave_log = get_csv('teacher_leave.csv')
+                is_submitted = False
+                applied_type = "CL"
+                
                 if not leave_log.empty and 'Date' in leave_log.columns:
-                    today_leaves = leave_log[leave_log['Date'] == curr_date_str]
-                    for _, row in today_leaves.iterrows():
-                        raw_log = str(row.get('Detailed_Sub_Log', ''))
-                        if raw_log and raw_log != "None":
-                            assignments = raw_log.split(" | ")
-                            for assignment in assignments:
-                                parts = assignment.split(": ")
-                                if len(parts) == 2:
-                                    t_slot = parts[0].strip()
-                                    t_sub_name = parts[1].strip()
-                                    if t_slot not in busy_subs: busy_subs[t_slot] = []
-                                    busy_subs[t_slot].append(t_sub_name)
-
-                if not missed.empty:
-                    st.warning(f"{abs_t} has {len(missed)} classes.")
-                    assigns = []
-                    
-                    for idx, row in missed.iterrows():
-                        slot = str(row['Start_Time']).strip()
-                        
-                        busy_at_slot_codes = routine[
-                            (routine['Day'] == day) & 
-                            (routine['Start_Time'] == slot)
-                        ]['Teacher'].tolist()
-                        
-                        free_options = []
-                        busy_options = []
-                        
-                        for t_name in TEACHER_LIST:
-                            if t_name == abs_t: continue 
-                            t_code = TEACHER_INITIALS.get(t_name, "")
-                            
-                            is_already_sub = False
-                            if slot in busy_subs and t_name in busy_subs[slot]:
-                                is_already_sub = True
-                            
-                            if is_already_sub:
-                                busy_options.append(f"⛔ {t_name} (Already Subbing)")
-                            elif t_code not in busy_at_slot_codes:
-                                free_options.append(f"✅ {t_name} (Free)")
-                            else:
-                                busy_info = routine[
-                                    (routine['Teacher'] == t_code) & 
-                                    (routine['Day'] == day) & 
-                                    (routine['Start_Time'] == slot)
-                                ]
-                                b_class = busy_info.iloc[0]['Class'] if not busy_info.empty else "Class"
-                                busy_options.append(f"⚠️ {t_name} (Busy in {b_class})")
-                        
-                        st.markdown(f"<div class='routine-card'><b>{slot}</b> | {row['Class']}</div>", unsafe_allow_html=True)
-                        
-                        all_opts = ["Select Substitute..."] + free_options + busy_options
-                        choice = st.selectbox(f"Sub for {slot}", all_opts, key=f"s_{idx}")
-                        
-                        if choice != "Select Substitute...":
-                            clean_name = choice.split(" (")[0].replace("✅ ", "").replace("⚠️ ", "").replace("⛔ ", "")
-                            assigns.append(f"{slot}: {clean_name}")
-                    
-                    st.divider()
-                    
-                    lt = st.selectbox("Leave Type", ["CL", "SL", "Half Day", "On Duty"])
-                    
-                    if st.button("Confirm"):
-                        new = pd.DataFrame([{"Date": curr_date_str, "Teacher": abs_t, "Type": lt, "Substitute": "Multiple", "Detailed_Sub_Log": " | ".join(assigns)}])
-                        h = not os.path.exists('teacher_leave.csv') or os.stat('teacher_leave.csv').st_size == 0
-                        new.to_csv('teacher_leave.csv', mode='a', index=False, header=h)
-                        st.success("Saved! Scroll up to download.")
+                    existing_leave = leave_log[(leave_log['Date'] == sub_date_str) & (leave_log['Teacher'] == abs_t)]
+                    if not existing_leave.empty:
+                        is_submitted = True
+                        applied_type = existing_leave.iloc[0]['Type']
+                
+                if is_submitted:
+                    st.success(f"✅ Leave Submitted: **{abs_t}** is marked for **{applied_type}** on **{sub_date_str}**.")
+                    if st.button("🗑️ Undo / Re-assign Leave"):
+                        leave_log = leave_log.drop(existing_leave.index)
+                        leave_log.to_csv('teacher_leave.csv', index=False)
+                        st.rerun()
                 else:
-                    st.info("No classes today.")
-                    lt_no_class = st.selectbox("Leave Type", ["CL", "SL", "Half Day", "On Duty"])
-                    if st.button("Mark Leave (No Sub)"):
-                         h = not os.path.exists('teacher_leave.csv') or os.stat('teacher_leave.csv').st_size == 0
-                         pd.DataFrame([{"Date": curr_date_str, "Teacher": abs_t, "Type": lt_no_class, "Substitute": "None", "Detailed_Sub_Log": "None"}]).to_csv('teacher_leave.csv', mode='a', index=False, header=h)
-                         st.success("Saved!")
-                         st.rerun()
+                    # --- SHOW THE FORM IF NOT SUBMITTED ---
+                    busy_subs = {}
+                    if not leave_log.empty and 'Date' in leave_log.columns:
+                        target_leaves = leave_log[leave_log['Date'] == sub_date_str]
+                        for _, row in target_leaves.iterrows():
+                            raw_log = str(row.get('Detailed_Sub_Log', ''))
+                            if raw_log and raw_log not in ["None", "Pending"]:
+                                assignments = raw_log.split(" | ")
+                                for assignment in assignments:
+                                    parts = assignment.split(": ")
+                                    if len(parts) == 2:
+                                        t_slot = parts[0].strip()
+                                        t_sub_name = parts[1].strip()
+                                        if t_slot not in busy_subs: busy_subs[t_slot] = []
+                                        busy_subs[t_slot].append(t_sub_name)
+                                        
+                    lt = st.selectbox("Leave Type", ["CL", "SL", "Half Day", "On Duty"])
+
+                    if not missed.empty:
+                        st.warning(f"{abs_t} has {len(missed)} classes on {target_day}.")
+                        assigns = []
+                        
+                        for idx, row in missed.iterrows():
+                            slot = str(row['Start_Time']).strip()
+                            
+                            busy_at_slot_codes = routine[
+                                (routine['Day'] == target_day) & 
+                                (routine['Start_Time'] == slot)
+                            ]['Teacher'].tolist()
+                            
+                            free_options = []
+                            busy_options = []
+                            
+                            for t_name in TEACHER_LIST:
+                                if t_name == abs_t: continue 
+                                t_code = TEACHER_INITIALS.get(t_name, "")
+                                
+                                is_already_sub = False
+                                if slot in busy_subs and t_name in busy_subs[slot]:
+                                    is_already_sub = True
+                                
+                                if is_already_sub:
+                                    busy_options.append(f"⛔ {t_name} (Already Subbing)")
+                                elif t_code not in busy_at_slot_codes:
+                                    free_options.append(f"✅ {t_name} (Free)")
+                                else:
+                                    busy_info = routine[
+                                        (routine['Teacher'] == t_code) & 
+                                        (routine['Day'] == target_day) & 
+                                        (routine['Start_Time'] == slot)
+                                    ]
+                                    b_class = busy_info.iloc[0]['Class'] if not busy_info.empty else "Class"
+                                    busy_options.append(f"⚠️ {t_name} (Busy in {b_class})")
+                            
+                            st.markdown(f"<div class='routine-card'><b>{slot}</b> | {row['Class']}</div>", unsafe_allow_html=True)
+                            
+                            all_opts = ["Select Substitute..."] + free_options + busy_options
+                            choice = st.selectbox(f"Sub for {slot}", all_opts, key=f"s_{idx}")
+                            
+                            if choice != "Select Substitute...":
+                                clean_name = choice.split(" (")[0].replace("✅ ", "").replace("⚠️ ", "").replace("⛔ ", "")
+                                assigns.append(f"{slot}: {clean_name}")
+                        
+                        st.divider()
+                        
+                        if st.button("Confirm Substitutes"):
+                            new = pd.DataFrame([{"Date": sub_date_str, "Teacher": abs_t, "Type": lt, "Substitute": "Multiple", "Detailed_Sub_Log": " | ".join(assigns)}])
+                            h = not os.path.exists('teacher_leave.csv') or os.stat('teacher_leave.csv').st_size == 0
+                            new.to_csv('teacher_leave.csv', mode='a', index=False, header=h)
+                            st.rerun()
+                    else:
+                        st.info("No classes scheduled for this teacher on this day.")
+                        if st.button("Mark Leave (No Sub)"):
+                            h = not os.path.exists('teacher_leave.csv') or os.stat('teacher_leave.csv').st_size == 0
+                            pd.DataFrame([{"Date": sub_date_str, "Teacher": abs_t, "Type": lt, "Substitute": "None", "Detailed_Sub_Log": "None"}]).to_csv('teacher_leave.csv', mode='a', index=False, header=h)
+                            st.rerun()
 
             st.divider()
             

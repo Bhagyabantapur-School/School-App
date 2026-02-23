@@ -3,6 +3,7 @@ import pandas as pd
 import os
 from datetime import datetime, time, timedelta
 from streamlit_qrcode_scanner import qrcode_scanner
+# Note: FPDF is imported inside the function where needed to avoid issues if not used
 
 # --- 1. CONFIGURATION & STYLING ---
 st.set_page_config(page_title="BPS Digital", page_icon="🏫", layout="centered")
@@ -299,9 +300,34 @@ else:
                             ].copy()
                             
                             if not roster.empty:
-                                roster['Ate_MDM'] = False
-                                st.write("Mark Students:")
+                                # --- NEW ID CARD SCANNER LOGIC ---
+                                if 'scanned_rolls' not in st.session_state:
+                                    st.session_state.scanned_rolls = []
+
+                                st.write("📸 **Scan ID Cards (or tick manually below):**")
                                 qr_val = qrcode_scanner(key='at_qr')
+                                
+                                if qr_val:
+                                    try:
+                                        # Parse ID Card Format: "Name:Student|Roll:12|Mob:987..."
+                                        parts = qr_val.split('|')
+                                        qr_dict = {}
+                                        for p in parts:
+                                            if ':' in p:
+                                                k, v = p.split(':', 1)
+                                                qr_dict[k.strip()] = v.strip()
+                                        
+                                        s_roll = str(qr_dict.get('Roll', ''))
+                                        if s_roll and s_roll not in st.session_state.scanned_rolls:
+                                            st.session_state.scanned_rolls.append(s_roll)
+                                            st.success(f"✅ Scanned Successfully: {qr_dict.get('Name', 'Student')} (Roll: {s_roll})")
+                                    except:
+                                        st.warning("⚠️ Invalid BPS ID Card format scanned.")
+
+                                # Set checkboxes to True automatically for scanned rolls
+                                roster['Ate_MDM'] = roster['Roll'].astype(str).isin(st.session_state.scanned_rolls)
+                                # -----------------------------------
+                                
                                 edited = st.data_editor(roster[['Section', 'Roll', 'Name', 'Ate_MDM']], hide_index=True, use_container_width=True)
                                 
                                 marked_count = edited['Ate_MDM'].sum()
@@ -325,6 +351,10 @@ else:
                                         df_new = pd.DataFrame(new_rows)[cols]
                                         h = not os.path.exists('mdm_log.csv') or os.stat('mdm_log.csv').st_size == 0
                                         df_new.to_csv('mdm_log.csv', mode='a', index=False, header=h)
+                                        
+                                        # Clear scanner memory after submission
+                                        st.session_state.scanned_rolls = []
+                                        
                                         st.success(f"Submitted {len(new_rows)} students successfully!")
                                         st.rerun()
                                     else: st.warning("No students selected.")
@@ -543,7 +573,6 @@ else:
                 summary_df['MDM Entry'] = summary_df['MDM Entry'].astype(int)
                 summary_df.sort_values(by=['Class', 'Section'], inplace=True)
                 
-                # --- ADD TOTAL ROW ---
                 if not summary_df.empty:
                     total_row = pd.DataFrame([{
                         'Class': 'TOTAL',
@@ -585,7 +614,6 @@ else:
 
             st.divider()
             
-            # --- GRANULAR MDM CLEAR ---
             del_label = f"🗑️ Clear Today's MDM Data for {c_filter}" if c_filter != "All" else "🗑️ Clear Today's MDM Data (All Classes)"
             if st.button(del_label):
                 temp_mdm = get_csv('mdm_log.csv')
@@ -671,7 +699,6 @@ else:
                             
                             if is_submitted:
                                 st.info(f"🔒 Attendance for {t_class} - {t_sec} is already submitted today.")
-                                # --- GRANULAR ATTENDANCE CLEAR ---
                                 if st.button(f"🗑️ Clear Today's Attendance for {t_class} - {t_sec}"):
                                     temp_att = get_csv('student_attendance_master.csv')
                                     if not temp_att.empty and 'Date' in temp_att.columns:

@@ -867,10 +867,12 @@ else:
                         st.success("Saved! Scroll up to download.")
                 else:
                     st.info("No classes today.")
-                    if st.button("Mark Absent (No Sub)"):
+                    lt_no_class = st.selectbox("Leave Type", ["CL", "SL", "Half Day", "On Duty"])
+                    if st.button("Mark Leave (No Sub)"):
                          h = not os.path.exists('teacher_leave.csv') or os.stat('teacher_leave.csv').st_size == 0
-                         pd.DataFrame([{"Date": curr_date_str, "Teacher": abs_t, "Type": "CL", "Substitute": "None", "Detailed_Sub_Log": "None"}]).to_csv('teacher_leave.csv', mode='a', index=False, header=h)
+                         pd.DataFrame([{"Date": curr_date_str, "Teacher": abs_t, "Type": lt_no_class, "Substitute": "None", "Detailed_Sub_Log": "None"}]).to_csv('teacher_leave.csv', mode='a', index=False, header=h)
                          st.success("Saved!")
+                         st.rerun()
 
             st.divider()
             

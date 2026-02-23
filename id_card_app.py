@@ -66,11 +66,9 @@ def generate_pdf(students_list, photo_dict):
         
         # --- LOGO ON THE RIGHT SIDE (16mm) ---
         if os.path.exists('logo.png'): 
-            # Placed on the far right (x + 68.5) so it doesn't touch the photo on the left
             pdf.image('logo.png', x=x+68.5, y=y+1, w=16, h=16)
             
         pdf.set_font("Arial", 'B', 8.5); pdf.set_text_color(255, 255, 255)
-        # Shifted school name to the left (x+2) and width restricted (66) to avoid the logo
         pdf.set_xy(x+2, y+1.5); pdf.cell(66, 5, "BHAGYABANTAPUR PRIMARY SCHOOL", 0, 1, 'C')
         pdf.set_font("Arial", '', 6)
         pdf.set_xy(x+2, y+6.5); pdf.cell(66, 3, "ID CARD - SESSION 2026", 0, 1, 'C')
@@ -94,19 +92,40 @@ def generate_pdf(students_list, photo_dict):
         # Details (Center)
         pdf.set_text_color(0); detail_x, curr_y, line_h = x+24, y+14, 4
         pdf.set_font("Arial", 'B', 9); pdf.set_xy(detail_x, curr_y)
-        # Narrowed text width to 44 to avoid overlap if logo hangs low
         pdf.cell(44, line_h, f"{student.get('Name', '')}".upper()[:25], 0, 1); curr_y += 4.5
         pdf.set_font("Arial", '', 7)
         for label, val in [("Father", student.get('Father', '')), ("Class", f"{student.get('Class', '')} | Sec: {student.get('Section', 'A')}"), ("Roll", f"{student.get('Roll', '')} | Sex: {student.get('Gender', '')}"), ("DOB", f"{student.get('DOB', '')} | Blood: {student.get('BloodGroup', '')}")]:
             pdf.set_xy(detail_x, curr_y); pdf.cell(44, line_h, f"{label}: {val}", 0, 1); curr_y += line_h
         pdf.set_xy(detail_x, curr_y); pdf.set_font("Arial", 'B', 7); pdf.cell(44, line_h, f"Mob: {student.get('Mobile', '')}", 0, 1)
 
-        # QR & Sig
+        # QR Code
         qr_data = f"Name:{student.get('Name', '')}|Roll:{student.get('Roll', '')}|Mob:{student.get('Mobile', '')}"
         qr = qrcode.make(qr_data); qr_path = tempfile.mktemp(suffix=".png"); qr.save(qr_path)
         pdf.image(qr_path, x=x+4.5, y=y+37, w=15, h=15)
-        if os.path.exists('signature.png'): pdf.image('signature.png', x=x+58, y=y+41, w=22, h=8)
         
+        # --- FUTURISTIC WATERMARK ---
+        wm_x = x + 55
+        wm_y = y + 42
+        pdf.set_draw_color(200, 230, 255) # Light sky blue
+        pdf.set_line_width(0.2)
+        
+        # Tech graphics: concentric circles and lines
+        pdf.ellipse(wm_x, wm_y, 25, 6) # Outer tech ring
+        pdf.ellipse(wm_x + 2, wm_y + 1, 21, 4) # Inner tech ring
+        pdf.line(wm_x - 3, wm_y + 3, wm_x + 28, wm_y + 3) # Horizon line
+        pdf.line(wm_x + 5, wm_y - 2, wm_x + 20, wm_y + 8) # Angled tech line
+        
+        # Watermark Text
+        pdf.set_text_color(200, 230, 255) # Light sky blue
+        pdf.set_font("Arial", 'B', 6)
+        pdf.set_xy(wm_x + 4, wm_y + 1)
+        pdf.cell(17, 4, "BPS DIGITAL", 0, 0, 'C')
+
+        # Head Teacher Signature (Placed over the watermark)
+        if os.path.exists('signature.png'): 
+            pdf.image('signature.png', x=x+58, y=y+41, w=22, h=8)
+        
+        pdf.set_text_color(0) # Reset text color to black for the footer
         pdf.set_font("Arial", 'I', 6); pdf.set_xy(x, y+49); pdf.cell(card_w-5, 3, "Sukhamay Kisku", 0, 1, 'R')
         pdf.set_font("Arial", '', 5); pdf.set_xy(x, y+51); pdf.cell(card_w-5, 2, "Head Teacher", 0, 0, 'R')
         

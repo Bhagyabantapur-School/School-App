@@ -103,27 +103,30 @@ def generate_pdf(students_list, photo_dict):
         qr = qrcode.make(qr_data); qr_path = tempfile.mktemp(suffix=".png"); qr.save(qr_path)
         pdf.image(qr_path, x=x+4.5, y=y+37, w=15, h=15)
         
-        # --- FUTURISTIC WATERMARK ---
+        # --- CLEAN, MODERN WATERMARK ---
         wm_x = x + 55
         wm_y = y + 42
-        pdf.set_draw_color(200, 230, 255) # Light sky blue
-        pdf.set_line_width(0.2)
         
-        # Tech graphics: concentric circles and lines
-        pdf.ellipse(wm_x, wm_y, 25, 6) # Outer tech ring
-        pdf.ellipse(wm_x + 2, wm_y + 1, 21, 4) # Inner tech ring
-        pdf.line(wm_x - 3, wm_y + 3, wm_x + 28, wm_y + 3) # Horizon line
-        pdf.line(wm_x + 5, wm_y - 2, wm_x + 20, wm_y + 8) # Angled tech line
+        # Sleek light blue digital brackets
+        pdf.set_draw_color(220, 240, 255) # Very light sky blue
+        pdf.set_line_width(0.4)
+        pdf.line(wm_x, wm_y, wm_x, wm_y + 6) # Left bracket
+        pdf.line(wm_x, wm_y, wm_x + 2, wm_y) 
+        pdf.line(wm_x, wm_y + 6, wm_x + 2, wm_y + 6)
         
-        # Watermark Text
-        pdf.set_text_color(200, 230, 255) # Light sky blue
-        pdf.set_font("Arial", 'B', 6)
-        pdf.set_xy(wm_x + 4, wm_y + 1)
-        pdf.cell(17, 4, "BPS DIGITAL", 0, 0, 'C')
+        pdf.line(wm_x + 27, wm_y, wm_x + 27, wm_y + 6) # Right bracket
+        pdf.line(wm_x + 25, wm_y, wm_x + 27, wm_y)
+        pdf.line(wm_x + 25, wm_y + 6, wm_x + 27, wm_y + 6)
 
-        # Head Teacher Signature (Placed over the watermark)
+        # Watermark Text inside brackets
+        pdf.set_text_color(210, 235, 255) # Light sky blue text
+        pdf.set_font("Arial", 'B', 6)
+        pdf.set_xy(wm_x, wm_y + 1)
+        pdf.cell(27, 4, "BPS DIGITAL", 0, 0, 'C')
+
+        # Head Teacher Signature (Placed perfectly over the watermark)
         if os.path.exists('signature.png'): 
-            pdf.image('signature.png', x=x+58, y=y+41, w=22, h=8)
+            pdf.image('signature.png', x=x+58, y=y+40, w=22, h=8)
         
         pdf.set_text_color(0) # Reset text color to black for the footer
         pdf.set_font("Arial", 'I', 6); pdf.set_xy(x, y+49); pdf.cell(card_w-5, 3, "Sukhamay Kisku", 0, 1, 'R')

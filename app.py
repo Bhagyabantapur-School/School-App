@@ -541,6 +541,16 @@ else:
                 summary_df['Attendance'] = summary_df['Attendance'].astype(int)
                 summary_df['MDM Entry'] = summary_df['MDM Entry'].astype(int)
                 summary_df.sort_values(by=['Class', 'Section'], inplace=True)
+                
+                # --- ADD TOTAL ROW ---
+                if not summary_df.empty:
+                    total_row = pd.DataFrame([{
+                        'Class': 'TOTAL',
+                        'Section': '',
+                        'Attendance': summary_df['Attendance'].sum(),
+                        'MDM Entry': summary_df['MDM Entry'].sum()
+                    }])
+                    summary_df = pd.concat([summary_df, total_row], ignore_index=True)
 
                 st.markdown(f"##### 🏫 Breakdown for {view_date if not show_all else 'All Time'}")
                 st.dataframe(summary_df, hide_index=True, use_container_width=True)

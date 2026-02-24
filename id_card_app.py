@@ -5,6 +5,7 @@ import os
 from fpdf import FPDF
 import tempfile
 from datetime import datetime
+from PIL import Image
 
 # --- IMPORT THE SCANNER ---
 try:
@@ -67,20 +68,37 @@ def generate_pdf(students_list, photo_dict):
     x_start, y_start, card_w, card_h, gap = 10, 10, 86, 54, 8
     col, row = 0, 0
     
-    # Check for background image in multiple formats
+    # Check for background image and LIGHTEN it automatically
     bg_img = None
-    if os.path.exists('background.jpg'): bg_img = 'background.jpg'
-    elif os.path.exists('background.jpeg'): bg_img = 'background.jpeg'
-    elif os.path.exists('background.png'): bg_img = 'background.png'
+    for ext in ['background.jpg', 'background.jpeg', 'background.png']:
+        if os.path.exists(ext):
+            bg_img = ext
+            break
+            
+    lightened_bg_path = None
+    if bg_img:
+        try:
+            # Open image and create a solid white background of the same size
+            original = Image.open(bg_img).convert("RGBA")
+            white_bg = Image.new("RGBA", original.size, (255, 255, 255, 255))
+            
+            # Blend them together. alpha=0.15 means it keeps 15% of the original image (very light)
+            lightened = Image.blend(white_bg, original, alpha=0.15)
+            
+            # Save as JPG for PDF compatibility
+            lightened_bg_path = tempfile.mktemp(suffix=".jpg")
+            lightened.convert("RGB").save(lightened_bg_path, "JPEG")
+        except Exception as e:
+            lightened_bg_path = bg_img # Fallback if processing fails
     
     for student in students_list:
         x = x_start + (col * (card_w + gap))
         y = y_start + (row * (card_h + gap))
         
-        # --- 1. FULL CARD BACKGROUND IMAGE ---
-        if bg_img:
+        # --- 1. FULL CARD BACKGROUND IMAGE (Lightened) ---
+        if lightened_bg_path:
             try:
-                pdf.image(bg_img, x=x, y=y, w=card_w, h=card_h)
+                pdf.image(lightened_bg_path, x=x, y=y, w=card_w, h=card_h)
             except Exception as e:
                 pass 
 
@@ -142,7 +160,9 @@ def generate_pdf(students_list, photo_dict):
         
         # --- FOOTER IMAGE (Optional) ---
         if os.path.exists('image_2.png'):
-            pdf.image('image_2.png', x=x, y=y+44, w=card_w, h=10)
+            try:
+                pdf.image('image_2.png', x=x, y=y+44, w=card_w, h=10)
+            except: pass
 
         # --- CLEAN, MODERN WATERMARK & SIGNATURE ---
         wm_x = x + 55
@@ -167,7 +187,9 @@ def generate_pdf(students_list, photo_dict):
 
         # Head Teacher Signature
         if os.path.exists('signature.png'): 
-            pdf.image('signature.png', x=x+58, y=y+40, w=22, h=8)
+            try:
+                pdf.image('signature.png', x=x+58, y=y+40, w=22, h=8)
+            except: pass
         
         # Footer Text
         pdf.set_text_color(0) # Reset text color to black for the footer
@@ -195,8 +217,8 @@ with tab1:
 
     # --- IMAGE FILE CHECKER (UI Status) ---
     bg_exists = os.path.exists('background.jpg') or os.path.exists('background.jpeg') or os.path.exists('background.png')
-    bg_status = "✅ Found" if bg_exists else "❌ Not Found (Check exact file name or upload as .jpg)"
-    st.markdown(f"<div style='text-align:center; font-size:12px; color:gray;'>Background Image Status: <b>{bg_status}</b></div>", unsafe_allow_html=True)
+    bg_status = "✅ Found (Auto-Lightened for Print)" if bg_exists else "❌ Not Found"
+    st.markdown(f"<div style='text-align:center; font-size:12px; color:gray;'>Background Status: <b>{bg_status}</b></div>", unsafe_allow_html=True)
     st.divider()
 
     df = get_students()

@@ -60,7 +60,11 @@ def generate_pdf(students_list, photo_dict):
         x = x_start + (col * (card_w + gap))
         y = y_start + (row * (card_h + gap))
         
-        # Draw Card Background & Header
+        # --- 1. FULL CARD BACKGROUND IMAGE ---
+        if os.path.exists('background.png'):
+            pdf.image('background.png', x=x, y=y, w=card_w, h=card_h)
+
+        # --- 2. Draw Card Border & Blue Header ---
         pdf.set_draw_color(0, 0, 0); pdf.set_line_width(0.3); pdf.rect(x, y, card_w, card_h)
         pdf.set_fill_color(0, 123, 255); pdf.rect(x, y, card_w, 11, 'F')
         
@@ -103,12 +107,11 @@ def generate_pdf(students_list, photo_dict):
         qr = qrcode.make(qr_data); qr_path = tempfile.mktemp(suffix=".png"); qr.save(qr_path)
         pdf.image(qr_path, x=x+4.5, y=y+37, w=15, h=15)
         
-        # --- NEW FOOTER IMAGE ---
-        # Placed at the bottom, spanning the full width.
+        # --- FOOTER IMAGE (Optional: Keeps the extra footer if you still have image_2.png) ---
         if os.path.exists('image_2.png'):
             pdf.image('image_2.png', x=x, y=y+44, w=card_w, h=10)
 
-        # --- CLEAN, MODERN WATERMARK & SIGNATURE (Layered ON TOP of the footer image) ---
+        # --- CLEAN, MODERN WATERMARK & SIGNATURE ---
         wm_x = x + 55
         wm_y = y + 42
         

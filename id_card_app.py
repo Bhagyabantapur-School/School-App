@@ -82,8 +82,8 @@ def generate_pdf(students_list, photo_dict):
             original = Image.open(bg_img).convert("RGBA")
             white_bg = Image.new("RGBA", original.size, (255, 255, 255, 255))
             
-            # Blend them together. alpha=0.15 means it keeps 15% of the original image (very light)
-            lightened = Image.blend(white_bg, original, alpha=0.15)
+            # Blend them together. alpha=0.50 means it keeps 50% of the original image (50% lighter)
+            lightened = Image.blend(white_bg, original, alpha=0.50)
             
             # Save as JPG for PDF compatibility
             lightened_bg_path = tempfile.mktemp(suffix=".jpg")

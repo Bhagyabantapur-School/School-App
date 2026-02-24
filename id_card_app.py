@@ -5,7 +5,6 @@ import os
 from fpdf import FPDF
 import tempfile
 from datetime import datetime
-from PIL import Image
 
 # --- IMPORT THE SCANNER ---
 try:
@@ -68,37 +67,21 @@ def generate_pdf(students_list, photo_dict):
     x_start, y_start, card_w, card_h, gap = 10, 10, 86, 54, 8
     col, row = 0, 0
     
-    # Check for background image and LIGHTEN it automatically
+    # Check for background image
     bg_img = None
     for ext in ['background.jpg', 'background.jpeg', 'background.png']:
         if os.path.exists(ext):
             bg_img = ext
             break
             
-    lightened_bg_path = None
-    if bg_img:
-        try:
-            # Open image and create a solid white background of the same size
-            original = Image.open(bg_img).convert("RGBA")
-            white_bg = Image.new("RGBA", original.size, (255, 255, 255, 255))
-            
-            # Blend them together. alpha=0.50 means it keeps 50% of the original image (50% lighter)
-            lightened = Image.blend(white_bg, original, alpha=0.50)
-            
-            # Save as JPG for PDF compatibility
-            lightened_bg_path = tempfile.mktemp(suffix=".jpg")
-            lightened.convert("RGB").save(lightened_bg_path, "JPEG")
-        except Exception as e:
-            lightened_bg_path = bg_img # Fallback if processing fails
-    
     for student in students_list:
         x = x_start + (col * (card_w + gap))
         y = y_start + (row * (card_h + gap))
         
-        # --- 1. FULL CARD BACKGROUND IMAGE (Lightened) ---
-        if lightened_bg_path:
+        # --- 1. FULL CARD BACKGROUND IMAGE (Original Opacity) ---
+        if bg_img:
             try:
-                pdf.image(lightened_bg_path, x=x, y=y, w=card_w, h=card_h)
+                pdf.image(bg_img, x=x, y=y, w=card_w, h=card_h)
             except Exception as e:
                 pass 
 
@@ -217,7 +200,7 @@ with tab1:
 
     # --- IMAGE FILE CHECKER (UI Status) ---
     bg_exists = os.path.exists('background.jpg') or os.path.exists('background.jpeg') or os.path.exists('background.png')
-    bg_status = "✅ Found (Auto-Lightened for Print)" if bg_exists else "❌ Not Found"
+    bg_status = "✅ Found" if bg_exists else "❌ Not Found"
     st.markdown(f"<div style='text-align:center; font-size:12px; color:gray;'>Background Status: <b>{bg_status}</b></div>", unsafe_allow_html=True)
     st.divider()
 

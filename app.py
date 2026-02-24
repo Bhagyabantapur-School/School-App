@@ -301,8 +301,8 @@ else:
                             
                             if not roster.empty:
                                 # --- NEW ID CARD SCANNER LOGIC ---
-                                if 'scanned_rolls' not in st.session_state:
-                                    st.session_state.scanned_rolls = []
+                                if 'scanned_keys' not in st.session_state:
+                                    st.session_state.scanned_keys = []
 
                                 st.write("📸 **Scan ID Cards (or tick manually below):**")
                                 qr_val = qrcode_scanner(key='at_qr')
@@ -317,15 +317,28 @@ else:
                                                 k, v = p.split(':', 1)
                                                 qr_dict[k.strip()] = v.strip()
                                         
-                                        s_roll = str(qr_dict.get('Roll', ''))
-                                        if s_roll and s_roll not in st.session_state.scanned_rolls:
-                                            st.session_state.scanned_rolls.append(s_roll)
-                                            st.success(f"✅ Scanned Successfully: {qr_dict.get('Name', 'Student')} (Roll: {s_roll})")
+                                        s_roll = str(qr_dict.get('Roll', '')).strip()
+                                        s_name = str(qr_dict.get('Name', '')).strip()
+                                        
+                                        if s_roll and s_name:
+                                            # Validate against current roster
+                                            is_valid_student = not roster[(roster['Roll'].astype(str) == s_roll) & (roster['Name'].astype(str) == s_name)].empty
+                                            
+                                            if is_valid_student:
+                                                scan_key = f"{s_roll}_{s_name}"
+                                                if scan_key not in st.session_state.scanned_keys:
+                                                    st.session_state.scanned_keys.append(scan_key)
+                                                    st.success(f"✅ Scanned Successfully: {s_name} (Roll: {s_roll})")
+                                                else:
+                                                    st.info(f"ℹ️ {s_name} is already scanned.")
+                                            else:
+                                                st.error(f"❌ MISMATCH: {s_name} (Roll: {s_roll}) is NOT in {target_class} {target_section}!")
                                     except:
                                         st.warning("⚠️ Invalid BPS ID Card format scanned.")
 
-                                # Set checkboxes to True automatically for scanned rolls
-                                roster['Ate_MDM'] = roster['Roll'].astype(str).isin(st.session_state.scanned_rolls)
+                                # Set checkboxes to True automatically for scanned keys
+                                roster['Scan_Key'] = roster['Roll'].astype(str) + "_" + roster['Name'].astype(str)
+                                roster['Ate_MDM'] = roster['Scan_Key'].isin(st.session_state.scanned_keys)
                                 # -----------------------------------
                                 
                                 edited = st.data_editor(roster[['Section', 'Roll', 'Name', 'Ate_MDM']], hide_index=True, use_container_width=True)
@@ -353,7 +366,7 @@ else:
                                         df_new.to_csv('mdm_log.csv', mode='a', index=False, header=h)
                                         
                                         # Clear scanner memory after submission
-                                        st.session_state.scanned_rolls = []
+                                        st.session_state.scanned_keys = []
                                         
                                         st.success(f"Submitted {len(new_rows)} students successfully!")
                                         st.rerun()
@@ -573,6 +586,7 @@ else:
                 summary_df['MDM Entry'] = summary_df['MDM Entry'].astype(int)
                 summary_df.sort_values(by=['Class', 'Section'], inplace=True)
                 
+                # --- ADD TOTAL ROW ---
                 if not summary_df.empty:
                     total_row = pd.DataFrame([{
                         'Class': 'TOTAL',
@@ -614,6 +628,7 @@ else:
 
             st.divider()
             
+            # --- GRANULAR MDM CLEAR ---
             del_label = f"🗑️ Clear Today's MDM Data for {c_filter}" if c_filter != "All" else "🗑️ Clear Today's MDM Data (All Classes)"
             if st.button(del_label):
                 temp_mdm = get_csv('mdm_log.csv')
@@ -699,6 +714,7 @@ else:
                             
                             if is_submitted:
                                 st.info(f"🔒 Attendance for {t_class} - {t_sec} is already submitted today.")
+                                # --- GRANULAR ATTENDANCE CLEAR ---
                                 if st.button(f"🗑️ Clear Today's Attendance for {t_class} - {t_sec}"):
                                     temp_att = get_csv('student_attendance_master.csv')
                                     if not temp_att.empty and 'Date' in temp_att.columns:

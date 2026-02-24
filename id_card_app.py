@@ -56,13 +56,22 @@ def generate_pdf(students_list, photo_dict):
     x_start, y_start, card_w, card_h, gap = 10, 10, 86, 54, 8
     col, row = 0, 0
     
+    # Check for background image in multiple formats
+    bg_img = None
+    if os.path.exists('background.jpg'): bg_img = 'background.jpg'
+    elif os.path.exists('background.jpeg'): bg_img = 'background.jpeg'
+    elif os.path.exists('background.png'): bg_img = 'background.png'
+    
     for student in students_list:
         x = x_start + (col * (card_w + gap))
         y = y_start + (row * (card_h + gap))
         
         # --- 1. FULL CARD BACKGROUND IMAGE ---
-        if os.path.exists('background.png'):
-            pdf.image('background.png', x=x, y=y, w=card_w, h=card_h)
+        if bg_img:
+            try:
+                pdf.image(bg_img, x=x, y=y, w=card_w, h=card_h)
+            except Exception as e:
+                pass # If FPDF fails to read the PNG, it silently skips so it doesn't crash the app
 
         # --- 2. Draw Card Border & Blue Header ---
         pdf.set_draw_color(0, 0, 0); pdf.set_line_width(0.3); pdf.rect(x, y, card_w, card_h)
@@ -107,7 +116,7 @@ def generate_pdf(students_list, photo_dict):
         qr = qrcode.make(qr_data); qr_path = tempfile.mktemp(suffix=".png"); qr.save(qr_path)
         pdf.image(qr_path, x=x+4.5, y=y+37, w=15, h=15)
         
-        # --- FOOTER IMAGE (Optional: Keeps the extra footer if you still have image_2.png) ---
+        # --- FOOTER IMAGE (Optional) ---
         if os.path.exists('image_2.png'):
             pdf.image('image_2.png', x=x, y=y+44, w=card_w, h=10)
 
@@ -159,6 +168,12 @@ with tab1:
     with col_b:
         if os.path.exists('logo.png'): st.image('logo.png', use_container_width=True)
     st.markdown('<h3 style="text-align:center; color:#007bff;">BPS Student ID Card Generator</h3>', unsafe_allow_html=True)
+
+    # --- IMAGE FILE CHECKER (UI Status) ---
+    bg_exists = os.path.exists('background.jpg') or os.path.exists('background.jpeg') or os.path.exists('background.png')
+    bg_status = "✅ Found" if bg_exists else "❌ Not Found (Check exact file name or upload as .jpg)"
+    st.markdown(f"<div style='text-align:center; font-size:12px; color:gray;'>Background Image Status: <b>{bg_status}</b></div>", unsafe_allow_html=True)
+    st.divider()
 
     df = get_students()
     if not df.empty:

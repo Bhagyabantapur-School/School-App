@@ -28,9 +28,20 @@ def get_students():
             df = pd.read_csv('students.csv')
             if 'Class' in df.columns:
                 df['Class'] = df['Class'].replace('CALSS IV', 'CLASS IV')
-            for col in ['Section', 'BloodGroup', 'Father', 'Gender', 'DOB', 'Mobile']:
+            
+            # Ensure all necessary columns exist
+            for col in ['Section', 'BloodGroup', 'Father', 'Mother', 'Gender', 'DOB', 'Mobile']:
                 if col not in df.columns:
                     df[col] = 'N/A'
+                    
+            # Fix Mobile Number trailing .0
+            df['Mobile'] = df['Mobile'].astype(str)
+            df['Mobile'] = df['Mobile'].apply(lambda x: x[:-2] if x.endswith('.0') else x)
+            df['Mobile'] = df['Mobile'].replace(['nan', 'None'], 'N/A')
+            
+            # Format DOB to DD-MM-YYYY
+            df['DOB'] = pd.to_datetime(df['DOB'], errors='coerce', dayfirst=True).dt.strftime('%d-%m-%Y').fillna(df['DOB'])
+
             return df
         except Exception as e:
             st.error(f"Error loading CSV: {e}")
@@ -71,11 +82,12 @@ def generate_pdf(students_list, photo_dict):
             try:
                 pdf.image(bg_img, x=x, y=y, w=card_w, h=card_h)
             except Exception as e:
-                pass # If FPDF fails to read the PNG, it silently skips so it doesn't crash the app
+                pass 
 
-        # --- 2. Draw Card Border & Blue Header ---
+        # --- 2. Draw Card Border & Darker Blue Header ---
         pdf.set_draw_color(0, 0, 0); pdf.set_line_width(0.3); pdf.rect(x, y, card_w, card_h)
-        pdf.set_fill_color(0, 123, 255); pdf.rect(x, y, card_w, 11, 'F')
+        # Using a deeper, darker blue color (R=0, G=51, B=153)
+        pdf.set_fill_color(0, 51, 153); pdf.rect(x, y, card_w, 11, 'F')
         
         # --- LOGO ON THE RIGHT SIDE (16mm) ---
         if os.path.exists('logo.png'): 
@@ -84,7 +96,11 @@ def generate_pdf(students_list, photo_dict):
         pdf.set_font("Arial", 'B', 8.5); pdf.set_text_color(255, 255, 255)
         pdf.set_xy(x+2, y+1.5); pdf.cell(66, 5, "BHAGYABANTAPUR PRIMARY SCHOOL", 0, 1, 'C')
         pdf.set_font("Arial", '', 6)
-        pdf.set_xy(x+2, y+6.5); pdf.cell(66, 3, "ID CARD - SESSION 2026", 0, 1, 'C')
+        
+        # Split Sub-header text (Mobile on left, Session on right)
+        pdf.set_xy(x+2, y+6.5)
+        pdf.cell(32, 3, "Mob: 7908390822", 0, 0, 'L')
+        pdf.cell(34, 3, "ID CARD - SESSION 2026", 0, 1, 'R')
         
         # Photo (Left Side)
         photo_x, photo_y, photo_w, photo_h = x+3, y+14, 18, 22
@@ -107,11 +123,20 @@ def generate_pdf(students_list, photo_dict):
         pdf.set_font("Arial", 'B', 9); pdf.set_xy(detail_x, curr_y)
         pdf.cell(44, line_h, f"{student.get('Name', '')}".upper()[:25], 0, 1); curr_y += 4.5
         pdf.set_font("Arial", '', 7)
-        for label, val in [("Father", student.get('Father', '')), ("Class", f"{student.get('Class', '')} | Sec: {student.get('Section', 'A')}"), ("Roll", f"{student.get('Roll', '')} | Sex: {student.get('Gender', '')}"), ("DOB", f"{student.get('DOB', '')} | Blood: {student.get('BloodGroup', '')}")]:
+        
+        # Updated detail labels: Removed Roll, Sex, Blood. Added Mother.
+        for label, val in [
+            ("Father", str(student.get('Father', ''))[:22]), 
+            ("Mother", str(student.get('Mother', ''))[:22]), 
+            ("Class", f"{student.get('Class', '')} | Sec: {student.get('Section', 'A')}"), 
+            ("DOB", student.get('DOB', ''))
+        ]:
             pdf.set_xy(detail_x, curr_y); pdf.cell(44, line_h, f"{label}: {val}", 0, 1); curr_y += line_h
-        pdf.set_xy(detail_x, curr_y); pdf.set_font("Arial", 'B', 7); pdf.cell(44, line_h, f"Mob: {student.get('Mobile', '')}", 0, 1)
+            
+        pdf.set_xy(detail_x, curr_y); pdf.set_font("Arial", 'B', 7)
+        pdf.cell(44, line_h, f"Mob: {student.get('Mobile', '')}", 0, 1)
 
-        # QR Code
+        # QR Code (Roll is still embedded inside the code for scanning functionality)
         qr_data = f"Name:{student.get('Name', '')}|Roll:{student.get('Roll', '')}|Mob:{student.get('Mobile', '')}"
         qr = qrcode.make(qr_data); qr_path = tempfile.mktemp(suffix=".png"); qr.save(qr_path)
         pdf.image(qr_path, x=x+4.5, y=y+37, w=15, h=15)

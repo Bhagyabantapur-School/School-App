@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
+import calendar
 from datetime import datetime, time, timedelta
 from streamlit_qrcode_scanner import qrcode_scanner
 # Note: FPDF is imported inside the function where needed to avoid issues if not used
@@ -628,7 +629,6 @@ else:
 
             st.divider()
             
-            # --- GRANULAR MDM CLEAR ---
             del_label = f"🗑️ Clear Today's MDM Data for {c_filter}" if c_filter != "All" else "🗑️ Clear Today's MDM Data (All Classes)"
             if st.button(del_label):
                 temp_mdm = get_csv('mdm_log.csv')
@@ -762,6 +762,71 @@ else:
                     st.download_button("📥 Download Log", att_log.to_csv(index=False).encode('utf-8'), f"attendance_{att_view_date}.csv", "text/csv")
                 else: st.info(f"No attendance for {att_view_date}.")
             else: st.info("Attendance Log empty.")
+            
+            # --- NEW: MONTHLY ATTENDANCE SUMMARY ---
+            st.divider()
+            st.subheader("📅 Monthly Attendance Summary")
+            with st.expander("Open Monthly View", expanded=False):
+                col_m, col_y = st.columns(2)
+                months_list = list(calendar.month_name)[1:]
+                cur_month_name = calendar.month_name[datetime.now().month]
+                selected_month = col_m.selectbox("Select Month", months_list, index=months_list.index(cur_month_name))
+                cur_year = datetime.now().year
+                selected_year = col_y.selectbox("Select Year", range(cur_year-2, cur_year+3), index=2)
+                
+                month_idx = months_list.index(selected_month) + 1
+                _, days_in_month = calendar.monthrange(selected_year, month_idx)
+                
+                all_dates_in_month = [datetime(selected_year, month_idx, d).strftime("%d-%m-%Y") for d in range(1, days_in_month + 1)]
+                all_days_in_month = [datetime(selected_year, month_idx, d).strftime("%A") for d in range(1, days_in_month + 1)]
+                
+                monthly_df = pd.DataFrame({'Date': all_dates_in_month, 'Day_Name': all_days_in_month})
+                
+                full_att = get_csv('student_attendance_master.csv')
+                if not full_att.empty and 'Status' in full_att.columns:
+                    present_att = full_att[full_att['Status'] == True].copy()
+                    if not present_att.empty:
+                        class_counts = present_att.groupby(['Date', 'Class']).size().unstack(fill_value=0).reset_index()
+                    else:
+                        class_counts = pd.DataFrame(columns=['Date'])
+                else:
+                    class_counts = pd.DataFrame(columns=['Date'])
+                    
+                for cls_name in ['CLASS PP', 'CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV', 'CLASS V']:
+                    if cls_name not in class_counts.columns:
+                        class_counts[cls_name] = 0
+                        
+                merged_df = pd.merge(monthly_df, class_counts, on='Date', how='left').fillna(0)
+                
+                merged_df['Total (I-IV)'] = merged_df['CLASS I'] + merged_df['CLASS II'] + merged_df['CLASS III'] + merged_df['CLASS IV']
+                
+                merged_df = merged_df.rename(columns={
+                    'CLASS PP': 'PP',
+                    'CLASS I': 'I',
+                    'CLASS II': 'II',
+                    'CLASS III': 'III',
+                    'CLASS IV': 'IV',
+                    'CLASS V': 'V'
+                })
+                
+                holidays_csv = get_csv('holidays.csv')
+                h_dates = holidays_csv['Date'].astype(str).str.strip().tolist() if not holidays_csv.empty and 'Date' in holidays_csv.columns else []
+                
+                def format_row(row):
+                    if row['Day_Name'] == 'Sunday':
+                        return pd.Series(['Sunday']*7)
+                    elif row['Date'] in h_dates:
+                        return pd.Series(['Holiday']*7)
+                    else:
+                        return pd.Series([int(row['PP']), int(row['I']), int(row['II']), int(row['III']), int(row['IV']), int(row['Total (I-IV)']), int(row['V'])])
+                
+                final_cols = ['PP', 'I', 'II', 'III', 'IV', 'Total (I-IV)', 'V']
+                merged_df[final_cols] = merged_df.apply(format_row, axis=1)
+                
+                display_m_df = merged_df[['Date', 'PP', 'I', 'II', 'III', 'IV', 'Total (I-IV)', 'V']]
+                st.dataframe(display_m_df, hide_index=True, use_container_width=True)
+                
+                st.download_button("📥 Download Monthly Report", display_m_df.to_csv(index=False).encode('utf-8'), f"Monthly_Attendance_{selected_month}_{selected_year}.csv", "text/csv")
             
             with st.expander("⚠ Emergency Reset (Attendance Database)"):
                 if st.button("Reset Attendance Database"):

@@ -97,10 +97,9 @@ def generate_pdf(students_list, photo_dict):
         pdf.set_xy(x+2, y+1.5); pdf.cell(66, 5, "BHAGYABANTAPUR PRIMARY SCHOOL", 0, 1, 'C')
         pdf.set_font("Arial", '', 6)
         
-        # Split Sub-header text (Mobile on left, Session on right)
+        # Centered Sub-header text with line separator
         pdf.set_xy(x+2, y+6.5)
-        pdf.cell(32, 3, "Mob: 7908390822", 0, 0, 'L')
-        pdf.cell(34, 3, "ID CARD - SESSION 2026", 0, 1, 'R')
+        pdf.cell(66, 3, "Mob: 7908390822  |  ID CARD - SESSION 2026", 0, 1, 'C')
         
         # Photo (Left Side)
         photo_x, photo_y, photo_w, photo_h = x+3, y+14, 18, 22

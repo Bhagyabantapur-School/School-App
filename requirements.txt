@@ -4,3 +4,5 @@ fpdf
 qrcode
 streamlit-qrcode-scanner
 Pillow
+gspread>=6.0.0
+google-auth

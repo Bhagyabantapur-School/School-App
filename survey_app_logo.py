@@ -20,7 +20,7 @@ class BPS_Survey(FPDF):
         
         # Load the Bengali font. 
         # Make sure 'Bengali.ttf' is in the same folder as this script.
-        # Note: Helvetica is a core font, so we DO NOT use add_font for it.
+        # NOTE: There is NO add_font('Helvetica') here, to prevent the ValueError.
         self.add_font('Bengali', '', 'Bengali.ttf')
 
     def draw_digit_boxes(self, x, y):

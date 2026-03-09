@@ -66,10 +66,17 @@ class BPS_Survey(FPDF):
         # --- Questions Section ---
         curr_y += 24
         self.set_xy(x, curr_y)
-        self.set_font('Bengali', '', 9)
         
-        # INSTRUCTION: Tick the correct box
-        self.cell(0, 5, u"সঠিক ঘরে টিক (\u2713) দিন:", ln=True)
+        # THE FIX: Split the instruction to use the PDF built-in symbol font!
+        self.set_font('Bengali', '', 9)
+        self.cell(22, 5, u"সঠিক ঘরে টিক (")
+        
+        self.set_font('ZapfDingbats', '', 8) # Core PDF symbol font
+        self.cell(3, 5, "4") # '4' renders as a checkmark ✔ in this font
+        
+        self.set_font('Bengali', '', 9)
+        self.cell(15, 5, u") দিন:")
+        self.ln(6)
         
         # --- MOBILE QUESTION ---
         curr_y = self.get_y()
@@ -122,7 +129,7 @@ class BPS_Survey(FPDF):
         self.cell(30, 5, u"তারিখ")
 
 # --- 3. Streamlit UI ---
-st.set_page_config(page_title="BPS Survey Generator", layout="wide") # Changed to wide layout for 3 columns
+st.set_page_config(page_title="BPS Survey Generator", layout="wide") 
 st.title("📋 BPS Guardian Update Form")
 
 if df.empty:

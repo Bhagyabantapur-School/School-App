@@ -1,15 +1,19 @@
 import streamlit as st
 import pandas as pd
-from fpdf import FPDF
+from fpdf import FPDF 
 
-# Load your students.csv
+# 1. Load Data
 df = pd.read_csv("students.csv")
 
 class BPS_Survey(FPDF):
     def __init__(self):
-        super().__init__()
-        # Use your renamed font file
-        self.add_font('Bengali', '', 'Bengali.ttf', uni=True)
+        # Use 'P' for Portrait, 'mm' for millimeters, 'A4' size
+        super().__init__(orientation='P', unit='mm', format='A4')
+        
+        # STEP 1: Load Noto Serif Bengali (Static version preferred)
+        # Ensure the .ttf file is named 'Bengali.ttf' in your folder
+        self.add_font('Bengali', '', 'Bengali.ttf')
+        self.set_font('Bengali', '', 10)
 
     def draw_digit_boxes(self, x, y):
         box_size = 6 
@@ -17,66 +21,58 @@ class BPS_Survey(FPDF):
             self.rect(x + (i * box_size), y, box_size, box_size)
 
     def draw_single_form(self, x, y, row):
-        # Origin for this quadrant
+        # fpdf2 uses a slightly different positioning system for Unicode
         self.set_xy(x, y)
         
-        # --- Add School Logo ---
-        # Positioned at (x, y), scaled to 12mm width
-        # Ensure 'logo.png' exists in your folder
+        # --- Logo ---
         try:
-            self.image('logo.png', x, y, 12) 
+            self.image('logo.png', x, y, 14) 
         except:
-            # Fallback if logo is missing so the app doesn't crash
-            self.rect(x, y, 12, 12) 
-            self.set_font('Arial', 'B', 6)
-            self.text(x+1, y+6, "LOGO")
+            self.rect(x, y, 14, 14)
 
-        # --- Header (Adjusted X to make room for Logo) ---
-        self.set_font('Arial', 'B', 11)
-        self.set_xy(x + 15, y)
-        self.cell(80, 6, "Bhagyabantapur Primary School (BPS)", ln=True, align='L')
+        # --- Header ---
+        self.set_font('Helvetica', 'B', 11) # Use standard font for English
+        self.set_xy(x + 16, y)
+        self.cell(80, 6, "Bhagyabantapur Primary School (BPS)", ln=True)
         
-        self.set_font('Bengali', '', 9)
-        self.set_x(x + 15)
-        self.cell(80, 5, u"অভিভাবক তথ্য যাচাই ফর্ম", ln=True, align='L')
+        self.set_font('Bengali', '', 10)
+        self.set_x(x + 16)
+        # Real Bengali Script
+        self.cell(80, 6, u"অভিভাবক তথ্য যাচাই ফর্ম", ln=True)
         
         # --- Student Info Table ---
-        curr_y = y + 15 # Moved down to avoid overlapping logo/header
-        self.rect(x, curr_y, 96, 20) 
+        curr_y = y + 18
+        self.rect(x, curr_y, 96, 22) 
         
+        # Table Content
         self.set_font('Bengali', '', 9)
-        # Row 1
+        # We use text() for precise quadrant placement
         self.text(x + 2, curr_y + 6, f"Student: {row['Name']}")
         self.text(x + 55, curr_y + 6, f"Class: {row['Class']}")
-        # Row 2
         self.text(x + 2, curr_y + 12, f"Father: {row['Father']}")
         self.text(x + 55, curr_y + 12, f"Section: {row['Section']}")
-        # Row 3
         self.text(x + 2, curr_y + 18, f"Mother: {row['Mother']}")
         self.text(x + 55, curr_y + 18, f"Mobile: {str(row['Mobile']).split('.')[0]}")
         
         # --- Questions Section ---
-        self.set_y(curr_y + 24)
-        self.set_font('Bengali', '', 9)
+        self.set_y(curr_y + 26)
         
         # Mobile Question
-        self.text(x, self.get_y(), u"এই মোবাইল নম্বরটি কি সঠিক?  হ্যাঁ [   ]  না [   ]")
-        self.ln(6)
-        self.text(x, self.get_y(), u"সঠিক না হলে, সঠিক নম্বরটি দিন:")
+        self.cell(0, 6, u"এই মোবাইল নম্বরটি কি সঠিক?  হ্যাঁ [   ]  না [   ]", ln=True)
         self.ln(2)
-        self.draw_digit_boxes(x, self.get_y())
+        self.cell(0, 6, u"সঠিক না হলে, সঠিক নম্বরটি দিন:", ln=True)
+        self.draw_digit_boxes(x, self.get_y() + 1)
         
         # WhatsApp Question
-        self.ln(12)
-        self.text(x, self.get_y(), u"এটি কি আপনার হোয়াটসঅ্যাপ নম্বর?  হ্যাঁ [   ]  না [   ]")
-        self.ln(6)
-        self.text(x, self.get_y(), u"হোয়াটসঅ্যাপ নম্বর না হলে সেটি দিন:")
+        self.set_y(self.get_y() + 12)
+        self.cell(0, 6, u"এটি কি আপনার হোয়াটসঅ্যাপ নম্বর?  হ্যাঁ [   ]  না [   ]", ln=True)
         self.ln(2)
-        self.draw_digit_boxes(x, self.get_y())
+        self.cell(0, 6, u"হোয়াটসঅ্যাপ নম্বর না হলে সেটি দিন:", ln=True)
+        self.draw_digit_boxes(x, self.get_y() + 1)
         
-        # --- Signature Section ---
-        self.ln(15)
-        self.set_font('Arial', '', 7)
+        # --- Signatures ---
+        self.set_y(self.get_y() + 15)
+        self.set_font('Helvetica', '', 7)
         self.text(x, self.get_y(), "______________________")
         self.text(x + 60, self.get_y(), "______________________")
         self.set_font('Bengali', '', 8)
@@ -84,26 +80,24 @@ class BPS_Survey(FPDF):
         self.text(x + 60, self.get_y() + 4, u"তারিখ")
 
 # --- Streamlit UI ---
-st.title("📋 BPS Guardian Survey (with Logo)")
+st.title("📋 BPS Guardian Update Form (4-per-page)")
 
-selected_indices = st.multiselect(
-    "Select Students:", 
-    df.index, 
-    format_func=lambda x: f"{df.iloc[x]['Name']} (Roll {df.iloc[x]['Roll']})"
-)
+selected_indices = st.multiselect("Select Students:", df.index, format_func=lambda x: f"{df.iloc[x]['Name']}")
 
 if st.button("Generate PDF"):
     if not selected_indices:
-        st.error("Please select students first!")
+        st.error("Select students first!")
     else:
+        # fpdf2 handles the context better
         pdf = BPS_Survey()
         for i in range(0, len(selected_indices), 4):
             pdf.add_page()
-            # 4 Quadrants
+            # 4 Corners of A4: Top-Left, Top-Right, Bottom-Left, Bottom-Right
             coords = [(7, 7), (107, 7), (7, 150), (107, 150)]
             for j, pos in enumerate(coords):
                 if i + j < len(selected_indices):
                     pdf.draw_single_form(pos[0], pos[1], df.iloc[selected_indices[i+j]])
         
-        pdf_bytes = pdf.output(dest='S').encode('latin-1')
-        st.download_button("⬇️ Download BPS Surveys", pdf_bytes, "BPS_Guardian_Survey_Logo.pdf")
+        # fpdf2 output is slightly different
+        pdf_output = pdf.output()
+        st.download_button("⬇️ Download PDF", pdf_output, "BPS_Update_Forms.pdf")

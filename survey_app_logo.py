@@ -58,12 +58,11 @@ class BPS_Survey(FPDF):
         curr_y = y + 16
         self.rect(x, curr_y, 96, 22) # Outer border for the details box
         
-        self.set_font('Bengali', '', 9)
-        
         # Clean mobile number (removes decimals, handles blanks)
         mobile_val = str(row['Mobile']).split('.')[0] if pd.notna(row['Mobile']) and str(row['Mobile']).strip() != "" else "N/A"
         
-        # Left Column Data
+        # Left Column Data (English uses Helvetica)
+        self.set_font('Helvetica', '', 9)
         self.text(x + 2, curr_y + 6, f"Student: {row['Name']}")
         self.text(x + 2, curr_y + 13, f"Father: {row['Father']}")
         self.text(x + 2, curr_y + 20, f"Mother: {row['Mother']}")
@@ -95,12 +94,18 @@ class BPS_Survey(FPDF):
         # --- Signature Line ---
         curr_y = self.get_y() + 14
         self.set_font('Helvetica', '', 7)
+        # Using text() is fine for English/ASCII underscores
         self.text(x, curr_y, "______________________")
         self.text(x + 60, curr_y, "______________________")
         
         self.set_font('Bengali', '', 8)
-        self.text(x, curr_y + 4, u"অভিভাবকের স্বাক্ষর")
-        self.text(x + 60, curr_y + 4, u"তারিখ")
+        
+        # THE FIX: Using cell() ensures HarfBuzz shapes the complex Bengali words
+        self.set_xy(x, curr_y + 1)
+        self.cell(40, 5, u"অভিভাবকের স্বাক্ষর")
+        
+        self.set_xy(x + 60, curr_y + 1)
+        self.cell(30, 5, u"তারিখ")
 
 # --- 3. Streamlit UI ---
 st.set_page_config(page_title="BPS Survey Generator", layout="centered")

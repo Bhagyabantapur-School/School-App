@@ -20,7 +20,7 @@ class BPS_Survey(FPDF):
         self.add_font('Bengali', '', 'Bengali.ttf')
         self.set_text_shaping(True) # HarfBuzz engine for correct conjuncts
         
-        # FIX 1: Prevent FPDF from secretly pushing text to a second page
+        # Prevent FPDF from secretly pushing text to a second page
         self.set_auto_page_break(auto=False)
 
     def draw_digit_boxes(self, x, y, box_size=8):
@@ -55,8 +55,19 @@ class BPS_Survey(FPDF):
         curr_y = 35 
         self.rect(x, curr_y, 128, 36) 
         
+        # Safe fetch for Mobile
         mobile_val = str(row['Mobile']).split('.')[0] if pd.notna(row['Mobile']) and str(row['Mobile']).strip() != "" else "N/A"
-        dob_val = str(row['DOB']) if 'DOB' in row and pd.notna(row['DOB']) else "N/A"
+        
+        # THE FIX: Format DOB to DD-MM-YYYY safely
+        dob_val = "N/A"
+        if 'DOB' in row and pd.notna(row['DOB']) and str(row['DOB']).strip() != "":
+            try:
+                # Parses the date and converts it to the requested format
+                parsed_date = pd.to_datetime(row['DOB'], dayfirst=True)
+                dob_val = parsed_date.strftime('%d-%m-%Y')
+            except:
+                # Fallback if the date format in the CSV is completely unrecognizable
+                dob_val = str(row['DOB'])
         
         self.set_font('Helvetica', '', 11)
         
@@ -144,7 +155,6 @@ class BPS_Survey(FPDF):
         self.cell(0, 8, u"হ্যাঁ হলে, সার্টিফিকেটের জেরক্স (Xerox) কপি জমা দিন।", ln=True)
         
         # --- Signature Line ---
-        # FIX 2: Dynamically calculate Y position based on previous line to stay on page
         curr_y = self.get_y() + 15 
         
         self.set_font('Helvetica', '', 10)

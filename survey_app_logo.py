@@ -1,14 +1,16 @@
 import streamlit as st
 import pandas as pd
-from fpdf import FPDF # Make sure you are using fpdf2 (pip install fpdf2)
+from fpdf import FPDF # Requires fpdf2 (pip install fpdf2)
 
 # --- 1. Load Data ---
-# Wrap in try-except to prevent the app from crashing if the CSV is missing
-try:
-    df = pd.read_csv("students.csv")
-except FileNotFoundError:
-    st.error("⚠️ 'students.csv' not found. Please ensure it is in the same folder.")
-    st.stop()
+@st.cache_data
+def load_data():
+    try:
+        return pd.read_csv("students.csv")
+    except FileNotFoundError:
+        return pd.DataFrame() # Return empty if not found
+
+df = load_data()
 
 # --- 2. PDF Generation Class ---
 class BPS_Survey(FPDF):
@@ -16,13 +18,13 @@ class BPS_Survey(FPDF):
         # Set format to A4, unit to millimeters, orientation to Portrait
         super().__init__(orientation='P', unit='mm', format='A4')
         
-        # Load the Bengali font. Ensure 'Bengali.ttf' is in your directory.
+        # Load the Bengali font. 
+        # Make sure 'Bengali.ttf' is in the same folder as this script.
+        # Note: Helvetica is a core font, so we DO NOT use add_font for it.
         self.add_font('Bengali', '', 'Bengali.ttf')
-        self.add_font('Helvetica', '', 'helvetica')
-        self.add_font('Helvetica', 'B', 'helvetica')
 
     def draw_digit_boxes(self, x, y):
-        """Draws 10 consecutive boxes for 10-digit phone numbers"""
+        """Draws 10 consecutive 6x6mm boxes for 10-digit phone numbers"""
         box_size = 6 
         for i in range(10):
             self.rect(x + (i * box_size), y, box_size, box_size)
@@ -33,6 +35,7 @@ class BPS_Survey(FPDF):
         
         # --- School Logo ---
         try:
+            # Assumes logo.png is in the same directory
             self.image('logo.png', x, y, 14) 
         except:
             # Fallback square if logo.png is missing
@@ -56,7 +59,7 @@ class BPS_Survey(FPDF):
         self.set_font('Bengali', '', 9)
         
         # Clean mobile number (removes decimals, handles blanks)
-        mobile_val = str(row['Mobile']).split('.')[0] if pd.notna(row['Mobile']) else ""
+        mobile_val = str(row['Mobile']).split('.')[0] if pd.notna(row['Mobile']) and str(row['Mobile']).strip() != "" else "N/A"
         
         # Left Column Data
         self.text(x + 2, curr_y + 6, f"Student: {row['Name']}")
@@ -100,38 +103,47 @@ class BPS_Survey(FPDF):
 # --- 3. Streamlit UI ---
 st.set_page_config(page_title="BPS Survey Generator", layout="centered")
 st.title("📋 BPS Guardian Update Form (4-in-1)")
-st.write("Select the students below to generate their customized verification forms.")
 
-# Multi-select widget showing Name and Class
-selected_indices = st.multiselect(
-    "Select Students:", 
-    df.index, 
-    format_func=lambda i: f"{df.iloc[i]['Name']} (Class {df.iloc[i]['Class']})"
-)
+if df.empty:
+    st.error("⚠️ 'students.csv' not found or is empty. Please ensure it is in the same folder.")
+    st.stop()
+
+# Select All functionality
+select_all = st.checkbox("Select All Students")
+
+if select_all:
+    selected_indices = df.index.tolist()
+else:
+    selected_indices = st.multiselect(
+        "Select Students manually:", 
+        df.index, 
+        format_func=lambda i: f"{df.iloc[i]['Name']} (Class {df.iloc[i]['Class']})"
+    )
 
 if st.button("Generate PDF Forms", type="primary"):
     if not selected_indices:
         st.warning("Please select at least one student from the list.")
     else:
-        pdf = BPS_Survey()
-        
-        # Process in chunks of 4 to fit 4 quadrants on an A4 sheet
-        for i in range(0, len(selected_indices), 4):
-            pdf.add_page()
+        with st.spinner("Generating PDF..."):
+            pdf = BPS_Survey()
             
-            # Coordinates for Top-Left, Top-Right, Bottom-Left, Bottom-Right
-            quadrant_coords = [(7, 7), (107, 7), (7, 150), (107, 150)]
+            # Process in chunks of 4 to fit 4 quadrants on an A4 sheet
+            for i in range(0, len(selected_indices), 4):
+                pdf.add_page()
+                
+                # Coordinates for Top-Left, Top-Right, Bottom-Left, Bottom-Right
+                quadrant_coords = [(7, 7), (107, 7), (7, 150), (107, 150)]
+                
+                for j in range(4):
+                    if i + j < len(selected_indices):
+                        student_data = df.iloc[selected_indices[i + j]]
+                        current_coords = quadrant_coords[j]
+                        pdf.draw_single_form(current_coords[0], current_coords[1], student_data)
             
-            for j in range(4):
-                if i + j < len(selected_indices):
-                    student_data = df.iloc[selected_indices[i + j]]
-                    current_coords = quadrant_coords[j]
-                    pdf.draw_single_form(current_coords[0], current_coords[1], student_data)
-        
-        # THE FIX: Cast the output strictly to bytes to prevent Streamlit error
-        pdf_bytes = bytes(pdf.output())
-        
-        st.success("PDF generated successfully! Click below to download.")
+            # Convert to pure bytes to prevent Streamlit download error
+            pdf_bytes = bytes(pdf.output())
+            
+        st.success("PDF generated successfully!")
         
         st.download_button(
             label="⬇️ Download Survey Forms (PDF)", 

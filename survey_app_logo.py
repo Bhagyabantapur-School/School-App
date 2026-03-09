@@ -15,122 +15,125 @@ df = load_data()
 # --- 2. PDF Generation Class ---
 class BPS_Survey(FPDF):
     def __init__(self):
-        super().__init__(orientation='P', unit='mm', format='A4')
+        # CHANGED: format='A5' instead of 'A4'
+        super().__init__(orientation='P', unit='mm', format='A5')
         self.add_font('Bengali', '', 'Bengali.ttf')
         self.set_text_shaping(True) # HarfBuzz engine for correct conjuncts
 
-    def draw_digit_boxes(self, x, y):
-        """Draws 10 consecutive 6x6mm boxes for 10-digit phone numbers"""
-        box_size = 6 
+    def draw_digit_boxes(self, x, y, box_size=8):
+        """Draws 10 consecutive boxes for 10-digit phone numbers"""
         for i in range(10):
             self.rect(x + (i * box_size), y, box_size, box_size)
 
-    def draw_single_form(self, x, y, row):
-        """Draws exactly one survey form at the given x, y coordinates"""
+    def draw_single_form(self, row):
+        """Draws exactly one survey form taking up the entire A5 page"""
+        # We start at standard margins (10, 10)
+        x = 10 
+        y = 10
         self.set_xy(x, y)
         
         # --- School Logo ---
         try:
-            self.image('logo.png', x, y, 14) 
+            self.image('logo.png', x, y, 20) # Scaled up to 20mm
         except:
-            self.rect(x, y, 14, 14)
-            self.set_font('Helvetica', 'B', 6)
-            self.text(x + 2, y + 7, "LOGO")
+            self.rect(x, y, 20, 20)
+            self.set_font('Helvetica', 'B', 8)
+            self.text(x + 3, y + 10, "LOGO")
 
         # --- Header ---
-        self.set_font('Helvetica', 'B', 11)
-        self.set_xy(x + 16, y)
-        self.cell(80, 6, "Bhagyabantapur Primary School (BPS)", ln=True)
+        self.set_font('Helvetica', 'B', 14) # Scaled up
+        self.set_xy(x + 24, y + 2)
+        self.cell(100, 8, "Bhagyabantapur Primary School (BPS)", ln=True)
         
-        self.set_font('Bengali', '', 10)
-        self.set_x(x + 16)
-        self.cell(80, 6, u"অভিভাবক তথ্য যাচাই ফর্ম", ln=True)
+        self.set_font('Bengali', '', 12) # Scaled up
+        self.set_x(x + 24)
+        self.cell(100, 8, u"অভিভাবক তথ্য যাচাই ফর্ম", ln=True)
         
         # --- Student Info Table ---
-        curr_y = y + 16
-        self.rect(x, curr_y, 96, 22)
+        curr_y = 35 # Moved down to account for larger header
+        self.rect(x, curr_y, 128, 30) # Wider and taller table
         
         mobile_val = str(row['Mobile']).split('.')[0] if pd.notna(row['Mobile']) and str(row['Mobile']).strip() != "" else "N/A"
         
-        # Left Column Data (English uses Helvetica)
-        self.set_font('Helvetica', '', 9)
-        self.text(x + 2, curr_y + 6, f"Student: {row['Name']}")
-        self.text(x + 2, curr_y + 13, f"Father: {row['Father']}")
-        self.text(x + 2, curr_y + 20, f"Mother: {row['Mother']}")
+        # Left Column Data
+        self.set_font('Helvetica', '', 11)
+        self.text(x + 3, curr_y + 8, f"Student: {row['Name']}")
+        self.text(x + 3, curr_y + 18, f"Father: {row['Father']}")
+        self.text(x + 3, curr_y + 28, f"Mother: {row['Mother']}")
         
         # Right Column Data
-        self.text(x + 55, curr_y + 6, f"Class: {row['Class']}")
-        self.text(x + 55, curr_y + 13, f"Section: {row['Section']}")
-        self.text(x + 55, curr_y + 20, f"Mobile: {mobile_val}")
+        self.text(x + 70, curr_y + 8, f"Class: {row['Class']}")
+        self.text(x + 70, curr_y + 18, f"Section: {row['Section']}")
+        self.text(x + 70, curr_y + 28, f"Mobile: {mobile_val}")
         
         # --- Questions Section ---
-        curr_y += 24
+        curr_y = 75
         self.set_xy(x, curr_y)
         
-        # THE FIX: Split the instruction to use the PDF built-in symbol font!
-        self.set_font('Bengali', '', 9)
-        self.cell(22, 5, u"সঠিক ঘরে টিক (")
-        
-        self.set_font('ZapfDingbats', '', 8) # Core PDF symbol font
-        self.cell(3, 5, "4") # '4' renders as a checkmark ✔ in this font
-        
-        self.set_font('Bengali', '', 9)
-        self.cell(15, 5, u") দিন:")
-        self.ln(6)
+        # INSTRUCTION: Tick the correct box
+        self.set_font('Bengali', '', 11)
+        self.cell(26, 6, u"সঠিক ঘরে টিক (")
+        self.set_font('ZapfDingbats', '', 10) 
+        self.cell(4, 6, "4") # Checkmark
+        self.set_font('Bengali', '', 11)
+        self.cell(15, 6, u") দিন:")
+        self.ln(10)
         
         # --- MOBILE QUESTION ---
         curr_y = self.get_y()
         self.set_xy(x, curr_y)
-        self.cell(44, 6, u"এই মোবাইল নম্বরটি কি সঠিক?")
+        self.cell(60, 8, u"এই মোবাইল নম্বরটি কি সঠিক?")
         
         # Draw "Yes" and Box
-        self.set_x(x + 45)
-        self.cell(8, 6, u"হ্যাঁ")
-        self.rect(x + 52, curr_y + 1.5, 3.5, 3.5) # Drawn Square Box
+        self.set_x(x + 65)
+        self.cell(10, 8, u"হ্যাঁ")
+        self.rect(x + 75, curr_y + 1.5, 5, 5) # 5mm checkbox
         
         # Draw "No" and Box
-        self.set_x(x + 58)
-        self.cell(8, 6, u"না")
-        self.rect(x + 64, curr_y + 1.5, 3.5, 3.5) # Drawn Square Box
+        self.set_x(x + 85)
+        self.cell(10, 8, u"না")
+        self.rect(x + 95, curr_y + 1.5, 5, 5) # 5mm checkbox
         
-        self.set_xy(x, curr_y + 6)
-        self.cell(0, 6, u"সঠিক না হলে, সঠিক নম্বরটি দিন:", ln=True)
-        self.draw_digit_boxes(x, self.get_y() + 1)
+        self.set_xy(x, curr_y + 10)
+        self.cell(0, 8, u"সঠিক না হলে, সঠিক নম্বরটি দিন:", ln=True)
+        self.draw_digit_boxes(x, self.get_y() + 2, box_size=8) # 8mm writing boxes!
+        self.ln(15)
         
         # --- WHATSAPP QUESTION ---
-        curr_y = self.get_y() + 9
+        curr_y = self.get_y()
         self.set_xy(x, curr_y)
-        self.cell(48, 6, u"এটি কি আপনার হোয়াটসঅ্যাপ নম্বর?")
+        self.cell(65, 8, u"এটি কি আপনার হোয়াটসঅ্যাপ নম্বর?")
         
         # Draw "Yes" and Box
-        self.set_x(x + 49)
-        self.cell(8, 6, u"হ্যাঁ")
-        self.rect(x + 56, curr_y + 1.5, 3.5, 3.5) # Drawn Square Box
+        self.set_x(x + 70)
+        self.cell(10, 8, u"হ্যাঁ")
+        self.rect(x + 80, curr_y + 1.5, 5, 5) # 5mm checkbox
         
         # Draw "No" and Box
-        self.set_x(x + 62)
-        self.cell(8, 6, u"না")
-        self.rect(x + 68, curr_y + 1.5, 3.5, 3.5) # Drawn Square Box
+        self.set_x(x + 90)
+        self.cell(10, 8, u"না")
+        self.rect(x + 100, curr_y + 1.5, 5, 5) # 5mm checkbox
         
-        self.set_xy(x, curr_y + 6)
-        self.cell(0, 6, u"হোয়াটসঅ্যাপ নম্বর না হলে সেটি দিন:", ln=True)
-        self.draw_digit_boxes(x, self.get_y() + 1)
+        self.set_xy(x, curr_y + 10)
+        self.cell(0, 8, u"হোয়াটসঅ্যাপ নম্বর না হলে সেটি দিন:", ln=True)
+        self.draw_digit_boxes(x, self.get_y() + 2, box_size=8) # 8mm writing boxes
         
         # --- Signature Line ---
-        curr_y = self.get_y() + 14
-        self.set_font('Helvetica', '', 7)
-        self.text(x, curr_y, "______________________")
-        self.text(x + 60, curr_y, "______________________")
+        # Positioned near the bottom of the A5 page
+        curr_y = 180 
+        self.set_font('Helvetica', '', 10)
+        self.text(x, curr_y, "__________________________")
+        self.text(x + 75, curr_y, "__________________________")
         
-        self.set_font('Bengali', '', 8)
-        self.set_xy(x, curr_y + 1)
-        self.cell(40, 5, u"অভিভাবকের স্বাক্ষর")
-        self.set_xy(x + 60, curr_y + 1)
-        self.cell(30, 5, u"তারিখ")
+        self.set_font('Bengali', '', 10)
+        self.set_xy(x, curr_y + 2)
+        self.cell(40, 6, u"অভিভাবকের স্বাক্ষর")
+        self.set_xy(x + 75, curr_y + 2)
+        self.cell(40, 6, u"তারিখ")
 
 # --- 3. Streamlit UI ---
 st.set_page_config(page_title="BPS Survey Generator", layout="wide") 
-st.title("📋 BPS Guardian Update Form")
+st.title("📋 BPS Guardian Update Form (A5 Format)")
 
 if df.empty:
     st.error("⚠️ 'students.csv' not found or is empty.")
@@ -138,7 +141,7 @@ if df.empty:
 
 # Ensure missing sections don't break the dropdown
 if 'Section' not in df.columns:
-    df['Section'] = "A" # Default fallback
+    df['Section'] = "A" 
 df['Section'] = df['Section'].fillna("N/A").astype(str)
 
 # --- Class & Section Selection Logic ---
@@ -148,14 +151,12 @@ with col1:
     available_classes = sorted(df['Class'].dropna().unique())
     selected_class = st.selectbox("1. Select Class:", available_classes)
 
-# Filter dataframe by selected class
 class_df = df[df['Class'] == selected_class]
 
 with col2:
     available_sections = sorted(class_df['Section'].unique())
     selected_section = st.selectbox("2. Select Section:", available_sections)
 
-# Filter dataframe further by selected section
 final_df = class_df[class_df['Section'] == selected_section]
 
 with col3:
@@ -172,30 +173,27 @@ with col3:
         )
 
 # --- Generation Button ---
-if st.button("Generate PDF Forms", type="primary"):
+if st.button("Generate A5 PDF Forms", type="primary"):
     if not selected_indices:
         st.warning("Please select at least one student.")
     else:
-        with st.spinner(f"Generating PDF for {selected_class} - {selected_section}..."):
+        with st.spinner(f"Generating A5 PDF for {selected_class} - {selected_section}..."):
             pdf = BPS_Survey()
             
-            for i in range(0, len(selected_indices), 4):
+            # CHANGED: 1 Form = 1 Page
+            for idx in selected_indices:
                 pdf.add_page()
-                quadrant_coords = [(7, 7), (107, 7), (7, 150), (107, 150)]
-                
-                for j in range(4):
-                    if i + j < len(selected_indices):
-                        student_data = df.loc[selected_indices[i + j]]
-                        current_coords = quadrant_coords[j]
-                        pdf.draw_single_form(current_coords[0], current_coords[1], student_data)
+                student_data = df.loc[idx]
+                # We no longer need coordinate arrays; it uses standard margins inside the class
+                pdf.draw_single_form(student_data)
             
             pdf_bytes = bytes(pdf.output())
             
-        st.success(f"Successfully generated {len(selected_indices)} forms!")
+        st.success(f"Successfully generated {len(selected_indices)} A5 pages!")
         
         st.download_button(
             label="⬇️ Download Survey Forms (PDF)", 
             data=pdf_bytes, 
-            file_name=f"BPS_Surveys_Class_{selected_class}_Sec_{selected_section}.pdf",
+            file_name=f"BPS_Surveys_A5_Class_{selected_class}_Sec_{selected_section}.pdf",
             mime="application/pdf"
         )

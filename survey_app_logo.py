@@ -122,35 +122,46 @@ class BPS_Survey(FPDF):
         self.cell(30, 5, u"তারিখ")
 
 # --- 3. Streamlit UI ---
-st.set_page_config(page_title="BPS Survey Generator", layout="centered")
+st.set_page_config(page_title="BPS Survey Generator", layout="wide") # Changed to wide layout for 3 columns
 st.title("📋 BPS Guardian Update Form")
 
 if df.empty:
     st.error("⚠️ 'students.csv' not found or is empty.")
     st.stop()
 
-# --- NEW: Class-wise Selection Logic ---
-col1, col2 = st.columns([1, 2])
+# Ensure missing sections don't break the dropdown
+if 'Section' not in df.columns:
+    df['Section'] = "A" # Default fallback
+df['Section'] = df['Section'].fillna("N/A").astype(str)
+
+# --- Class & Section Selection Logic ---
+col1, col2, col3 = st.columns([1, 1, 2])
 
 with col1:
-    # Get unique classes and sort them (handle NaN values if any exist)
     available_classes = sorted(df['Class'].dropna().unique())
     selected_class = st.selectbox("1. Select Class:", available_classes)
 
-# Filter the dataframe to only show students in the selected class
+# Filter dataframe by selected class
 class_df = df[df['Class'] == selected_class]
 
 with col2:
-    st.write(f"**2. Select Students in Class {selected_class}:**")
-    select_all = st.checkbox(f"Select All {len(class_df)} Students", value=True)
+    available_sections = sorted(class_df['Section'].unique())
+    selected_section = st.selectbox("2. Select Section:", available_sections)
+
+# Filter dataframe further by selected section
+final_df = class_df[class_df['Section'] == selected_section]
+
+with col3:
+    st.write(f"**3. Students in {selected_class} - {selected_section}:**")
+    select_all = st.checkbox(f"Select All {len(final_df)} Students", value=True)
     
     if select_all:
-        selected_indices = class_df.index.tolist()
+        selected_indices = final_df.index.tolist()
     else:
         selected_indices = st.multiselect(
             "Choose specific students:", 
-            class_df.index, 
-            format_func=lambda i: f"{class_df.loc[i]['Name']} (Roll: {class_df.loc[i].get('Roll', 'N/A')})"
+            final_df.index, 
+            format_func=lambda i: f"{final_df.loc[i]['Name']} (Roll: {final_df.loc[i].get('Roll', 'N/A')})"
         )
 
 # --- Generation Button ---
@@ -158,7 +169,7 @@ if st.button("Generate PDF Forms", type="primary"):
     if not selected_indices:
         st.warning("Please select at least one student.")
     else:
-        with st.spinner(f"Generating PDF for Class {selected_class}..."):
+        with st.spinner(f"Generating PDF for {selected_class} - {selected_section}..."):
             pdf = BPS_Survey()
             
             for i in range(0, len(selected_indices), 4):
@@ -167,18 +178,17 @@ if st.button("Generate PDF Forms", type="primary"):
                 
                 for j in range(4):
                     if i + j < len(selected_indices):
-                        # Use .loc because selected_indices are the actual dataframe indices
                         student_data = df.loc[selected_indices[i + j]]
                         current_coords = quadrant_coords[j]
                         pdf.draw_single_form(current_coords[0], current_coords[1], student_data)
             
             pdf_bytes = bytes(pdf.output())
             
-        st.success(f"Successfully generated {len(selected_indices)} forms for Class {selected_class}!")
+        st.success(f"Successfully generated {len(selected_indices)} forms!")
         
         st.download_button(
             label="⬇️ Download Survey Forms (PDF)", 
             data=pdf_bytes, 
-            file_name=f"BPS_Surveys_Class_{selected_class}.pdf",
+            file_name=f"BPS_Surveys_Class_{selected_class}_Sec_{selected_section}.pdf",
             mime="application/pdf"
         )

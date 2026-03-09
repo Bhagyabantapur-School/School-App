@@ -19,6 +19,9 @@ class BPS_Survey(FPDF):
         super().__init__(orientation='P', unit='mm', format='A5')
         self.add_font('Bengali', '', 'Bengali.ttf')
         self.set_text_shaping(True) # HarfBuzz engine for correct conjuncts
+        
+        # FIX 1: Prevent FPDF from secretly pushing text to a second page
+        self.set_auto_page_break(auto=False)
 
     def draw_digit_boxes(self, x, y, box_size=8):
         """Draws 10 consecutive boxes for 10-digit phone numbers"""
@@ -27,14 +30,13 @@ class BPS_Survey(FPDF):
 
     def draw_single_form(self, row):
         """Draws exactly one survey form taking up the entire A5 page"""
-        # Standard margins for a full A5 page
         x = 10 
         y = 10
         self.set_xy(x, y)
         
         # --- School Logo ---
         try:
-            self.image('logo.png', x, y, 20) # Scaled up for full page
+            self.image('logo.png', x, y, 20) 
         except:
             self.rect(x, y, 20, 20)
             self.set_font('Helvetica', 'B', 8)
@@ -51,9 +53,8 @@ class BPS_Survey(FPDF):
         
         # --- Student Info Table ---
         curr_y = 35 
-        self.rect(x, curr_y, 128, 36) # Made taller to fit 4 rows
+        self.rect(x, curr_y, 128, 36) 
         
-        # Safe fetches for Mobile and DOB
         mobile_val = str(row['Mobile']).split('.')[0] if pd.notna(row['Mobile']) and str(row['Mobile']).strip() != "" else "N/A"
         dob_val = str(row['DOB']) if 'DOB' in row and pd.notna(row['DOB']) else "N/A"
         
@@ -92,12 +93,12 @@ class BPS_Survey(FPDF):
         # Draw "Yes" and Box
         self.set_x(x + 65)
         self.cell(10, 8, u"হ্যাঁ")
-        self.rect(x + 75, curr_y + 1.5, 5, 5) # 5mm checkbox
+        self.rect(x + 75, curr_y + 1.5, 5, 5) 
         
         # Draw "No" and Box
         self.set_x(x + 85)
         self.cell(10, 8, u"না")
-        self.rect(x + 95, curr_y + 1.5, 5, 5) # 5mm checkbox
+        self.rect(x + 95, curr_y + 1.5, 5, 5) 
         
         self.set_xy(x, curr_y + 10)
         self.cell(0, 8, u"সঠিক না হলে, সঠিক নম্বরটি দিন:", ln=True)
@@ -112,19 +113,19 @@ class BPS_Survey(FPDF):
         # Draw "Yes" and Box
         self.set_x(x + 70)
         self.cell(10, 8, u"হ্যাঁ")
-        self.rect(x + 80, curr_y + 1.5, 5, 5) # 5mm checkbox
+        self.rect(x + 80, curr_y + 1.5, 5, 5) 
         
         # Draw "No" and Box
         self.set_x(x + 90)
         self.cell(10, 8, u"না")
-        self.rect(x + 100, curr_y + 1.5, 5, 5) # 5mm checkbox
+        self.rect(x + 100, curr_y + 1.5, 5, 5) 
         
         self.set_xy(x, curr_y + 10)
         self.cell(0, 8, u"হোয়াটসঅ্যাপ নম্বর না হলে সেটি দিন:", ln=True)
         self.draw_digit_boxes(x, self.get_y() + 2, box_size=8)
         self.ln(15)
         
-        # --- NEW: SC/ST/OBC QUESTION ---
+        # --- SC/ST/OBC QUESTION ---
         curr_y = self.get_y()
         self.set_xy(x, curr_y)
         self.cell(82, 8, u"ছাত্র/ছাত্রীর কি SC / ST / OBC সার্টিফিকেট আছে?")
@@ -132,18 +133,20 @@ class BPS_Survey(FPDF):
         # Draw "Yes" and Box
         self.set_x(x + 85)
         self.cell(10, 8, u"হ্যাঁ")
-        self.rect(x + 95, curr_y + 1.5, 5, 5) # 5mm checkbox
+        self.rect(x + 95, curr_y + 1.5, 5, 5) 
         
         # Draw "No" and Box
         self.set_x(x + 105)
         self.cell(10, 8, u"না")
-        self.rect(x + 115, curr_y + 1.5, 5, 5) # 5mm checkbox
+        self.rect(x + 115, curr_y + 1.5, 5, 5) 
         
         self.set_xy(x, curr_y + 10)
         self.cell(0, 8, u"হ্যাঁ হলে, সার্টিফিকেটের জেরক্স (Xerox) কপি জমা দিন।", ln=True)
         
         # --- Signature Line ---
-        curr_y = 185 # Locked to the bottom of the A5 page
+        # FIX 2: Dynamically calculate Y position based on previous line to stay on page
+        curr_y = self.get_y() + 15 
+        
         self.set_font('Helvetica', '', 10)
         self.text(x, curr_y, "__________________________")
         self.text(x + 75, curr_y, "__________________________")

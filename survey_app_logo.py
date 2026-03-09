@@ -19,9 +19,11 @@ class BPS_Survey(FPDF):
         super().__init__(orientation='P', unit='mm', format='A4')
         
         # Load the Bengali font. 
-        # Make sure 'Bengali.ttf' is in the same folder as this script.
-        # NOTE: There is NO add_font('Helvetica') here, to prevent the ValueError.
         self.add_font('Bengali', '', 'Bengali.ttf')
+        
+        # --- THE FIX FOR BENGALI RENDERING ---
+        # Activates HarfBuzz to correctly position e-kars and conjuncts
+        self.set_text_shaping(True) 
 
     def draw_digit_boxes(self, x, y):
         """Draws 10 consecutive 6x6mm boxes for 10-digit phone numbers"""

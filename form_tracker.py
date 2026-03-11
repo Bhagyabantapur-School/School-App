@@ -78,20 +78,23 @@ def get_local_csv(file):
         except: return pd.DataFrame()
     return pd.DataFrame()
 
-# --- 4. LOAD DATA ---
+# --- 4. LOAD DATA (FIXED FOR EMPTY DATAFRAMES) ---
 students_df = get_local_csv('students.csv')
 if not students_df.empty and 'Section' not in students_df.columns: 
     students_df['Section'] = 'A'
 
 mdm_df = fetch_sheet_data('mdm_log')
-if not mdm_df.empty:
+if mdm_df.empty:
+    mdm_df = pd.DataFrame(columns=['Date', 'Teacher', 'Class', 'Section', 'Roll', 'Name', 'Time', 'UID'])
+else:
     mdm_df['UID'] = mdm_df['Class'].astype(str) + "_" + mdm_df['Section'].astype(str) + "_" + mdm_df['Roll'].astype(str)
 
 form_df = fetch_sheet_data('form_distribution_log')
 expected_columns = ['Class', 'Section', 'Roll', 'Student Name', 'Date (form generated)', 'Date (receive form)']
 
 if form_df.empty:
-    form_df = pd.DataFrame(columns=expected_columns)
+    # Explicitly add the UID column so it exists even when blank
+    form_df = pd.DataFrame(columns=expected_columns + ['UID'])
 else:
     for col in expected_columns:
         if col not in form_df.columns:
@@ -171,7 +174,6 @@ with tab1:
 with tab2:
     st.subheader("Step 2: Sync with MDM & Auto-Distribute")
     
-    # UPDATED: Added Date Selector for MDM verification
     sync_date_obj = st.date_input("Select MDM Date to Sync", now.date(), key="t2_d")
     sync_date_str = sync_date_obj.strftime("%d-%m-%Y")
     
@@ -185,7 +187,7 @@ with tab2:
         if target_mdm.empty:
             st.warning(f"No MDM entries found for the selected date ({sync_date_str}).")
         else:
-            # Automatic Matching Engine (Runs instantly when date changes)
+            # Automatic Matching Engine
             target_mdm_uids = target_mdm['UID'].tolist()
             
             pending_forms = form_df[form_df['Date (receive form)'] == 'Pending']
@@ -208,7 +210,6 @@ with tab2:
             if not ready_to_distribute.empty:
                 st.dataframe(ready_to_distribute[['Class', 'Section', 'Roll', 'Student Name', 'Date (form generated)']], hide_index=True, use_container_width=True)
                 
-                # UPDATED: Single action button to prevent Streamlit reset issues
                 if st.button(f"📦 Confirm Distribution & Update Database for {sync_date_str}", type="primary"):
                     updated_form_df = form_df.copy()
                     mask = (updated_form_df['UID'].isin(target_mdm_uids)) & (updated_form_df['Date (receive form)'] == 'Pending')

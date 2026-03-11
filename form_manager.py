@@ -199,8 +199,10 @@ class BPS_Survey(FPDF):
 
 # --- 5. LOAD DATA ---
 students_df = get_local_csv('students.csv')
-if not students_df.empty and 'Section' not in students_df.columns: 
-    students_df['Section'] = 'A'
+if not students_df.empty:
+    if 'Section' not in students_df.columns: 
+        students_df['Section'] = 'A'
+    students_df['UID'] = students_df['Class'].astype(str) + "_" + students_df['Section'].astype(str) + "_" + students_df['Roll'].astype(str)
 
 mdm_df = fetch_sheet_data('mdm_log')
 if mdm_df.empty:
@@ -209,10 +211,12 @@ else:
     mdm_df['UID'] = mdm_df['Class'].astype(str) + "_" + mdm_df['Section'].astype(str) + "_" + mdm_df['Roll'].astype(str)
 
 form_df = fetch_sheet_data('form_distribution_log')
+
 expected_columns = [
     'Class', 'Section', 'Roll', 'Student Name', 
     'Date (form generated)', 'Date (receive form)', 
-    'Date (returned)', 'Return Status'
+    'Date (returned)', 'Return Status',
+    'WhatsApp Added', 'WhatsApp Group'
 ]
 
 if form_df.empty:
@@ -220,17 +224,17 @@ if form_df.empty:
 else:
     for col in expected_columns:
         if col not in form_df.columns:
-            if col == 'Return Status' or col == 'Date (returned)':
-                form_df[col] = "Pending"
-            else:
-                form_df[col] = ""
+            if col == 'Return Status' or col == 'Date (returned)': form_df[col] = "Pending"
+            elif col == 'WhatsApp Added': form_df[col] = "No"
+            elif col == 'WhatsApp Group': form_df[col] = "None"
+            else: form_df[col] = ""
     form_df['UID'] = form_df['Class'].astype(str) + "_" + form_df['Section'].astype(str) + "_" + form_df['Roll'].astype(str)
 
 # --- 6. UI TABS ---
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "🖨️ 1. Generate Forms", 
+    "🖨️ 1. Generate", 
     "🤝 2. Distribute", 
-    "📥 3. Returns", 
+    "📥 3. Returns & WA", 
     "📊 4. Master Log", 
     "📈 5. Summary"
 ])
@@ -255,7 +259,6 @@ with tab1:
             gen_date_str = gen_date_obj.strftime("%d-%m-%Y")
             
         filtered_students = students_df[(students_df['Class'] == sel_class) & (students_df['Section'] == sel_sec)].copy()
-        filtered_students['UID'] = filtered_students['Class'].astype(str) + "_" + filtered_students['Section'].astype(str) + "_" + filtered_students['Roll'].astype(str)
         
         existing_uids = form_df['UID'].tolist() if not form_df.empty else []
         
@@ -315,7 +318,9 @@ with tab1:
                                 'Date (form generated)': gen_date_str, 
                                 'Date (receive form)': 'Pending',
                                 'Date (returned)': 'Pending',
-                                'Return Status': 'Pending'
+                                'Return Status': 'Pending',
+                                'WhatsApp Added': 'No',
+                                'WhatsApp Group': 'None'
                             })
                             
                         pdf_bytes = bytes(pdf.output())
@@ -377,7 +382,7 @@ with tab1:
                     st.error("Please select at least one student to re-print.")
 
 # ==========================================
-# TAB 2: MDM AUTO-DISTRIBUTE (FIXED LOGIC)
+# TAB 2: MDM AUTO-DISTRIBUTE
 # ==========================================
 with tab2:
     st.subheader("Step 2: Sync with MDM & Auto-Distribute")
@@ -412,24 +417,16 @@ with tab2:
             else:
                 target_mdm_uids = target_mdm['UID'].tolist()
                 
-                # We need all forms ever generated for this class to filter properly
                 all_class_forms = form_df[
                     (form_df['Class'].astype(str) == str(sel_class_t2)) & 
                     (form_df['Section'].astype(str) == str(sel_sec_t2))
                 ]
                 all_generated_uids = all_class_forms['UID'].tolist() if not all_class_forms.empty else []
-                
-                # Pending forms are only those waiting to be handed out
                 pending_forms = all_class_forms[all_class_forms['Date (receive form)'] == 'Pending']
                 
-                # Ready: In MDM today AND form is sitting on desk (Pending)
                 ready_to_distribute = pending_forms[pending_forms['UID'].isin(target_mdm_uids)].copy()
-                
-                # Missing: In MDM today BUT NO form was EVER generated (Not in all_generated_uids)
                 mdm_no_form_uids = [u for u in target_mdm_uids if u not in all_generated_uids]
                 missing_forms = target_mdm[target_mdm['UID'].isin(mdm_no_form_uids)]
-                
-                # Absent: Form is pending BUT student is NOT in MDM today
                 absent_forms = pending_forms[~pending_forms['UID'].isin(target_mdm_uids)]
                 
                 st.divider()
@@ -472,10 +469,10 @@ with tab2:
                     st.dataframe(absent_forms[['Class', 'Section', 'Roll', 'Student Name']], hide_index=True, use_container_width=True)
 
 # ==========================================
-# TAB 3: LOG RETURNED FORMS
+# TAB 3: LOG RETURNED FORMS & WHATSAPP
 # ==========================================
 with tab3:
-    st.subheader("Step 3: Log Returned & Checked Forms")
+    st.subheader("Step 3: Log Returns & Assign WhatsApp Groups")
     
     col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
@@ -489,15 +486,15 @@ with tab3:
         ret_date_str = ret_date_obj.strftime("%d-%m-%Y")
         
     if not form_df.empty:
-        target_df = form_df[
+        received_df = form_df[
             (form_df['Date (receive form)'] != 'Pending') & 
-            (form_df['Return Status'] != 'Complete') & 
             (form_df['Class'].astype(str) == str(sel_class_t3)) & 
             (form_df['Section'].astype(str) == str(sel_sec_t3))
-        ].copy()
+        ]
         
-        pending_returns_df = target_df[target_df['Return Status'] == 'Pending'].copy()
-        incomplete_returns_df = target_df[target_df['Return Status'] == 'Incomplete'].copy()
+        pending_returns_df = received_df[received_df['Return Status'] == 'Pending'].copy()
+        incomplete_returns_df = received_df[received_df['Return Status'] == 'Incomplete'].copy()
+        completed_returns_df = received_df[received_df['Return Status'] == 'Complete'].copy()
 
         st.divider()
 
@@ -528,10 +525,8 @@ with tab3:
                         uid = pending_returns_df.loc[idx, 'UID']
                         mask = updated_form_df['UID'] == uid
                         
-                        if is_complete:
-                            updated_form_df.loc[mask, 'Return Status'] = 'Complete'
-                        elif is_incomplete:
-                            updated_form_df.loc[mask, 'Return Status'] = 'Incomplete'
+                        if is_complete: updated_form_df.loc[mask, 'Return Status'] = 'Complete'
+                        elif is_incomplete: updated_form_df.loc[mask, 'Return Status'] = 'Incomplete'
                             
                         updated_form_df.loc[mask, 'Date (returned)'] = ret_date_str
                         changes_made += 1
@@ -541,8 +536,7 @@ with tab3:
                     overwrite_sheet_df('form_distribution_log', updated_form_df)
                     st.success(f"✅ Successfully updated {changes_made} new returns!")
                     st.rerun()
-                else:
-                    st.warning("No boxes ticked.")
+                else: st.warning("No boxes ticked.")
 
         st.divider()
 
@@ -564,11 +558,8 @@ with tab3:
             if st.button("💾 Save Fixed Forms", type="primary", key="btn_fix_ret"):
                 updated_form_df = form_df.copy()
                 changes_made = 0
-                
                 for idx in edited_fix_returns.index:
-                    is_fixed = edited_fix_returns.loc[idx, 'Fix & Mark Complete']
-                    
-                    if is_fixed:
+                    if edited_fix_returns.loc[idx, 'Fix & Mark Complete']:
                         uid = incomplete_returns_df.loc[idx, 'UID']
                         mask = updated_form_df['UID'] == uid
                         updated_form_df.loc[mask, 'Return Status'] = 'Complete'
@@ -580,8 +571,96 @@ with tab3:
                     overwrite_sheet_df('form_distribution_log', updated_form_df)
                     st.success(f"✅ Successfully completed {changes_made} forms!")
                     st.rerun()
+                else: st.warning("No boxes ticked to fix.")
+
+        st.divider()
+
+        # --- SECTION 3.3: WHATSAPP SYNC & CONTACT SAVING ---
+        st.markdown("#### 💬 3. WhatsApp Group Assignment & Contact Saving")
+        st.info("Click the 'Contact Name' cell and press Ctrl+C to copy. Edit the Mobile number if they provided a new one.")
+        
+        if completed_returns_df.empty:
+            st.success("No completed forms available for WhatsApp Assignment yet.")
+        else:
+            # Map Class to Graduation Year
+            grad_year_map = {
+                'CLASS V': '26', 'CLASS IV': '27', 
+                'CLASS III': '28', 'CLASS II': '29', 
+                'CLASS I': '30', 'CLASS PP': '31'
+            }
+
+            # Bring in Father Name and Mobile from main student database
+            wa_display_df = pd.merge(
+                completed_returns_df,
+                students_df[['UID', 'Father', 'Mobile']],
+                on='UID',
+                how='left'
+            )
+
+            # Build the Perfect Contact Name
+            wa_display_df['Grad Year'] = wa_display_df['Class'].map(grad_year_map).fillna('XX')
+            wa_display_df['Father'] = wa_display_df['Father'].fillna('Guardian')
+            wa_display_df['Contact Name (Copy)'] = "BPS " + wa_display_df['Grad Year'] + " " + wa_display_df['Student Name'] + " (" + wa_display_df['Father'] + ")"
+
+            # Prepare WA Data
+            wa_display_df['Suggested Group'] = "BPS " + wa_display_df['Class'].astype(str) + " " + wa_display_df['Section'].astype(str)
+            wa_display_df['Added to WA'] = wa_display_df['WhatsApp Added'].apply(lambda x: True if x == 'Yes' else False)
+            wa_display_df['Group Name'] = wa_display_df.apply(lambda r: r['Suggested Group'] if r['WhatsApp Group'] == 'None' else r['WhatsApp Group'], axis=1)
+
+            # Make Mobile Editable (string to avoid weird float formatting)
+            wa_display_df['Mobile'] = wa_display_df['Mobile'].fillna("").astype(str).str.replace('.0', '', regex=False)
+
+            edited_wa = st.data_editor(
+                wa_display_df[['Added to WA', 'Contact Name (Copy)', 'Mobile', 'Group Name']],
+                hide_index=True,
+                use_container_width=True,
+                disabled=['Contact Name (Copy)'] # Don't edit the auto-generated name
+            )
+            
+            if st.button("💾 Save WhatsApp Status & Updated Mobile Numbers", type="primary", key="btn_wa_sync"):
+                updated_form_df = form_df.copy()
+                updated_students_df = students_df.copy()
+                changes_made = 0
+                mobile_changes = 0
+                
+                for idx in edited_wa.index:
+                    is_added = edited_wa.loc[idx, 'Added to WA']
+                    group_name = edited_wa.loc[idx, 'Group Name']
+                    new_mobile = edited_wa.loc[idx, 'Mobile']
+                    uid = wa_display_df.loc[idx, 'UID']
+                    
+                    old_added = wa_display_df.loc[idx, 'WhatsApp Added']
+                    old_group = wa_display_df.loc[idx, 'WhatsApp Group']
+                    old_mobile = wa_display_df.loc[idx, 'Mobile']
+                    
+                    new_added_str = 'Yes' if is_added else 'No'
+                    
+                    # 1. Update WhatsApp Status in form DB
+                    if old_added != new_added_str or old_group != group_name:
+                        mask = updated_form_df['UID'] == uid
+                        updated_form_df.loc[mask, 'WhatsApp Added'] = new_added_str
+                        updated_form_df.loc[mask, 'WhatsApp Group'] = group_name if is_added else 'None'
+                        changes_made += 1
+                        
+                    # 2. Update Mobile Number in Master students DB
+                    if str(old_mobile) != str(new_mobile):
+                        s_mask = updated_students_df['UID'] == uid
+                        updated_students_df.loc[s_mask, 'Mobile'] = new_mobile
+                        mobile_changes += 1
+                        
+                if changes_made > 0:
+                    updated_form_df = updated_form_df.drop(columns=['UID'], errors='ignore')
+                    overwrite_sheet_df('form_distribution_log', updated_form_df)
+                    
+                if mobile_changes > 0:
+                    updated_students_df = updated_students_df.drop(columns=['UID'], errors='ignore')
+                    updated_students_df.to_csv('students.csv', index=False) # Safely update local CSV
+                    
+                if changes_made > 0 or mobile_changes > 0:
+                    st.success(f"✅ Successfully updated {changes_made} WhatsApp groups and {mobile_changes} Mobile numbers!")
+                    st.rerun()
                 else:
-                    st.warning("No boxes ticked to fix.")
+                    st.warning("No changes detected.")
 
 # ==========================================
 # TAB 4: MASTER LOG
@@ -617,30 +696,31 @@ with tab5:
         
         if not form_df.empty:
             gen_counts = form_df.groupby(['Class', 'Section']).size().reset_index(name='Forms Generated')
-            
             dist_df = form_df[form_df['Date (receive form)'] != 'Pending']
             dist_counts = dist_df.groupby(['Class', 'Section']).size().reset_index(name='Distributed')
-            
             comp_df = form_df[form_df['Return Status'] == 'Complete']
             comp_counts = comp_df.groupby(['Class', 'Section']).size().reset_index(name='Returned (Complete)')
-            
             incomp_df = form_df[form_df['Return Status'] == 'Incomplete']
             incomp_counts = incomp_df.groupby(['Class', 'Section']).size().reset_index(name='Returned (Incomplete)')
             
+            wa_df = form_df[form_df['WhatsApp Added'] == 'Yes']
+            wa_counts = wa_df.groupby(['Class', 'Section']).size().reset_index(name='WhatsApp Synced')
+
             summary_df = pd.merge(summary_df, gen_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, dist_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, comp_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, incomp_counts, on=['Class', 'Section'], how='left').fillna(0)
+            summary_df = pd.merge(summary_df, wa_counts, on=['Class', 'Section'], how='left').fillna(0)
             
             summary_df['Outstanding (With Guardian)'] = summary_df['Distributed'] - (summary_df['Returned (Complete)'] + summary_df['Returned (Incomplete)'])
             summary_df['Pending Desk Stack'] = summary_df['Forms Generated'] - summary_df['Distributed']
             summary_df['Not Generated Yet'] = summary_df['Total Students'] - summary_df['Forms Generated']
             
-            cols_to_int = ['Total Students', 'Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'Outstanding (With Guardian)', 'Pending Desk Stack', 'Not Generated Yet']
+            cols_to_int = ['Total Students', 'Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'WhatsApp Synced', 'Outstanding (With Guardian)', 'Pending Desk Stack', 'Not Generated Yet']
             for col in cols_to_int:
                 summary_df[col] = summary_df[col].astype(int)
         else:
-            for col in ['Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'Outstanding (With Guardian)', 'Pending Desk Stack']:
+            for col in ['Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'WhatsApp Synced', 'Outstanding (With Guardian)', 'Pending Desk Stack']:
                 summary_df[col] = 0
             summary_df['Not Generated Yet'] = summary_df['Total Students']
 
@@ -664,6 +744,7 @@ with tab5:
             'Distributed': summary_df['Distributed'].sum(),
             'Returned (Complete)': summary_df['Returned (Complete)'].sum(),
             'Returned (Incomplete)': summary_df['Returned (Incomplete)'].sum(),
+            'WhatsApp Synced': summary_df['WhatsApp Synced'].sum(),
             'Outstanding (With Guardian)': summary_df['Outstanding (With Guardian)'].sum(),
             'Pending Desk Stack': summary_df['Pending Desk Stack'].sum(),
             'Not Generated Yet': summary_df['Not Generated Yet'].sum()
@@ -672,12 +753,12 @@ with tab5:
         summary_df = pd.concat([summary_df, total_row], ignore_index=True)
 
         st.markdown("##### Overall School Progress")
-        
-        m1, m2, m3 = st.columns(3)
+        m1, m2, m3, m4 = st.columns(4)
         m1.metric("Total Students", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Total Students'].values[0])
         m2.metric("Forms Generated", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Forms Generated'].values[0])
         m3.metric("Forms Distributed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Distributed'].values[0])
-        
+        m4.metric("📱 WA Groups Synced", summary_df.loc[summary_df['Class'] == 'TOTAL', 'WhatsApp Synced'].values[0])
+
         st.markdown("<br>", unsafe_allow_html=True)
         r1, r2, r3, r4 = st.columns(4)
         r1.metric("✅ Complete Returns", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Returned (Complete)'].values[0])
@@ -686,7 +767,6 @@ with tab5:
         r4.metric("📭 Desk Stack (Not Given)", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Pending Desk Stack'].values[0])
         
         st.divider()
-        
         st.markdown("##### Detailed Breakdown by Section")
         st.dataframe(summary_df, hide_index=True, use_container_width=True)
         

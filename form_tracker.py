@@ -78,7 +78,7 @@ def get_local_csv(file):
         except: return pd.DataFrame()
     return pd.DataFrame()
 
-# --- 4. LOAD DATA (FIXED FOR EMPTY DATAFRAMES) ---
+# --- 4. LOAD DATA ---
 students_df = get_local_csv('students.csv')
 if not students_df.empty and 'Section' not in students_df.columns: 
     students_df['Section'] = 'A'
@@ -101,7 +101,7 @@ else:
     form_df['UID'] = form_df['Class'].astype(str) + "_" + form_df['Section'].astype(str) + "_" + form_df['Roll'].astype(str)
 
 # --- 5. UI TABS ---
-tab1, tab2, tab3 = st.tabs(["🖨️ 1. Log Generated Forms", "🤝 2. MDM Auto-Distribute", "📊 3. Master Log"])
+tab1, tab2, tab3, tab4 = st.tabs(["🖨️ 1. Log Generated Forms", "🤝 2. MDM Auto-Distribute", "📊 3. Master Log", "📈 4. Summary & Progress"])
 
 # ==========================================
 # TAB 1: LOG PRINTED FORMS
@@ -176,7 +176,6 @@ with tab2:
     if students_df.empty:
         st.warning("No student data found in students.csv.")
     else:
-        # UPDATED: Added Class and Section filters to Tab 2
         col1, col2, col3 = st.columns([1, 1, 1])
         with col1:
             classes_t2 = sorted(students_df['Class'].dropna().unique())
@@ -193,7 +192,6 @@ with tab2:
         if mdm_df.empty:
             st.error("No MDM data found in the database. Please ensure teachers have submitted MDM.")
         else:
-            # Filter MDM specifically by Date, Class, and Section
             target_mdm = mdm_df[
                 (mdm_df['Date'].astype(str) == sync_date_str) & 
                 (mdm_df['Class'].astype(str) == str(sel_class_t2)) & 
@@ -203,10 +201,8 @@ with tab2:
             if target_mdm.empty:
                 st.warning(f"No MDM entries found for {sel_class_t2} - {sel_sec_t2} on the selected date ({sync_date_str}).")
             else:
-                # Automatic Matching Engine scoped to the selected class/section
                 target_mdm_uids = target_mdm['UID'].tolist()
                 
-                # Filter pending forms to only look at the selected class and section
                 pending_forms = form_df[
                     (form_df['Date (receive form)'] == 'Pending') & 
                     (form_df['Class'].astype(str) == str(sel_class_t2)) & 
@@ -214,14 +210,9 @@ with tab2:
                 ]
                 pending_uids = pending_forms['UID'].tolist() if not pending_forms.empty else []
                 
-                # 1. MATCH: In MDM and has Pending Form
                 ready_to_distribute = pending_forms[pending_forms['UID'].isin(target_mdm_uids)].copy()
-                
-                # 2. MISSING FORM: In MDM but NO Pending Form
                 mdm_no_form_uids = [u for u in target_mdm_uids if u not in pending_uids]
                 missing_forms = target_mdm[target_mdm['UID'].isin(mdm_no_form_uids)]
-                
-                # 3. ABSENT: Has Pending Form but NOT in MDM
                 absent_forms = pending_forms[~pending_forms['UID'].isin(target_mdm_uids)]
                 
                 st.divider()
@@ -229,7 +220,6 @@ with tab2:
                 # UI: Ready to Distribute (WITH EDITABLE CHECKBOXES)
                 st.markdown(f"<div class='alert-box alert-success'><h4>✅ Ready to Distribute ({len(ready_to_distribute)})</h4><p>These students have forms printed AND are present for MDM today. Uncheck anyone who didn't actually receive the form.</p></div>", unsafe_allow_html=True)
                 if not ready_to_distribute.empty:
-                    
                     ready_to_distribute['Distributed'] = True
                     
                     edited_ready_df = st.data_editor(
@@ -287,3 +277,58 @@ with tab3:
                     st.rerun()
     else:
         st.info("No forms have been logged yet.")
+
+# ==========================================
+# TAB 4: SUMMARY & PROGRESS
+# ==========================================
+with tab4:
+    st.subheader("📈 Class-Wise Distribution Summary")
+    
+    if students_df.empty:
+        st.warning("No student data found to generate a summary.")
+    else:
+        # Calculate Base Student Totals
+        summary_df = students_df.groupby(['Class', 'Section']).size().reset_index(name='Total Students')
+        
+        if not form_df.empty:
+            # Calculate Generated Forms
+            gen_counts = form_df.groupby(['Class', 'Section']).size().reset_index(name='Forms Generated')
+            
+            # Calculate Distributed Forms
+            dist_df = form_df[form_df['Date (receive form)'] != 'Pending']
+            dist_counts = dist_df.groupby(['Class', 'Section']).size().reset_index(name='Distributed')
+            
+            # Merge all calculations
+            summary_df = pd.merge(summary_df, gen_counts, on=['Class', 'Section'], how='left').fillna(0)
+            summary_df = pd.merge(summary_df, dist_counts, on=['Class', 'Section'], how='left').fillna(0)
+            
+            # Calculate Pending & Not Generated
+            summary_df['Pending (Printed but not given)'] = summary_df['Forms Generated'] - summary_df['Distributed']
+            summary_df['Not Generated Yet'] = summary_df['Total Students'] - summary_df['Forms Generated']
+            
+            # Clean up floats to integers for a clean display
+            for col in ['Total Students', 'Forms Generated', 'Distributed', 'Pending (Printed but not given)', 'Not Generated Yet']:
+                summary_df[col] = summary_df[col].astype(int)
+        else:
+            # Fallback if no forms exist yet at all
+            summary_df['Forms Generated'] = 0
+            summary_df['Distributed'] = 0
+            summary_df['Pending (Printed but not given)'] = 0
+            summary_df['Not Generated Yet'] = summary_df['Total Students']
+
+        # --- Top Level Metrics ---
+        st.markdown("##### Overall School Progress")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total Students", summary_df['Total Students'].sum())
+        m2.metric("Forms Generated", summary_df['Forms Generated'].sum())
+        m3.metric("Forms Distributed", summary_df['Distributed'].sum(), delta=int(summary_df['Distributed'].sum()))
+        m4.metric("Pending Desk Stack", summary_df['Pending (Printed but not given)'].sum(), delta_color="inverse")
+        
+        st.divider()
+        
+        # --- Detail Table ---
+        st.markdown("##### Detailed Breakdown by Section")
+        st.dataframe(summary_df, hide_index=True, use_container_width=True)
+        
+        # Download button for the summary report
+        st.download_button("📥 Download Summary Report", summary_df.to_csv(index=False).encode('utf-8'), f"BPS_Summary_Report_{curr_date_str}.csv", "text/csv")

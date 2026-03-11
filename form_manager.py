@@ -236,14 +236,13 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 # ==========================================
-# TAB 1: GENERATE PDF & LOG (SPLIT SECTIONS)
+# TAB 1: GENERATE PDF & LOG
 # ==========================================
 with tab1:
     st.subheader("Step 1: Generate PDFs & Save to Database")
     if students_df.empty:
         st.warning("No student data found in students.csv.")
     else:
-        # 1. Global Selectors
         col1, col2, col3 = st.columns([1, 1, 1])
         with col1:
             classes = sorted(students_df['Class'].dropna().unique())
@@ -255,7 +254,6 @@ with tab1:
             gen_date_obj = st.date_input("Date to log on Database", now.date())
             gen_date_str = gen_date_obj.strftime("%d-%m-%Y")
             
-        # 2. Filter Students & Separate by DB Status
         filtered_students = students_df[(students_df['Class'] == sel_class) & (students_df['Section'] == sel_sec)].copy()
         filtered_students['UID'] = filtered_students['Class'].astype(str) + "_" + filtered_students['Section'].astype(str) + "_" + filtered_students['Roll'].astype(str)
         
@@ -379,7 +377,7 @@ with tab1:
                     st.error("Please select at least one student to re-print.")
 
 # ==========================================
-# TAB 2: MDM AUTO-DISTRIBUTE
+# TAB 2: MDM AUTO-DISTRIBUTE (FIXED LOGIC)
 # ==========================================
 with tab2:
     st.subheader("Step 2: Sync with MDM & Auto-Distribute")
@@ -414,16 +412,24 @@ with tab2:
             else:
                 target_mdm_uids = target_mdm['UID'].tolist()
                 
-                pending_forms = form_df[
-                    (form_df['Date (receive form)'] == 'Pending') & 
+                # We need all forms ever generated for this class to filter properly
+                all_class_forms = form_df[
                     (form_df['Class'].astype(str) == str(sel_class_t2)) & 
                     (form_df['Section'].astype(str) == str(sel_sec_t2))
                 ]
-                pending_uids = pending_forms['UID'].tolist() if not pending_forms.empty else []
+                all_generated_uids = all_class_forms['UID'].tolist() if not all_class_forms.empty else []
                 
+                # Pending forms are only those waiting to be handed out
+                pending_forms = all_class_forms[all_class_forms['Date (receive form)'] == 'Pending']
+                
+                # Ready: In MDM today AND form is sitting on desk (Pending)
                 ready_to_distribute = pending_forms[pending_forms['UID'].isin(target_mdm_uids)].copy()
-                mdm_no_form_uids = [u for u in target_mdm_uids if u not in pending_uids]
+                
+                # Missing: In MDM today BUT NO form was EVER generated (Not in all_generated_uids)
+                mdm_no_form_uids = [u for u in target_mdm_uids if u not in all_generated_uids]
                 missing_forms = target_mdm[target_mdm['UID'].isin(mdm_no_form_uids)]
+                
+                # Absent: Form is pending BUT student is NOT in MDM today
                 absent_forms = pending_forms[~pending_forms['UID'].isin(target_mdm_uids)]
                 
                 st.divider()
@@ -457,11 +463,11 @@ with tab2:
                         else:
                             st.warning("No students were selected for distribution.")
 
-                st.markdown(f"<div class='alert-box alert-warning'><h4>⚠️ Present but NO FORM ({len(missing_forms)})</h4><p>These students ate MDM, but no form has been generated for them yet.</p></div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='alert-box alert-warning'><h4>⚠️ Present but NO FORM ({len(missing_forms)})</h4><p>These students ate MDM today, but no form has been generated for them yet.</p></div>", unsafe_allow_html=True)
                 if not missing_forms.empty:
                     st.dataframe(missing_forms[['Class', 'Section', 'Roll', 'Name']], hide_index=True, use_container_width=True)
 
-                st.markdown(f"<div class='alert-box alert-info'><h4>📭 Form Pending but ABSENT ({len(absent_forms)})</h4><p>Forms are printed, but these students did not eat MDM. Do not distribute.</p></div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='alert-box alert-info'><h4>📭 Form Pending but ABSENT ({len(absent_forms)})</h4><p>Forms are printed, but these students did not eat MDM today. Do not distribute.</p></div>", unsafe_allow_html=True)
                 if not absent_forms.empty:
                     st.dataframe(absent_forms[['Class', 'Section', 'Roll', 'Student Name']], hide_index=True, use_container_width=True)
 

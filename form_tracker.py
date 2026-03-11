@@ -93,7 +93,6 @@ form_df = fetch_sheet_data('form_distribution_log')
 expected_columns = ['Class', 'Section', 'Roll', 'Student Name', 'Date (form generated)', 'Date (receive form)']
 
 if form_df.empty:
-    # Explicitly add the UID column so it exists even when blank
     form_df = pd.DataFrame(columns=expected_columns + ['UID'])
 else:
     for col in expected_columns:
@@ -205,20 +204,40 @@ with tab2:
             
             st.divider()
             
-            # UI: Ready to Distribute
-            st.markdown(f"<div class='alert-box alert-success'><h4>✅ Ready to Distribute ({len(ready_to_distribute)})</h4><p>These students have forms printed AND are present for MDM on {sync_date_str}.</p></div>", unsafe_allow_html=True)
+            # UI: Ready to Distribute (WITH EDITABLE CHECKBOXES)
+            st.markdown(f"<div class='alert-box alert-success'><h4>✅ Ready to Distribute ({len(ready_to_distribute)})</h4><p>These students have forms printed AND are present for MDM on {sync_date_str}. Uncheck anyone who didn't actually receive the form.</p></div>", unsafe_allow_html=True)
             if not ready_to_distribute.empty:
-                st.dataframe(ready_to_distribute[['Class', 'Section', 'Roll', 'Student Name', 'Date (form generated)']], hide_index=True, use_container_width=True)
+                
+                # Add a True boolean column for the checkboxes
+                ready_to_distribute['Distributed'] = True
+                
+                # Use data_editor so user can uncheck specific rows
+                edited_ready_df = st.data_editor(
+                    ready_to_distribute[['Distributed', 'Class', 'Section', 'Roll', 'Student Name', 'Date (form generated)']],
+                    hide_index=True,
+                    use_container_width=True,
+                    disabled=['Class', 'Section', 'Roll', 'Student Name', 'Date (form generated)'] # Lock everything except the checkbox
+                )
                 
                 if st.button(f"📦 Confirm Distribution & Update Database for {sync_date_str}", type="primary"):
-                    updated_form_df = form_df.copy()
-                    mask = (updated_form_df['UID'].isin(target_mdm_uids)) & (updated_form_df['Date (receive form)'] == 'Pending')
-                    updated_form_df.loc[mask, 'Date (receive form)'] = sync_date_str
+                    # Only take the students where the checkbox remained True
+                    actually_distributed = edited_ready_df[edited_ready_df['Distributed'] == True]
                     
-                    updated_form_df = updated_form_df.drop(columns=['UID'], errors='ignore')
-                    overwrite_sheet_df('form_distribution_log', updated_form_df)
-                    st.success(f"Database updated! Forms safely marked as received on {sync_date_str}.")
-                    st.rerun()
+                    if not actually_distributed.empty:
+                        # Map back to get the UIDs of only the selected students
+                        confirmed_uids = ready_to_distribute.loc[actually_distributed.index, 'UID'].tolist()
+                        
+                        updated_form_df = form_df.copy()
+                        mask = (updated_form_df['UID'].isin(confirmed_uids)) & (updated_form_df['Date (receive form)'] == 'Pending')
+                        updated_form_df.loc[mask, 'Date (receive form)'] = sync_date_str
+                        
+                        updated_form_df = updated_form_df.drop(columns=['UID'], errors='ignore')
+                        overwrite_sheet_df('form_distribution_log', updated_form_df)
+                        
+                        st.success(f"Database updated! {len(confirmed_uids)} Forms safely marked as received on {sync_date_str}.")
+                        st.rerun()
+                    else:
+                        st.warning("No students were selected for distribution.")
 
             # UI: Missing Form Alert
             st.markdown(f"<div class='alert-box alert-warning'><h4>⚠️ Present but NO FORM ({len(missing_forms)})</h4><p>These students ate MDM on {sync_date_str}, but no form has been generated for them yet.</p></div>", unsafe_allow_html=True)

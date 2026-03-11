@@ -55,33 +55,36 @@ class BPS_Survey(FPDF):
         curr_y = 35 
         self.rect(x, curr_y, 128, 36) 
         
-        # Safe fetch for Mobile
+        # Safe fetches for specific fields
         mobile_val = str(row['Mobile']).split('.')[0] if pd.notna(row['Mobile']) and str(row['Mobile']).strip() != "" else "N/A"
+        roll_val = str(row['Roll']).split('.')[0] if 'Roll' in row and pd.notna(row['Roll']) and str(row['Roll']).strip() != "" else "N/A"
         
-        # THE FIX: Format DOB to DD-MM-YYYY safely
+        # Format DOB to DD-MM-YYYY safely
         dob_val = "N/A"
         if 'DOB' in row and pd.notna(row['DOB']) and str(row['DOB']).strip() != "":
             try:
-                # Parses the date and converts it to the requested format
                 parsed_date = pd.to_datetime(row['DOB'], dayfirst=True)
                 dob_val = parsed_date.strftime('%d-%m-%Y')
             except:
-                # Fallback if the date format in the CSV is completely unrecognizable
                 dob_val = str(row['DOB'])
         
         self.set_font('Helvetica', '', 11)
         
-        # Row 1
+        # Row 1 (DOB placed at top right)
         self.text(x + 3, curr_y + 7, f"Student: {row['Name']}")
-        self.text(x + 70, curr_y + 7, f"Class: {row['Class']}")
-        # Row 2
+        self.text(x + 70, curr_y + 7, f"DOB: {dob_val}")
+        
+        # Row 2 (Class follows)
         self.text(x + 3, curr_y + 15, f"Father: {row['Father']}")
-        self.text(x + 70, curr_y + 15, f"Section: {row['Section']}")
-        # Row 3
+        self.text(x + 70, curr_y + 15, f"Class: {row['Class']}")
+        
+        # Row 3 (Section follows)
         self.text(x + 3, curr_y + 23, f"Mother: {row['Mother']}")
-        self.text(x + 70, curr_y + 23, f"DOB: {dob_val}")
-        # Row 4
+        self.text(x + 70, curr_y + 23, f"Section: {row['Section']}")
+        
+        # Row 4 (Roll at the bottom right)
         self.text(x + 3, curr_y + 31, f"Mobile: {mobile_val}")
+        self.text(x + 70, curr_y + 31, f"Roll: {roll_val}") 
         
         # --- Questions Section ---
         curr_y = 78

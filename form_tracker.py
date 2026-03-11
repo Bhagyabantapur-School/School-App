@@ -79,7 +79,7 @@ def get_local_csv(file):
         except: return pd.DataFrame()
     return pd.DataFrame()
 
-# --- 4. LOAD DATA (Upgraded to handle Return columns) ---
+# --- 4. LOAD DATA ---
 students_df = get_local_csv('students.csv')
 if not students_df.empty and 'Section' not in students_df.columns: 
     students_df['Section'] = 'A'
@@ -91,8 +91,6 @@ else:
     mdm_df['UID'] = mdm_df['Class'].astype(str) + "_" + mdm_df['Section'].astype(str) + "_" + mdm_df['Roll'].astype(str)
 
 form_df = fetch_sheet_data('form_distribution_log')
-
-# ADDED NEW COLUMNS for tracking returns
 expected_columns = [
     'Class', 'Section', 'Roll', 'Student Name', 
     'Date (form generated)', 'Date (receive form)', 
@@ -102,7 +100,6 @@ expected_columns = [
 if form_df.empty:
     form_df = pd.DataFrame(columns=expected_columns + ['UID'])
 else:
-    # Auto-upgrade existing database with new columns
     for col in expected_columns:
         if col not in form_df.columns:
             if col == 'Return Status' or col == 'Date (returned)':
@@ -290,8 +287,8 @@ with tab3:
         ret_date_obj = st.date_input("Return Date", now.date(), key="t3_d")
         ret_date_str = ret_date_obj.strftime("%d-%m-%Y")
         
-    # Only show students who HAVE received the form, but are NOT YET Complete.
     if not form_df.empty:
+        # Show students who received the form, but are NOT YET Complete
         return_target_df = form_df[
             (form_df['Date (receive form)'] != 'Pending') & 
             (form_df['Return Status'] != 'Complete') & 
@@ -302,50 +299,51 @@ with tab3:
         if return_target_df.empty:
             st.success(f"All distributed forms for {sel_class_t3} - {sel_sec_t3} have been returned and marked Complete!")
         else:
-            st.info(f"Showing students who received their form. Update their status below.")
+            st.info(f"Tick the box for students who brought their form back today.")
             
-            # Interactive Data Editor with Dropdowns for Status
+            # Setup the interactive columns
+            return_target_df['Mark Returned'] = False
+            
+            # Default to Complete, unless it was already marked Incomplete previously
+            return_target_df['Condition'] = return_target_df['Return Status'].apply(lambda x: 'Incomplete' if x == 'Incomplete' else 'Complete')
+            
+            # Interactive Data Editor with Checkbox
             edited_returns = st.data_editor(
-                return_target_df[['Roll', 'Student Name', 'Return Status', 'Date (receive form)']],
+                return_target_df[['Mark Returned', 'Roll', 'Student Name', 'Condition', 'Return Status', 'Date (receive form)']],
                 column_config={
-                    "Return Status": st.column_config.SelectboxColumn(
+                    "Condition": st.column_config.SelectboxColumn(
                         "Review Status",
-                        help="Select the status of the returned form",
-                        width="medium",
-                        options=["Pending", "Complete", "Incomplete"],
+                        help="Select if the form is fully filled or incomplete",
+                        options=["Complete", "Incomplete"],
                         required=True
                     )
                 },
                 hide_index=True,
                 use_container_width=True,
-                disabled=['Roll', 'Student Name', 'Date (receive form)']
+                disabled=['Roll', 'Student Name', 'Return Status', 'Date (receive form)']
             )
             
             if st.button(f"💾 Save Return Updates for {sel_class_t3} - {sel_sec_t3}", type="primary"):
-                updated_form_df = form_df.copy()
-                changes_made = 0
+                actually_returned = edited_returns[edited_returns['Mark Returned'] == True]
                 
-                # Compare edited rows with original
-                for idx in return_target_df.index:
-                    old_status = return_target_df.loc[idx, 'Return Status']
-                    new_status = edited_returns.loc[idx, 'Return Status']
+                if not actually_returned.empty:
+                    updated_form_df = form_df.copy()
                     
-                    if old_status != new_status:
-                        updated_form_df.loc[idx, 'Return Status'] = new_status
-                        # If status changed to Complete/Incomplete, update the date. If back to pending, reset date.
-                        if new_status in ['Complete', 'Incomplete']:
-                            updated_form_df.loc[idx, 'Date (returned)'] = ret_date_str
-                        else:
-                            updated_form_df.loc[idx, 'Date (returned)'] = "Pending"
-                        changes_made += 1
-                
-                if changes_made > 0:
+                    for idx in actually_returned.index:
+                        uid = return_target_df.loc[idx, 'UID']
+                        condition = actually_returned.loc[idx, 'Condition']
+                        
+                        mask = updated_form_df['UID'] == uid
+                        updated_form_df.loc[mask, 'Return Status'] = condition
+                        updated_form_df.loc[mask, 'Date (returned)'] = ret_date_str
+                        
                     updated_form_df = updated_form_df.drop(columns=['UID'], errors='ignore')
                     overwrite_sheet_df('form_distribution_log', updated_form_df)
-                    st.success(f"✅ Successfully updated {changes_made} return records!")
+                    
+                    st.success(f"✅ Successfully updated {len(actually_returned)} return records!")
                     st.rerun()
                 else:
-                    st.warning("No status changes were made.")
+                    st.warning("No students were ticked as returned.")
 
 # ==========================================
 # TAB 4: MASTER LOG
@@ -385,7 +383,6 @@ with tab5:
             dist_df = form_df[form_df['Date (receive form)'] != 'Pending']
             dist_counts = dist_df.groupby(['Class', 'Section']).size().reset_index(name='Distributed')
             
-            # New Calculations for Returns
             comp_df = form_df[form_df['Return Status'] == 'Complete']
             comp_counts = comp_df.groupby(['Class', 'Section']).size().reset_index(name='Returned (Complete)')
             
@@ -397,7 +394,6 @@ with tab5:
             summary_df = pd.merge(summary_df, comp_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, incomp_counts, on=['Class', 'Section'], how='left').fillna(0)
             
-            # Form Math
             summary_df['Outstanding (With Guardian)'] = summary_df['Distributed'] - (summary_df['Returned (Complete)'] + summary_df['Returned (Incomplete)'])
             summary_df['Pending Desk Stack'] = summary_df['Forms Generated'] - summary_df['Distributed']
             summary_df['Not Generated Yet'] = summary_df['Total Students'] - summary_df['Forms Generated']
@@ -410,7 +406,6 @@ with tab5:
                 summary_df[col] = 0
             summary_df['Not Generated Yet'] = summary_df['Total Students']
 
-        # Custom Sorting
         custom_dict = {
             'CLASS PP': 0, 'PP': 0,
             'CLASS I': 1, 'I': 1,
@@ -423,7 +418,6 @@ with tab5:
         summary_df['Sort_Order'] = summary_df['Class'].map(custom_dict).fillna(99)
         summary_df = summary_df.sort_values(by=['Sort_Order', 'Section']).drop(columns=['Sort_Order'])
 
-        # Total Row
         total_row = pd.DataFrame([{
             'Class': 'TOTAL',
             'Section': '',
@@ -439,16 +433,13 @@ with tab5:
         
         summary_df = pd.concat([summary_df, total_row], ignore_index=True)
 
-        # Top Level Metrics UI
         st.markdown("##### Overall School Progress")
         
-        # Row 1 of metrics
         m1, m2, m3 = st.columns(3)
         m1.metric("Total Students", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Total Students'].values[0])
         m2.metric("Forms Generated", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Forms Generated'].values[0])
         m3.metric("Forms Distributed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Distributed'].values[0])
         
-        # Row 2 of metrics
         st.markdown("<br>", unsafe_allow_html=True)
         r1, r2, r3, r4 = st.columns(4)
         r1.metric("✅ Complete Returns", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Returned (Complete)'].values[0])

@@ -236,13 +236,14 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 # ==========================================
-# TAB 1: GENERATE PDF & LOG
+# TAB 1: GENERATE PDF & LOG (SPLIT SECTIONS)
 # ==========================================
 with tab1:
     st.subheader("Step 1: Generate PDFs & Save to Database")
     if students_df.empty:
         st.warning("No student data found in students.csv.")
     else:
+        # 1. Global Selectors
         col1, col2, col3 = st.columns([1, 1, 1])
         with col1:
             classes = sorted(students_df['Class'].dropna().unique())
@@ -251,44 +252,63 @@ with tab1:
             sections = sorted(students_df[students_df['Class'] == sel_class]['Section'].unique())
             sel_sec = st.selectbox("Select Section", sections, key="t1_s")
         with col3:
-            gen_date_obj = st.date_input("Generation Date", now.date())
+            gen_date_obj = st.date_input("Date to log on Database", now.date())
             gen_date_str = gen_date_obj.strftime("%d-%m-%Y")
             
-        filtered_students = students_df[(students_df['Class'] == sel_class) & (students_df['Section'] == sel_sec)]
+        # 2. Filter Students & Separate by DB Status
+        filtered_students = students_df[(students_df['Class'] == sel_class) & (students_df['Section'] == sel_sec)].copy()
+        filtered_students['UID'] = filtered_students['Class'].astype(str) + "_" + filtered_students['Section'].astype(str) + "_" + filtered_students['Roll'].astype(str)
         
-        st.write(f"**Select students to generate forms for (Date: {gen_date_str}):**")
-        select_all = st.checkbox("Select All Students in this Section")
+        existing_uids = form_df['UID'].tolist() if not form_df.empty else []
         
-        if select_all:
-            selected_idx = filtered_students.index.tolist()
-        else:
-            selected_idx = st.multiselect(
-                "Choose specific students:", 
-                filtered_students.index, 
-                format_func=lambda i: f"Roll {filtered_students.loc[i].get('Roll', 'N/A')} - {filtered_students.loc[i]['Name']}"
-            )
+        unprinted_df = filtered_students[~filtered_students['UID'].isin(existing_uids)].copy()
+        printed_df = filtered_students[filtered_students['UID'].isin(existing_uids)].copy()
+
+        st.divider()
+        
+        # --- SECTION 1: NEW FORMS ---
+        st.markdown("#### 🆕 Section 1: Generate New Forms")
+        st.info("These students DO NOT have a form generated in the database yet.")
+        
+        filter_mode = st.radio("Filter unprinted students:", ["Show All Missing Forms", "Only Show Present Students (via MDM)"], horizontal=True)
+        
+        if filter_mode == "Only Show Present Students (via MDM)":
+            mdm_check_obj = st.date_input("Select MDM Date to Check Presence", now.date(), key="mdm_check_d")
+            mdm_check_str = mdm_check_obj.strftime("%d-%m-%Y")
             
-        if st.button("📄 Generate PDFs & Log to Database", type="primary"):
-            if selected_idx:
-                new_logs = []
-                pdf = BPS_Survey()
+            if mdm_df.empty:
+                st.warning("No MDM data found in the database.")
+                display_unprinted = pd.DataFrame()
+            else:
+                present_uids = mdm_df[mdm_df['Date'].astype(str) == mdm_check_str]['UID'].tolist()
+                display_unprinted = unprinted_df[unprinted_df['UID'].isin(present_uids)]
+        else:
+            display_unprinted = unprinted_df
+            
+        if display_unprinted.empty:
+            st.success("No students found matching this criteria!")
+        else:
+            select_all_new = st.checkbox(f"Select All {len(display_unprinted)} Students", key="sa_new")
+            if select_all_new:
+                selected_new_idx = display_unprinted.index.tolist()
+            else:
+                selected_new_idx = st.multiselect(
+                    "Choose specific students:", 
+                    display_unprinted.index, 
+                    format_func=lambda i: f"Roll {display_unprinted.loc[i].get('Roll', 'N/A')} - {display_unprinted.loc[i]['Name']}",
+                    key="ms_new"
+                )
                 
-                with st.spinner("Building PDFs and updating cloud database..."):
-                    for i in selected_idx:
-                        row = filtered_students.loc[i]
-                        uid = f"{row['Class']}_{row['Section']}_{row['Roll']}"
-                        
-                        # 1. GENERATE PDF PAGE
-                        pdf.add_page()
-                        pdf.draw_single_form(row)
-                        
-                        # 2. LOG TO DATABASE
-                        is_duplicate = False
-                        if not form_df.empty:
-                            existing = form_df[(form_df['UID'] == uid) & (form_df['Date (receive form)'] == "Pending")]
-                            if not existing.empty: is_duplicate = True
-                        
-                        if not is_duplicate:
+            if st.button("📄 Generate New PDFs & Log to Database", type="primary", key="btn_new"):
+                if selected_new_idx:
+                    with st.spinner("Building PDFs and updating cloud database..."):
+                        pdf = BPS_Survey()
+                        new_logs = []
+                        for i in selected_new_idx:
+                            row = display_unprinted.loc[i]
+                            pdf.add_page()
+                            pdf.draw_single_form(row)
+                            
                             new_logs.append({
                                 'Class': row['Class'], 
                                 'Section': row['Section'], 
@@ -299,24 +319,64 @@ with tab1:
                                 'Date (returned)': 'Pending',
                                 'Return Status': 'Pending'
                             })
-                    
-                    pdf_bytes = bytes(pdf.output())
-                    
-                    if new_logs:
-                        append_sheet_df('form_distribution_log', pd.DataFrame(new_logs))
-                        st.success(f"✅ {len(new_logs)} forms generated and safely logged to the database!")
-                    else:
-                        st.warning("PDFs built successfully! (No new database entries added because they were already marked 'Pending').")
-                
-                # Show Download Button immediately after generation
-                st.download_button(
-                    label="⬇️ Download Generated Survey Forms (PDF)", 
-                    data=pdf_bytes, 
-                    file_name=f"BPS_Surveys_{sel_class}_{sel_sec}.pdf",
-                    mime="application/pdf"
-                )
+                            
+                        pdf_bytes = bytes(pdf.output())
+                        
+                        if new_logs:
+                            append_sheet_df('form_distribution_log', pd.DataFrame(new_logs))
+                            st.success(f"✅ {len(new_logs)} forms safely logged to the database!")
+                            
+                        st.download_button(
+                            label="⬇️ Download New Survey Forms (PDF)", 
+                            data=pdf_bytes, 
+                            file_name=f"BPS_NEW_Surveys_{sel_class}_{sel_sec}.pdf",
+                            mime="application/pdf",
+                            key="dl_new"
+                        )
+                else:
+                    st.error("Please select at least one student.")
+
+        st.divider()
+
+        # --- SECTION 2: RE-PRINT FORMS ---
+        st.markdown("#### 🔄 Section 2: Re-Print Existing Forms")
+        st.warning("These students ALREADY have forms generated in the database. Generating here will NOT duplicate them.")
+        
+        if printed_df.empty:
+            st.success("No forms have been generated for this class/section yet.")
+        else:
+            select_all_rep = st.checkbox(f"Select All {len(printed_df)} Students", key="sa_rep")
+            if select_all_rep:
+                selected_rep_idx = printed_df.index.tolist()
             else:
-                st.error("Please select at least one student.")
+                selected_rep_idx = st.multiselect(
+                    "Choose specific students to re-print:", 
+                    printed_df.index, 
+                    format_func=lambda i: f"Roll {printed_df.loc[i].get('Roll', 'N/A')} - {printed_df.loc[i]['Name']}",
+                    key="ms_rep"
+                )
+                
+            if st.button("🖨️ Re-Print PDFs (No DB Update)", key="btn_rep"):
+                if selected_rep_idx:
+                    with st.spinner("Building PDFs..."):
+                        pdf = BPS_Survey()
+                        for i in selected_rep_idx:
+                            row = printed_df.loc[i]
+                            pdf.add_page()
+                            pdf.draw_single_form(row)
+                            
+                        pdf_bytes = bytes(pdf.output())
+                        st.success(f"✅ Successfully prepared {len(selected_rep_idx)} forms for re-print!")
+                        
+                        st.download_button(
+                            label="⬇️ Download Re-Print Survey Forms (PDF)", 
+                            data=pdf_bytes, 
+                            file_name=f"BPS_REPRINT_Surveys_{sel_class}_{sel_sec}.pdf",
+                            mime="application/pdf",
+                            key="dl_rep"
+                        )
+                else:
+                    st.error("Please select at least one student to re-print.")
 
 # ==========================================
 # TAB 2: MDM AUTO-DISTRIBUTE

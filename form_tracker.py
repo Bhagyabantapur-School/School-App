@@ -316,6 +316,21 @@ with tab4:
             summary_df['Pending (Printed but not given)'] = 0
             summary_df['Not Generated Yet'] = summary_df['Total Students']
 
+        # --- CUSTOM SORTING LOGIC ---
+        # Map specific values to force "Class PP" to be 0 (the top), and the rest in standard numerical order
+        custom_dict = {
+            'CLASS PP': 0, 'PP': 0,
+            'CLASS I': 1, 'I': 1,
+            'CLASS II': 2, 'II': 2,
+            'CLASS III': 3, 'III': 3,
+            'CLASS IV': 4, 'IV': 4,
+            'CLASS V': 5, 'V': 5
+        }
+        
+        # Apply the mapping to create a hidden sort column, sort it, then drop the sorting column
+        summary_df['Sort_Order'] = summary_df['Class'].map(custom_dict).fillna(99)
+        summary_df = summary_df.sort_values(by=['Sort_Order', 'Section']).drop(columns=['Sort_Order'])
+
         # --- Top Level Metrics ---
         st.markdown("##### Overall School Progress")
         m1, m2, m3, m4 = st.columns(4)

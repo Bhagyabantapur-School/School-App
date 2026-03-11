@@ -93,7 +93,6 @@ expected_columns = ['Class', 'Section', 'Roll', 'Student Name', 'Date (form gene
 if form_df.empty:
     form_df = pd.DataFrame(columns=expected_columns)
 else:
-    # Ensure all expected columns exist
     for col in expected_columns:
         if col not in form_df.columns:
             form_df[col] = ""
@@ -110,17 +109,23 @@ with tab1:
     if students_df.empty:
         st.warning("No student data found in students.csv.")
     else:
-        col1, col2 = st.columns(2)
+        # UPDATED: Added a third column for the Date Selector
+        col1, col2, col3 = st.columns([1, 1, 1])
         with col1:
             classes = sorted(students_df['Class'].dropna().unique())
             sel_class = st.selectbox("Select Class", classes, key="t1_c")
         with col2:
             sections = sorted(students_df[students_df['Class'] == sel_class]['Section'].unique())
             sel_sec = st.selectbox("Select Section", sections, key="t1_s")
+        with col3:
+            # Calendar widget defaults to today, but you can pick any date
+            gen_date_obj = st.date_input("Generation Date", now.date())
+            gen_date_str = gen_date_obj.strftime("%d-%m-%Y")
             
         filtered_students = students_df[(students_df['Class'] == sel_class) & (students_df['Section'] == sel_sec)]
         
-        st.write(f"**Select students whose forms were generated today ({curr_date_str}):**")
+        # UPDATED: UI text reflects the chosen date
+        st.write(f"**Select students whose forms were generated on {gen_date_str}:**")
         select_all = st.checkbox("Select All Students in this Section")
         
         if select_all:
@@ -139,7 +144,6 @@ with tab1:
                     row = filtered_students.loc[i]
                     uid = f"{row['Class']}_{row['Section']}_{row['Roll']}"
                     
-                    # Prevent duplicate active generation logs
                     is_duplicate = False
                     if not form_df.empty:
                         existing = form_df[(form_df['UID'] == uid) & (form_df['Date (receive form)'] == "Pending")]
@@ -151,13 +155,14 @@ with tab1:
                             'Section': row['Section'], 
                             'Roll': row['Roll'], 
                             'Student Name': row['Name'], 
-                            'Date (form generated)': curr_date_str, 
+                            'Date (form generated)': gen_date_str, # UPDATED: Uses selected date
                             'Date (receive form)': 'Pending'
                         })
                 
                 if new_logs:
                     append_sheet_df('form_distribution_log', pd.DataFrame(new_logs))
-                    st.success(f"✅ {len(new_logs)} forms marked as Generated for {sel_class} - {sel_sec}!")
+                    st.success(f"✅ {len(new_logs)} forms marked as Generated on {gen_date_str} for {sel_class} - {sel_sec}!")
+                    st.rerun() # Added rerun to instantly update the UI after saving
                 else:
                     st.warning("All selected students already have a 'Pending' form in the database.")
             else:

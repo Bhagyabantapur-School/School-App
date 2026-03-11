@@ -173,81 +173,99 @@ with tab1:
 with tab2:
     st.subheader("Step 2: Sync with MDM & Auto-Distribute")
     
-    sync_date_obj = st.date_input("Select MDM Date to Sync", now.date(), key="t2_d")
-    sync_date_str = sync_date_obj.strftime("%d-%m-%Y")
-    
-    st.info(f"Looking for students who ate MDM on **{sync_date_str}** and have a Pending form.")
-    
-    if mdm_df.empty:
-        st.error("No MDM data found in the database. Please ensure teachers have submitted MDM.")
+    if students_df.empty:
+        st.warning("No student data found in students.csv.")
     else:
-        target_mdm = mdm_df[mdm_df['Date'].astype(str) == sync_date_str]
+        # UPDATED: Added Class and Section filters to Tab 2
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col1:
+            classes_t2 = sorted(students_df['Class'].dropna().unique())
+            sel_class_t2 = st.selectbox("Select Class", classes_t2, key="t2_c")
+        with col2:
+            sections_t2 = sorted(students_df[students_df['Class'] == sel_class_t2]['Section'].unique())
+            sel_sec_t2 = st.selectbox("Select Section", sections_t2, key="t2_s")
+        with col3:
+            sync_date_obj = st.date_input("Select MDM Date to Sync", now.date(), key="t2_d")
+            sync_date_str = sync_date_obj.strftime("%d-%m-%Y")
         
-        if target_mdm.empty:
-            st.warning(f"No MDM entries found for the selected date ({sync_date_str}).")
+        st.info(f"Looking for **{sel_class_t2} - {sel_sec_t2}** students who ate MDM on **{sync_date_str}** and have a Pending form.")
+        
+        if mdm_df.empty:
+            st.error("No MDM data found in the database. Please ensure teachers have submitted MDM.")
         else:
-            # Automatic Matching Engine
-            target_mdm_uids = target_mdm['UID'].tolist()
+            # Filter MDM specifically by Date, Class, and Section
+            target_mdm = mdm_df[
+                (mdm_df['Date'].astype(str) == sync_date_str) & 
+                (mdm_df['Class'].astype(str) == str(sel_class_t2)) & 
+                (mdm_df['Section'].astype(str) == str(sel_sec_t2))
+            ]
             
-            pending_forms = form_df[form_df['Date (receive form)'] == 'Pending']
-            pending_uids = pending_forms['UID'].tolist() if not pending_forms.empty else []
-            
-            # 1. MATCH: In MDM and has Pending Form
-            ready_to_distribute = pending_forms[pending_forms['UID'].isin(target_mdm_uids)].copy()
-            
-            # 2. MISSING FORM: In MDM but NO Pending Form
-            mdm_no_form_uids = [u for u in target_mdm_uids if u not in pending_uids]
-            missing_forms = target_mdm[target_mdm['UID'].isin(mdm_no_form_uids)]
-            
-            # 3. ABSENT: Has Pending Form but NOT in MDM
-            absent_forms = pending_forms[~pending_forms['UID'].isin(target_mdm_uids)]
-            
-            st.divider()
-            
-            # UI: Ready to Distribute (WITH EDITABLE CHECKBOXES)
-            st.markdown(f"<div class='alert-box alert-success'><h4>✅ Ready to Distribute ({len(ready_to_distribute)})</h4><p>These students have forms printed AND are present for MDM on {sync_date_str}. Uncheck anyone who didn't actually receive the form.</p></div>", unsafe_allow_html=True)
-            if not ready_to_distribute.empty:
+            if target_mdm.empty:
+                st.warning(f"No MDM entries found for {sel_class_t2} - {sel_sec_t2} on the selected date ({sync_date_str}).")
+            else:
+                # Automatic Matching Engine scoped to the selected class/section
+                target_mdm_uids = target_mdm['UID'].tolist()
                 
-                # Add a True boolean column for the checkboxes
-                ready_to_distribute['Distributed'] = True
+                # Filter pending forms to only look at the selected class and section
+                pending_forms = form_df[
+                    (form_df['Date (receive form)'] == 'Pending') & 
+                    (form_df['Class'].astype(str) == str(sel_class_t2)) & 
+                    (form_df['Section'].astype(str) == str(sel_sec_t2))
+                ]
+                pending_uids = pending_forms['UID'].tolist() if not pending_forms.empty else []
                 
-                # Use data_editor so user can uncheck specific rows
-                edited_ready_df = st.data_editor(
-                    ready_to_distribute[['Distributed', 'Class', 'Section', 'Roll', 'Student Name', 'Date (form generated)']],
-                    hide_index=True,
-                    use_container_width=True,
-                    disabled=['Class', 'Section', 'Roll', 'Student Name', 'Date (form generated)'] # Lock everything except the checkbox
-                )
+                # 1. MATCH: In MDM and has Pending Form
+                ready_to_distribute = pending_forms[pending_forms['UID'].isin(target_mdm_uids)].copy()
                 
-                if st.button(f"📦 Confirm Distribution & Update Database for {sync_date_str}", type="primary"):
-                    # Only take the students where the checkbox remained True
-                    actually_distributed = edited_ready_df[edited_ready_df['Distributed'] == True]
+                # 2. MISSING FORM: In MDM but NO Pending Form
+                mdm_no_form_uids = [u for u in target_mdm_uids if u not in pending_uids]
+                missing_forms = target_mdm[target_mdm['UID'].isin(mdm_no_form_uids)]
+                
+                # 3. ABSENT: Has Pending Form but NOT in MDM
+                absent_forms = pending_forms[~pending_forms['UID'].isin(target_mdm_uids)]
+                
+                st.divider()
+                
+                # UI: Ready to Distribute (WITH EDITABLE CHECKBOXES)
+                st.markdown(f"<div class='alert-box alert-success'><h4>✅ Ready to Distribute ({len(ready_to_distribute)})</h4><p>These students have forms printed AND are present for MDM today. Uncheck anyone who didn't actually receive the form.</p></div>", unsafe_allow_html=True)
+                if not ready_to_distribute.empty:
                     
-                    if not actually_distributed.empty:
-                        # Map back to get the UIDs of only the selected students
-                        confirmed_uids = ready_to_distribute.loc[actually_distributed.index, 'UID'].tolist()
+                    ready_to_distribute['Distributed'] = True
+                    
+                    edited_ready_df = st.data_editor(
+                        ready_to_distribute[['Distributed', 'Class', 'Section', 'Roll', 'Student Name', 'Date (form generated)']],
+                        hide_index=True,
+                        use_container_width=True,
+                        disabled=['Class', 'Section', 'Roll', 'Student Name', 'Date (form generated)']
+                    )
+                    
+                    if st.button(f"📦 Confirm Distribution & Update Database for {sel_class_t2} - {sel_sec_t2}", type="primary"):
+                        actually_distributed = edited_ready_df[edited_ready_df['Distributed'] == True]
                         
-                        updated_form_df = form_df.copy()
-                        mask = (updated_form_df['UID'].isin(confirmed_uids)) & (updated_form_df['Date (receive form)'] == 'Pending')
-                        updated_form_df.loc[mask, 'Date (receive form)'] = sync_date_str
-                        
-                        updated_form_df = updated_form_df.drop(columns=['UID'], errors='ignore')
-                        overwrite_sheet_df('form_distribution_log', updated_form_df)
-                        
-                        st.success(f"Database updated! {len(confirmed_uids)} Forms safely marked as received on {sync_date_str}.")
-                        st.rerun()
-                    else:
-                        st.warning("No students were selected for distribution.")
+                        if not actually_distributed.empty:
+                            confirmed_uids = ready_to_distribute.loc[actually_distributed.index, 'UID'].tolist()
+                            
+                            updated_form_df = form_df.copy()
+                            mask = (updated_form_df['UID'].isin(confirmed_uids)) & (updated_form_df['Date (receive form)'] == 'Pending')
+                            updated_form_df.loc[mask, 'Date (receive form)'] = sync_date_str
+                            
+                            updated_form_df = updated_form_df.drop(columns=['UID'], errors='ignore')
+                            overwrite_sheet_df('form_distribution_log', updated_form_df)
+                            
+                            st.success(f"Database updated! {len(confirmed_uids)} Forms safely marked as received on {sync_date_str}.")
+                            st.rerun()
+                        else:
+                            st.warning("No students were selected for distribution.")
 
-            # UI: Missing Form Alert
-            st.markdown(f"<div class='alert-box alert-warning'><h4>⚠️ Present but NO FORM ({len(missing_forms)})</h4><p>These students ate MDM on {sync_date_str}, but no form has been generated for them yet.</p></div>", unsafe_allow_html=True)
-            if not missing_forms.empty:
-                st.dataframe(missing_forms[['Class', 'Section', 'Roll', 'Name']], hide_index=True, use_container_width=True)
+                # UI: Missing Form Alert
+                st.markdown(f"<div class='alert-box alert-warning'><h4>⚠️ Present but NO FORM ({len(missing_forms)})</h4><p>These students ate MDM, but no form has been generated for them yet.</p></div>", unsafe_allow_html=True)
+                if not missing_forms.empty:
+                    st.dataframe(missing_forms[['Class', 'Section', 'Roll', 'Name']], hide_index=True, use_container_width=True)
 
-            # UI: Absent Alert
-            st.markdown(f"<div class='alert-box alert-info'><h4>📭 Form Pending but ABSENT ({len(absent_forms)})</h4><p>Forms are printed, but these students did not eat MDM on {sync_date_str}. Do not distribute.</p></div>", unsafe_allow_html=True)
-            if not absent_forms.empty:
-                st.dataframe(absent_forms[['Class', 'Section', 'Roll', 'Student Name']], hide_index=True, use_container_width=True)
+                # UI: Absent Alert
+                st.markdown(f"<div class='alert-box alert-info'><h4>📭 Form Pending but ABSENT ({len(absent_forms)})</h4><p>Forms are printed, but these students did not eat MDM. Do not distribute.</p></div>", unsafe_allow_html=True)
+                if not absent_forms.empty:
+                    st.dataframe(absent_forms[['Class', 'Section', 'Roll', 'Student Name']], hide_index=True, use_container_width=True)
 
 # ==========================================
 # TAB 3: MASTER LOG

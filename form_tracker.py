@@ -271,7 +271,7 @@ with tab2:
                     st.dataframe(absent_forms[['Class', 'Section', 'Roll', 'Student Name']], hide_index=True, use_container_width=True)
 
 # ==========================================
-# TAB 3: LOG RETURNED FORMS
+# TAB 3: LOG RETURNED FORMS (FIXED UI)
 # ==========================================
 with tab3:
     st.subheader("Step 3: Log Returned & Checked Forms")
@@ -299,48 +299,47 @@ with tab3:
         if return_target_df.empty:
             st.success(f"All distributed forms for {sel_class_t3} - {sel_sec_t3} have been returned and marked Complete!")
         else:
-            st.info(f"Tick the box for students who brought their form back today.")
+            st.info(f"Tick the appropriate box for students who brought their form back today.")
             
-            # Setup the interactive columns
-            return_target_df['Mark Returned'] = False
+            # Setup explicitly visible checkbox columns
+            return_target_df['Mark Complete'] = False
+            return_target_df['Mark Incomplete'] = False
             
-            # Default to Complete, unless it was already marked Incomplete previously
-            return_target_df['Condition'] = return_target_df['Return Status'].apply(lambda x: 'Incomplete' if x == 'Incomplete' else 'Complete')
-            
-            # Interactive Data Editor with Checkbox
+            # Interactive Data Editor with visible checkboxes
             edited_returns = st.data_editor(
-                return_target_df[['Mark Returned', 'Roll', 'Student Name', 'Condition', 'Return Status', 'Date (receive form)']],
-                column_config={
-                    "Condition": st.column_config.SelectboxColumn(
-                        "Review Status",
-                        help="Select if the form is fully filled or incomplete",
-                        options=["Complete", "Incomplete"],
-                        required=True
-                    )
-                },
+                return_target_df[['Mark Complete', 'Mark Incomplete', 'Roll', 'Student Name', 'Return Status', 'Date (receive form)']],
                 hide_index=True,
                 use_container_width=True,
                 disabled=['Roll', 'Student Name', 'Return Status', 'Date (receive form)']
             )
             
             if st.button(f"💾 Save Return Updates for {sel_class_t3} - {sel_sec_t3}", type="primary"):
-                actually_returned = edited_returns[edited_returns['Mark Returned'] == True]
+                updated_form_df = form_df.copy()
+                changes_made = 0
                 
-                if not actually_returned.empty:
-                    updated_form_df = form_df.copy()
+                # Check which rows had a box ticked
+                for idx in edited_returns.index:
+                    is_complete = edited_returns.loc[idx, 'Mark Complete']
+                    is_incomplete = edited_returns.loc[idx, 'Mark Incomplete']
                     
-                    for idx in actually_returned.index:
+                    # If they ticked either box
+                    if is_complete or is_incomplete:
                         uid = return_target_df.loc[idx, 'UID']
-                        condition = actually_returned.loc[idx, 'Condition']
-                        
                         mask = updated_form_df['UID'] == uid
-                        updated_form_df.loc[mask, 'Return Status'] = condition
-                        updated_form_df.loc[mask, 'Date (returned)'] = ret_date_str
                         
+                        # Priority to Complete if they accidentally check both
+                        if is_complete:
+                            updated_form_df.loc[mask, 'Return Status'] = 'Complete'
+                        elif is_incomplete:
+                            updated_form_df.loc[mask, 'Return Status'] = 'Incomplete'
+                            
+                        updated_form_df.loc[mask, 'Date (returned)'] = ret_date_str
+                        changes_made += 1
+                        
+                if changes_made > 0:
                     updated_form_df = updated_form_df.drop(columns=['UID'], errors='ignore')
                     overwrite_sheet_df('form_distribution_log', updated_form_df)
-                    
-                    st.success(f"✅ Successfully updated {len(actually_returned)} return records!")
+                    st.success(f"✅ Successfully updated {changes_made} return records!")
                     st.rerun()
                 else:
                     st.warning("No students were ticked as returned.")

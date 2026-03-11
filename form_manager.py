@@ -577,19 +577,17 @@ with tab3:
 
         # --- SECTION 3.3: WHATSAPP SYNC & CONTACT SAVING ---
         st.markdown("#### 💬 3. WhatsApp Group Assignment & Contact Saving")
-        st.info("Click the 'Contact Name' cell and press Ctrl+C to copy. Edit the Mobile number if they provided a new one.")
+        st.info("Edit the Mobile number if they provided a new one. Download the contacts to save them all to your phone instantly!")
         
         if completed_returns_df.empty:
             st.success("No completed forms available for WhatsApp Assignment yet.")
         else:
-            # Map Class to Graduation Year
             grad_year_map = {
                 'CLASS V': '26', 'CLASS IV': '27', 
                 'CLASS III': '28', 'CLASS II': '29', 
                 'CLASS I': '30', 'CLASS PP': '31'
             }
 
-            # Bring in Father Name and Mobile from main student database
             wa_display_df = pd.merge(
                 completed_returns_df,
                 students_df[['UID', 'Father', 'Mobile']],
@@ -597,24 +595,21 @@ with tab3:
                 how='left'
             )
 
-            # Build the Perfect Contact Name
             wa_display_df['Grad Year'] = wa_display_df['Class'].map(grad_year_map).fillna('XX')
             wa_display_df['Father'] = wa_display_df['Father'].fillna('Guardian')
             wa_display_df['Contact Name (Copy)'] = "BPS " + wa_display_df['Grad Year'] + " " + wa_display_df['Student Name'] + " (" + wa_display_df['Father'] + ")"
 
-            # Prepare WA Data
             wa_display_df['Suggested Group'] = "BPS " + wa_display_df['Class'].astype(str) + " " + wa_display_df['Section'].astype(str)
             wa_display_df['Added to WA'] = wa_display_df['WhatsApp Added'].apply(lambda x: True if x == 'Yes' else False)
             wa_display_df['Group Name'] = wa_display_df.apply(lambda r: r['Suggested Group'] if r['WhatsApp Group'] == 'None' else r['WhatsApp Group'], axis=1)
 
-            # Make Mobile Editable (string to avoid weird float formatting)
             wa_display_df['Mobile'] = wa_display_df['Mobile'].fillna("").astype(str).str.replace('.0', '', regex=False)
 
             edited_wa = st.data_editor(
                 wa_display_df[['Added to WA', 'Contact Name (Copy)', 'Mobile', 'Group Name']],
                 hide_index=True,
                 use_container_width=True,
-                disabled=['Contact Name (Copy)'] # Don't edit the auto-generated name
+                disabled=['Contact Name (Copy)'] 
             )
             
             if st.button("💾 Save WhatsApp Status & Updated Mobile Numbers", type="primary", key="btn_wa_sync"):
@@ -631,18 +626,16 @@ with tab3:
                     
                     old_added = wa_display_df.loc[idx, 'WhatsApp Added']
                     old_group = wa_display_df.loc[idx, 'WhatsApp Group']
-                    old_mobile = wa_display_df.loc[idx, 'Mobile']
+                    old_mobile = str(wa_display_df.loc[idx, 'Mobile']).replace('.0', '')
                     
                     new_added_str = 'Yes' if is_added else 'No'
                     
-                    # 1. Update WhatsApp Status in form DB
                     if old_added != new_added_str or old_group != group_name:
                         mask = updated_form_df['UID'] == uid
                         updated_form_df.loc[mask, 'WhatsApp Added'] = new_added_str
                         updated_form_df.loc[mask, 'WhatsApp Group'] = group_name if is_added else 'None'
                         changes_made += 1
                         
-                    # 2. Update Mobile Number in Master students DB
                     if str(old_mobile) != str(new_mobile):
                         s_mask = updated_students_df['UID'] == uid
                         updated_students_df.loc[s_mask, 'Mobile'] = new_mobile
@@ -654,13 +647,57 @@ with tab3:
                     
                 if mobile_changes > 0:
                     updated_students_df = updated_students_df.drop(columns=['UID'], errors='ignore')
-                    updated_students_df.to_csv('students.csv', index=False) # Safely update local CSV
+                    updated_students_df.to_csv('students.csv', index=False)
                     
                 if changes_made > 0 or mobile_changes > 0:
                     st.success(f"✅ Successfully updated {changes_made} WhatsApp groups and {mobile_changes} Mobile numbers!")
                     st.rerun()
                 else:
                     st.warning("No changes detected.")
+
+            # --- BULK CONTACT EXPORT (vCard & Google CSV) ---
+            st.markdown("##### 📲 Bulk Save to Phone & Google Contacts")
+            col_vcf, col_csv = st.columns(2)
+            
+            # 1. vCard Data (For tapping on mobile)
+            vcard_data = ""
+            for _, row in wa_display_df.iterrows():
+                c_name = row['Contact Name (Copy)']
+                c_phone = str(row['Mobile']).strip()
+                if c_phone and c_phone != "N/A" and c_phone != "nan":
+                    vcard_data += f"BEGIN:VCARD\nVERSION:3.0\nFN:{c_name}\nTEL:{c_phone}\nEND:VCARD\n"
+            
+            with col_vcf:
+                st.info("📱 Best for Mobile Phones")
+                if vcard_data:
+                    st.download_button(
+                        label=f"📥 Download Mobile Contacts (.vcf)",
+                        data=vcard_data.encode('utf-8'),
+                        file_name=f"BPS_Contacts_{sel_class_t3}_{sel_sec_t3}.vcf",
+                        mime="text/vcard"
+                    )
+            
+            # 2. Google Contacts CSV Data (With Auto-Labels)
+            with col_csv:
+                st.info("💻 Best for contacts.google.com")
+                valid_contacts_df = wa_display_df[wa_display_df['Mobile'].str.strip() != ""]
+                valid_contacts_df = valid_contacts_df[valid_contacts_df['Mobile'].str.strip() != "nan"]
+                valid_contacts_df = valid_contacts_df[valid_contacts_df['Mobile'].str.strip() != "N/A"]
+                
+                if not valid_contacts_df.empty:
+                    google_csv_df = pd.DataFrame({
+                        'Name': valid_contacts_df['Contact Name (Copy)'],
+                        'Group Membership': valid_contacts_df['Group Name'],
+                        'Phone 1 - Type': 'Mobile',
+                        'Phone 1 - Value': valid_contacts_df['Mobile']
+                    })
+                    
+                    st.download_button(
+                        label=f"📥 Download Google Contacts (.csv)",
+                        data=google_csv_df.to_csv(index=False).encode('utf-8'),
+                        file_name=f"Google_BPS_Contacts_{sel_class_t3}_{sel_sec_t3}.csv",
+                        mime="text/csv"
+                    )
 
 # ==========================================
 # TAB 4: MASTER LOG

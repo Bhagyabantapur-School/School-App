@@ -626,7 +626,7 @@ with tab3:
                     
                     old_added = wa_display_df.loc[idx, 'WhatsApp Added']
                     old_group = wa_display_df.loc[idx, 'WhatsApp Group']
-                    old_mobile = str(wa_display_df.loc[idx, 'Mobile']).replace('.0', '')
+                    old_mobile = wa_display_df.loc[idx, 'Mobile']
                     
                     new_added_str = 'Yes' if is_added else 'No'
                     
@@ -700,17 +700,34 @@ with tab3:
                     )
 
 # ==========================================
-# TAB 4: MASTER LOG
+# TAB 4: MASTER LOG (UPGRADED - NOW EDITABLE)
 # ==========================================
 with tab4:
-    st.subheader("Database View: form_distribution_log")
+    st.subheader("Database View & Corrections")
     if not form_df.empty:
-        display_df = form_df.drop(columns=['UID'], errors='ignore')
-        st.dataframe(display_df, hide_index=True, use_container_width=True)
+        st.info("💡 **Made a mistake?** Edit any cell directly in the table below (like changing a status back to 'Pending') and click Save.")
         
-        col_csv, col_clear = st.columns([1, 1])
+        display_df = form_df.drop(columns=['UID'], errors='ignore')
+        
+        edited_master_df = st.data_editor(
+            display_df, 
+            num_rows="dynamic",
+            use_container_width=True,
+            key="master_editor"
+        )
+        
+        col_save, col_csv, col_clear = st.columns([2, 1, 1])
+        
+        with col_save:
+            if st.button("💾 Save Database Corrections", type="primary"):
+                edited_master_df['UID'] = edited_master_df['Class'].astype(str) + "_" + edited_master_df['Section'].astype(str) + "_" + edited_master_df['Roll'].astype(str)
+                overwrite_sheet_df('form_distribution_log', edited_master_df)
+                st.success("✅ Corrections saved to the cloud database successfully!")
+                st.rerun()
+
         with col_csv:
             st.download_button("📥 Download Master Log CSV", display_df.to_csv(index=False).encode('utf-8'), "BPS_Master_Log.csv", "text/csv")
+            
         with col_clear:
             with st.expander("⚠ Emergency Reset"):
                 if st.button("Clear Distribution Database"):

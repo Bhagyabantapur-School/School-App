@@ -78,7 +78,7 @@ def get_local_csv(file):
         except: return pd.DataFrame()
     return pd.DataFrame()
 
-# --- 4. LOAD DATA ---
+# --- 4. LOAD DATA (FIXED FOR EMPTY DATAFRAMES) ---
 students_df = get_local_csv('students.csv')
 if not students_df.empty and 'Section' not in students_df.columns: 
     students_df['Section'] = 'A'
@@ -317,7 +317,6 @@ with tab4:
             summary_df['Not Generated Yet'] = summary_df['Total Students']
 
         # --- CUSTOM SORTING LOGIC ---
-        # Map specific values to force "Class PP" to be 0 (the top), and the rest in standard numerical order
         custom_dict = {
             'CLASS PP': 0, 'PP': 0,
             'CLASS I': 1, 'I': 1,
@@ -327,17 +326,30 @@ with tab4:
             'CLASS V': 5, 'V': 5
         }
         
-        # Apply the mapping to create a hidden sort column, sort it, then drop the sorting column
         summary_df['Sort_Order'] = summary_df['Class'].map(custom_dict).fillna(99)
         summary_df = summary_df.sort_values(by=['Sort_Order', 'Section']).drop(columns=['Sort_Order'])
+
+        # --- APPEND TOTAL ROW ---
+        total_row = pd.DataFrame([{
+            'Class': 'TOTAL',
+            'Section': '',
+            'Total Students': summary_df['Total Students'].sum(),
+            'Forms Generated': summary_df['Forms Generated'].sum(),
+            'Distributed': summary_df['Distributed'].sum(),
+            'Pending (Printed but not given)': summary_df['Pending (Printed but not given)'].sum(),
+            'Not Generated Yet': summary_df['Not Generated Yet'].sum()
+        }])
+        
+        # Add the total row directly to the bottom
+        summary_df = pd.concat([summary_df, total_row], ignore_index=True)
 
         # --- Top Level Metrics ---
         st.markdown("##### Overall School Progress")
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Total Students", summary_df['Total Students'].sum())
-        m2.metric("Forms Generated", summary_df['Forms Generated'].sum())
-        m3.metric("Forms Distributed", summary_df['Distributed'].sum(), delta=int(summary_df['Distributed'].sum()))
-        m4.metric("Pending Desk Stack", summary_df['Pending (Printed but not given)'].sum(), delta_color="inverse")
+        m1.metric("Total Students", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Total Students'].values[0])
+        m2.metric("Forms Generated", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Forms Generated'].values[0])
+        m3.metric("Forms Distributed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Distributed'].values[0], delta=int(summary_df.loc[summary_df['Class'] == 'TOTAL', 'Distributed'].values[0]))
+        m4.metric("Pending Desk Stack", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Pending (Printed but not given)'].values[0], delta_color="inverse")
         
         st.divider()
         

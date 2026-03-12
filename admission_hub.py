@@ -1,14 +1,13 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from gspread_pandas import Spread, Client
+import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 
 # --- 1. CONFIG & SECURITY ---
 st.set_page_config(page_title="BPS Admission Hub", layout="wide")
 
-# Custom CSS for BPS Branding & Security (Watermark + No Selection)
 st.markdown(f"""
     <style>
     .stApp {{ background-color: #f0f2f6; }}
@@ -22,21 +21,27 @@ st.markdown(f"""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATABASE CONNECTION ---
+# --- 2. DATABASE CONNECTION (Fixed for standard gspread) ---
 @st.cache_resource
-def get_spread():
-    # Authenticate using Streamlit Secrets
-    scope = ["https://www.googleapis.com/auth/spreadsheets"]
-    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
-    return Spread("BPS_Database", creds=creds)
+def get_gspread_client():
+    # Define scopes for Google Sheets and Drive
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
+    client = gspread.authorize(creds)
+    return client
 
 def load_data():
-    spread = get_spread()
-    # Read the live students_master tab
-    df = spread.sheet_to_df(sheet="students_master", index=0)
-    return df
+    client = get_gspread_client()
+    # Open the database and get the specific sheet
+    sheet = client.open("BPS_Database").worksheet("students_master")
+    # Fetch all data and convert to Pandas DataFrame
+    records = sheet.get_all_records()
+    return pd.DataFrame(records)
 
-# Initialize Data in Session State to prevent constant reloading
+# Initialize Data in Session State
 if 'df' not in st.session_state:
     try:
         st.session_state.df = load_data()
@@ -53,16 +58,12 @@ if menu == "Data Analytics":
     st.title("📊 Student Population Analytics")
     df = st.session_state.df
     
-    # Top-level metrics
     col1, col2, col3 = st.columns(3)
     col1.metric("Total Students", len(df))
-    # Assuming the column is named 'Gender' or 'Sex' based on your CSV structure (using 'Gender' as per previous code)
     col2.metric("Boys", len(df[df['Gender'].str.upper() == 'BOYS']))
     col3.metric("Girls", len(df[df['Gender'].str.upper() == 'GIRLS']))
 
     st.subheader("Enrollment by Class")
-    
-    # Defining the order so LPP shows up first
     class_order = ['LPP', 'CLASS PP', 'CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV', 'CLASS V']
     
     fig = px.histogram(df, x="Class", color="Gender", barmode='group', 
@@ -82,7 +83,6 @@ elif menu == "New Admission":
         with col1:
             name = st.text_input("Student Name").upper()
             gender = st.selectbox("Gender", ["BOYS", "GIRLS"])
-            # LPP Class included here
             cls = st.selectbox("Class", ["LPP", "CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V"])
             sec = st.selectbox("Section", ["A", "B", "C"])
             roll = st.number_input("Roll Number", min_value=1, step=1)
@@ -98,37 +98,28 @@ elif menu == "New Admission":
         
         if submitted:
             if name and mobile:
-                # Calculate new Sl number
                 new_sl = len(st.session_state.df) + 1
-                
-                # Generate a temporary Student Code (BPS + Year + Roll)
                 student_code = f"BPS{datetime.now().year}{roll:03d}"
                 
-                # Prepare new row dictionary (Keys must match your Google Sheet headers exactly)
-                new_student = {
-                    "Sl": new_sl,
-                    "Name": name,
-                    "Gender": gender,
-                    "Class": cls,
-                    "Section": sec,
-                    "Roll": roll,
-                    "Father": father,
-                    "Mother": mother,
-                    "DOB": dob.strftime("%Y-%m-%d"),
-                    "BloodGroup": blood,
-                    "Mobile": mobile,
-                    "Student Code": student_code
-                }
+                # Create a list exactly matching the columns in your students_master.csv
+                # Sl, Name, Gender, Class, Section, Roll, Father, Mother, DOB, BloodGroup, Mobile, Student Code, Social Category, BSP ROLL, BSP SECTION, BSP CLASS
+                row_to_append = [
+                    new_sl, name, gender, cls, sec, roll, father, mother, 
+                    dob.strftime("%Y-%m-%d"), blood, mobile, student_code,
+                    "GENERAL", "", "", "" # Defaulting the last columns to blank/general
+                ]
                 
                 with st.spinner("Saving to BPS_Database..."):
                     try:
-                        # Append directly to Google Sheets
-                        spread = get_spread()
-                        spread.df_to_sheet(pd.DataFrame([new_student]), sheet="students_master", index=False, append=True)
+                        client = get_gspread_client()
+                        sheet = client.open("BPS_Database").worksheet("students_master")
+                        
+                        # Append the list directly to the bottom of the Google Sheet
+                        sheet.append_row(row_to_append)
                         
                         st.success(f"✅ Successfully admitted {name} to {cls} {sec}!")
                         
-                        # Refresh the cached data so analytics update immediately
+                        # Refresh the cached data
                         st.session_state.df = load_data() 
                     except Exception as e:
                         st.error(f"Failed to save student: {e}")
@@ -138,26 +129,12 @@ elif menu == "New Admission":
 # --- 6. SYSTEM SETTINGS ---
 elif menu == "System Settings":
     st.title("⚙️ System Settings & Data Explorer")
-    
     st.subheader("Class Configuration")
     st.info("Class **LPP (Lower Pre Primary) Section A** is currently active and available in the Admission portal.")
-        
     st.divider()
     
     st.subheader("Raw Master Data Explorer")
-    st.write("View the live data currently stored in the `students_master` tab.")
-    
-    # Add a quick class filter for the raw data
     selected_class = st.multiselect("Filter by Class", options=st.session_state.df['Class'].unique(), default=st.session_state.df['Class'].unique())
     filtered_df = st.session_state.df[st.session_state.df['Class'].isin(selected_class)]
     
     st.dataframe(filtered_df, use_container_width=True)
-    
-    # Download button for backup
-    csv = filtered_df.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="Download Filtered Data as CSV",
-        data=csv,
-        file_name='bps_students_backup.csv',
-        mime='text/csv',
-    )

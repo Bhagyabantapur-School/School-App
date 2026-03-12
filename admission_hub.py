@@ -21,7 +21,7 @@ st.markdown(f"""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATABASE CONNECTION (Fixed for standard gspread) ---
+# --- 2. DATABASE CONNECTION ---
 @st.cache_resource
 def get_gspread_client():
     # Define scopes for Google Sheets and Drive
@@ -64,7 +64,9 @@ if menu == "Data Analytics":
     col3.metric("Girls", len(df[df['Gender'].str.upper() == 'GIRLS']))
 
     st.subheader("Enrollment by Class")
-    class_order = ['LPP', 'CLASS PP', 'CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV', 'CLASS V']
+    
+    # Updated to 'CLASS LPP'
+    class_order = ['CLASS LPP', 'CLASS PP', 'CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV', 'CLASS V']
     
     fig = px.histogram(df, x="Class", color="Gender", barmode='group', 
                        category_orders={"Class": class_order},
@@ -83,7 +85,9 @@ elif menu == "New Admission":
         with col1:
             name = st.text_input("Student Name").upper()
             gender = st.selectbox("Gender", ["BOYS", "GIRLS"])
-            cls = st.selectbox("Class", ["LPP", "CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V"])
+            
+            # Updated to 'CLASS LPP'
+            cls = st.selectbox("Class", ["CLASS LPP", "CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V"])
             sec = st.selectbox("Section", ["A", "B", "C"])
             roll = st.number_input("Roll Number", min_value=1, step=1)
             
@@ -102,11 +106,10 @@ elif menu == "New Admission":
                 student_code = f"BPS{datetime.now().year}{roll:03d}"
                 
                 # Create a list exactly matching the columns in your students_master.csv
-                # Sl, Name, Gender, Class, Section, Roll, Father, Mother, DOB, BloodGroup, Mobile, Student Code, Social Category, BSP ROLL, BSP SECTION, BSP CLASS
                 row_to_append = [
                     new_sl, name, gender, cls, sec, roll, father, mother, 
                     dob.strftime("%Y-%m-%d"), blood, mobile, student_code,
-                    "GENERAL", "", "", "" # Defaulting the last columns to blank/general
+                    "GENERAL", "", "", "" 
                 ]
                 
                 with st.spinner("Saving to BPS_Database..."):
@@ -130,7 +133,10 @@ elif menu == "New Admission":
 elif menu == "System Settings":
     st.title("⚙️ System Settings & Data Explorer")
     st.subheader("Class Configuration")
-    st.info("Class **LPP (Lower Pre Primary) Section A** is currently active and available in the Admission portal.")
+    
+    # Updated text description
+    st.info("**CLASS LPP (Lower Pre Primary) Section A** is currently active and available in the Admission portal.")
+    
     st.divider()
     
     st.subheader("Raw Master Data Explorer")

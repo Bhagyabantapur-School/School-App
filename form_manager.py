@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
-import os
 import gspread
 from google.oauth2.service_account import Credentials
 from fpdf import FPDF # Requires fpdf2 (pip install fpdf2)
@@ -62,6 +61,7 @@ def overwrite_sheet_df(sheet_name, df):
     df = df.fillna("").astype(str)
     if not df.empty:
         ws.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name='A1')
+        ws.freeze(rows=1) # <--- THIS KEEPS HEADERS FROZEN IN GOOGLE SHEETS!
     clear_cache()
 
 def append_sheet_df(sheet_name, df):
@@ -73,12 +73,6 @@ def append_sheet_df(sheet_name, df):
     df = df.fillna("").astype(str)
     ws.append_rows(df.values.tolist())
     clear_cache()
-
-def get_local_csv(file):
-    if os.path.exists(file): 
-        try: return pd.read_csv(file)
-        except: return pd.DataFrame()
-    return pd.DataFrame()
 
 # --- 4. PDF GENERATOR CLASS ---
 class BPS_Survey(FPDF):
@@ -197,12 +191,16 @@ class BPS_Survey(FPDF):
         self.set_xy(x + 75, curr_y + 2)
         self.cell(40, 6, u"তারিখ")
 
-# --- 5. LOAD DATA ---
-students_df = get_local_csv('students.csv')
+# --- 5. LOAD DATA FROM CLOUD ---
+# Read directly from Google Sheets instead of CSV!
+students_df = fetch_sheet_data('students_master')
 if not students_df.empty:
     if 'Section' not in students_df.columns: 
         students_df['Section'] = 'A'
     students_df['UID'] = students_df['Class'].astype(str) + "_" + students_df['Section'].astype(str) + "_" + students_df['Roll'].astype(str)
+else:
+    st.error("⚠️ 'students_master' tab missing or empty in BPS_Database. Please copy your students.csv data into Google Sheets.")
+    st.stop()
 
 mdm_df = fetch_sheet_data('mdm_log')
 if mdm_df.empty:
@@ -212,12 +210,13 @@ else:
 
 form_df = fetch_sheet_data('form_distribution_log')
 
+# Added Old Mobile Number backup to tracking
 expected_columns = [
     'Class', 'Section', 'Roll', 'Student Name', 
     'Date (form generated)', 'Date (receive form)', 
     'Date (returned)', 'Return Status',
     'WhatsApp Added', 'WhatsApp Group',
-    'Mobile Updated'
+    'Mobile Updated', 'Old Mobile Number'
 ]
 
 if form_df.empty:
@@ -227,7 +226,7 @@ else:
         if col not in form_df.columns:
             if col == 'Return Status' or col == 'Date (returned)': form_df[col] = "Pending"
             elif col in ['WhatsApp Added', 'Mobile Updated']: form_df[col] = "No"
-            elif col == 'WhatsApp Group': form_df[col] = "None"
+            elif col in ['WhatsApp Group', 'Old Mobile Number']: form_df[col] = ""
             else: form_df[col] = ""
     form_df['UID'] = form_df['Class'].astype(str) + "_" + form_df['Section'].astype(str) + "_" + form_df['Roll'].astype(str)
 
@@ -247,7 +246,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 with tab1:
     st.subheader("Step 1: Generate PDFs & Save to Database")
     if students_df.empty:
-        st.warning("No student data found in students.csv.")
+        st.warning("No student data found.")
     else:
         col1, col2, col3 = st.columns([1, 1, 1])
         with col1:
@@ -323,7 +322,8 @@ with tab1:
                                 'Return Status': 'Pending',
                                 'WhatsApp Added': 'No',
                                 'WhatsApp Group': 'None',
-                                'Mobile Updated': 'No'
+                                'Mobile Updated': 'No',
+                                'Old Mobile Number': ''
                             })
                             
                         pdf_bytes = bytes(pdf.output())
@@ -391,7 +391,7 @@ with tab2:
     st.subheader("Step 2: Sync with MDM & Auto-Distribute")
     
     if students_df.empty:
-        st.warning("No student data found in students.csv.")
+        st.warning("No student data found.")
     else:
         col1, col2, col3 = st.columns([1, 1, 1])
         with col1:
@@ -407,7 +407,7 @@ with tab2:
         st.info(f"Looking for **{sel_class_t2} - {sel_sec_t2}** students who ate MDM on **{sync_date_str}** and have a Pending form.")
         
         if mdm_df.empty:
-            st.error("No MDM data found in the database. Please ensure teachers have submitted MDM.")
+            st.error("No MDM data found in the database.")
         else:
             target_mdm = mdm_df[
                 (mdm_df['Date'].astype(str) == sync_date_str) & 
@@ -580,7 +580,7 @@ with tab3:
 
         # --- SECTION 3.3: WHATSAPP SYNC & CONTACT SAVING ---
         st.markdown("#### 💬 3. WhatsApp Group Assignment & Contact Saving")
-        st.info("Edit the Mobile number if they provided a new one. Download the contacts to save them all to your phone instantly!")
+        st.info("Edit the Mobile number if they provided a new one. The old number will be automatically saved as a backup!")
         
         if completed_returns_df.empty:
             st.success("No completed forms available for WhatsApp Assignment yet.")
@@ -639,13 +639,16 @@ with tab3:
                         updated_form_df.loc[mask, 'WhatsApp Group'] = group_name if is_added else 'None'
                         changes_made += 1
                         
+                    # NOW WRITING TO GOOGLE SHEETS FOR STUDENTS & BACKING UP OLD NUMBER
                     if str(old_mobile) != str(new_mobile):
+                        # 1. Save new number to students master
                         s_mask = updated_students_df['UID'] == uid
                         updated_students_df.loc[s_mask, 'Mobile'] = new_mobile
                         
-                        # Tag as modified in form DB!
-                        mask = updated_form_df['UID'] == uid
-                        updated_form_df.loc[mask, 'Mobile Updated'] = 'Yes'
+                        # 2. Tag as modified and save OLD number to form tracking DB!
+                        f_mask = updated_form_df['UID'] == uid
+                        updated_form_df.loc[f_mask, 'Mobile Updated'] = 'Yes'
+                        updated_form_df.loc[f_mask, 'Old Mobile Number'] = old_mobile
                         mobile_changes += 1
                         
                 if changes_made > 0 or mobile_changes > 0:
@@ -654,10 +657,10 @@ with tab3:
                     
                 if mobile_changes > 0:
                     updated_students_df = updated_students_df.drop(columns=['UID'], errors='ignore')
-                    updated_students_df.to_csv('students.csv', index=False)
+                    overwrite_sheet_df('students_master', updated_students_df) # Now saves to Google Sheets!
                     
                 if changes_made > 0 or mobile_changes > 0:
-                    st.success(f"✅ Successfully updated {changes_made} WhatsApp groups and {mobile_changes} Mobile numbers!")
+                    st.success(f"✅ Successfully updated {changes_made} WhatsApp groups and securely backed up {mobile_changes} old mobile numbers!")
                     st.rerun()
                 else:
                     st.warning("No changes detected.")
@@ -666,7 +669,6 @@ with tab3:
             st.markdown("##### 📲 Bulk Save to Phone & Google Contacts")
             col_vcf, col_csv = st.columns(2)
             
-            # 1. vCard Data (For tapping on mobile)
             vcard_data = ""
             for _, row in wa_display_df.iterrows():
                 c_name = row['Contact Name (Copy)']
@@ -684,7 +686,6 @@ with tab3:
                         mime="text/vcard"
                     )
             
-            # 2. Google Contacts CSV Data (With Auto-Labels)
             with col_csv:
                 st.info("💻 Best for contacts.google.com")
                 st.caption("✨ **Pro Tip:** If you upload overlapping students on different days, just use Google Contacts' **'Merge & fix'** tool on the left menu to clean up duplicates instantly!")
@@ -737,18 +738,31 @@ with tab4:
         wa_merged['Date (receive form)'] = wa_merged['Date (receive form)'].fillna('Not Generated')
         wa_merged['Return Status'] = wa_merged['Return Status'].fillna('N/A')
         wa_merged['Mobile Updated'] = wa_merged['Mobile Updated'].fillna('No')
+        wa_merged['Old Mobile Number'] = wa_merged['Old Mobile Number'].fillna('')
         
         st.divider()
         
-        # --- Part 1: In WhatsApp Group ---
+        # --- Part 1: In WhatsApp Group (NOW WITH OLD NUMBER BACKUP) ---
         st.markdown("#### ✅ Part 1: Members in WhatsApp Group")
         part1_df = wa_merged[wa_merged['WhatsApp Added'] == 'Yes'].copy()
         if part1_df.empty:
             st.info("No students from this section have been added to the WhatsApp group yet.")
         else:
             part1_df['Number Status'] = part1_df['Mobile Updated'].apply(lambda x: '🔄 Changed' if x == 'Yes' else '✅ Unchanged')
+            part1_df['Old Mobile'] = part1_df.apply(lambda r: r['Old Mobile Number'] if r['Mobile Updated'] == 'Yes' else '-', axis=1)
+            part1_df['Current Mobile'] = part1_df['Mobile']
+            
+            display_p1 = part1_df[['Roll_stu', 'Name', 'Old Mobile', 'Current Mobile', 'Number Status']].rename(columns={'Roll_stu': 'Roll'})
+            
+            # --- Highlighting Logic for Changed Numbers ---
+            def highlight_changed_number(row):
+                if row['Number Status'] == '🔄 Changed':
+                    # Highlight the 'Current Mobile' column (index 3) for rows that changed
+                    return [''] * 3 + ['background-color: #fff3cd; color: #856404; font-weight: bold;'] + ['']
+                return [''] * 5
+
             st.dataframe(
-                part1_df[['Roll_stu', 'Name', 'Mobile', 'Number Status']].rename(columns={'Roll_stu': 'Roll'}), 
+                display_p1.style.apply(highlight_changed_number, axis=1), 
                 hide_index=True, 
                 use_container_width=True
             )
@@ -766,7 +780,6 @@ with tab4:
             
             display_p2 = part2_df[['Roll_stu', 'Name', 'Date (receive form)', 'Reason']].rename(columns={'Roll_stu': 'Roll', 'Date (receive form)': 'Distributed On'})
             
-            # --- Highlighting Logic for returned forms ready to add ---
             def highlight_ready_wa(row):
                 if row['Reason'] == "Form Complete but not added to Group":
                     return ['background-color: #d4edda; color: #155724; font-weight: bold;'] * len(row)
@@ -818,7 +831,6 @@ with tab4:
             
             display_p4 = part4_df[['Roll_stu', 'Name', 'Father', 'Reason']].rename(columns={'Roll_stu': 'Roll'})
             
-            # --- Highlighting Logic for the missing forms ---
             def highlight_urgent(row):
                 if row['Reason'] == "Came to school but not generated":
                     return ['background-color: #f8d7da; color: #721c24; font-weight: bold;'] * len(row)

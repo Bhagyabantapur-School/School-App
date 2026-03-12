@@ -212,11 +212,13 @@ else:
 
 form_df = fetch_sheet_data('form_distribution_log')
 
+# ADDED 'Mobile Updated' to tracking columns
 expected_columns = [
     'Class', 'Section', 'Roll', 'Student Name', 
     'Date (form generated)', 'Date (receive form)', 
     'Date (returned)', 'Return Status',
-    'WhatsApp Added', 'WhatsApp Group'
+    'WhatsApp Added', 'WhatsApp Group',
+    'Mobile Updated'
 ]
 
 if form_df.empty:
@@ -225,18 +227,19 @@ else:
     for col in expected_columns:
         if col not in form_df.columns:
             if col == 'Return Status' or col == 'Date (returned)': form_df[col] = "Pending"
-            elif col == 'WhatsApp Added': form_df[col] = "No"
+            elif col in ['WhatsApp Added', 'Mobile Updated']: form_df[col] = "No"
             elif col == 'WhatsApp Group': form_df[col] = "None"
             else: form_df[col] = ""
     form_df['UID'] = form_df['Class'].astype(str) + "_" + form_df['Section'].astype(str) + "_" + form_df['Roll'].astype(str)
 
 # --- 6. UI TABS ---
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🖨️ 1. Generate", 
     "🤝 2. Distribute", 
     "📥 3. Returns & WA", 
-    "📊 4. Master Log", 
-    "📈 5. Summary"
+    "💬 4. WhatsApp Report", 
+    "📊 5. Master Log", 
+    "📈 6. Summary"
 ])
 
 # ==========================================
@@ -320,7 +323,8 @@ with tab1:
                                 'Date (returned)': 'Pending',
                                 'Return Status': 'Pending',
                                 'WhatsApp Added': 'No',
-                                'WhatsApp Group': 'None'
+                                'WhatsApp Group': 'None',
+                                'Mobile Updated': 'No'
                             })
                             
                         pdf_bytes = bytes(pdf.output())
@@ -626,7 +630,7 @@ with tab3:
                     
                     old_added = wa_display_df.loc[idx, 'WhatsApp Added']
                     old_group = wa_display_df.loc[idx, 'WhatsApp Group']
-                    old_mobile = wa_display_df.loc[idx, 'Mobile']
+                    old_mobile = str(wa_display_df.loc[idx, 'Mobile']).replace('.0', '')
                     
                     new_added_str = 'Yes' if is_added else 'No'
                     
@@ -639,9 +643,12 @@ with tab3:
                     if str(old_mobile) != str(new_mobile):
                         s_mask = updated_students_df['UID'] == uid
                         updated_students_df.loc[s_mask, 'Mobile'] = new_mobile
+                        # Tag as modified in form DB!
+                        mask = updated_form_df['UID'] == uid
+                        updated_form_df.loc[mask, 'Mobile Updated'] = 'Yes'
                         mobile_changes += 1
                         
-                if changes_made > 0:
+                if changes_made > 0 or mobile_changes > 0:
                     updated_form_df = updated_form_df.drop(columns=['UID'], errors='ignore')
                     overwrite_sheet_df('form_distribution_log', updated_form_df)
                     
@@ -680,6 +687,7 @@ with tab3:
             # 2. Google Contacts CSV Data (With Auto-Labels)
             with col_csv:
                 st.info("💻 Best for contacts.google.com")
+                st.caption("✨ **Pro Tip:** If you upload overlapping students on different days, just use Google Contacts' **'Merge & fix'** tool on the left menu to clean up duplicates instantly!")
                 valid_contacts_df = wa_display_df[wa_display_df['Mobile'].str.strip() != ""]
                 valid_contacts_df = valid_contacts_df[valid_contacts_df['Mobile'].str.strip() != "nan"]
                 valid_contacts_df = valid_contacts_df[valid_contacts_df['Mobile'].str.strip() != "N/A"]
@@ -700,9 +708,87 @@ with tab3:
                     )
 
 # ==========================================
-# TAB 4: MASTER LOG (UPGRADED - NOW EDITABLE)
+# TAB 4: WHATSAPP REPORT (SMART STATUS)
 # ==========================================
 with tab4:
+    st.subheader("💬 WhatsApp Group Status Report")
+    
+    if students_df.empty:
+        st.warning("No student data found.")
+    else:
+        col1, col2 = st.columns(2)
+        with col1:
+            wa_classes = sorted(students_df['Class'].dropna().unique())
+            wa_sel_class = st.selectbox("Select Class", wa_classes, key="wa_c")
+        with col2:
+            wa_sections = sorted(students_df[students_df['Class'] == wa_sel_class]['Section'].unique())
+            wa_sel_sec = st.selectbox("Select Section", wa_sections, key="wa_s")
+
+        class_students = students_df[(students_df['Class'] == wa_sel_class) & (students_df['Section'] == wa_sel_sec)].copy()
+        
+        if not form_df.empty:
+            class_forms = form_df[(form_df['Class'] == wa_sel_class) & (form_df['Section'] == wa_sel_sec)].copy()
+        else:
+            class_forms = pd.DataFrame(columns=expected_columns)
+        
+        wa_merged = pd.merge(class_students, class_forms, on='UID', how='left', suffixes=('_stu', '_form'))
+        
+        wa_merged['WhatsApp Added'] = wa_merged['WhatsApp Added'].fillna('No')
+        wa_merged['Date (receive form)'] = wa_merged['Date (receive form)'].fillna('Not Generated')
+        wa_merged['Return Status'] = wa_merged['Return Status'].fillna('N/A')
+        wa_merged['Mobile Updated'] = wa_merged['Mobile Updated'].fillna('No')
+        
+        st.divider()
+        
+        # --- Part 1: In WhatsApp Group ---
+        st.markdown("#### ✅ Part 1: Members in WhatsApp Group")
+        part1_df = wa_merged[wa_merged['WhatsApp Added'] == 'Yes'].copy()
+        if part1_df.empty:
+            st.info("No students from this section have been added to the WhatsApp group yet.")
+        else:
+            part1_df['Number Status'] = part1_df['Mobile Updated'].apply(lambda x: '🔄 Changed' if x == 'Yes' else '✅ Unchanged')
+            st.dataframe(
+                part1_df[['Roll_stu', 'Name', 'Mobile', 'Number Status']].rename(columns={'Roll_stu': 'Roll'}), 
+                hide_index=True, 
+                use_container_width=True
+            )
+            
+        st.divider()
+        
+        # --- Part 2: Took form, NOT in group ---
+        st.markdown("#### ⚠️ Part 2: Form Distributed but NOT in Group")
+        part2_df = wa_merged[(wa_merged['WhatsApp Added'] != 'Yes') & (~wa_merged['Date (receive form)'].isin(['Pending', 'Not Generated']))].copy()
+        
+        if part2_df.empty:
+            st.success("All students who received a form are either added to the group or haven't received one yet.")
+        else:
+            part2_df['Reason'] = part2_df['Return Status'].apply(lambda x: "Form Incomplete" if x == "Incomplete" else ("Pending Return" if x == "Pending" else "Form Complete but not added to Group"))
+            st.dataframe(
+                part2_df[['Roll_stu', 'Name', 'Date (receive form)', 'Reason']].rename(columns={'Roll_stu': 'Roll', 'Date (receive form)': 'Distributed On'}), 
+                hide_index=True, 
+                use_container_width=True
+            )
+
+        st.divider()
+        
+        # --- Part 3: Did not take form ---
+        st.markdown("#### 📭 Part 3: Form NOT Distributed (Not in Group)")
+        part3_df = wa_merged[wa_merged['Date (receive form)'].isin(['Pending', 'Not Generated'])].copy()
+        
+        if part3_df.empty:
+            st.success("All students in this section have received their forms!")
+        else:
+            part3_df['Status'] = part3_df['Date (receive form)'].apply(lambda x: "Form Printed (On Desk)" if x == 'Pending' else "Form Not Generated")
+            st.dataframe(
+                part3_df[['Roll_stu', 'Name', 'Father', 'Status']].rename(columns={'Roll_stu': 'Roll'}), 
+                hide_index=True, 
+                use_container_width=True
+            )
+
+# ==========================================
+# TAB 5: MASTER LOG (UPGRADED - NOW EDITABLE)
+# ==========================================
+with tab5:
     st.subheader("Database View & Corrections")
     if not form_df.empty:
         st.info("💡 **Made a mistake?** Edit any cell directly in the table below (like changing a status back to 'Pending') and click Save.")
@@ -738,9 +824,9 @@ with tab4:
         st.info("No forms have been logged yet.")
 
 # ==========================================
-# TAB 5: SUMMARY & PROGRESS
+# TAB 6: SUMMARY & PROGRESS
 # ==========================================
-with tab5:
+with tab6:
     st.subheader("📈 Class-Wise Distribution & Return Summary")
     
     if students_df.empty:

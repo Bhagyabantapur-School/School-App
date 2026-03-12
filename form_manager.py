@@ -212,7 +212,6 @@ else:
 
 form_df = fetch_sheet_data('form_distribution_log')
 
-# ADDED 'Mobile Updated' to tracking columns
 expected_columns = [
     'Class', 'Section', 'Roll', 'Student Name', 
     'Date (form generated)', 'Date (receive form)', 
@@ -643,6 +642,7 @@ with tab3:
                     if str(old_mobile) != str(new_mobile):
                         s_mask = updated_students_df['UID'] == uid
                         updated_students_df.loc[s_mask, 'Mobile'] = new_mobile
+                        
                         # Tag as modified in form DB!
                         mask = updated_form_df['UID'] == uid
                         updated_form_df.loc[mask, 'Mobile Updated'] = 'Yes'
@@ -771,16 +771,52 @@ with tab4:
 
         st.divider()
         
-        # --- Part 3: Did not take form ---
-        st.markdown("#### 📭 Part 3: Form NOT Distributed (Not in Group)")
-        part3_df = wa_merged[wa_merged['Date (receive form)'].isin(['Pending', 'Not Generated'])].copy()
+        # --- Part 3: Form Printed (On Desk) ---
+        st.markdown("#### 📭 Part 3: Form Printed (On Desk) - Not in Group")
+        part3_df = wa_merged[wa_merged['Date (receive form)'] == 'Pending'].copy()
         
         if part3_df.empty:
-            st.success("All students in this section have received their forms!")
+            st.success("No forms are currently sitting on the desk waiting to be distributed!")
         else:
-            part3_df['Status'] = part3_df['Date (receive form)'].apply(lambda x: "Form Printed (On Desk)" if x == 'Pending' else "Form Not Generated")
             st.dataframe(
-                part3_df[['Roll_stu', 'Name', 'Father', 'Status']].rename(columns={'Roll_stu': 'Roll'}), 
+                part3_df[['Roll_stu', 'Name', 'Father']].rename(columns={'Roll_stu': 'Roll'}), 
+                hide_index=True, 
+                use_container_width=True
+            )
+
+        st.divider()
+
+        # --- Part 4: Form Not Generated ---
+        st.markdown("#### ❌ Part 4: Form Not Generated - Not in Group")
+        part4_df = wa_merged[wa_merged['Date (receive form)'] == 'Not Generated'].copy()
+        
+        if part4_df.empty:
+            st.success("All students in this section have had their forms generated!")
+        else:
+            st.info("Check if these students were present on a specific date to see why forms aren't generated.")
+            col_d, _ = st.columns([1, 2])
+            with col_d:
+                p4_date_obj = st.date_input("Check presence on MDM Date:", now.date(), key="p4_date")
+                p4_date_str = p4_date_obj.strftime("%d-%m-%Y")
+                
+            present_uids = []
+            if not mdm_df.empty:
+                present_uids = mdm_df[mdm_df['Date'].astype(str) == p4_date_str]['UID'].tolist()
+                
+            part4_df['Reason'] = part4_df['UID'].apply(
+                lambda uid: "Came to school but not generated" if uid in present_uids else "Not came to school"
+            )
+            
+            display_p4 = part4_df[['Roll_stu', 'Name', 'Father', 'Reason']].rename(columns={'Roll_stu': 'Roll'})
+            
+            # --- Highlighting Logic for the missing forms ---
+            def highlight_urgent(row):
+                if row['Reason'] == "Came to school but not generated":
+                    return ['background-color: #f8d7da; color: #721c24; font-weight: bold;'] * len(row)
+                return [''] * len(row)
+
+            st.dataframe(
+                display_p4.style.apply(highlight_urgent, axis=1), 
                 hide_index=True, 
                 use_container_width=True
             )

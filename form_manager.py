@@ -763,8 +763,17 @@ with tab4:
             st.success("All students who received a form are either added to the group or haven't received one yet.")
         else:
             part2_df['Reason'] = part2_df['Return Status'].apply(lambda x: "Form Incomplete" if x == "Incomplete" else ("Pending Return" if x == "Pending" else "Form Complete but not added to Group"))
+            
+            display_p2 = part2_df[['Roll_stu', 'Name', 'Date (receive form)', 'Reason']].rename(columns={'Roll_stu': 'Roll', 'Date (receive form)': 'Distributed On'})
+            
+            # --- Highlighting Logic for returned forms ready to add ---
+            def highlight_ready_wa(row):
+                if row['Reason'] == "Form Complete but not added to Group":
+                    return ['background-color: #d4edda; color: #155724; font-weight: bold;'] * len(row)
+                return [''] * len(row)
+
             st.dataframe(
-                part2_df[['Roll_stu', 'Name', 'Date (receive form)', 'Reason']].rename(columns={'Roll_stu': 'Roll', 'Date (receive form)': 'Distributed On'}), 
+                display_p2.style.apply(highlight_ready_wa, axis=1), 
                 hide_index=True, 
                 use_container_width=True
             )

@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+import os
 import gspread
 from google.oauth2.service_account import Credentials
 from fpdf import FPDF # Requires fpdf2 (pip install fpdf2)
@@ -192,7 +193,6 @@ class BPS_Survey(FPDF):
         self.cell(40, 6, u"তারিখ")
 
 # --- 5. LOAD DATA FROM CLOUD ---
-# Read directly from Google Sheets instead of CSV!
 students_df = fetch_sheet_data('students_master')
 if not students_df.empty:
     if 'Section' not in students_df.columns: 
@@ -210,7 +210,6 @@ else:
 
 form_df = fetch_sheet_data('form_distribution_log')
 
-# Added Old Mobile Number backup to tracking
 expected_columns = [
     'Class', 'Section', 'Roll', 'Student Name', 
     'Date (form generated)', 'Date (receive form)', 
@@ -407,7 +406,7 @@ with tab2:
         st.info(f"Looking for **{sel_class_t2} - {sel_sec_t2}** students who ate MDM on **{sync_date_str}** and have a Pending form.")
         
         if mdm_df.empty:
-            st.error("No MDM data found in the database.")
+            st.error("No MDM data found in the database. Please ensure teachers have submitted MDM.")
         else:
             target_mdm = mdm_df[
                 (mdm_df['Date'].astype(str) == sync_date_str) & 
@@ -639,13 +638,13 @@ with tab3:
                         updated_form_df.loc[mask, 'WhatsApp Group'] = group_name if is_added else 'None'
                         changes_made += 1
                         
-                    # NOW WRITING TO GOOGLE SHEETS FOR STUDENTS & BACKING UP OLD NUMBER
+                    # Write to Google Sheets for students & back up old number
                     if str(old_mobile) != str(new_mobile):
                         # 1. Save new number to students master
                         s_mask = updated_students_df['UID'] == uid
                         updated_students_df.loc[s_mask, 'Mobile'] = new_mobile
                         
-                        # 2. Tag as modified and save OLD number to form tracking DB!
+                        # 2. Tag as modified and save OLD number to form tracking DB
                         f_mask = updated_form_df['UID'] == uid
                         updated_form_df.loc[f_mask, 'Mobile Updated'] = 'Yes'
                         updated_form_df.loc[f_mask, 'Old Mobile Number'] = old_mobile
@@ -657,7 +656,7 @@ with tab3:
                     
                 if mobile_changes > 0:
                     updated_students_df = updated_students_df.drop(columns=['UID'], errors='ignore')
-                    overwrite_sheet_df('students_master', updated_students_df) # Now saves to Google Sheets!
+                    overwrite_sheet_df('students_master', updated_students_df) # Saves to Google Sheets
                     
                 if changes_made > 0 or mobile_changes > 0:
                     st.success(f"✅ Successfully updated {changes_made} WhatsApp groups and securely backed up {mobile_changes} old mobile numbers!")
@@ -742,7 +741,7 @@ with tab4:
         
         st.divider()
         
-        # --- Part 1: In WhatsApp Group (NOW WITH OLD NUMBER BACKUP) ---
+        # --- Part 1: In WhatsApp Group (WITH HIGHLIGHTS) ---
         st.markdown("#### ✅ Part 1: Members in WhatsApp Group")
         part1_df = wa_merged[wa_merged['WhatsApp Added'] == 'Yes'].copy()
         if part1_df.empty:
@@ -754,10 +753,8 @@ with tab4:
             
             display_p1 = part1_df[['Roll_stu', 'Name', 'Old Mobile', 'Current Mobile', 'Number Status']].rename(columns={'Roll_stu': 'Roll'})
             
-            # --- Highlighting Logic for Changed Numbers ---
             def highlight_changed_number(row):
                 if row['Number Status'] == '🔄 Changed':
-                    # Highlight the 'Current Mobile' column (index 3) for rows that changed
                     return [''] * 3 + ['background-color: #fff3cd; color: #856404; font-weight: bold;'] + ['']
                 return [''] * 5
 
@@ -769,7 +766,7 @@ with tab4:
             
         st.divider()
         
-        # --- Part 2: Took form, NOT in group ---
+        # --- Part 2: Took form, NOT in group (WITH HIGHLIGHTS) ---
         st.markdown("#### ⚠️ Part 2: Form Distributed but NOT in Group")
         part2_df = wa_merged[(wa_merged['WhatsApp Added'] != 'Yes') & (~wa_merged['Date (receive form)'].isin(['Pending', 'Not Generated']))].copy()
         
@@ -808,7 +805,7 @@ with tab4:
 
         st.divider()
 
-        # --- Part 4: Form Not Generated ---
+        # --- Part 4: Form Not Generated (WITH HIGHLIGHTS) ---
         st.markdown("#### ❌ Part 4: Form Not Generated - Not in Group")
         part4_df = wa_merged[wa_merged['Date (receive form)'] == 'Not Generated'].copy()
         
@@ -843,7 +840,7 @@ with tab4:
             )
 
 # ==========================================
-# TAB 5: MASTER LOG (UPGRADED - NOW EDITABLE)
+# TAB 5: MASTER LOG (EDITABLE)
 # ==========================================
 with tab5:
     st.subheader("Database View & Corrections")
@@ -881,7 +878,7 @@ with tab5:
         st.info("No forms have been logged yet.")
 
 # ==========================================
-# TAB 6: SUMMARY & PROGRESS
+# TAB 6: SUMMARY & PROGRESS (5 COLUMNS)
 # ==========================================
 with tab6:
     st.subheader("📈 Class-Wise Distribution & Return Summary")
@@ -903,21 +900,25 @@ with tab6:
             wa_df = form_df[form_df['WhatsApp Added'] == 'Yes']
             wa_counts = wa_df.groupby(['Class', 'Section']).size().reset_index(name='WhatsApp Synced')
 
+            mob_up_df = form_df[form_df['Mobile Updated'] == 'Yes']
+            mob_up_counts = mob_up_df.groupby(['Class', 'Section']).size().reset_index(name='Mobile Numbers Changed')
+
             summary_df = pd.merge(summary_df, gen_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, dist_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, comp_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, incomp_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, wa_counts, on=['Class', 'Section'], how='left').fillna(0)
+            summary_df = pd.merge(summary_df, mob_up_counts, on=['Class', 'Section'], how='left').fillna(0)
             
             summary_df['Outstanding (With Guardian)'] = summary_df['Distributed'] - (summary_df['Returned (Complete)'] + summary_df['Returned (Incomplete)'])
             summary_df['Pending Desk Stack'] = summary_df['Forms Generated'] - summary_df['Distributed']
             summary_df['Not Generated Yet'] = summary_df['Total Students'] - summary_df['Forms Generated']
             
-            cols_to_int = ['Total Students', 'Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'WhatsApp Synced', 'Outstanding (With Guardian)', 'Pending Desk Stack', 'Not Generated Yet']
+            cols_to_int = ['Total Students', 'Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'WhatsApp Synced', 'Mobile Numbers Changed', 'Outstanding (With Guardian)', 'Pending Desk Stack', 'Not Generated Yet']
             for col in cols_to_int:
                 summary_df[col] = summary_df[col].astype(int)
         else:
-            for col in ['Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'WhatsApp Synced', 'Outstanding (With Guardian)', 'Pending Desk Stack']:
+            for col in ['Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'WhatsApp Synced', 'Mobile Numbers Changed', 'Outstanding (With Guardian)', 'Pending Desk Stack']:
                 summary_df[col] = 0
             summary_df['Not Generated Yet'] = summary_df['Total Students']
 
@@ -942,6 +943,7 @@ with tab6:
             'Returned (Complete)': summary_df['Returned (Complete)'].sum(),
             'Returned (Incomplete)': summary_df['Returned (Incomplete)'].sum(),
             'WhatsApp Synced': summary_df['WhatsApp Synced'].sum(),
+            'Mobile Numbers Changed': summary_df['Mobile Numbers Changed'].sum(),
             'Outstanding (With Guardian)': summary_df['Outstanding (With Guardian)'].sum(),
             'Pending Desk Stack': summary_df['Pending Desk Stack'].sum(),
             'Not Generated Yet': summary_df['Not Generated Yet'].sum()
@@ -950,11 +952,12 @@ with tab6:
         summary_df = pd.concat([summary_df, total_row], ignore_index=True)
 
         st.markdown("##### Overall School Progress")
-        m1, m2, m3, m4 = st.columns(4)
+        m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("Total Students", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Total Students'].values[0])
         m2.metric("Forms Generated", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Forms Generated'].values[0])
         m3.metric("Forms Distributed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Distributed'].values[0])
         m4.metric("📱 WA Groups Synced", summary_df.loc[summary_df['Class'] == 'TOTAL', 'WhatsApp Synced'].values[0])
+        m5.metric("🔄 Numbers Changed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Mobile Numbers Changed'].values[0])
 
         st.markdown("<br>", unsafe_allow_html=True)
         r1, r2, r3, r4 = st.columns(4)

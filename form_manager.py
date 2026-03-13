@@ -588,14 +588,26 @@ with tab3:
             grad_year_map = {
                 'CLASS V': '26', 'CLASS IV': '27', 
                 'CLASS III': '28', 'CLASS II': '29', 
-                'CLASS I': '30', 'CLASS PP': '31'
+                'CLASS I': '30', 'CLASS PP': '31', 'CLASS LPP': '32'
             }
 
             all_wa_df = pd.merge(completed_returns_df, students_df[['UID', 'Father', 'Mobile']], on='UID', how='left')
             all_wa_df['Grad Year'] = all_wa_df['Class'].map(grad_year_map).fillna('XX')
             all_wa_df['Father'] = all_wa_df['Father'].fillna('Guardian')
             all_wa_df['Contact Name (Copy)'] = "BPS " + all_wa_df['Grad Year'] + " " + all_wa_df['Student Name'] + " (" + all_wa_df['Father'] + ")"
-            all_wa_df['Suggested Group'] = "BPS " + all_wa_df['Class'].astype(str) + " " + all_wa_df['Section'].astype(str)
+            
+            # --- NEW ROMAN TO NUMBER MAPPING FOR WHATSAPP GROUPS ---
+            class_to_number_map = {
+                'CLASS LPP': 'CLASS LPP',
+                'CLASS PP': 'CLASS PP',
+                'CLASS I': 'CLASS 1',
+                'CLASS II': 'CLASS 2',
+                'CLASS III': 'CLASS 3',
+                'CLASS IV': 'CLASS 4',
+                'CLASS V': 'CLASS 5'
+            }
+            mapped_class = all_wa_df['Class'].map(class_to_number_map).fillna(all_wa_df['Class'])
+            all_wa_df['Suggested Group'] = "BPS " + mapped_class.astype(str) + " " + all_wa_df['Section'].astype(str)
             
             # Map legacy 'No' and empty fields to 'Not Started'
             all_wa_df['WhatsApp Status'] = all_wa_df['WhatsApp Added'].replace({'No': 'Not Started', '': 'Not Started'})
@@ -1002,6 +1014,7 @@ with tab6:
             summary_df['Not Generated Yet'] = summary_df['Total Students']
 
         custom_dict = {
+            'CLASS LPP': -1, 'LPP': -1,
             'CLASS PP': 0, 'PP': 0,
             'CLASS I': 1, 'I': 1,
             'CLASS II': 2, 'II': 2,

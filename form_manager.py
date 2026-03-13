@@ -1019,6 +1019,10 @@ with tab6:
             wa_df = form_df[form_df['WhatsApp Added'].isin(IN_GROUP_STATUSES)]
             wa_counts = wa_df.groupby(['Class', 'Section']).size().reset_index(name='WhatsApp Synced')
 
+            # Link Sent Metrics
+            link_df = form_df[form_df['WhatsApp Added'] == 'Invitation Sent']
+            link_counts = link_df.groupby(['Class', 'Section']).size().reset_index(name='Link Sent')
+
             nowa_df = form_df[form_df['WhatsApp Added'].isin(NO_WA_STATUSES)]
             nowa_counts = nowa_df.groupby(['Class', 'Section']).size().reset_index(name='No Smartphone')
 
@@ -1030,6 +1034,7 @@ with tab6:
             summary_df = pd.merge(summary_df, comp_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, incomp_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, wa_counts, on=['Class', 'Section'], how='left').fillna(0)
+            summary_df = pd.merge(summary_df, link_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, nowa_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, mob_up_counts, on=['Class', 'Section'], how='left').fillna(0)
             
@@ -1037,11 +1042,11 @@ with tab6:
             summary_df['Pending Desk Stack'] = summary_df['Forms Generated'] - summary_df['Distributed']
             summary_df['Not Generated Yet'] = summary_df['Total Students'] - summary_df['Forms Generated']
             
-            cols_to_int = ['Total Students', 'Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'WhatsApp Synced', 'No Smartphone', 'Mobile Numbers Changed', 'Outstanding (With Guardian)', 'Pending Desk Stack', 'Not Generated Yet']
+            cols_to_int = ['Total Students', 'Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'WhatsApp Synced', 'Link Sent', 'No Smartphone', 'Mobile Numbers Changed', 'Outstanding (With Guardian)', 'Pending Desk Stack', 'Not Generated Yet']
             for col in cols_to_int:
                 summary_df[col] = summary_df[col].astype(int)
         else:
-            for col in ['Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'WhatsApp Synced', 'No Smartphone', 'Mobile Numbers Changed', 'Outstanding (With Guardian)', 'Pending Desk Stack']:
+            for col in ['Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'WhatsApp Synced', 'Link Sent', 'No Smartphone', 'Mobile Numbers Changed', 'Outstanding (With Guardian)', 'Pending Desk Stack']:
                 summary_df[col] = 0
             summary_df['Not Generated Yet'] = summary_df['Total Students']
 
@@ -1067,6 +1072,7 @@ with tab6:
             'Returned (Complete)': summary_df['Returned (Complete)'].sum(),
             'Returned (Incomplete)': summary_df['Returned (Incomplete)'].sum(),
             'WhatsApp Synced': summary_df['WhatsApp Synced'].sum(),
+            'Link Sent': summary_df['Link Sent'].sum(),
             'No Smartphone': summary_df['No Smartphone'].sum(),
             'Mobile Numbers Changed': summary_df['Mobile Numbers Changed'].sum(),
             'Outstanding (With Guardian)': summary_df['Outstanding (With Guardian)'].sum(),
@@ -1077,13 +1083,14 @@ with tab6:
         summary_df = pd.concat([summary_df, total_row], ignore_index=True)
 
         st.markdown("##### Overall School Progress")
-        m1, m2, m3, m4, m5, m6 = st.columns(6)
+        m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
         m1.metric("Total Students", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Total Students'].values[0])
         m2.metric("Forms Generated", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Forms Generated'].values[0])
         m3.metric("Forms Distributed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Distributed'].values[0])
-        m4.metric("📱 WA Groups Synced", summary_df.loc[summary_df['Class'] == 'TOTAL', 'WhatsApp Synced'].values[0])
-        m5.metric("📵 No Smartphone", summary_df.loc[summary_df['Class'] == 'TOTAL', 'No Smartphone'].values[0])
-        m6.metric("🔄 Numbers Changed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Mobile Numbers Changed'].values[0])
+        m4.metric("📱 WA Synced", summary_df.loc[summary_df['Class'] == 'TOTAL', 'WhatsApp Synced'].values[0])
+        m5.metric("🔗 Invite Sent", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Link Sent'].values[0])
+        m6.metric("📵 No Smartphone", summary_df.loc[summary_df['Class'] == 'TOTAL', 'No Smartphone'].values[0])
+        m7.metric("🔄 Nos Changed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Mobile Numbers Changed'].values[0])
 
         st.markdown("<br>", unsafe_allow_html=True)
         r1, r2, r3, r4 = st.columns(4)

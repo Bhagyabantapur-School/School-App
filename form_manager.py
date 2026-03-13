@@ -613,7 +613,10 @@ with tab3:
             
             # Map legacy 'No' and empty fields to 'Not Started'
             all_wa_df['WhatsApp Status'] = all_wa_df['WhatsApp Added'].replace({'No': 'Not Started', '': 'Not Started'})
-            all_wa_df['Group Name'] = all_wa_df.apply(lambda r: r['Suggested Group'] if r['WhatsApp Group'] in ['None', ''] else r['WhatsApp Group'], axis=1)
+            
+            # ---> FORCE OVERRIDE FIX: Always use the new Arabic numeral generated name!
+            all_wa_df['Group Name'] = all_wa_df['Suggested Group']
+            
             all_wa_df['Mobile'] = all_wa_df['Mobile'].fillna("").astype(str).str.replace('.0', '', regex=False)
 
             # Split into Pending and Saved lists based on new granular statuses
@@ -642,7 +645,7 @@ with tab3:
                     },
                     hide_index=True,
                     use_container_width=True,
-                    disabled=['Contact Name (Copy)'] 
+                    disabled=['Contact Name (Copy)', 'Group Name'] 
                 )
 
                 # --- EXPORT BUTTONS FOR PENDING CONTACTS (Uses the live edited table!) ---
@@ -1074,12 +1077,13 @@ with tab6:
         summary_df = pd.concat([summary_df, total_row], ignore_index=True)
 
         st.markdown("##### Overall School Progress")
-        m1, m2, m3, m4, m5 = st.columns(5)
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
         m1.metric("Total Students", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Total Students'].values[0])
-        m2.metric("Forms Distributed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Distributed'].values[0])
-        m3.metric("📱 WA Groups Synced", summary_df.loc[summary_df['Class'] == 'TOTAL', 'WhatsApp Synced'].values[0])
-        m4.metric("📵 No Smartphone", summary_df.loc[summary_df['Class'] == 'TOTAL', 'No Smartphone'].values[0])
-        m5.metric("🔄 Numbers Changed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Mobile Numbers Changed'].values[0])
+        m2.metric("Forms Generated", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Forms Generated'].values[0])
+        m3.metric("Forms Distributed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Distributed'].values[0])
+        m4.metric("📱 WA Groups Synced", summary_df.loc[summary_df['Class'] == 'TOTAL', 'WhatsApp Synced'].values[0])
+        m5.metric("📵 No Smartphone", summary_df.loc[summary_df['Class'] == 'TOTAL', 'No Smartphone'].values[0])
+        m6.metric("🔄 Numbers Changed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Mobile Numbers Changed'].values[0])
 
         st.markdown("<br>", unsafe_allow_html=True)
         r1, r2, r3, r4 = st.columns(4)

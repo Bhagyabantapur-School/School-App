@@ -220,6 +220,8 @@ expected_columns = [
 
 # Universal completed statuses list
 IN_GROUP_STATUSES = ['Yes', 'Added via Link', 'Added Directly']
+NO_WA_STATUSES = ['No Smartphone']
+RESOLVED_STATUSES = IN_GROUP_STATUSES + NO_WA_STATUSES
 
 if form_df.empty:
     form_df = pd.DataFrame(columns=expected_columns + ['UID'])
@@ -596,7 +598,7 @@ with tab3:
             all_wa_df['Father'] = all_wa_df['Father'].fillna('Guardian')
             all_wa_df['Contact Name (Copy)'] = "BPS " + all_wa_df['Grad Year'] + " " + all_wa_df['Student Name'] + " (" + all_wa_df['Father'] + ")"
             
-            # --- NEW ROMAN TO NUMBER MAPPING FOR WHATSAPP GROUPS ---
+            # --- ROMAN TO NUMBER MAPPING FOR WHATSAPP GROUPS ---
             class_to_number_map = {
                 'CLASS LPP': 'CLASS LPP',
                 'CLASS PP': 'CLASS PP',
@@ -615,18 +617,18 @@ with tab3:
             all_wa_df['Mobile'] = all_wa_df['Mobile'].fillna("").astype(str).str.replace('.0', '', regex=False)
 
             # Split into Pending and Saved lists based on new granular statuses
-            pending_wa_df = all_wa_df[~all_wa_df['WhatsApp Status'].isin(IN_GROUP_STATUSES)].copy()
-            saved_wa_df = all_wa_df[all_wa_df['WhatsApp Status'].isin(IN_GROUP_STATUSES)].copy()
+            pending_wa_df = all_wa_df[~all_wa_df['WhatsApp Status'].isin(RESOLVED_STATUSES)].copy()
+            saved_wa_df = all_wa_df[all_wa_df['WhatsApp Status'].isin(RESOLVED_STATUSES)].copy()
 
             # --- SECTION 3.3: PENDING WHATSAPP SYNC ---
             st.markdown("#### 💬 3. Pending WhatsApp Assignment")
             if pending_wa_df.empty:
-                st.success("All completed returns have been processed and added to WhatsApp!")
+                st.success("All completed returns have been processed and moved out of the pending queue!")
             else:
-                st.info("💡 **Instructions:** Select the exact status from the dropdown. Once you select 'Added via Link' or 'Added Directly' and click Save, they will move to Section 4.")
+                st.info("💡 **Instructions:** Select the exact status from the dropdown. Once you select a RESOLVED status ('Added via Link', 'Added Directly', or 'No Smartphone') and click Save, they will move to Section 4.")
                 
                 # Granular Status Dropdown Options
-                status_options = ["Not Started", "Contact Saved", "Invitation Sent", "Added via Link", "Added Directly"]
+                status_options = ["Not Started", "Contact Saved", "Invitation Sent", "Added via Link", "Added Directly", "No Smartphone"]
                 
                 edited_wa = st.data_editor(
                     pending_wa_df[['WhatsApp Status', 'Contact Name (Copy)', 'Mobile', 'Group Name']],
@@ -702,6 +704,10 @@ with tab3:
                         old_group = pending_wa_df.loc[idx, 'WhatsApp Group']
                         old_mobile = str(pending_wa_df.loc[idx, 'Mobile']).replace('.0', '')
                         
+                        # Set Group to None if No Smartphone
+                        if new_status == 'No Smartphone':
+                            group_name = 'None'
+
                         if old_status != new_status or old_group != group_name:
                             mask = updated_form_df['UID'] == uid
                             updated_form_df.loc[mask, 'WhatsApp Added'] = new_status
@@ -734,10 +740,10 @@ with tab3:
 
             st.divider()
 
-            # --- SECTION 3.4: NOW IN WHATSAPP GROUP ---
-            st.markdown("#### ✅ 4. Now in WhatsApp group")
+            # --- SECTION 3.4: PROCESSED & RESOLVED ---
+            st.markdown("#### ✅ 4. Processed & Resolved (In Group or No Smartphone)")
             if saved_wa_df.empty:
-                st.info("No students have been successfully added to the group yet.")
+                st.info("No students have been fully processed for this section yet.")
             else:
                 st.dataframe(
                     saved_wa_df[['Roll', 'Student Name', 'Contact Name (Copy)', 'Mobile', 'WhatsApp Status', 'Group Name']],
@@ -750,10 +756,12 @@ with tab3:
                     
                     vcard_data_saved = ""
                     for _, row in saved_wa_df.iterrows():
-                        c_name = row['Contact Name (Copy)']
-                        c_phone = str(row['Mobile']).strip()
-                        if c_phone and c_phone != "N/A" and c_phone != "nan":
-                            vcard_data_saved += f"BEGIN:VCARD\nVERSION:3.0\nFN:{c_name}\nTEL:{c_phone}\nEND:VCARD\n"
+                        # Only export actual groups, skip No Smartphone
+                        if row['WhatsApp Status'] != 'No Smartphone':
+                            c_name = row['Contact Name (Copy)']
+                            c_phone = str(row['Mobile']).strip()
+                            if c_phone and c_phone != "N/A" and c_phone != "nan":
+                                vcard_data_saved += f"BEGIN:VCARD\nVERSION:3.0\nFN:{c_name}\nTEL:{c_phone}\nEND:VCARD\n"
                     
                     with col_vcf_saved:
                         if vcard_data_saved:
@@ -769,6 +777,7 @@ with tab3:
                         valid_saved_df = saved_wa_df[saved_wa_df['Mobile'].str.strip() != ""]
                         valid_saved_df = valid_saved_df[valid_saved_df['Mobile'].str.strip() != "nan"]
                         valid_saved_df = valid_saved_df[valid_saved_df['Mobile'].str.strip() != "N/A"]
+                        valid_saved_df = valid_saved_df[valid_saved_df['WhatsApp Status'] != 'No Smartphone']
                         
                         if not valid_saved_df.empty:
                             google_csv_saved = pd.DataFrame({
@@ -848,10 +857,10 @@ with tab4:
         
         # --- Part 2: Took form, NOT in group (Pending & In Progress) ---
         st.markdown("#### ⚠️ Part 2: Form Distributed but NOT in Group")
-        part2_df = wa_merged[(~wa_merged['WhatsApp Added'].isin(IN_GROUP_STATUSES)) & (~wa_merged['Date (receive form)'].isin(['Pending', 'Not Generated']))].copy()
+        part2_df = wa_merged[(~wa_merged['WhatsApp Added'].isin(RESOLVED_STATUSES)) & (~wa_merged['Date (receive form)'].isin(['Pending', 'Not Generated']))].copy()
         
         if part2_df.empty:
-            st.success("All students who received a form are either added to the group or haven't received one yet.")
+            st.success("All students who received a form are either added to the group, marked 'No Smartphone', or haven't received one yet.")
         else:
             def determine_reason(row):
                 if row['Return Status'] == 'Incomplete':
@@ -929,6 +938,22 @@ with tab4:
                 use_container_width=True
             )
 
+        st.divider()
+
+        # --- Part 5: No Smartphone ---
+        st.markdown("#### 📵 Part 5: No Smartphone (Cannot Join)")
+        part5_df = wa_merged[wa_merged['WhatsApp Added'].isin(NO_WA_STATUSES)].copy()
+        
+        if part5_df.empty:
+            st.success("No families in this section have reported lacking a smartphone.")
+        else:
+            st.warning("These students require physical paper notices instead of WhatsApp messages.")
+            st.dataframe(
+                part5_df[['Roll_stu', 'Name', 'Father', 'Mobile']].rename(columns={'Roll_stu': 'Roll', 'Mobile': 'Contact Number'}), 
+                hide_index=True, 
+                use_container_width=True
+            )
+
 # ==========================================
 # TAB 5: MASTER LOG (EDITABLE)
 # ==========================================
@@ -987,9 +1012,12 @@ with tab6:
             incomp_df = form_df[form_df['Return Status'] == 'Incomplete']
             incomp_counts = incomp_df.groupby(['Class', 'Section']).size().reset_index(name='Returned (Incomplete)')
             
-            # Count only people fully in the group
+            # WhatsApp Metrics
             wa_df = form_df[form_df['WhatsApp Added'].isin(IN_GROUP_STATUSES)]
             wa_counts = wa_df.groupby(['Class', 'Section']).size().reset_index(name='WhatsApp Synced')
+
+            nowa_df = form_df[form_df['WhatsApp Added'].isin(NO_WA_STATUSES)]
+            nowa_counts = nowa_df.groupby(['Class', 'Section']).size().reset_index(name='No Smartphone')
 
             mob_up_df = form_df[form_df['Mobile Updated'] == 'Yes']
             mob_up_counts = mob_up_df.groupby(['Class', 'Section']).size().reset_index(name='Mobile Numbers Changed')
@@ -999,17 +1027,18 @@ with tab6:
             summary_df = pd.merge(summary_df, comp_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, incomp_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, wa_counts, on=['Class', 'Section'], how='left').fillna(0)
+            summary_df = pd.merge(summary_df, nowa_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, mob_up_counts, on=['Class', 'Section'], how='left').fillna(0)
             
             summary_df['Outstanding (With Guardian)'] = summary_df['Distributed'] - (summary_df['Returned (Complete)'] + summary_df['Returned (Incomplete)'])
             summary_df['Pending Desk Stack'] = summary_df['Forms Generated'] - summary_df['Distributed']
             summary_df['Not Generated Yet'] = summary_df['Total Students'] - summary_df['Forms Generated']
             
-            cols_to_int = ['Total Students', 'Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'WhatsApp Synced', 'Mobile Numbers Changed', 'Outstanding (With Guardian)', 'Pending Desk Stack', 'Not Generated Yet']
+            cols_to_int = ['Total Students', 'Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'WhatsApp Synced', 'No Smartphone', 'Mobile Numbers Changed', 'Outstanding (With Guardian)', 'Pending Desk Stack', 'Not Generated Yet']
             for col in cols_to_int:
                 summary_df[col] = summary_df[col].astype(int)
         else:
-            for col in ['Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'WhatsApp Synced', 'Mobile Numbers Changed', 'Outstanding (With Guardian)', 'Pending Desk Stack']:
+            for col in ['Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'WhatsApp Synced', 'No Smartphone', 'Mobile Numbers Changed', 'Outstanding (With Guardian)', 'Pending Desk Stack']:
                 summary_df[col] = 0
             summary_df['Not Generated Yet'] = summary_df['Total Students']
 
@@ -1035,6 +1064,7 @@ with tab6:
             'Returned (Complete)': summary_df['Returned (Complete)'].sum(),
             'Returned (Incomplete)': summary_df['Returned (Incomplete)'].sum(),
             'WhatsApp Synced': summary_df['WhatsApp Synced'].sum(),
+            'No Smartphone': summary_df['No Smartphone'].sum(),
             'Mobile Numbers Changed': summary_df['Mobile Numbers Changed'].sum(),
             'Outstanding (With Guardian)': summary_df['Outstanding (With Guardian)'].sum(),
             'Pending Desk Stack': summary_df['Pending Desk Stack'].sum(),
@@ -1046,9 +1076,9 @@ with tab6:
         st.markdown("##### Overall School Progress")
         m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("Total Students", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Total Students'].values[0])
-        m2.metric("Forms Generated", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Forms Generated'].values[0])
-        m3.metric("Forms Distributed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Distributed'].values[0])
-        m4.metric("📱 WA Groups Synced", summary_df.loc[summary_df['Class'] == 'TOTAL', 'WhatsApp Synced'].values[0])
+        m2.metric("Forms Distributed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Distributed'].values[0])
+        m3.metric("📱 WA Groups Synced", summary_df.loc[summary_df['Class'] == 'TOTAL', 'WhatsApp Synced'].values[0])
+        m4.metric("📵 No Smartphone", summary_df.loc[summary_df['Class'] == 'TOTAL', 'No Smartphone'].values[0])
         m5.metric("🔄 Numbers Changed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Mobile Numbers Changed'].values[0])
 
         st.markdown("<br>", unsafe_allow_html=True)

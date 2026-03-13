@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import os
 import gspread
 from google.oauth2.service_account import Credentials
-from fpdf import FPDF # Requires fpdf2 (pip install fpdf2)
+from fpdf import FPDF
 
 # --- 1. CONFIGURATION & STYLING ---
 st.set_page_config(page_title="BPS Form Manager", page_icon="📝", layout="wide")
@@ -218,13 +218,16 @@ expected_columns = [
     'Mobile Updated', 'Old Mobile Number'
 ]
 
+# Universal completed statuses list
+IN_GROUP_STATUSES = ['Yes', 'Added via Link', 'Added Directly']
+
 if form_df.empty:
     form_df = pd.DataFrame(columns=expected_columns + ['UID'])
 else:
     for col in expected_columns:
         if col not in form_df.columns:
             if col == 'Return Status' or col == 'Date (returned)': form_df[col] = "Pending"
-            elif col in ['WhatsApp Added', 'Mobile Updated']: form_df[col] = "No"
+            elif col in ['WhatsApp Added', 'Mobile Updated']: form_df[col] = "Not Started"
             elif col in ['WhatsApp Group', 'Old Mobile Number']: form_df[col] = ""
             else: form_df[col] = ""
     form_df['UID'] = form_df['Class'].astype(str) + "_" + form_df['Section'].astype(str) + "_" + form_df['Roll'].astype(str)
@@ -319,7 +322,7 @@ with tab1:
                                 'Date (receive form)': 'Pending',
                                 'Date (returned)': 'Pending',
                                 'Return Status': 'Pending',
-                                'WhatsApp Added': 'No',
+                                'WhatsApp Added': 'Not Started',
                                 'WhatsApp Group': 'None',
                                 'Mobile Updated': 'No',
                                 'Old Mobile Number': ''
@@ -593,23 +596,36 @@ with tab3:
             all_wa_df['Father'] = all_wa_df['Father'].fillna('Guardian')
             all_wa_df['Contact Name (Copy)'] = "BPS " + all_wa_df['Grad Year'] + " " + all_wa_df['Student Name'] + " (" + all_wa_df['Father'] + ")"
             all_wa_df['Suggested Group'] = "BPS " + all_wa_df['Class'].astype(str) + " " + all_wa_df['Section'].astype(str)
-            all_wa_df['Added to WA'] = all_wa_df['WhatsApp Added'].apply(lambda x: True if x == 'Yes' else False)
-            all_wa_df['Group Name'] = all_wa_df.apply(lambda r: r['Suggested Group'] if r['WhatsApp Group'] == 'None' else r['WhatsApp Group'], axis=1)
+            
+            # Map legacy 'No' and empty fields to 'Not Started'
+            all_wa_df['WhatsApp Status'] = all_wa_df['WhatsApp Added'].replace({'No': 'Not Started', '': 'Not Started'})
+            all_wa_df['Group Name'] = all_wa_df.apply(lambda r: r['Suggested Group'] if r['WhatsApp Group'] in ['None', ''] else r['WhatsApp Group'], axis=1)
             all_wa_df['Mobile'] = all_wa_df['Mobile'].fillna("").astype(str).str.replace('.0', '', regex=False)
 
-            # Split into Pending and Saved lists
-            pending_wa_df = all_wa_df[all_wa_df['WhatsApp Added'] != 'Yes'].copy()
-            saved_wa_df = all_wa_df[all_wa_df['WhatsApp Added'] == 'Yes'].copy()
+            # Split into Pending and Saved lists based on new granular statuses
+            pending_wa_df = all_wa_df[~all_wa_df['WhatsApp Status'].isin(IN_GROUP_STATUSES)].copy()
+            saved_wa_df = all_wa_df[all_wa_df['WhatsApp Status'].isin(IN_GROUP_STATUSES)].copy()
 
             # --- SECTION 3.3: PENDING WHATSAPP SYNC ---
             st.markdown("#### 💬 3. Pending WhatsApp Assignment")
             if pending_wa_df.empty:
                 st.success("All completed returns have been processed and added to WhatsApp!")
             else:
-                st.info("💡 **Instructions:** Edit numbers if needed, check the boxes, download your CSV (it grabs the live edits!), then click Save to move them to Section 4.")
+                st.info("💡 **Instructions:** Select the exact status from the dropdown. Once you select 'Added via Link' or 'Added Directly' and click Save, they will move to Section 4.")
+                
+                # Granular Status Dropdown Options
+                status_options = ["Not Started", "Contact Saved", "Invitation Sent", "Added via Link", "Added Directly"]
                 
                 edited_wa = st.data_editor(
-                    pending_wa_df[['Added to WA', 'Contact Name (Copy)', 'Mobile', 'Group Name']],
+                    pending_wa_df[['WhatsApp Status', 'Contact Name (Copy)', 'Mobile', 'Group Name']],
+                    column_config={
+                        "WhatsApp Status": st.column_config.SelectboxColumn(
+                            "WhatsApp Status",
+                            help="Select the current sync status",
+                            options=status_options,
+                            required=True,
+                        )
+                    },
                     hide_index=True,
                     use_container_width=True,
                     disabled=['Contact Name (Copy)'] 
@@ -658,28 +674,26 @@ with tab3:
                         )
 
                 # --- SAVE BUTTON ---
-                if st.button("💾 Save WhatsApp Status & Move to Section 4", type="primary", key="btn_wa_sync"):
+                if st.button("💾 Save WhatsApp Status Updates", type="primary", key="btn_wa_sync"):
                     updated_form_df = form_df.copy()
                     updated_students_df = students_df.copy()
                     changes_made = 0
                     mobile_changes = 0
                     
                     for idx in edited_wa.index:
-                        is_added = edited_wa.loc[idx, 'Added to WA']
+                        new_status = edited_wa.loc[idx, 'WhatsApp Status']
                         group_name = edited_wa.loc[idx, 'Group Name']
                         new_mobile = edited_wa.loc[idx, 'Mobile']
                         uid = pending_wa_df.loc[idx, 'UID']
                         
-                        old_added = pending_wa_df.loc[idx, 'WhatsApp Added']
+                        old_status = pending_wa_df.loc[idx, 'WhatsApp Status']
                         old_group = pending_wa_df.loc[idx, 'WhatsApp Group']
                         old_mobile = str(pending_wa_df.loc[idx, 'Mobile']).replace('.0', '')
                         
-                        new_added_str = 'Yes' if is_added else 'No'
-                        
-                        if old_added != new_added_str or old_group != group_name:
+                        if old_status != new_status or old_group != group_name:
                             mask = updated_form_df['UID'] == uid
-                            updated_form_df.loc[mask, 'WhatsApp Added'] = new_added_str
-                            updated_form_df.loc[mask, 'WhatsApp Group'] = group_name if is_added else 'None'
+                            updated_form_df.loc[mask, 'WhatsApp Added'] = new_status
+                            updated_form_df.loc[mask, 'WhatsApp Group'] = group_name if new_status != 'Not Started' else 'None'
                             changes_made += 1
                             
                         # Write to Google Sheets for students & back up old number
@@ -708,13 +722,13 @@ with tab3:
 
             st.divider()
 
-            # --- SECTION 3.4: WHATSAPP CONTACTS SAVED & CREATED ---
-            st.markdown("#### ✅ 4. WhatsApp Contacts Saved & Created")
+            # --- SECTION 3.4: NOW IN WHATSAPP GROUP ---
+            st.markdown("#### ✅ 4. Now in WhatsApp group")
             if saved_wa_df.empty:
-                st.info("No contacts have been saved to WhatsApp for this section yet.")
+                st.info("No students have been successfully added to the group yet.")
             else:
                 st.dataframe(
-                    saved_wa_df[['Roll', 'Student Name', 'Contact Name (Copy)', 'Mobile', 'Group Name']],
+                    saved_wa_df[['Roll', 'Student Name', 'Contact Name (Copy)', 'Mobile', 'WhatsApp Status', 'Group Name']],
                     hide_index=True,
                     use_container_width=True
                 )
@@ -786,7 +800,7 @@ with tab4:
         
         wa_merged = pd.merge(class_students, class_forms, on='UID', how='left', suffixes=('_stu', '_form'))
         
-        wa_merged['WhatsApp Added'] = wa_merged['WhatsApp Added'].fillna('No')
+        wa_merged['WhatsApp Added'] = wa_merged['WhatsApp Added'].fillna('Not Started')
         wa_merged['Date (receive form)'] = wa_merged['Date (receive form)'].fillna('Not Generated')
         wa_merged['Return Status'] = wa_merged['Return Status'].fillna('N/A')
         wa_merged['Mobile Updated'] = wa_merged['Mobile Updated'].fillna('No')
@@ -794,22 +808,23 @@ with tab4:
         
         st.divider()
         
-        # --- Part 1: In WhatsApp Group (WITH HIGHLIGHTS) ---
+        # --- Part 1: In WhatsApp Group ---
         st.markdown("#### ✅ Part 1: Members in WhatsApp Group")
-        part1_df = wa_merged[wa_merged['WhatsApp Added'] == 'Yes'].copy()
+        part1_df = wa_merged[wa_merged['WhatsApp Added'].isin(IN_GROUP_STATUSES)].copy()
         if part1_df.empty:
             st.info("No students from this section have been added to the WhatsApp group yet.")
         else:
             part1_df['Number Status'] = part1_df['Mobile Updated'].apply(lambda x: '🔄 Changed' if x == 'Yes' else '✅ Unchanged')
+            part1_df['Method Added'] = part1_df['WhatsApp Added'].replace({'Yes': 'Added Directly'})
             part1_df['Old Mobile'] = part1_df.apply(lambda r: r['Old Mobile Number'] if r['Mobile Updated'] == 'Yes' else '-', axis=1)
             part1_df['Current Mobile'] = part1_df['Mobile']
             
-            display_p1 = part1_df[['Roll_stu', 'Name', 'Old Mobile', 'Current Mobile', 'Number Status']].rename(columns={'Roll_stu': 'Roll'})
+            display_p1 = part1_df[['Roll_stu', 'Name', 'Method Added', 'Old Mobile', 'Current Mobile', 'Number Status']].rename(columns={'Roll_stu': 'Roll'})
             
             def highlight_changed_number(row):
                 if row['Number Status'] == '🔄 Changed':
-                    return [''] * 3 + ['background-color: #fff3cd; color: #856404; font-weight: bold;'] + ['']
-                return [''] * 5
+                    return [''] * 4 + ['background-color: #fff3cd; color: #856404; font-weight: bold;'] + ['']
+                return [''] * 6
 
             st.dataframe(
                 display_p1.style.apply(highlight_changed_number, axis=1), 
@@ -819,19 +834,29 @@ with tab4:
             
         st.divider()
         
-        # --- Part 2: Took form, NOT in group (WITH HIGHLIGHTS) ---
+        # --- Part 2: Took form, NOT in group (Pending & In Progress) ---
         st.markdown("#### ⚠️ Part 2: Form Distributed but NOT in Group")
-        part2_df = wa_merged[(wa_merged['WhatsApp Added'] != 'Yes') & (~wa_merged['Date (receive form)'].isin(['Pending', 'Not Generated']))].copy()
+        part2_df = wa_merged[(~wa_merged['WhatsApp Added'].isin(IN_GROUP_STATUSES)) & (~wa_merged['Date (receive form)'].isin(['Pending', 'Not Generated']))].copy()
         
         if part2_df.empty:
             st.success("All students who received a form are either added to the group or haven't received one yet.")
         else:
-            part2_df['Reason'] = part2_df['Return Status'].apply(lambda x: "Form Incomplete" if x == "Incomplete" else ("Pending Return" if x == "Pending" else "Form Complete but not added to Group"))
+            def determine_reason(row):
+                if row['Return Status'] == 'Incomplete':
+                    return "Form Incomplete"
+                elif row['Return Status'] == 'Pending':
+                    return "Pending Return"
+                elif row['WhatsApp Added'] in ['Contact Saved', 'Invitation Sent']:
+                    return f"⏳ In Progress: {row['WhatsApp Added']}"
+                else:
+                    return "Form Complete but not started"
+
+            part2_df['Reason'] = part2_df.apply(determine_reason, axis=1)
             
             display_p2 = part2_df[['Roll_stu', 'Name', 'Date (receive form)', 'Reason']].rename(columns={'Roll_stu': 'Roll', 'Date (receive form)': 'Distributed On'})
             
             def highlight_ready_wa(row):
-                if row['Reason'] == "Form Complete but not added to Group":
+                if "In Progress" in row['Reason'] or row['Reason'] == "Form Complete but not started":
                     return ['background-color: #d4edda; color: #155724; font-weight: bold;'] * len(row)
                 return [''] * len(row)
 
@@ -858,7 +883,7 @@ with tab4:
 
         st.divider()
 
-        # --- Part 4: Form Not Generated (WITH HIGHLIGHTS) ---
+        # --- Part 4: Form Not Generated ---
         st.markdown("#### ❌ Part 4: Form Not Generated - Not in Group")
         part4_df = wa_merged[wa_merged['Date (receive form)'] == 'Not Generated'].copy()
         
@@ -931,7 +956,7 @@ with tab5:
         st.info("No forms have been logged yet.")
 
 # ==========================================
-# TAB 6: SUMMARY & PROGRESS (5 COLUMNS)
+# TAB 6: SUMMARY & PROGRESS 
 # ==========================================
 with tab6:
     st.subheader("📈 Class-Wise Distribution & Return Summary")
@@ -950,7 +975,8 @@ with tab6:
             incomp_df = form_df[form_df['Return Status'] == 'Incomplete']
             incomp_counts = incomp_df.groupby(['Class', 'Section']).size().reset_index(name='Returned (Incomplete)')
             
-            wa_df = form_df[form_df['WhatsApp Added'] == 'Yes']
+            # Count only people fully in the group
+            wa_df = form_df[form_df['WhatsApp Added'].isin(IN_GROUP_STATUSES)]
             wa_counts = wa_df.groupby(['Class', 'Section']).size().reset_index(name='WhatsApp Synced')
 
             mob_up_df = form_df[form_df['Mobile Updated'] == 'Yes']

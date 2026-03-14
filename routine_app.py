@@ -55,7 +55,6 @@ def get_routine_data():
 def get_activity_log():
     sheet = get_sheet("activity_log")
     data = sheet.get_all_values()
-    # Handle the case where the sheet only has headers
     if len(data) <= 1:
         return pd.DataFrame(columns=["Date", "Start_Time", "End_Time", "Duration", "Activity", "Notes"])
     df = pd.DataFrame(data[1:], columns=data[0])
@@ -67,6 +66,9 @@ try:
     # 3. Live Time Tracking (IST)
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist_timezone)
+    
+    # Clean the current time so it doesn't carry seconds/microseconds into the input fields
+    clean_now = now.replace(second=0, microsecond=0).time()
     
     current_day = now.strftime('%A')
     current_time = now.time()
@@ -147,7 +149,6 @@ try:
     today_logs = log_df[log_df['Date'] == today_str].copy()
     
     if not today_logs.empty:
-        # Convert "H:MM" duration back into decimal hours for adding
         def parse_duration(dur_str):
             try:
                 h, m = map(int, str(dur_str).split(':'))
@@ -158,8 +159,7 @@ try:
         today_logs['Hours'] = today_logs['Duration'].apply(parse_duration)
         summary = today_logs.groupby('Activity')['Hours'].sum().sort_values(ascending=False)
         
-        # Display the totals dynamically in columns
-        cols = st.columns(min(len(summary), 3)) # Up to 3 columns per row for mobile
+        cols = st.columns(min(len(summary), 3))
         col_idx = 0
         for act, hrs in summary.items():
             with cols[col_idx % 3]:
@@ -171,22 +171,22 @@ try:
     st.markdown("<br>", unsafe_allow_html=True)
 
 
-    # 7. FEATURE: Daily Activity Logger
+    # 7. FEATURE: Daily Activity Logger (FIXED WITH UNIQUE KEYS)
     with st.expander("📝 Log Completed Activity"):
         with st.form("log_activity_form", clear_on_submit=True):
             st.markdown("### Record What You Did")
             
-            log_date = st.date_input("Date", value=now.date())
-            # Default the input to whatever activity is currently scheduled
-            log_activity = st.text_input("Activity Performed", value=current_activity if current_activity != "FREE TIME" else "")
+            # Every input now has a unique `key` to lock its state during auto-refresh
+            log_date = st.date_input("Date", value=now.date(), key="log_date")
+            log_activity = st.text_input("Activity Performed", value=current_activity if current_activity != "FREE TIME" else "", key="log_activity")
             
             col1, col2 = st.columns(2)
             with col1:
-                log_start = st.time_input("Started At", value=now.time())
+                log_start = st.time_input("Started At", value=clean_now, key="log_start")
             with col2:
-                log_end = st.time_input("Ended At", value=now.time())
+                log_end = st.time_input("Ended At", value=clean_now, key="log_end")
                 
-            log_notes = st.text_area("Notes / Remarks (Optional)")
+            log_notes = st.text_area("Notes / Remarks (Optional)", key="log_notes")
             
             log_submitted = st.form_submit_button("Save to Activity Log", use_container_width=True)
             
@@ -219,7 +219,7 @@ try:
                     st.error("Please enter an activity name.")
 
 
-    # 8. FEATURE: Routine Editor
+    # 8. FEATURE: Routine Editor (FIXED WITH UNIQUE KEYS)
     with st.expander("✏️ Update Master Schedule"):
         with st.form("edit_routine_form", clear_on_submit=True):
             st.markdown("### Add to Routine Master")
@@ -227,15 +227,15 @@ try:
             days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
             col1, col2 = st.columns(2)
             with col1:
-                input_day = st.selectbox("Day", days_of_week, index=days_of_week.index(current_day))
+                input_day = st.selectbox("Day", days_of_week, index=days_of_week.index(current_day), key="master_day")
             with col2:
-                input_activity = st.text_input("Routine Category (e.g., WORK, HEALTH)")
+                input_activity = st.text_input("Routine Category (e.g., WORK, HEALTH)", key="master_activity")
             
             col3, col4 = st.columns(2)
             with col3:
-                input_start = st.time_input("Schedule Start Time", value=now.time())
+                input_start = st.time_input("Schedule Start Time", value=clean_now, key="master_start")
             with col4:
-                input_end = st.time_input("Schedule End Time", value=now.time())
+                input_end = st.time_input("Schedule End Time", value=clean_now, key="master_end")
                 
             submitted = st.form_submit_button("Update Master Sheet", use_container_width=True)
             

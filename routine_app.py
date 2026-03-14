@@ -20,7 +20,8 @@ st.markdown("""
     header {visibility: hidden;}
     footer {visibility: hidden;}
     .block-container {padding-top: 2rem; padding-bottom: 2rem;}
-    input[type="text"] {font-size: 16px;}
+    input[type="text"], textarea {font-size: 16px;}
+    div[data-testid="metric-container"] {text-align: center; background-color: #f0f2f6; padding: 10px; border-radius: 10px;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -36,31 +37,29 @@ def init_connection():
     )
     return gspread.authorize(creds)
 
-def get_sheet():
+def get_sheet(tab_name):
     client = init_connection()
-    return client.open("MY ROUTINE 2026").sheet1
+    return client.open("MY ROUTINE 2026").worksheet(tab_name)
 
-# --- THE FIX IS HERE ---
 @st.cache_data(ttl=60) 
 def get_routine_data():
-    sheet = get_sheet()
-    # Pull raw values to bypass the duplicate/empty header crash
+    sheet = get_sheet("routine_master")
     data = sheet.get_all_values()
-    
-    # Convert to DataFrame (Row 0 is headers, Row 1+ is data)
     df = pd.DataFrame(data[1:], columns=data[0])
-    
-    # Force the app to only look at the first 5 columns (ignoring accidental blank columns)
     df = df.iloc[:, :5]
-    
-    # Rename them explicitly to guarantee no errors
     df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity"]
-    
-    # Drop any completely empty rows that might have snuck in
     df = df[df["Day"].astype(str).str.strip() != ""]
-    
     return df
-# -----------------------
+
+@st.cache_data(ttl=60)
+def get_activity_log():
+    sheet = get_sheet("activity_log")
+    data = sheet.get_all_values()
+    # Handle the case where the sheet only has headers
+    if len(data) <= 1:
+        return pd.DataFrame(columns=["Date", "Start_Time", "End_Time", "Duration", "Activity", "Notes"])
+    df = pd.DataFrame(data[1:], columns=data[0])
+    return df
 
 try:
     df = get_routine_data()
@@ -79,7 +78,6 @@ try:
     next_activity = "NONE"
     next_time_str = ""
 
-    # Filter data for today only to make finding the "Next" activity easier
     today_schedule = []
     for _, row in df.iterrows():
         if str(row.get('Day')).strip() == current_day:
@@ -97,11 +95,9 @@ try:
             else:
                 end_t = datetime.strptime(end_str, '%H:%M').time()
 
-            # Check if we are currently in this activity
             if start_t <= current_time <= end_t:
                 current_activity = str(row['Activity']).strip().upper()
                 
-                # Check what is next
                 if i + 1 < len(today_schedule):
                     next_row = today_schedule[i+1]
                     next_activity = str(next_row['Activity']).strip().upper()
@@ -111,7 +107,6 @@ try:
                     next_activity = "END OF DAY"
                 break
                 
-            # If we are in FREE TIME (before this activity starts)
             elif current_time < start_t and current_activity == "FREE TIME":
                 next_activity = str(row['Activity']).strip().upper()
                 next_start_time = datetime.strptime(start_str, '%H:%M')
@@ -133,36 +128,116 @@ try:
     else:
         color = "#333333" 
 
-    # Main Activity Display 
+    # Main Activity & Up Next
     st.markdown(f"<h1 style='text-align: center; font-size: 4.5rem; color: {color}; margin-top: 30px; margin-bottom: 10px; line-height: 1.2;'>{current_activity}</h1>", unsafe_allow_html=True)
 
-    # Up Next Subtitle Display
     if next_activity not in ["NONE", "END OF DAY"]:
-        st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 40px; font-weight: 400;'>Up Next: <b>{next_activity}</b> at {next_time_str}</h4>", unsafe_allow_html=True)
+        st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 30px; font-weight: 400;'>Up Next: <b>{next_activity}</b> at {next_time_str}</h4>", unsafe_allow_html=True)
     elif next_activity == "END OF DAY":
-        st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 40px; font-weight: 400;'>Up Next: Schedule Complete</h4>", unsafe_allow_html=True)
+        st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 30px; font-weight: 400;'>Up Next: Schedule Complete</h4>", unsafe_allow_html=True)
     else:
-        st.markdown(f"<div style='margin-bottom: 40px;'></div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='margin-bottom: 30px;'></div>", unsafe_allow_html=True)
 
-    # 6. Editor Expander
-    with st.expander("✏️ Quick Add / Edit Routine"):
+    # 6. FEATURE: Daily Productivity Summary
+    st.markdown("---")
+    st.markdown("<h4 style='text-align: center; color: #555; margin-bottom: 20px;'>📊 Today's Productivity</h4>", unsafe_allow_html=True)
+    
+    log_df = get_activity_log()
+    today_str = now.strftime('%Y-%m-%d')
+    today_logs = log_df[log_df['Date'] == today_str].copy()
+    
+    if not today_logs.empty:
+        # Convert "H:MM" duration back into decimal hours for adding
+        def parse_duration(dur_str):
+            try:
+                h, m = map(int, str(dur_str).split(':'))
+                return h + (m / 60.0)
+            except:
+                return 0.0
+                
+        today_logs['Hours'] = today_logs['Duration'].apply(parse_duration)
+        summary = today_logs.groupby('Activity')['Hours'].sum().sort_values(ascending=False)
+        
+        # Display the totals dynamically in columns
+        cols = st.columns(min(len(summary), 3)) # Up to 3 columns per row for mobile
+        col_idx = 0
+        for act, hrs in summary.items():
+            with cols[col_idx % 3]:
+                st.metric(label=act, value=f"{hrs:.1f} hrs")
+            col_idx += 1
+    else:
+        st.markdown("<p style='text-align: center; color: #888;'>No activities logged yet today.</p>", unsafe_allow_html=True)
+        
+    st.markdown("<br>", unsafe_allow_html=True)
+
+
+    # 7. FEATURE: Daily Activity Logger
+    with st.expander("📝 Log Completed Activity"):
+        with st.form("log_activity_form", clear_on_submit=True):
+            st.markdown("### Record What You Did")
+            
+            log_date = st.date_input("Date", value=now.date())
+            # Default the input to whatever activity is currently scheduled
+            log_activity = st.text_input("Activity Performed", value=current_activity if current_activity != "FREE TIME" else "")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                log_start = st.time_input("Started At", value=now.time())
+            with col2:
+                log_end = st.time_input("Ended At", value=now.time())
+                
+            log_notes = st.text_area("Notes / Remarks (Optional)")
+            
+            log_submitted = st.form_submit_button("Save to Activity Log", use_container_width=True)
+            
+            if log_submitted:
+                if log_activity:
+                    start_dt = datetime.combine(log_date, log_start)
+                    end_dt = datetime.combine(log_date, log_end)
+                    if end_dt < start_dt:
+                        end_dt = end_dt.replace(day=end_dt.day + 1)
+                    duration_td = end_dt - start_dt
+                    hours, remainder = divmod(duration_td.seconds, 3600)
+                    minutes = remainder // 60
+                    duration_str = f"{hours}:{minutes:02d}"
+
+                    log_sheet = get_sheet("activity_log")
+                    log_sheet.append_row([
+                        log_date.strftime('%Y-%m-%d'), 
+                        log_start.strftime('%H:%M'), 
+                        log_end.strftime('%H:%M'), 
+                        duration_str, 
+                        log_activity.upper(), 
+                        log_notes
+                    ])
+                    
+                    st.cache_data.clear()
+                    st.success("Activity logged successfully!")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error("Please enter an activity name.")
+
+
+    # 8. FEATURE: Routine Editor
+    with st.expander("✏️ Update Master Schedule"):
         with st.form("edit_routine_form", clear_on_submit=True):
-            st.markdown("### Add New Time Slot")
+            st.markdown("### Add to Routine Master")
             
             days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
             col1, col2 = st.columns(2)
             with col1:
                 input_day = st.selectbox("Day", days_of_week, index=days_of_week.index(current_day))
             with col2:
-                input_activity = st.text_input("Activity (e.g., WORK, HEALTH)")
+                input_activity = st.text_input("Routine Category (e.g., WORK, HEALTH)")
             
             col3, col4 = st.columns(2)
             with col3:
-                input_start = st.time_input("Start Time", value=now.time())
+                input_start = st.time_input("Schedule Start Time", value=now.time())
             with col4:
-                input_end = st.time_input("End Time", value=now.time())
+                input_end = st.time_input("Schedule End Time", value=now.time())
                 
-            submitted = st.form_submit_button("Update Sheet", use_container_width=True)
+            submitted = st.form_submit_button("Update Master Sheet", use_container_width=True)
             
             if submitted:
                 if input_activity:
@@ -178,17 +253,15 @@ try:
                     minutes = remainder // 60
                     duration_str = f"{hours}:{minutes:02d}"
 
-                    sheet = get_sheet()
-                    sheet.append_row([input_day, start_str, end_str, duration_str, input_activity.upper()])
+                    routine_sheet = get_sheet("routine_master")
+                    routine_sheet.append_row([input_day, start_str, end_str, duration_str, input_activity.upper()])
                     
                     st.cache_data.clear()
                     st.success(f"Added '{input_activity.upper()}' to {input_day}!")
-                    
-                    # Force instant reload to show the change immediately
                     time.sleep(1)
                     st.rerun()
                 else:
-                    st.error("Please enter an activity name.")
+                    st.error("Please enter an activity category.")
 
 except Exception as e:
     st.error(f"System Error: {e}")

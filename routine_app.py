@@ -41,6 +41,7 @@ def get_sheet(tab_name):
     client = init_connection()
     return client.open("MY ROUTINE 2026").worksheet(tab_name)
 
+# --- THE FIX IS APPLIED HERE ---
 @st.cache_data(ttl=60) 
 def get_routine_data():
     sheet = get_sheet("routine_master")
@@ -49,6 +50,8 @@ def get_routine_data():
     df = df.iloc[:, :5]
     df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity"]
     df = df[df["Day"].astype(str).str.strip() != ""]
+    # Strip invisible spaces and force uppercase so groupby math works perfectly
+    df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
     return df
 
 @st.cache_data(ttl=60)
@@ -58,7 +61,10 @@ def get_activity_log():
     if len(data) <= 1:
         return pd.DataFrame(columns=["Date", "Start_Time", "End_Time", "Duration", "Activity", "Notes"])
     df = pd.DataFrame(data[1:], columns=data[0])
+    # Apply the same cleaning to the activity log
+    df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
     return df
+# -------------------------------
 
 # Helper function to convert H:MM strings into total minutes for accurate math
 def parse_duration_to_minutes(dur_str):
@@ -212,7 +218,7 @@ try:
                             log_start.strftime('%H:%M'), 
                             log_end.strftime('%H:%M'), 
                             duration_str, 
-                            log_activity.upper(), 
+                            log_activity.upper().strip(), 
                             log_notes
                         ])
                         
@@ -299,7 +305,7 @@ try:
                         duration_str = f"{hours}:{minutes:02d}"
 
                         routine_sheet = get_sheet("routine_master")
-                        routine_sheet.append_row([input_day, start_str, end_str, duration_str, input_activity.upper()])
+                        routine_sheet.append_row([input_day, start_str, end_str, duration_str, input_activity.upper().strip()])
                         
                         st.cache_data.clear()
                         st.success(f"Added '{input_activity.upper()}' to {input_day}!")

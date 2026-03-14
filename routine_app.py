@@ -10,18 +10,38 @@ from streamlit_autorefresh import st_autorefresh
 # 1. Configuration
 st.set_page_config(page_title="Live Routine", page_icon="⏱️", layout="centered")
 
-# Auto-Refresh every 60 seconds
+# Auto-Refresh every 60 seconds (safe with keyed widgets)
 st_autorefresh(interval=60000, key="routine_refresh")
 
-# Hide standard Streamlit menus for a clean interface
+# Hide standard menus and inject Google Sheets style CSS
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
     footer {visibility: hidden;}
     .block-container {padding-top: 2rem; padding-bottom: 2rem;}
-    input[type="text"], textarea {font-size: 16px;}
-    div[data-testid="metric-container"] {text-align: center; background-color: #f0f2f6; padding: 10px; border-radius: 10px; margin-bottom: 15px;}
+    
+    /* Make input boxes sharp and flat like Google Sheet cells */
+    div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {
+        border-radius: 0px !important;
+        border: 1px solid #cccccc !important;
+        background-color: #ffffff !important;
+        box-shadow: none !important;
+    }
+    
+    input[type="text"], input[type="time"], textarea {
+        font-size: 16px !important;
+        padding: 8px !important;
+        color: #000000 !important;
+    }
+    
+    div[data-testid="metric-container"] {
+        text-align: center; 
+        background-color: #f0f2f6; 
+        padding: 10px; 
+        border-radius: 10px; 
+        margin-bottom: 15px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -41,7 +61,6 @@ def get_sheet(tab_name):
     client = init_connection()
     return client.open("MY ROUTINE 2026").worksheet(tab_name)
 
-# --- THE FIX IS APPLIED HERE ---
 @st.cache_data(ttl=60) 
 def get_routine_data():
     sheet = get_sheet("routine_master")
@@ -50,7 +69,6 @@ def get_routine_data():
     df = df.iloc[:, :5]
     df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity"]
     df = df[df["Day"].astype(str).str.strip() != ""]
-    # Strip invisible spaces and force uppercase so groupby math works perfectly
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
     return df
 
@@ -61,12 +79,9 @@ def get_activity_log():
     if len(data) <= 1:
         return pd.DataFrame(columns=["Date", "Start_Time", "End_Time", "Duration", "Activity", "Notes"])
     df = pd.DataFrame(data[1:], columns=data[0])
-    # Apply the same cleaning to the activity log
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
     return df
-# -------------------------------
 
-# Helper function to convert H:MM strings into total minutes for accurate math
 def parse_duration_to_minutes(dur_str):
     try:
         h, m = map(int, str(dur_str).strip().split(':'))
@@ -82,11 +97,9 @@ try:
     now = datetime.now(ist_timezone)
     
     clean_now = now.replace(second=0, microsecond=0).time()
-    
     current_day = now.strftime('%A')
     current_time = now.time()
 
-    # Create the Tabs
     tab1, tab2 = st.tabs(["⏱️ Live View", "📅 Today's Schedule"])
 
     # ==========================================
@@ -132,7 +145,6 @@ try:
                     next_start_time = datetime.strptime(start_str, '%H:%M')
                     next_time_str = next_start_time.strftime('%I:%M %p')
                     break
-                    
             except ValueError:
                 continue
 
@@ -157,7 +169,7 @@ try:
         else:
             st.markdown(f"<div style='margin-bottom: 30px;'></div>", unsafe_allow_html=True)
 
-        # Actual Productivity Summary (From Activity Log)
+        # Actual Productivity Summary
         st.markdown("---")
         st.markdown("<h4 style='text-align: center; color: #555; margin-bottom: 20px;'>📊 Today's Actual Productivity</h4>", unsafe_allow_html=True)
         
@@ -174,7 +186,6 @@ try:
             for act, total_mins in summary.items():
                 hours, remainder_mins = divmod(total_mins, 60)
                 display_time = f"{int(hours)}:{int(remainder_mins):02d}"
-                
                 with cols[col_idx % 3]:
                     st.metric(label=act, value=display_time)
                 col_idx += 1
@@ -183,14 +194,11 @@ try:
             
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # Activity Logger Form
         with st.expander("📝 Log Completed Activity"):
             with st.form("log_activity_form", clear_on_submit=True):
                 st.markdown("### Record What You Did")
-                
                 log_date = st.date_input("Date", value=now.date(), key="log_date")
                 log_activity = st.text_input("Activity Performed", value=current_activity if current_activity != "FREE TIME" else "", key="log_activity")
-                
                 col1, col2 = st.columns(2)
                 with col1:
                     log_start = st.time_input("Started At", value=clean_now, key="log_start")
@@ -198,7 +206,6 @@ try:
                     log_end = st.time_input("Ended At", value=clean_now, key="log_end")
                     
                 log_notes = st.text_area("Notes / Remarks (Optional)", key="log_notes")
-                
                 log_submitted = st.form_submit_button("Save to Activity Log", use_container_width=True)
                 
                 if log_submitted:
@@ -214,12 +221,8 @@ try:
 
                         log_sheet = get_sheet("activity_log")
                         log_sheet.append_row([
-                            log_date.strftime('%Y-%m-%d'), 
-                            log_start.strftime('%H:%M'), 
-                            log_end.strftime('%H:%M'), 
-                            duration_str, 
-                            log_activity.upper().strip(), 
-                            log_notes
+                            log_date.strftime('%Y-%m-%d'), log_start.strftime('%H:%M'), 
+                            log_end.strftime('%H:%M'), duration_str, log_activity.upper().strip(), log_notes
                         ])
                         
                         st.cache_data.clear()
@@ -229,29 +232,98 @@ try:
                     else:
                         st.error("Please enter an activity name.")
 
+
     # ==========================================
-    # TAB 2: FULL DAY SCHEDULE & SUMMARY
+    # TAB 2: LIVE SPREADSHEET EDITOR
     # ==========================================
     with tab2:
-        st.markdown(f"<h3 style='text-align: center; color: #555; margin-bottom: 20px;'>{current_day}'s Full Routine</h3>", unsafe_allow_html=True)
+        st.markdown(f"<h3 style='text-align: center; color: #555; margin-bottom: 5px;'>{current_day}'s Full Routine</h3>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #888; font-size: 14px; margin-bottom: 20px;'>Tap any cell to edit. Times will open your phone's clock dial. Scroll down to save.</p>", unsafe_allow_html=True)
         
         today_full_df = df[df['Day'].str.strip() == current_day].copy()
         
         if not today_full_df.empty:
-            display_df = today_full_df[['Start_Time', 'End_Time', 'Activity', 'Duration']]
-            display_df.columns = ["Start", "End", "Activity", "Duration"]
+            # Prepare the DataFrame for Streamlit's native data editor
+            edit_df = today_full_df[['Start_Time', 'End_Time', 'Activity']].copy()
             
-            st.dataframe(
-                display_df, 
-                use_container_width=True, 
-                hide_index=True
+            # Convert strings to actual time objects so mobile phones recognize them as time inputs
+            def convert_to_time(t_str):
+                try:
+                    if t_str.strip() == '0:00': return datetime.strptime('00:00', '%H:%M').time()
+                    return datetime.strptime(t_str.strip(), '%H:%M').time()
+                except:
+                    return datetime.strptime('00:00', '%H:%M').time()
+
+            edit_df['Start_Time'] = edit_df['Start_Time'].apply(convert_to_time)
+            edit_df['End_Time'] = edit_df['End_Time'].apply(convert_to_time)
+            
+            # The Magic Editor Component
+            edited_schedule = st.data_editor(
+                edit_df,
+                column_config={
+                    "Start_Time": st.column_config.TimeColumn("Start", format="HH:mm", step=60, required=True),
+                    "End_Time": st.column_config.TimeColumn("End", format="HH:mm", step=60, required=True),
+                    "Activity": st.column_config.TextColumn("Activity", required=True)
+                },
+                hide_index=True,
+                use_container_width=True,
+                num_rows="dynamic", # This allows you to add/delete rows directly in the table!
+                key="schedule_editor"
             )
             
-            # Scheduled Productivity Summary (From Routine Master)
+            # Save button for the spreadsheet
+            if st.button("💾 Save Changes to Google Sheet", use_container_width=True):
+                with st.spinner("Syncing to Google Sheets..."):
+                    new_rows = []
+                    
+                    # Convert the edited times back into the formats your master sheet expects
+                    for _, row in edited_schedule.iterrows():
+                        if pd.isna(row['Activity']) or str(row['Activity']).strip() == "":
+                            continue
+                            
+                        start_t = row['Start_Time']
+                        end_t = row['End_Time']
+                        if pd.isna(start_t) or pd.isna(end_t):
+                            continue
+                            
+                        start_str = start_t.strftime('%H:%M')
+                        end_str = end_t.strftime('%H:%M')
+                        
+                        s_dt = datetime.combine(now.date(), start_t)
+                        e_dt = datetime.combine(now.date(), end_t)
+                        if end_str == '00:00' or end_str == '0:00':
+                            e_dt = e_dt.replace(day=e_dt.day + 1)
+                        elif e_dt < s_dt:
+                            e_dt = e_dt.replace(day=e_dt.day + 1)
+                            
+                        duration_td = e_dt - s_dt
+                        hours, remainder = divmod(duration_td.seconds, 3600)
+                        minutes = remainder // 60
+                        duration_str = f"{hours}:{minutes:02d}"
+                        
+                        new_rows.append([current_day, start_str, end_str, duration_str, str(row['Activity']).strip().upper()])
+
+                    # Rebuild the entire Master Sheet to overwrite the old today with your new edited today
+                    full_df = df.copy()
+                    other_days_df = full_df[full_df['Day'].str.strip() != current_day]
+                    new_today_df = pd.DataFrame(new_rows, columns=["Day", "Start_Time", "End_Time", "Duration", "Activity"])
+                    final_df = pd.concat([other_days_df, new_today_df], ignore_index=True)
+                    
+                    routine_sheet = get_sheet("routine_master")
+                    routine_sheet.clear() # Clear old data to prevent ghost duplicates
+                    
+                    # Upload the fresh grid (requires gspread update structure)
+                    data_to_upload = [final_df.columns.values.tolist()] + final_df.values.tolist()
+                    routine_sheet.update(values=data_to_upload, range_name="A1")
+                    
+                    st.cache_data.clear()
+                    st.success("Schedule successfully updated!")
+                    time.sleep(1)
+                    st.rerun()
+
             st.markdown("---")
             st.markdown("<h4 style='text-align: center; color: #555; margin-bottom: 20px;'>📈 Scheduled Summary</h4>", unsafe_allow_html=True)
             
-            # Apply the helper function to sum the planned durations
             today_full_df['Total_Minutes'] = today_full_df['Duration'].apply(parse_duration_to_minutes)
             schedule_summary = today_full_df.groupby('Activity')['Total_Minutes'].sum().sort_values(ascending=False)
             
@@ -260,7 +332,6 @@ try:
             for act, total_mins in schedule_summary.items():
                 hours, remainder_mins = divmod(total_mins, 60)
                 display_time = f"{int(hours)}:{int(remainder_mins):02d}"
-                
                 with cols_sched[col_idx_sched % 3]:
                     st.metric(label=act, value=display_time)
                 col_idx_sched += 1
@@ -268,51 +339,5 @@ try:
         else:
             st.info(f"No routine scheduled for {current_day}.")
             
-        st.markdown("<br><br>", unsafe_allow_html=True)
-            
-        # Master Editor Form placed at the bottom of the schedule view
-        with st.expander("✏️ Update Master Schedule"):
-            with st.form("edit_routine_form", clear_on_submit=True):
-                st.markdown("### Add to Routine Master")
-                
-                days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-                col1, col2 = st.columns(2)
-                with col1:
-                    input_day = st.selectbox("Day", days_of_week, index=days_of_week.index(current_day), key="master_day")
-                with col2:
-                    input_activity = st.text_input("Routine Category (e.g., WORK, HEALTH)", key="master_activity")
-                
-                col3, col4 = st.columns(2)
-                with col3:
-                    input_start = st.time_input("Schedule Start Time", value=clean_now, key="master_start")
-                with col4:
-                    input_end = st.time_input("Schedule End Time", value=clean_now, key="master_end")
-                    
-                submitted = st.form_submit_button("Update Master Sheet", use_container_width=True)
-                
-                if submitted:
-                    if input_activity:
-                        start_str = input_start.strftime('%H:%M')
-                        end_str = input_end.strftime('%H:%M')
-                        
-                        start_dt = datetime.combine(now.date(), input_start)
-                        end_dt = datetime.combine(now.date(), input_end)
-                        if end_dt < start_dt:
-                            end_dt = end_dt.replace(day=end_dt.day + 1)
-                        duration_td = end_dt - start_dt
-                        hours, remainder = divmod(duration_td.seconds, 3600)
-                        minutes = remainder // 60
-                        duration_str = f"{hours}:{minutes:02d}"
-
-                        routine_sheet = get_sheet("routine_master")
-                        routine_sheet.append_row([input_day, start_str, end_str, duration_str, input_activity.upper().strip()])
-                        
-                        st.cache_data.clear()
-                        st.success(f"Added '{input_activity.upper()}' to {input_day}!")
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.error("Please enter an activity category.")
-
 except Exception as e:
     st.error(f"System Error: {e}")

@@ -6,7 +6,7 @@ from datetime import datetime
 import pytz
 from streamlit_autorefresh import st_autorefresh
 
-# Configuration
+# 1. Configuration
 st.set_page_config(page_title="Live Routine", page_icon="⏱️", layout="centered")
 
 # Auto-Refresh every 60 seconds
@@ -23,7 +23,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Database Connection
+# 2. Database Connection
 @st.cache_resource
 def init_connection():
     scopes = [
@@ -48,35 +48,64 @@ def get_routine_data():
 try:
     df = get_routine_data()
     
-    # Live Time Tracking (IST)
+    # 3. Live Time Tracking (IST)
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist_timezone)
     
     current_day = now.strftime('%A')
     current_time = now.time()
 
+    # Top clock display
     st.markdown(f"<h3 style='text-align: center; color: #888;'>{current_day} | {now.strftime('%I:%M %p')}</h3>", unsafe_allow_html=True)
 
     current_activity = "FREE TIME"
+    next_activity = "NONE"
+    next_time_str = ""
 
+    # Filter data for today only to make finding the "Next" activity easier
+    today_schedule = []
     for _, row in df.iterrows():
         if str(row.get('Day')).strip() == current_day:
-            try:
-                start_t = datetime.strptime(str(row['Start_Time']).strip(), '%H:%M').time()
-                end_str = str(row['End_Time']).strip()
+            today_schedule.append(row)
+
+    # 4. Match current time and find Up Next
+    for i, row in enumerate(today_schedule):
+        try:
+            start_str = str(row['Start_Time']).strip()
+            end_str = str(row['End_Time']).strip()
+            
+            start_t = datetime.strptime(start_str, '%H:%M').time()
+            if end_str == '0:00':
+                end_t = datetime.strptime('23:59:59', '%H:%M:%S').time()
+            else:
+                end_t = datetime.strptime(end_str, '%H:%M').time()
+
+            # Check if we are currently in this activity
+            if start_t <= current_time <= end_t:
+                current_activity = str(row['Activity']).strip().upper()
                 
-                if end_str == '0:00':
-                    end_t = datetime.strptime('23:59:59', '%H:%M:%S').time()
+                # Check what is next
+                if i + 1 < len(today_schedule):
+                    next_row = today_schedule[i+1]
+                    next_activity = str(next_row['Activity']).strip().upper()
+                    # Convert 24hr string to 12hr format for display
+                    next_start_time = datetime.strptime(str(next_row['Start_Time']).strip(), '%H:%M')
+                    next_time_str = next_start_time.strftime('%I:%M %p')
                 else:
-                    end_t = datetime.strptime(end_str, '%H:%M').time()
+                    next_activity = "END OF DAY"
+                break
+                
+            # If we are in FREE TIME (before this activity starts)
+            elif current_time < start_t and current_activity == "FREE TIME":
+                next_activity = str(row['Activity']).strip().upper()
+                next_start_time = datetime.strptime(start_str, '%H:%M')
+                next_time_str = next_start_time.strftime('%I:%M %p')
+                break
+                
+        except ValueError:
+            continue
 
-                if start_t <= current_time <= end_t:
-                    current_activity = str(row['Activity']).strip().upper()
-                    break
-            except ValueError:
-                continue
-
-    # Dynamic UI Coloring
+    # 5. Dynamic UI Coloring
     if current_activity in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY"]:
         color = "#ff4b4b" 
     elif current_activity in ["WORK", "REPORT", "TASK"]:
@@ -88,9 +117,18 @@ try:
     else:
         color = "#333333" 
 
-    st.markdown(f"<h1 style='text-align: center; font-size: 4.5rem; color: {color}; margin-top: 30px; margin-bottom: 50px; line-height: 1.2;'>{current_activity}</h1>", unsafe_allow_html=True)
+    # Main Activity Display (Reduced bottom margin to fit 'Up Next')
+    st.markdown(f"<h1 style='text-align: center; font-size: 4.5rem; color: {color}; margin-top: 30px; margin-bottom: 10px; line-height: 1.2;'>{current_activity}</h1>", unsafe_allow_html=True)
 
-    # Editor Expander
+    # Up Next Subtitle Display
+    if next_activity not in ["NONE", "END OF DAY"]:
+        st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 40px; font-weight: 400;'>Up Next: <b>{next_activity}</b> at {next_time_str}</h4>", unsafe_allow_html=True)
+    elif next_activity == "END OF DAY":
+        st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 40px; font-weight: 400;'>Up Next: Schedule Complete</h4>", unsafe_allow_html=True)
+    else:
+        st.markdown(f"<div style='margin-bottom: 40px;'></div>", unsafe_allow_html=True) # Spacer if no next activity
+
+    # 6. Editor Expander
     with st.expander("✏️ Quick Add / Edit Routine"):
         with st.form("edit_routine_form", clear_on_submit=True):
             st.markdown("### Add New Time Slot")

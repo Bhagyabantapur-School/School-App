@@ -10,9 +10,10 @@ from streamlit_autorefresh import st_autorefresh
 # 1. Configuration & Session State Init
 st.set_page_config(page_title="Live Routine", page_icon="⏱️", layout="centered")
 
-# Initialize the active task tracker
-if 'active_task' not in st.session_state:
-    st.session_state.active_task = None
+# Initialize the active task tracker to hold BOTH main and sub activities
+if 'active_main_task' not in st.session_state:
+    st.session_state.active_main_task = None
+    st.session_state.active_sub_task = None
     st.session_state.active_start_time = None
 
 st_autorefresh(interval=60000, key="routine_refresh")
@@ -67,11 +68,8 @@ def get_sheet(tab_name):
 def get_routine_data():
     sheet = get_sheet("routine_master")
     data = sheet.get_all_values()
-    
-    # Read up to 6 columns to include your new sub-activities list
     df = pd.DataFrame(data[1:], columns=data[0])
     
-    # Ensure there are 6 columns even if some are blank
     if df.shape[1] < 6:
         for _ in range(6 - df.shape[1]):
             df[df.shape[1]] = ""
@@ -87,9 +85,19 @@ def get_routine_data():
 def get_activity_log():
     sheet = get_sheet("activity_log")
     data = sheet.get_all_values()
+    
+    # Updated to handle 7 columns (including Sub_Activities)
     if len(data) <= 1:
-        return pd.DataFrame(columns=["Date", "Start_Time", "End_Time", "Duration", "Activity", "Notes"])
+        return pd.DataFrame(columns=["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "Notes"])
+    
     df = pd.DataFrame(data[1:], columns=data[0])
+    
+    if df.shape[1] < 7:
+        for _ in range(7 - df.shape[1]):
+            df[df.shape[1]] = ""
+            
+    df = df.iloc[:, :7]
+    df.columns = ["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "Notes"]
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
     return df
 
@@ -179,18 +187,19 @@ try:
         # --- ONE CLICK TRACKER (START/STOP) ---
         sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
         
-        if sub_list or st.session_state.active_task:
+        if sub_list or st.session_state.active_main_task:
             st.markdown("---")
             st.markdown("<h4 style='text-align: center; color: #333;'>Tap to Track Activity</h4>", unsafe_allow_html=True)
             
             # Display active task status
-            if st.session_state.active_task:
+            if st.session_state.active_main_task:
                 elapsed_time = now - st.session_state.active_start_time
                 mins_elapsed = elapsed_time.seconds // 60
-                st.info(f"⏳ **In Progress:** {st.session_state.active_task} (Running for {mins_elapsed} min)")
+                display_name = st.session_state.active_sub_task if st.session_state.active_sub_task else st.session_state.active_main_task
                 
-                # Big STOP button
-                if st.button(f"🛑 STOP & SAVE {st.session_state.active_task}", use_container_width=True, type="primary"):
+                st.info(f"⏳ **In Progress:** {display_name} (Running for {mins_elapsed} min)")
+                
+                if st.button(f"🛑 STOP & SAVE {display_name}", use_container_width=True, type="primary"):
                     end_time_log = now.time()
                     start_time_log = st.session_state.active_start_time.time()
                     log_date = now.date()
@@ -199,31 +208,35 @@ try:
                     minutes = remainder // 60
                     duration_str = f"{hours}:{minutes:02d}"
 
+                    # Write 7 columns to the activity_log
                     log_sheet = get_sheet("activity_log")
                     log_sheet.append_row([
                         log_date.strftime('%Y-%m-%d'), 
                         start_time_log.strftime('%H:%M'), 
                         end_time_log.strftime('%H:%M'), 
                         duration_str, 
-                        st.session_state.active_task, 
+                        st.session_state.active_main_task, 
+                        st.session_state.active_sub_task,
                         "Auto-logged via One-Click Timer"
                     ])
                     
-                    # Reset tracker
-                    st.session_state.active_task = None
+                    st.session_state.active_main_task = None
+                    st.session_state.active_sub_task = None
                     st.session_state.active_start_time = None
                     st.cache_data.clear()
                     st.success("Activity logged successfully!")
                     time.sleep(1)
                     st.rerun()
 
-            # Display grid of sub-activities if nothing is currently running
+            # Display grid of sub-activities
             elif sub_list:
                 cols = st.columns(3)
                 for idx, task in enumerate(sub_list):
                     with cols[idx % 3]:
                         if st.button(f"▶️ {task}", key=f"btn_{task}", use_container_width=True):
-                            st.session_state.active_task = task
+                            # Lock in both Main Activity and Sub Activity
+                            st.session_state.active_main_task = current_activity
+                            st.session_state.active_sub_task = task
                             st.session_state.active_start_time = now
                             st.rerun()
 
@@ -237,6 +250,7 @@ try:
         
         if not today_logs.empty:
             today_logs['Total_Minutes'] = today_logs['Duration'].apply(parse_duration_to_minutes)
+            # The summary groups by Main Activity to keep the dashboard clean
             summary = today_logs.groupby('Activity')['Total_Minutes'].sum().sort_values(ascending=False)
             cols = st.columns(min(len(summary), 3))
             col_idx = 0
@@ -251,18 +265,26 @@ try:
             
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # Manual Log Form fallback
+        # Manual Log Form
         with st.expander("📝 Manual Log Activity"):
             with st.form("log_activity_form", clear_on_submit=True):
                 st.markdown("### Manually Record Time")
                 log_date = st.date_input("Date", value=now.date(), key="log_date")
-                log_activity = st.text_input("Activity Performed", value=current_activity if current_activity != "FREE TIME" else "", key="log_activity")
+                
+                # Split inputs for Main and Sub activity
+                col_act1, col_act2 = st.columns(2)
+                with col_act1:
+                    log_activity = st.text_input("Main Category", value=current_activity if current_activity != "FREE TIME" else "", key="log_activity")
+                with col_act2:
+                    log_sub_activity = st.text_input("Sub-Activity", placeholder="e.g., YOGA", key="log_sub_activity")
+                    
                 col1, col2 = st.columns(2)
                 with col1:
                     log_start = st.time_input("Started At", value=clean_now, key="log_start")
                 with col2:
                     log_end = st.time_input("Ended At", value=clean_now, key="log_end")
                 log_notes = st.text_area("Notes", key="log_notes")
+                
                 if st.form_submit_button("Save to Activity Log", use_container_width=True):
                     if log_activity:
                         start_dt = datetime.combine(log_date, log_start)
@@ -270,12 +292,25 @@ try:
                         if end_dt < start_dt: end_dt = end_dt.replace(day=end_dt.day + 1)
                         duration_td = end_dt - start_dt
                         h, m = divmod(duration_td.seconds, 3600)
+                        
+                        # Save 7 columns to the log
                         log_sheet = get_sheet("activity_log")
-                        log_sheet.append_row([log_date.strftime('%Y-%m-%d'), log_start.strftime('%H:%M'), log_end.strftime('%H:%M'), f"{h}:{m//60:02d}", log_activity.upper().strip(), log_notes])
+                        log_sheet.append_row([
+                            log_date.strftime('%Y-%m-%d'), 
+                            log_start.strftime('%H:%M'), 
+                            log_end.strftime('%H:%M'), 
+                            f"{h}:{m//60:02d}", 
+                            log_activity.upper().strip(), 
+                            log_sub_activity.upper().strip(),
+                            log_notes
+                        ])
+                        
                         st.cache_data.clear()
                         st.success("Activity logged!")
                         time.sleep(1)
                         st.rerun()
+                    else:
+                        st.error("Please enter a Main Category.")
 
     # ==========================================
     # TAB 2: LIVE SPREADSHEET EDITOR
@@ -287,7 +322,6 @@ try:
         today_full_df = df[df['Day'].str.strip() == current_day].copy()
         
         if not today_full_df.empty:
-            # Included the new Sub_Activities column in the editor
             edit_df = today_full_df[['Start_Time', 'End_Time', 'Activity', 'Sub_Activities']].copy()
             
             def convert_to_time(t_str):

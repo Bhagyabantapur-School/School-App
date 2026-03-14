@@ -21,7 +21,7 @@ st.markdown("""
     footer {visibility: hidden;}
     .block-container {padding-top: 2rem; padding-bottom: 2rem;}
     input[type="text"], textarea {font-size: 16px;}
-    div[data-testid="metric-container"] {text-align: center; background-color: #f0f2f6; padding: 10px; border-radius: 10px;}
+    div[data-testid="metric-container"] {text-align: center; background-color: #f0f2f6; padding: 10px; border-radius: 10px; margin-bottom: 15px;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -59,6 +59,14 @@ def get_activity_log():
         return pd.DataFrame(columns=["Date", "Start_Time", "End_Time", "Duration", "Activity", "Notes"])
     df = pd.DataFrame(data[1:], columns=data[0])
     return df
+
+# Helper function to convert H:MM strings into total minutes for accurate math
+def parse_duration_to_minutes(dur_str):
+    try:
+        h, m = map(int, str(dur_str).strip().split(':'))
+        return (h * 60) + m
+    except:
+        return 0
 
 try:
     df = get_routine_data()
@@ -143,21 +151,15 @@ try:
         else:
             st.markdown(f"<div style='margin-bottom: 30px;'></div>", unsafe_allow_html=True)
 
+        # Actual Productivity Summary (From Activity Log)
         st.markdown("---")
-        st.markdown("<h4 style='text-align: center; color: #555; margin-bottom: 20px;'>📊 Today's Productivity</h4>", unsafe_allow_html=True)
+        st.markdown("<h4 style='text-align: center; color: #555; margin-bottom: 20px;'>📊 Today's Actual Productivity</h4>", unsafe_allow_html=True)
         
         log_df = get_activity_log()
         today_str = now.strftime('%Y-%m-%d')
         today_logs = log_df[log_df['Date'] == today_str].copy()
         
         if not today_logs.empty:
-            def parse_duration_to_minutes(dur_str):
-                try:
-                    h, m = map(int, str(dur_str).split(':'))
-                    return (h * 60) + m
-                except:
-                    return 0
-                    
             today_logs['Total_Minutes'] = today_logs['Duration'].apply(parse_duration_to_minutes)
             summary = today_logs.groupby('Activity')['Total_Minutes'].sum().sort_values(ascending=False)
             
@@ -175,6 +177,7 @@ try:
             
         st.markdown("<br>", unsafe_allow_html=True)
 
+        # Activity Logger Form
         with st.expander("📝 Log Completed Activity"):
             with st.form("log_activity_form", clear_on_submit=True):
                 st.markdown("### Record What You Did")
@@ -220,6 +223,48 @@ try:
                     else:
                         st.error("Please enter an activity name.")
 
+    # ==========================================
+    # TAB 2: FULL DAY SCHEDULE & SUMMARY
+    # ==========================================
+    with tab2:
+        st.markdown(f"<h3 style='text-align: center; color: #555; margin-bottom: 20px;'>{current_day}'s Full Routine</h3>", unsafe_allow_html=True)
+        
+        today_full_df = df[df['Day'].str.strip() == current_day].copy()
+        
+        if not today_full_df.empty:
+            display_df = today_full_df[['Start_Time', 'End_Time', 'Activity', 'Duration']]
+            display_df.columns = ["Start", "End", "Activity", "Duration"]
+            
+            st.dataframe(
+                display_df, 
+                use_container_width=True, 
+                hide_index=True
+            )
+            
+            # Scheduled Productivity Summary (From Routine Master)
+            st.markdown("---")
+            st.markdown("<h4 style='text-align: center; color: #555; margin-bottom: 20px;'>📈 Scheduled Summary</h4>", unsafe_allow_html=True)
+            
+            # Apply the helper function to sum the planned durations
+            today_full_df['Total_Minutes'] = today_full_df['Duration'].apply(parse_duration_to_minutes)
+            schedule_summary = today_full_df.groupby('Activity')['Total_Minutes'].sum().sort_values(ascending=False)
+            
+            cols_sched = st.columns(min(len(schedule_summary), 3))
+            col_idx_sched = 0
+            for act, total_mins in schedule_summary.items():
+                hours, remainder_mins = divmod(total_mins, 60)
+                display_time = f"{int(hours)}:{int(remainder_mins):02d}"
+                
+                with cols_sched[col_idx_sched % 3]:
+                    st.metric(label=act, value=display_time)
+                col_idx_sched += 1
+
+        else:
+            st.info(f"No routine scheduled for {current_day}.")
+            
+        st.markdown("<br><br>", unsafe_allow_html=True)
+            
+        # Master Editor Form placed at the bottom of the schedule view
         with st.expander("✏️ Update Master Schedule"):
             with st.form("edit_routine_form", clear_on_submit=True):
                 st.markdown("### Add to Routine Master")
@@ -262,29 +307,6 @@ try:
                         st.rerun()
                     else:
                         st.error("Please enter an activity category.")
-
-    # ==========================================
-    # TAB 2: FULL DAY SCHEDULE
-    # ==========================================
-    with tab2:
-        st.markdown(f"<h3 style='text-align: center; color: #555; margin-bottom: 20px;'>{current_day}'s Full Routine</h3>", unsafe_allow_html=True)
-        
-        # Filter the main DataFrame for today's activities only
-        today_full_df = df[df['Day'].str.strip() == current_day].copy()
-        
-        if not today_full_df.empty:
-            # Select and rename columns for a clean display
-            display_df = today_full_df[['Start_Time', 'End_Time', 'Activity', 'Duration']]
-            display_df.columns = ["Start", "End", "Activity", "Duration"]
-            
-            # Display it as a responsive, index-hidden table that looks great on mobile
-            st.dataframe(
-                display_df, 
-                use_container_width=True, 
-                hide_index=True
-            )
-        else:
-            st.info(f"No routine scheduled for {current_day}.")
 
 except Exception as e:
     st.error(f"System Error: {e}")

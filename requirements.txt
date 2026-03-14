@@ -8,3 +8,4 @@ google-auth
 fpdf2
 uharfbuzz
 plotly
+pytz

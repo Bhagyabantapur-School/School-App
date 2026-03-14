@@ -4,6 +4,7 @@ from google.oauth2.service_account import Credentials
 import pandas as pd
 from datetime import datetime
 import pytz
+import time
 from streamlit_autorefresh import st_autorefresh
 
 # 1. Configuration
@@ -39,11 +40,27 @@ def get_sheet():
     client = init_connection()
     return client.open("MY ROUTINE 2026").sheet1
 
+# --- THE FIX IS HERE ---
 @st.cache_data(ttl=60) 
 def get_routine_data():
     sheet = get_sheet()
-    data = sheet.get_all_records()
-    return pd.DataFrame(data)
+    # Pull raw values to bypass the duplicate/empty header crash
+    data = sheet.get_all_values()
+    
+    # Convert to DataFrame (Row 0 is headers, Row 1+ is data)
+    df = pd.DataFrame(data[1:], columns=data[0])
+    
+    # Force the app to only look at the first 5 columns (ignoring accidental blank columns)
+    df = df.iloc[:, :5]
+    
+    # Rename them explicitly to guarantee no errors
+    df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity"]
+    
+    # Drop any completely empty rows that might have snuck in
+    df = df[df["Day"].astype(str).str.strip() != ""]
+    
+    return df
+# -----------------------
 
 try:
     df = get_routine_data()
@@ -88,7 +105,6 @@ try:
                 if i + 1 < len(today_schedule):
                     next_row = today_schedule[i+1]
                     next_activity = str(next_row['Activity']).strip().upper()
-                    # Convert 24hr string to 12hr format for display
                     next_start_time = datetime.strptime(str(next_row['Start_Time']).strip(), '%H:%M')
                     next_time_str = next_start_time.strftime('%I:%M %p')
                 else:
@@ -117,7 +133,7 @@ try:
     else:
         color = "#333333" 
 
-    # Main Activity Display (Reduced bottom margin to fit 'Up Next')
+    # Main Activity Display 
     st.markdown(f"<h1 style='text-align: center; font-size: 4.5rem; color: {color}; margin-top: 30px; margin-bottom: 10px; line-height: 1.2;'>{current_activity}</h1>", unsafe_allow_html=True)
 
     # Up Next Subtitle Display
@@ -126,7 +142,7 @@ try:
     elif next_activity == "END OF DAY":
         st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 40px; font-weight: 400;'>Up Next: Schedule Complete</h4>", unsafe_allow_html=True)
     else:
-        st.markdown(f"<div style='margin-bottom: 40px;'></div>", unsafe_allow_html=True) # Spacer if no next activity
+        st.markdown(f"<div style='margin-bottom: 40px;'></div>", unsafe_allow_html=True)
 
     # 6. Editor Expander
     with st.expander("✏️ Quick Add / Edit Routine"):
@@ -167,6 +183,10 @@ try:
                     
                     st.cache_data.clear()
                     st.success(f"Added '{input_activity.upper()}' to {input_day}!")
+                    
+                    # Force instant reload to show the change immediately
+                    time.sleep(1)
+                    st.rerun()
                 else:
                     st.error("Please enter an activity name.")
 

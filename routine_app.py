@@ -10,7 +10,6 @@ from streamlit_autorefresh import st_autorefresh
 # 1. Configuration & Session State Init
 st.set_page_config(page_title="Live Routine", page_icon="⏱️", layout="centered")
 
-# Initialize the active task tracker to hold BOTH main and sub activities
 if 'active_main_task' not in st.session_state:
     st.session_state.active_main_task = None
     st.session_state.active_sub_task = None
@@ -45,6 +44,13 @@ st.markdown("""
         border-radius: 10px; 
         margin-bottom: 15px;
     }
+    
+    /* Style Checkboxes */
+    div[data-testid="stCheckbox"] label {
+        font-size: 18px !important;
+        padding-top: 5px;
+        padding-bottom: 5px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -70,12 +76,12 @@ def get_routine_data():
     data = sheet.get_all_values()
     df = pd.DataFrame(data[1:], columns=data[0])
     
-    if df.shape[1] < 6:
-        for _ in range(6 - df.shape[1]):
-            df[df.shape[1]] = ""
+    # Pad to 7 columns if missing
+    while df.shape[1] < 7:
+        df[df.shape[1]] = ""
             
-    df = df.iloc[:, :6]
-    df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities"]
+    df = df.iloc[:, :7]
+    df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list"]
     
     df = df[df["Day"].astype(str).str.strip() != ""]
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
@@ -86,18 +92,17 @@ def get_activity_log():
     sheet = get_sheet("activity_log")
     data = sheet.get_all_values()
     
-    # Updated to handle 7 columns (including Sub_Activities)
     if len(data) <= 1:
-        return pd.DataFrame(columns=["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "Notes"])
+        return pd.DataFrame(columns=["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"])
     
     df = pd.DataFrame(data[1:], columns=data[0])
     
-    if df.shape[1] < 7:
-        for _ in range(7 - df.shape[1]):
-            df[df.shape[1]] = ""
+    # Pad to 8 columns if missing
+    while df.shape[1] < 8:
+        df[df.shape[1]] = ""
             
-    df = df.iloc[:, :7]
-    df.columns = ["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "Notes"]
+    df = df.iloc[:, :8]
+    df.columns = ["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"]
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
     return df
 
@@ -108,13 +113,45 @@ def parse_duration_to_minutes(dur_str):
     except:
         return 0
 
+def get_last_done_str(sub_task, log_df, now):
+    matches = log_df[log_df['Sub_Activities'].astype(str).str.strip().str.upper() == sub_task.upper()]
+    if matches.empty:
+        return "Never"
+    
+    max_dt = None
+    for _, r in matches.iterrows():
+        try:
+            dt_str = f"{r['Date']} {r['End_Time']}"
+            dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+            if max_dt is None or dt > max_dt:
+                max_dt = dt
+        except:
+            continue
+            
+    if not max_dt: return "Never"
+    
+    now_naive = now.replace(tzinfo=None)
+    diff = now_naive - max_dt
+    
+    if diff.days > 0:
+        return f"{diff.days}d ago"
+    elif diff.seconds >= 3600:
+        return f"{diff.seconds // 3600}h ago"
+    elif diff.seconds >= 60:
+        return f"{diff.seconds // 60}m ago"
+    else:
+        return "Just now"
+
 try:
     df = get_routine_data()
+    log_df = get_activity_log() # Fetch log early for checklists and last-done calculation
+    
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist_timezone)
     clean_now = now.replace(second=0, microsecond=0).time()
     
     current_day = now.strftime('%A')
+    today_str = now.strftime('%Y-%m-%d')
     current_time = now.time()
 
     tab1, tab2 = st.tabs(["⏱️ Live View", "📅 Today's Schedule"])
@@ -129,6 +166,7 @@ try:
         next_activity = "NONE"
         next_time_str = ""
         current_sub_activities = ""
+        current_check_list = ""
 
         today_schedule = df[df['Day'].str.strip() == current_day].to_dict('records')
 
@@ -146,6 +184,7 @@ try:
                 if start_t <= current_time <= end_t:
                     current_activity = str(row['Activity']).strip().upper()
                     current_sub_activities = str(row.get('Sub_Activities', '')).strip()
+                    current_check_list = str(row.get('check_list', '')).strip()
                     
                     if i + 1 < len(today_schedule):
                         next_row = today_schedule[i+1]
@@ -164,16 +203,11 @@ try:
             except ValueError:
                 continue
 
-        if current_activity in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY"]:
-            color = "#ff4b4b" 
-        elif current_activity in ["WORK", "REPORT", "TASK"]:
-            color = "#0068c9" 
-        elif current_activity == "HEALTH":
-            color = "#2e7b32" 
-        elif current_activity in ["SLEEP", "PRE", "TEA", "OUT"]:
-            color = "#ff9f36" 
-        else:
-            color = "#333333" 
+        if current_activity in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY"]: color = "#ff4b4b" 
+        elif current_activity in ["WORK", "REPORT", "TASK"]: color = "#0068c9" 
+        elif current_activity == "HEALTH": color = "#2e7b32" 
+        elif current_activity in ["SLEEP", "PRE", "TEA", "OUT"]: color = "#ff9f36" 
+        else: color = "#333333" 
 
         st.markdown(f"<h1 style='text-align: center; font-size: 4.5rem; color: {color}; margin-top: 30px; margin-bottom: 10px; line-height: 1.2;'>{current_activity}</h1>", unsafe_allow_html=True)
 
@@ -184,6 +218,38 @@ try:
         else:
             st.markdown(f"<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
 
+        # --- CHECKLIST FEATURE ---
+        chk_list = [c.strip() for c in current_check_list.split(',') if c.strip()]
+        if chk_list:
+            st.markdown("---")
+            st.markdown("<h4 style='text-align: center; color: #333;'>✅ Tasks & Reminders</h4>", unsafe_allow_html=True)
+            
+            today_logs = log_df[log_df['Date'] == today_str]
+            logged_tasks = today_logs[today_logs['Activity'] == current_activity]['check_list'].tolist()
+            
+            for task in chk_list:
+                # Check if this task has already been clicked and logged today
+                is_done = any(task.upper() == str(x).strip().upper() for x in logged_tasks)
+                
+                # Render checkbox
+                checked = st.checkbox(task, value=is_done, disabled=is_done, key=f"chk_{task}_{current_activity}")
+                
+                # If user clicks it right now
+                if checked and not is_done:
+                    sheet_log = get_sheet("activity_log")
+                    sheet_log.append_row([
+                        today_str, 
+                        now.strftime('%H:%M'), 
+                        now.strftime('%H:%M'), 
+                        "0:00", 
+                        current_activity, 
+                        "", 
+                        task, 
+                        "Checked off"
+                    ])
+                    st.cache_data.clear()
+                    st.rerun()
+
         # --- ONE CLICK TRACKER (START/STOP) ---
         sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
         
@@ -191,7 +257,6 @@ try:
             st.markdown("---")
             st.markdown("<h4 style='text-align: center; color: #333;'>Tap to Track Activity</h4>", unsafe_allow_html=True)
             
-            # Display active task status
             if st.session_state.active_main_task:
                 elapsed_time = now - st.session_state.active_start_time
                 mins_elapsed = elapsed_time.seconds // 60
@@ -202,21 +267,20 @@ try:
                 if st.button(f"🛑 STOP & SAVE {display_name}", use_container_width=True, type="primary"):
                     end_time_log = now.time()
                     start_time_log = st.session_state.active_start_time.time()
-                    log_date = now.date()
                     
                     hours, remainder = divmod(elapsed_time.seconds, 3600)
                     minutes = remainder // 60
                     duration_str = f"{hours}:{minutes:02d}"
 
-                    # Write 7 columns to the activity_log
                     log_sheet = get_sheet("activity_log")
                     log_sheet.append_row([
-                        log_date.strftime('%Y-%m-%d'), 
+                        today_str, 
                         start_time_log.strftime('%H:%M'), 
                         end_time_log.strftime('%H:%M'), 
                         duration_str, 
                         st.session_state.active_main_task, 
                         st.session_state.active_sub_task,
+                        "",
                         "Auto-logged via One-Click Timer"
                     ])
                     
@@ -228,13 +292,14 @@ try:
                     time.sleep(1)
                     st.rerun()
 
-            # Display grid of sub-activities
             elif sub_list:
                 cols = st.columns(3)
                 for idx, task in enumerate(sub_list):
                     with cols[idx % 3]:
-                        if st.button(f"▶️ {task}", key=f"btn_{task}", use_container_width=True):
-                            # Lock in both Main Activity and Sub Activity
+                        # Calculate and display how long ago this sub-task was done
+                        last_done = get_last_done_str(task, log_df, now)
+                        
+                        if st.button(f"▶️ {task}\n(Last: {last_done})", key=f"btn_{task}", use_container_width=True):
                             st.session_state.active_main_task = current_activity
                             st.session_state.active_sub_task = task
                             st.session_state.active_start_time = now
@@ -244,13 +309,10 @@ try:
         
         # Today's Productivity Metrics
         st.markdown("<h4 style='text-align: center; color: #555; margin-bottom: 20px;'>📊 Today's Actual Productivity</h4>", unsafe_allow_html=True)
-        log_df = get_activity_log()
-        today_str = now.strftime('%Y-%m-%d')
         today_logs = log_df[log_df['Date'] == today_str].copy()
         
         if not today_logs.empty:
             today_logs['Total_Minutes'] = today_logs['Duration'].apply(parse_duration_to_minutes)
-            # The summary groups by Main Activity to keep the dashboard clean
             summary = today_logs.groupby('Activity')['Total_Minutes'].sum().sort_values(ascending=False)
             cols = st.columns(min(len(summary), 3))
             col_idx = 0
@@ -271,18 +333,19 @@ try:
                 st.markdown("### Manually Record Time")
                 log_date = st.date_input("Date", value=now.date(), key="log_date")
                 
-                # Split inputs for Main and Sub activity
                 col_act1, col_act2 = st.columns(2)
                 with col_act1:
-                    log_activity = st.text_input("Main Category", value=current_activity if current_activity != "FREE TIME" else "", key="log_activity")
+                    log_activity = st.text_input("Main Category", value=current_activity if current_activity != "FREE TIME" else "", key="log_act")
                 with col_act2:
-                    log_sub_activity = st.text_input("Sub-Activity", placeholder="e.g., YOGA", key="log_sub_activity")
+                    log_sub_activity = st.text_input("Sub-Activity", placeholder="e.g., YOGA", key="log_sub")
                     
                 col1, col2 = st.columns(2)
                 with col1:
                     log_start = st.time_input("Started At", value=clean_now, key="log_start")
                 with col2:
                     log_end = st.time_input("Ended At", value=clean_now, key="log_end")
+                
+                log_chk = st.text_input("Checklist Item (Optional)", key="log_chk")    
                 log_notes = st.text_area("Notes", key="log_notes")
                 
                 if st.form_submit_button("Save to Activity Log", use_container_width=True):
@@ -293,15 +356,15 @@ try:
                         duration_td = end_dt - start_dt
                         h, m = divmod(duration_td.seconds, 3600)
                         
-                        # Save 7 columns to the log
-                        log_sheet = get_sheet("activity_log")
-                        log_sheet.append_row([
+                        sheet_log = get_sheet("activity_log")
+                        sheet_log.append_row([
                             log_date.strftime('%Y-%m-%d'), 
                             log_start.strftime('%H:%M'), 
                             log_end.strftime('%H:%M'), 
                             f"{h}:{m//60:02d}", 
                             log_activity.upper().strip(), 
                             log_sub_activity.upper().strip(),
+                            log_chk.strip(),
                             log_notes
                         ])
                         
@@ -317,12 +380,12 @@ try:
     # ==========================================
     with tab2:
         st.markdown(f"<h3 style='text-align: center; color: #555; margin-bottom: 5px;'>{current_day}'s Full Routine</h3>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #888; font-size: 14px; margin-bottom: 20px;'>Tap any cell to edit. Times will open your phone's clock dial.</p>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #888; font-size: 14px; margin-bottom: 20px;'>Tap any cell to edit. Scroll right to see Sub-Activities and Checklists.</p>", unsafe_allow_html=True)
         
         today_full_df = df[df['Day'].str.strip() == current_day].copy()
         
         if not today_full_df.empty:
-            edit_df = today_full_df[['Start_Time', 'End_Time', 'Activity', 'Sub_Activities']].copy()
+            edit_df = today_full_df[['Start_Time', 'End_Time', 'Activity', 'Sub_Activities', 'check_list']].copy()
             
             def convert_to_time(t_str):
                 try:
@@ -340,7 +403,8 @@ try:
                     "Start_Time": st.column_config.TimeColumn("Start", format="HH:mm", step=60, required=True),
                     "End_Time": st.column_config.TimeColumn("End", format="HH:mm", step=60, required=True),
                     "Activity": st.column_config.TextColumn("Activity", required=True),
-                    "Sub_Activities": st.column_config.TextColumn("Sub List (comma sep.)")
+                    "Sub_Activities": st.column_config.TextColumn("Sub List (comma sep.)"),
+                    "check_list": st.column_config.TextColumn("Checklist (comma sep.)")
                 },
                 hide_index=True,
                 use_container_width=True,
@@ -371,11 +435,14 @@ try:
                         sub_act = str(row.get('Sub_Activities', '')).strip()
                         if sub_act == 'nan': sub_act = ""
                         
-                        new_rows.append([current_day, start_str, end_str, duration_str, str(row['Activity']).strip().upper(), sub_act])
+                        chk_act = str(row.get('check_list', '')).strip()
+                        if chk_act == 'nan': chk_act = ""
+                        
+                        new_rows.append([current_day, start_str, end_str, duration_str, str(row['Activity']).strip().upper(), sub_act, chk_act])
 
                     full_df = df.copy()
                     other_days_df = full_df[full_df['Day'].str.strip() != current_day]
-                    new_today_df = pd.DataFrame(new_rows, columns=["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities"])
+                    new_today_df = pd.DataFrame(new_rows, columns=["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list"])
                     final_df = pd.concat([other_days_df, new_today_df], ignore_index=True)
                     
                     routine_sheet = get_sheet("routine_master")

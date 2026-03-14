@@ -9,3 +9,4 @@ fpdf2
 uharfbuzz
 plotly
 pytz
+streamlit-autorefresh

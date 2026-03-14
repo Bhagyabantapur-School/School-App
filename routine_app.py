@@ -140,6 +140,7 @@ try:
     else:
         st.markdown(f"<div style='margin-bottom: 30px;'></div>", unsafe_allow_html=True)
 
+
     # 6. FEATURE: Daily Productivity Summary
     st.markdown("---")
     st.markdown("<h4 style='text-align: center; color: #555; margin-bottom: 20px;'>📊 Today's Productivity</h4>", unsafe_allow_html=True)
@@ -149,21 +150,26 @@ try:
     today_logs = log_df[log_df['Date'] == today_str].copy()
     
     if not today_logs.empty:
-        def parse_duration(dur_str):
+        # Convert the duration to total minutes to add them correctly
+        def parse_duration_to_minutes(dur_str):
             try:
                 h, m = map(int, str(dur_str).split(':'))
-                return h + (m / 60.0)
+                return (h * 60) + m
             except:
-                return 0.0
+                return 0
                 
-        today_logs['Hours'] = today_logs['Duration'].apply(parse_duration)
-        summary = today_logs.groupby('Activity')['Hours'].sum().sort_values(ascending=False)
+        today_logs['Total_Minutes'] = today_logs['Duration'].apply(parse_duration_to_minutes)
+        summary = today_logs.groupby('Activity')['Total_Minutes'].sum().sort_values(ascending=False)
         
         cols = st.columns(min(len(summary), 3))
         col_idx = 0
-        for act, hrs in summary.items():
+        for act, total_mins in summary.items():
+            # Convert the total minutes back to H:MM format for display
+            hours, remainder_mins = divmod(total_mins, 60)
+            display_time = f"{int(hours)}:{int(remainder_mins):02d}"
+            
             with cols[col_idx % 3]:
-                st.metric(label=act, value=f"{hrs:.1f} hrs")
+                st.metric(label=act, value=display_time)
             col_idx += 1
     else:
         st.markdown("<p style='text-align: center; color: #888;'>No activities logged yet today.</p>", unsafe_allow_html=True)
@@ -171,12 +177,11 @@ try:
     st.markdown("<br>", unsafe_allow_html=True)
 
 
-    # 7. FEATURE: Daily Activity Logger (FIXED WITH UNIQUE KEYS)
+    # 7. FEATURE: Daily Activity Logger
     with st.expander("📝 Log Completed Activity"):
         with st.form("log_activity_form", clear_on_submit=True):
             st.markdown("### Record What You Did")
             
-            # Every input now has a unique `key` to lock its state during auto-refresh
             log_date = st.date_input("Date", value=now.date(), key="log_date")
             log_activity = st.text_input("Activity Performed", value=current_activity if current_activity != "FREE TIME" else "", key="log_activity")
             
@@ -219,7 +224,7 @@ try:
                     st.error("Please enter an activity name.")
 
 
-    # 8. FEATURE: Routine Editor (FIXED WITH UNIQUE KEYS)
+    # 8. FEATURE: Routine Editor
     with st.expander("✏️ Update Master Schedule"):
         with st.form("edit_routine_form", clear_on_submit=True):
             st.markdown("### Add to Routine Master")

@@ -957,6 +957,45 @@ with tab4:
                 use_container_width=True
             )
 
+        st.divider()
+
+        # --- Part 6: Multiple Children (Siblings) ---
+        st.markdown("#### 👨‍👩‍👧‍👦 Part 6: Parents with Multiple Children (Siblings)")
+        
+        # Prepare master mobile list for sibling detection
+        all_stu = students_df.copy()
+        all_stu['Clean_Mobile'] = all_stu['Mobile'].fillna("").astype(str).str.replace('.0', '', regex=False).str.strip()
+        valid_stu = all_stu[all_stu['Clean_Mobile'] != ""]
+        dup_mobiles = valid_stu[valid_stu.duplicated(subset=['Clean_Mobile'], keep=False)]['Clean_Mobile'].unique()
+        
+        part6_df = wa_merged.copy()
+        part6_df['Clean_Mobile'] = part6_df['Mobile'].fillna("").astype(str).str.replace('.0', '', regex=False).str.strip()
+        
+        mult_children_df = part6_df[part6_df['Clean_Mobile'].isin(dup_mobiles)].copy()
+        
+        if mult_children_df.empty:
+            st.success("No students in this section share a phone number with another student in the school.")
+        else:
+            def get_siblings(row):
+                mob = row['Clean_Mobile']
+                sibs = valid_stu[(valid_stu['Clean_Mobile'] == mob) & (valid_stu['UID'] != row['UID'])]
+                return " + ".join(sibs['Name'] + " (" + sibs['Class'] + " " + sibs['Section'] + ")")
+                
+            mult_children_df['Other Children (Siblings)'] = mult_children_df.apply(get_siblings, axis=1)
+            # Filter out any accidental empty strings
+            mult_children_df = mult_children_df[mult_children_df['Other Children (Siblings)'] != ""]
+            
+            if mult_children_df.empty:
+                st.success("No students in this section share a phone number with another student in the school.")
+            else:
+                st.info("💡 **Tip:** These students share a mobile number with other students in the school. Adding the parent to WhatsApp covers all these children!")
+                display_p6 = mult_children_df[['Roll_stu', 'Name', 'Father', 'Clean_Mobile', 'Other Children (Siblings)']].rename(columns={'Roll_stu': 'Roll', 'Clean_Mobile': 'Mobile'})
+                st.dataframe(
+                    display_p6, 
+                    hide_index=True, 
+                    use_container_width=True
+                )
+
 # ==========================================
 # TAB 5: MASTER LOG (EDITABLE)
 # ==========================================

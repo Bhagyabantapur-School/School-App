@@ -159,7 +159,8 @@ try:
     today_str = now.strftime('%Y-%m-%d')
     current_time = now.time()
 
-    tab1, tab2 = st.tabs(["⏱️ Live View", "📅 Today's Schedule"])
+    # Updated to 3 Tabs
+    tab1, tab2, tab3 = st.tabs(["⏱️ Live View", "📅 Today's Schedule", "🔗 App Hub"])
 
     # ==========================================
     # TAB 1: LIVE DASHBOARD
@@ -212,7 +213,6 @@ try:
 
         st.markdown(f"<h1 style='text-align: center; font-size: 4.5rem; color: {color}; margin-top: 30px; margin-bottom: 5px; line-height: 1.2;'>{current_activity}</h1>", unsafe_allow_html=True)
 
-        # --- CALCULATE AND DISPLAY ELAPSED TIME ---
         if current_activity_start:
             dt_start = datetime.combine(now.date(), current_activity_start)
             dt_start = ist_timezone.localize(dt_start)
@@ -231,7 +231,6 @@ try:
         else:
             st.markdown(f"<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
 
-        # --- SMART SCHEDULE INJECTION & COUNTDOWN ---
         sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
         chk_list = [c.strip() for c in current_check_list.split(',') if c.strip()]
         all_logged_items = log_df['check_list'].tolist() + log_df['Sub_Activities'].tolist()
@@ -252,10 +251,8 @@ try:
                     is_done_in_log = any(formatted_task.upper() == str(x).strip().upper() for x in all_logged_items)
                     is_done = is_done_in_sheet or is_done_in_log
                     
-                    # RULE 1: If it's done, skip it entirely
                     if is_done: continue
                         
-                    # RULE 2: If <= 24h away (including overdue) -> Put in Top Countdown Box
                     if hours_until_due <= 24:
                         sec_diff = time_diff.total_seconds()
                         is_overdue = sec_diff < 0
@@ -267,21 +264,18 @@ try:
                         
                         if is_overdue:
                             time_text = f"overdue by {time_str}"
-                            # If overdue by >= 30 mins (1800 seconds), turn red. Else blue.
                             text_color = "#ff4b4b" if abs_sec >= 1800 else "#0068c9"
                         else:
                             time_text = f"due in {time_str}"
-                            text_color = "#0068c9" # Default blue
+                            text_color = "#0068c9"
                             
                         upcoming_ui_elements.append(f"&gt; <b style='color: {text_color};'>{r['Task_Name']} ({r['Activity']})</b> {time_text}")
                         
-                    # RULE 3: If exact due time is reached -> ALSO Drop into actionable lists
                     if hours_until_due <= 0 and str(r['Activity']).strip().upper() == current_activity:
                         if r['Type'] == 'Sub-Activity': sub_list.append(formatted_task)
                         elif r['Type'] == 'Checklist': chk_list.append(formatted_task)
                 except: continue
 
-        # --- RENDER TOP COUNTDOWN BOX ---
         if upcoming_ui_elements:
             box_html = f"""
             <div style='background-color:#fff3e0; padding:15px; border-radius:10px; border: 1px solid #ffcc80; margin-bottom: 20px;'>
@@ -293,7 +287,6 @@ try:
             box_html += "</div>"
             st.markdown(box_html, unsafe_allow_html=True)
 
-        # --- CHECKLIST FEATURE ---
         if chk_list:
             st.markdown("---")
             st.markdown("<h4 style='text-align: center; color: #333;'>✅ Tasks & Reminders</h4>", unsafe_allow_html=True)
@@ -332,7 +325,6 @@ try:
                     st.cache_data.clear()
                     st.rerun()
 
-        # --- BULLETPROOF GOOGLE SHEETS TRACKER ---
         running_tasks = log_df[log_df['End_Time'] == 'RUNNING']
         is_running = not running_tasks.empty
         
@@ -441,7 +433,6 @@ try:
             
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # --- FUTURE SCHEDULER FORM ---
         with st.expander("🗓️ Schedule Future Task"):
             with st.form("schedule_future_form", clear_on_submit=True):
                 st.markdown("### Attach Task to a Future Activity")
@@ -452,7 +443,6 @@ try:
                 f_entity = st.selectbox("Entity", ["Personal", "School", "People"], key="f_entity")
                 f_name = st.text_input("Task Details", placeholder="e.g., Pay Electricity Bill", key="f_name")
                 
-                # Manual typing with Dropdown workaround for Due Time
                 time_options = [f"{str(h).zfill(2)}:{str(m).zfill(2)}" for h in range(24) for m in range(60)]
                 now_str = clean_now.strftime('%H:%M')
                 
@@ -488,7 +478,6 @@ try:
                     else:
                         st.error("Please enter task details.")
 
-        # Manual Log Form
         with st.expander("📝 Manual Log Activity"):
             with st.form("log_activity_form", clear_on_submit=True):
                 st.markdown("### Manually Record Time")
@@ -617,6 +606,19 @@ try:
                 col_idx_sched += 1
         else:
             st.info(f"No routine scheduled for {current_day}.")
-            
+
+    # ==========================================
+    # TAB 3: APP HUB
+    # ==========================================
+    with tab3:
+        st.markdown("<h3 style='text-align: center; color: #555; margin-bottom: 20px;'>🔗 Quick Links</h3>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #888; margin-bottom: 30px;'>Access your other modules directly from here.</p>", unsafe_allow_html=True)
+        
+        # Replace these placeholder URLs with your actual deployed Streamlit Cloud links
+        st.link_button("🏫 Admission Hub", "https://school-app-y4hesp5fcntdc44kktgrrb.streamlit.app", use_container_width=True)
+        st.link_button("📱 Main Dashboard (app.py)", "https://your-main-app-url.streamlit.app", use_container_width=True)
+        st.link_button("📋 Form Manager", "https://your-form-manager-url.streamlit.app", use_container_width=True)
+        st.link_button("🪪 ID Card Generator", "https://your-id-card-url.streamlit.app", use_container_width=True)
+
 except Exception as e:
     st.error(f"System Error: {e}")

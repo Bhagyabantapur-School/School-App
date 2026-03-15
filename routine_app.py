@@ -115,7 +115,6 @@ def get_future_tasks():
     while df.shape[1] < 7: df[df.shape[1]] = ""
     df = df.iloc[:, :7]
     df.columns = ["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status"]
-    # Save the exact row number so the app knows which cell to update when marked complete!
     df['row_index'] = df.index + 2 
     return df
 
@@ -218,37 +217,50 @@ try:
         else:
             st.markdown(f"<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
 
-        # --- SMART SCHEDULE INJECTION ---
+        # --- SMART SCHEDULE INJECTION & COUNTDOWN ---
         sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
         chk_list = [c.strip() for c in current_check_list.split(',') if c.strip()]
         all_logged_items = log_df['check_list'].tolist() + log_df['Sub_Activities'].tolist()
+        
+        upcoming_ui_elements = []
 
         if not future_df.empty:
-            future_activity_df = future_df[future_df['Activity'].str.upper() == current_activity]
-            for _, r in future_activity_df.iterrows():
+            for _, r in future_df.iterrows():
                 try:
                     due_dt_str = f"{r['Due_Date']} {r['Due_Time']}"
                     due_dt = ist_timezone.localize(datetime.strptime(due_dt_str, "%Y-%m-%d %H:%M"))
-                    hours_until_due = (due_dt - now).total_seconds() / 3600
+                    time_diff = due_dt - now
+                    hours_until_due = time_diff.total_seconds() / 3600
                     
-                    # Optional: Include Entity tag if you want it visible on the button/checkbox
-                    # formatted_task = f"[{r['Entity']}] {r['Task_Name']} [Due: {r['Due_Date'][5:]} {r['Due_Time']}]"
                     formatted_task = f"{r['Task_Name']} [Due: {r['Due_Date'][5:]} {r['Due_Time']}]"
                     
                     is_done_in_sheet = str(r['Status']).strip().upper() == 'COMPLETED'
                     is_done_in_log = any(formatted_task.upper() == str(x).strip().upper() for x in all_logged_items)
                     is_done = is_done_in_sheet or is_done_in_log
                     
-                    show_task = False
-                    if not is_done and hours_until_due <= 24: 
-                        show_task = True 
-                    elif is_done and hours_until_due >= -24 and r['Type'] == 'Checklist':
-                        show_task = True
+                    # RULE 1: If it's done, skip it entirely so it disappears from the screen!
+                    if is_done: continue
                         
-                    if show_task:
+                    # RULE 2: If < 24h away but NOT DUE YET -> Put in Top Countdown Box
+                    if 0 < hours_until_due <= 24:
+                        h, rem = divmod(int(time_diff.total_seconds()), 3600)
+                        m = rem // 60
+                        time_str = f"{h}h {m}m" if h > 0 else f"{m}m"
+                        upcoming_ui_elements.append(f"**{r['Task_Name']}** ({r['Activity']}) due in **{time_str}**")
+                        
+                    # RULE 3: If exact due time is reached (<= 0h) -> Drop into actionable lists
+                    elif hours_until_due <= 0 and str(r['Activity']).strip().upper() == current_activity:
                         if r['Type'] == 'Sub-Activity': sub_list.append(formatted_task)
                         elif r['Type'] == 'Checklist': chk_list.append(formatted_task)
                 except: continue
+
+        # --- RENDER TOP COUNTDOWN BOX ---
+        if upcoming_ui_elements:
+            st.markdown("<div style='background-color:#fff3e0; padding:15px; border-radius:10px; border: 1px solid #ffcc80;'>", unsafe_allow_html=True)
+            st.markdown("<h4 style='text-align: center; color: #e65100; margin-top:0; margin-bottom:15px;'>⏳ Upcoming Tasks (Next 24h)</h4>", unsafe_allow_html=True)
+            for element in upcoming_ui_elements:
+                st.markdown(f"<p style='text-align: center; margin-bottom:5px; font-size:16px; color: #d84315;'>{element}</p>", unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
 
         # --- CHECKLIST FEATURE ---
         if chk_list:
@@ -259,13 +271,9 @@ try:
             today_logged_tasks = today_logs[today_logs['Activity'] == current_activity]['check_list'].tolist()
             
             for task in chk_list:
+                # If it's a dynamic future task, it's strictly not done (otherwise it would be filtered out above)
                 if "[Due:" in task:
-                    raw_task = task.split(" [Due:")[0].strip()
-                    matches = future_df[(future_df['Task_Name'].str.strip() == raw_task) & (future_df['Type'] == 'Checklist')]
-                    if not matches.empty and str(matches.iloc[0]['Status']).strip().upper() == 'COMPLETED':
-                        is_done = True
-                    else:
-                        is_done = any(task.upper() == str(x).strip().upper() for x in all_logged_items)
+                    is_done = False
                 else:
                     is_done = any(task.upper() == str(x).strip().upper() for x in today_logged_tasks)
                     
@@ -284,7 +292,7 @@ try:
                         if not matches.empty:
                             r_idx = int(matches.iloc[0]['row_index'])
                             fsheet = get_sheet("future_tasks")
-                            fsheet.update_cell(r_idx, 7, "Completed") # Column 7 is now Status
+                            fsheet.update_cell(r_idx, 7, "Completed") 
                             
                     st.cache_data.clear()
                     st.rerun()
@@ -340,7 +348,7 @@ try:
                             if not matches.empty:
                                 r_idx = int(matches.iloc[0]['row_index'])
                                 fsheet = get_sheet("future_tasks")
-                                fsheet.update_cell(r_idx, 7, "Completed") # Column 7 is now Status
+                                fsheet.update_cell(r_idx, 7, "Completed") 
                         
                         st.cache_data.clear()
                         st.success("Activity saved!")
@@ -365,7 +373,10 @@ try:
                 for idx, task in enumerate(sub_list):
                     with cols[idx % 3]:
                         last_done = get_last_done_str(task, log_df, now)
-                        if st.button(f"▶️ {task}\n(Last: {last_done})", key=f"btn_{task}", use_container_width=True):
+                        # Hide Last Done if it's a one-off future task
+                        last_txt = f"\n(Last: {last_done})" if "[Due:" not in task else ""
+                        
+                        if st.button(f"▶️ {task}{last_txt}", key=f"btn_{task}", use_container_width=True):
                             log_sheet = get_sheet("activity_log")
                             log_sheet.append_row([
                                 today_str, now.strftime('%H:%M'), "RUNNING", "RUNNING",    
@@ -396,7 +407,7 @@ try:
             
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # --- FUTURE SCHEDULER FORM (Added Entity) ---
+        # --- FUTURE SCHEDULER FORM ---
         with st.expander("🗓️ Schedule Future Task"):
             with st.form("schedule_future_form", clear_on_submit=True):
                 st.markdown("### Attach Task to a Future Activity")

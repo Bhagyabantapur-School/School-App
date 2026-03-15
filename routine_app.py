@@ -252,23 +252,37 @@ try:
                     is_done_in_log = any(formatted_task.upper() == str(x).strip().upper() for x in all_logged_items)
                     is_done = is_done_in_sheet or is_done_in_log
                     
+                    # RULE 1: If it's done, skip it entirely
                     if is_done: continue
                         
-                    if 0 < hours_until_due <= 24:
-                        h, rem = divmod(int(time_diff.total_seconds()), 3600)
+                    # RULE 2: If <= 24h away (including overdue) -> Put in Top Countdown Box
+                    if hours_until_due <= 24:
+                        sec_diff = time_diff.total_seconds()
+                        is_overdue = sec_diff < 0
+                        abs_sec = abs(int(sec_diff))
+                        
+                        h, rem = divmod(abs_sec, 3600)
                         m = rem // 60
                         time_str = f"{h}h {m}m" if h > 0 else f"{m}m"
                         
-                        upcoming_ui_elements.append(f"&gt; <b style='color: #0068c9;'>{r['Task_Name']} ({r['Activity']})</b> due in {time_str}")
+                        if is_overdue:
+                            time_text = f"overdue by {time_str}"
+                            # If overdue by >= 30 mins (1800 seconds), turn red. Else blue.
+                            text_color = "#ff4b4b" if abs_sec >= 1800 else "#0068c9"
+                        else:
+                            time_text = f"due in {time_str}"
+                            text_color = "#0068c9" # Default blue
+                            
+                        upcoming_ui_elements.append(f"&gt; <b style='color: {text_color};'>{r['Task_Name']} ({r['Activity']})</b> {time_text}")
                         
-                    elif hours_until_due <= 0 and str(r['Activity']).strip().upper() == current_activity:
+                    # RULE 3: If exact due time is reached -> ALSO Drop into actionable lists
+                    if hours_until_due <= 0 and str(r['Activity']).strip().upper() == current_activity:
                         if r['Type'] == 'Sub-Activity': sub_list.append(formatted_task)
                         elif r['Type'] == 'Checklist': chk_list.append(formatted_task)
                 except: continue
 
         # --- RENDER TOP COUNTDOWN BOX ---
         if upcoming_ui_elements:
-            # Everything inside ONE single HTML block to guarantee the box stays connected
             box_html = f"""
             <div style='background-color:#fff3e0; padding:15px; border-radius:10px; border: 1px solid #ffcc80; margin-bottom: 20px;'>
                 <h4 style='text-align: center; color: #e65100; margin-top:0; margin-bottom:15px;'>⏳ Upcoming Special Tasks</h4>
@@ -277,7 +291,6 @@ try:
                 box_html += f"<p style='text-align: center; margin-bottom:5px; font-size:16px; color: #d84315;'>{element}</p>"
             
             box_html += "</div>"
-            
             st.markdown(box_html, unsafe_allow_html=True)
 
         # --- CHECKLIST FEATURE ---

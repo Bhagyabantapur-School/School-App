@@ -168,6 +168,7 @@ try:
         st.markdown(f"<h3 style='text-align: center; color: #888;'>{current_day} | {now.strftime('%I:%M %p')}</h3>", unsafe_allow_html=True)
 
         current_activity = "FREE TIME"
+        current_activity_start = None
         next_activity = "NONE"
         next_time_str = ""
         current_sub_activities = ""
@@ -186,6 +187,7 @@ try:
 
                 if start_t <= current_time <= end_t:
                     current_activity = str(row['Activity']).strip().upper()
+                    current_activity_start = start_t
                     current_sub_activities = str(row.get('Sub_Activities', '')).strip()
                     current_check_list = str(row.get('check_list', '')).strip()
                     
@@ -208,7 +210,19 @@ try:
         elif current_activity in ["SLEEP", "PRE", "TEA", "OUT"]: color = "#ff9f36" 
         else: color = "#333333" 
 
-        st.markdown(f"<h1 style='text-align: center; font-size: 4.5rem; color: {color}; margin-top: 30px; margin-bottom: 10px; line-height: 1.2;'>{current_activity}</h1>", unsafe_allow_html=True)
+        st.markdown(f"<h1 style='text-align: center; font-size: 4.5rem; color: {color}; margin-top: 30px; margin-bottom: 5px; line-height: 1.2;'>{current_activity}</h1>", unsafe_allow_html=True)
+
+        # --- CALCULATE AND DISPLAY ELAPSED TIME ---
+        if current_activity_start:
+            dt_start = datetime.combine(now.date(), current_activity_start)
+            dt_start = ist_timezone.localize(dt_start)
+            elapsed = now - dt_start
+            eh, erem = divmod(int(elapsed.total_seconds()), 3600)
+            em = erem // 60
+            elapsed_text = f"{eh}h {em}m" if eh > 0 else f"{em}m"
+            st.markdown(f"<h3 style='text-align: center; color: #555; margin-top: 0px; margin-bottom: 10px; font-weight: 400;'>⏱️ Elapsed: {elapsed_text}</h3>", unsafe_allow_html=True)
+        else:
+            st.markdown("<div style='margin-bottom: 15px;'></div>", unsafe_allow_html=True)
 
         if next_activity not in ["NONE", "END OF DAY"]:
             st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;'>Up Next: <b>{next_activity}</b> at {next_time_str}</h4>", unsafe_allow_html=True)
@@ -238,7 +252,7 @@ try:
                     is_done_in_log = any(formatted_task.upper() == str(x).strip().upper() for x in all_logged_items)
                     is_done = is_done_in_sheet or is_done_in_log
                     
-                    # RULE 1: If it's done, skip it entirely so it disappears from the screen!
+                    # RULE 1: If it's done, skip it entirely
                     if is_done: continue
                         
                     # RULE 2: If < 24h away but NOT DUE YET -> Put in Top Countdown Box
@@ -246,9 +260,10 @@ try:
                         h, rem = divmod(int(time_diff.total_seconds()), 3600)
                         m = rem // 60
                         time_str = f"{h}h {m}m" if h > 0 else f"{m}m"
-                        upcoming_ui_elements.append(f"**{r['Task_Name']}** ({r['Activity']}) due in **{time_str}**")
+                        # Updated formatting to > Bold(Task + Activity) due in time
+                        upcoming_ui_elements.append(f"&gt; <b>{r['Task_Name']} ({r['Activity']})</b> due in {time_str}")
                         
-                    # RULE 3: If exact due time is reached (<= 0h) -> Drop into actionable lists
+                    # RULE 3: If exact due time is reached -> Drop into actionable lists
                     elif hours_until_due <= 0 and str(r['Activity']).strip().upper() == current_activity:
                         if r['Type'] == 'Sub-Activity': sub_list.append(formatted_task)
                         elif r['Type'] == 'Checklist': chk_list.append(formatted_task)
@@ -257,7 +272,7 @@ try:
         # --- RENDER TOP COUNTDOWN BOX ---
         if upcoming_ui_elements:
             st.markdown("<div style='background-color:#fff3e0; padding:15px; border-radius:10px; border: 1px solid #ffcc80;'>", unsafe_allow_html=True)
-            st.markdown("<h4 style='text-align: center; color: #e65100; margin-top:0; margin-bottom:15px;'>⏳ Upcoming Tasks (Next 24h)</h4>", unsafe_allow_html=True)
+            st.markdown("<h4 style='text-align: center; color: #e65100; margin-top:0; margin-bottom:15px;'>⏳ Upcoming Special Tasks</h4>", unsafe_allow_html=True)
             for element in upcoming_ui_elements:
                 st.markdown(f"<p style='text-align: center; margin-bottom:5px; font-size:16px; color: #d84315;'>{element}</p>", unsafe_allow_html=True)
             st.markdown("</div>", unsafe_allow_html=True)
@@ -271,9 +286,13 @@ try:
             today_logged_tasks = today_logs[today_logs['Activity'] == current_activity]['check_list'].tolist()
             
             for task in chk_list:
-                # If it's a dynamic future task, it's strictly not done (otherwise it would be filtered out above)
                 if "[Due:" in task:
-                    is_done = False
+                    raw_task = task.split(" [Due:")[0].strip()
+                    matches = future_df[(future_df['Task_Name'].str.strip() == raw_task) & (future_df['Type'] == 'Checklist')]
+                    if not matches.empty and str(matches.iloc[0]['Status']).strip().upper() == 'COMPLETED':
+                        is_done = True
+                    else:
+                        is_done = any(task.upper() == str(x).strip().upper() for x in all_logged_items)
                 else:
                     is_done = any(task.upper() == str(x).strip().upper() for x in today_logged_tasks)
                     
@@ -373,7 +392,6 @@ try:
                 for idx, task in enumerate(sub_list):
                     with cols[idx % 3]:
                         last_done = get_last_done_str(task, log_df, now)
-                        # Hide Last Done if it's a one-off future task
                         last_txt = f"\n(Last: {last_done})" if "[Due:" not in task else ""
                         
                         if st.button(f"▶️ {task}{last_txt}", key=f"btn_{task}", use_container_width=True):

@@ -252,18 +252,16 @@ try:
                     is_done_in_log = any(formatted_task.upper() == str(x).strip().upper() for x in all_logged_items)
                     is_done = is_done_in_sheet or is_done_in_log
                     
-                    # RULE 1: If it's done, skip it entirely
                     if is_done: continue
                         
-                    # RULE 2: If < 24h away but NOT DUE YET -> Put in Top Countdown Box
                     if 0 < hours_until_due <= 24:
                         h, rem = divmod(int(time_diff.total_seconds()), 3600)
                         m = rem // 60
                         time_str = f"{h}h {m}m" if h > 0 else f"{m}m"
-                        # Updated formatting to > Bold(Task + Activity) due in time
-                        upcoming_ui_elements.append(f"&gt; <b>{r['Task_Name']} ({r['Activity']})</b> due in {time_str}")
                         
-                    # RULE 3: If exact due time is reached -> Drop into actionable lists
+                        # Task name is styled completely blue (#0068c9), rest is default text color
+                        upcoming_ui_elements.append(f"&gt; <b style='color: #0068c9;'>{r['Task_Name']} ({r['Activity']})</b> due in {time_str}")
+                        
                     elif hours_until_due <= 0 and str(r['Activity']).strip().upper() == current_activity:
                         if r['Type'] == 'Sub-Activity': sub_list.append(formatted_task)
                         elif r['Type'] == 'Checklist': chk_list.append(formatted_task)

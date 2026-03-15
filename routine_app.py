@@ -104,17 +104,17 @@ def get_future_tasks():
     try:
         sheet = ss.worksheet("future_tasks")
     except gspread.exceptions.WorksheetNotFound:
-        sheet = ss.add_worksheet(title="future_tasks", rows="100", cols="6")
-        sheet.append_row(["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Status"])
+        sheet = ss.add_worksheet(title="future_tasks", rows="100", cols="7")
+        sheet.append_row(["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status"])
     
     data = sheet.get_all_values()
     if len(data) <= 1:
-        return pd.DataFrame(columns=["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Status", "row_index"])
+        return pd.DataFrame(columns=["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "row_index"])
     
     df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 6: df[df.shape[1]] = ""
-    df = df.iloc[:, :6]
-    df.columns = ["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Status"]
+    while df.shape[1] < 7: df[df.shape[1]] = ""
+    df = df.iloc[:, :7]
+    df.columns = ["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status"]
     # Save the exact row number so the app knows which cell to update when marked complete!
     df['row_index'] = df.index + 2 
     return df
@@ -218,7 +218,7 @@ try:
         else:
             st.markdown(f"<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
 
-        # --- SMART SCHEDULE INJECTION (Now reads Status Column) ---
+        # --- SMART SCHEDULE INJECTION ---
         sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
         chk_list = [c.strip() for c in current_check_list.split(',') if c.strip()]
         all_logged_items = log_df['check_list'].tolist() + log_df['Sub_Activities'].tolist()
@@ -231,18 +231,17 @@ try:
                     due_dt = ist_timezone.localize(datetime.strptime(due_dt_str, "%Y-%m-%d %H:%M"))
                     hours_until_due = (due_dt - now).total_seconds() / 3600
                     
+                    # Optional: Include Entity tag if you want it visible on the button/checkbox
+                    # formatted_task = f"[{r['Entity']}] {r['Task_Name']} [Due: {r['Due_Date'][5:]} {r['Due_Time']}]"
                     formatted_task = f"{r['Task_Name']} [Due: {r['Due_Date'][5:]} {r['Due_Time']}]"
                     
-                    # Check if marked completed in the Status column OR in the activity log
                     is_done_in_sheet = str(r['Status']).strip().upper() == 'COMPLETED'
                     is_done_in_log = any(formatted_task.upper() == str(x).strip().upper() for x in all_logged_items)
                     is_done = is_done_in_sheet or is_done_in_log
                     
                     show_task = False
-                    # Starts showing 24h before, stays FOREVER until completed
                     if not is_done and hours_until_due <= 24: 
                         show_task = True 
-                    # If done, checklists stay visible for 24h as a completed box.
                     elif is_done and hours_until_due >= -24 and r['Type'] == 'Checklist':
                         show_task = True
                         
@@ -261,7 +260,6 @@ try:
             
             for task in chk_list:
                 if "[Due:" in task:
-                    # Look globally for scheduled tasks, OR rely on the future_tasks status
                     raw_task = task.split(" [Due:")[0].strip()
                     matches = future_df[(future_df['Task_Name'].str.strip() == raw_task) & (future_df['Type'] == 'Checklist')]
                     if not matches.empty and str(matches.iloc[0]['Status']).strip().upper() == 'COMPLETED':
@@ -274,21 +272,19 @@ try:
                 checked = st.checkbox(task, value=is_done, disabled=is_done, key=f"chk_{task}_{current_activity}")
                 
                 if checked and not is_done:
-                    # 1. Log to Activity Log
                     sheet_log = get_sheet("activity_log")
                     sheet_log.append_row([
                         today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
                         "0:00", current_activity, "", task, "Checked off"
                     ])
                     
-                    # 2. Update Status to "Completed" in future_tasks tab
                     if "[Due:" in task:
                         raw_task = task.split(" [Due:")[0].strip()
                         matches = future_df[(future_df['Task_Name'].str.strip() == raw_task) & (future_df['Type'] == 'Checklist')]
                         if not matches.empty:
                             r_idx = int(matches.iloc[0]['row_index'])
                             fsheet = get_sheet("future_tasks")
-                            fsheet.update_cell(r_idx, 6, "Completed")
+                            fsheet.update_cell(r_idx, 7, "Completed") # Column 7 is now Status
                             
                     st.cache_data.clear()
                     st.rerun()
@@ -328,7 +324,6 @@ try:
                             duration_str = f"{hours}:{minutes:02d}"
                         except: duration_str = "0:00"
 
-                        # 1. Update the timer in activity_log
                         log_sheet = get_sheet("activity_log")
                         cells = log_sheet.findall("RUNNING")
                         for cell in cells:
@@ -339,14 +334,13 @@ try:
                                 log_sheet.update_cell(target_row, 8, "Auto-logged via Timer") 
                                 break
                                 
-                        # 2. Update Status to "Completed" in future_tasks tab
                         if "[Due:" in active_sub:
                             raw_task = active_sub.split(" [Due:")[0].strip()
                             matches = future_df[(future_df['Task_Name'].str.strip() == raw_task) & (future_df['Type'] == 'Sub-Activity')]
                             if not matches.empty:
                                 r_idx = int(matches.iloc[0]['row_index'])
                                 fsheet = get_sheet("future_tasks")
-                                fsheet.update_cell(r_idx, 6, "Completed")
+                                fsheet.update_cell(r_idx, 7, "Completed") # Column 7 is now Status
                         
                         st.cache_data.clear()
                         st.success("Activity saved!")
@@ -402,7 +396,7 @@ try:
             
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # --- FUTURE SCHEDULER FORM (Now adds "Pending" status) ---
+        # --- FUTURE SCHEDULER FORM (Added Entity) ---
         with st.expander("🗓️ Schedule Future Task"):
             with st.form("schedule_future_form", clear_on_submit=True):
                 st.markdown("### Attach Task to a Future Activity")
@@ -410,6 +404,7 @@ try:
                 unique_activities = [act for act in df['Activity'].unique() if act.strip()]
                 f_act = st.selectbox("Parent Category", unique_activities, key="f_act")
                 f_type = st.radio("Task Type", ["Checklist", "Sub-Activity"], horizontal=True, key="f_type")
+                f_entity = st.selectbox("Entity", ["Personal", "School", "People"], key="f_entity")
                 f_name = st.text_input("Task Details", placeholder="e.g., Pay Electricity Bill", key="f_name")
                 
                 col1, col2 = st.columns(2)
@@ -423,8 +418,8 @@ try:
                         try:
                             fsheet = ss.worksheet("future_tasks")
                         except gspread.exceptions.WorksheetNotFound:
-                            fsheet = ss.add_worksheet(title="future_tasks", rows="100", cols="6")
-                            fsheet.append_row(["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Status"])
+                            fsheet = ss.add_worksheet(title="future_tasks", rows="100", cols="7")
+                            fsheet.append_row(["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status"])
                         
                         fsheet.append_row([
                             f_date.strftime('%Y-%m-%d'),
@@ -432,7 +427,8 @@ try:
                             f_act.upper().strip(),
                             f_type,
                             f_name.strip(),
-                            "Pending" # Status automatically defaults to Pending
+                            f_entity,
+                            "Pending"
                         ])
                         st.cache_data.clear()
                         st.success("Task Scheduled! It will appear 24 hours before due time.")

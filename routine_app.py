@@ -7,8 +7,13 @@ import pytz
 import time
 from streamlit_autorefresh import st_autorefresh
 
-# 1. Configuration 
+# 1. Configuration & Session State Init
 st.set_page_config(page_title="Live Routine", page_icon="⏱️", layout="centered")
+
+if 'active_main_task' not in st.session_state:
+    st.session_state.active_main_task = None
+    st.session_state.active_sub_task = None
+    st.session_state.active_start_time = None
 
 st_autorefresh(interval=60000, key="routine_refresh")
 
@@ -103,7 +108,6 @@ def parse_duration_to_minutes(dur_str):
         return 0
 
 def get_last_done_str(sub_task, log_df, now):
-    # Filter out RUNNING tasks from history check
     completed_logs = log_df[log_df['End_Time'] != 'RUNNING']
     matches = completed_logs[completed_logs['Sub_Activities'].astype(str).str.strip().str.upper() == sub_task.upper()]
     if matches.empty: return "Never"
@@ -221,7 +225,6 @@ try:
         # --- BULLETPROOF GOOGLE SHEETS TRACKER ---
         sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
         
-        # Check Google Sheets to see if any task is currently marked as "RUNNING"
         running_tasks = log_df[log_df['End_Time'] == 'RUNNING']
         is_running = not running_tasks.empty
         
@@ -230,7 +233,6 @@ try:
             st.markdown("<h4 style='text-align: center; color: #333;'>Tap to Track Activity</h4>", unsafe_allow_html=True)
             
             if is_running:
-                # Rebuild the timer directly from the Google Sheet timestamp
                 active_row = running_tasks.iloc[-1]
                 active_main = str(active_row['Activity'])
                 active_sub = str(active_row['Sub_Activities'])
@@ -243,36 +245,54 @@ try:
                     elapsed_time = now - active_start_time
                     mins_elapsed = int(elapsed_time.total_seconds() // 60)
                 except:
-                    mins_elapsed = 0 # Fallback if time format is broken
+                    mins_elapsed = 0 
                 
                 st.info(f"⏳ **In Progress:** {display_name} (Running for {mins_elapsed} min)")
                 
-                if st.button(f"🛑 STOP & SAVE {display_name}", use_container_width=True, type="primary"):
-                    end_time_log = now.time()
-                    
-                    try:
-                        hours, remainder = divmod(int(elapsed_time.total_seconds()), 3600)
-                        minutes = remainder // 60
-                        duration_str = f"{hours}:{minutes:02d}"
-                    except:
-                        duration_str = "0:00"
+                # The Save & Cancel Buttons Layout
+                col_stop, col_cancel = st.columns(2)
+                
+                with col_stop:
+                    if st.button("🛑 SAVE", use_container_width=True, type="primary"):
+                        end_time_log = now.time()
+                        
+                        try:
+                            hours, remainder = divmod(int(elapsed_time.total_seconds()), 3600)
+                            minutes = remainder // 60
+                            duration_str = f"{hours}:{minutes:02d}"
+                        except:
+                            duration_str = "0:00"
 
-                    log_sheet = get_sheet("activity_log")
-                    
-                    # Find exactly which row has the "RUNNING" tag to overwrite it
-                    cells = log_sheet.findall("RUNNING")
-                    for cell in cells:
-                        if cell.col == 3: # Column 3 is the End_Time column
-                            target_row = cell.row
-                            log_sheet.update_cell(target_row, 3, end_time_log.strftime('%H:%M')) # Update End Time
-                            log_sheet.update_cell(target_row, 4, duration_str)                   # Update Duration
-                            log_sheet.update_cell(target_row, 8, "Auto-logged via One-Click Timer") # Update Notes
-                            break
-                    
-                    st.cache_data.clear()
-                    st.success("Activity saved successfully!")
-                    time.sleep(1)
-                    st.rerun()
+                        log_sheet = get_sheet("activity_log")
+                        cells = log_sheet.findall("RUNNING")
+                        for cell in cells:
+                            if cell.col == 3: 
+                                target_row = cell.row
+                                log_sheet.update_cell(target_row, 3, end_time_log.strftime('%H:%M')) 
+                                log_sheet.update_cell(target_row, 4, duration_str)                   
+                                log_sheet.update_cell(target_row, 8, "Auto-logged via Timer") 
+                                break
+                        
+                        st.cache_data.clear()
+                        st.success("Activity saved!")
+                        time.sleep(1)
+                        st.rerun()
+
+                with col_cancel:
+                    if st.button("❌ CANCEL", use_container_width=True):
+                        log_sheet = get_sheet("activity_log")
+                        cells = log_sheet.findall("RUNNING")
+                        
+                        # Find the "RUNNING" cell in End_Time (Column C) and delete the entire row
+                        for cell in cells:
+                            if cell.col == 3: 
+                                log_sheet.delete_rows(cell.row)
+                                break
+                                
+                        st.cache_data.clear()
+                        st.warning("Activity cancelled.")
+                        time.sleep(1)
+                        st.rerun()
 
             elif sub_list:
                 cols = st.columns(3)
@@ -281,13 +301,12 @@ try:
                         last_done = get_last_done_str(task, log_df, now)
                         
                         if st.button(f"▶️ {task}\n(Last: {last_done})", key=f"btn_{task}", use_container_width=True):
-                            # Immediately write "RUNNING" to Google Sheets to survive phone crashes
                             log_sheet = get_sheet("activity_log")
                             log_sheet.append_row([
                                 today_str, 
                                 now.strftime('%H:%M'), 
-                                "RUNNING",    # End Time is running
-                                "RUNNING",    # Duration is running
+                                "RUNNING",    
+                                "RUNNING",    
                                 current_activity, 
                                 task,
                                 "",
@@ -300,7 +319,6 @@ try:
         
         # Today's Productivity Metrics
         st.markdown("<h4 style='text-align: center; color: #555; margin-bottom: 20px;'>📊 Today's Actual Productivity</h4>", unsafe_allow_html=True)
-        # Filter out anything currently 'RUNNING' so it doesn't break the math
         today_logs = log_df[(log_df['Date'] == today_str) & (log_df['Duration'] != 'RUNNING')].copy()
         
         if not today_logs.empty:

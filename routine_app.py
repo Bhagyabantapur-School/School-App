@@ -452,9 +452,15 @@ try:
                 f_entity = st.selectbox("Entity", ["Personal", "School", "People"], key="f_entity")
                 f_name = st.text_input("Task Details", placeholder="e.g., Pay Electricity Bill", key="f_name")
                 
+                # Manual typing with Dropdown workaround for Due Time
+                time_options = [f"{str(h).zfill(2)}:{str(m).zfill(2)}" for h in range(24) for m in range(60)]
+                now_str = clean_now.strftime('%H:%M')
+                
                 col1, col2 = st.columns(2)
                 with col1: f_date = st.date_input("Due Date", value=now.date(), key="f_date")
-                with col2: f_time = st.time_input("Due Time", value=clean_now, key="f_time")
+                with col2: 
+                    f_time_str = st.selectbox("Due Time (Type to search)", options=time_options, index=time_options.index(now_str), key="f_time")
+                    f_time = datetime.strptime(f_time_str, '%H:%M').time()
                     
                 if st.form_submit_button("Schedule Task", use_container_width=True):
                     if f_name:

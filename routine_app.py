@@ -259,7 +259,6 @@ try:
                         m = rem // 60
                         time_str = f"{h}h {m}m" if h > 0 else f"{m}m"
                         
-                        # Task name is styled completely blue (#0068c9), rest is default text color
                         upcoming_ui_elements.append(f"&gt; <b style='color: #0068c9;'>{r['Task_Name']} ({r['Activity']})</b> due in {time_str}")
                         
                     elif hours_until_due <= 0 and str(r['Activity']).strip().upper() == current_activity:
@@ -269,11 +268,17 @@ try:
 
         # --- RENDER TOP COUNTDOWN BOX ---
         if upcoming_ui_elements:
-            st.markdown("<div style='background-color:#fff3e0; padding:15px; border-radius:10px; border: 1px solid #ffcc80;'>", unsafe_allow_html=True)
-            st.markdown("<h4 style='text-align: center; color: #e65100; margin-top:0; margin-bottom:15px;'>⏳ Upcoming Special Tasks</h4>", unsafe_allow_html=True)
+            # Everything inside ONE single HTML block to guarantee the box stays connected
+            box_html = f"""
+            <div style='background-color:#fff3e0; padding:15px; border-radius:10px; border: 1px solid #ffcc80; margin-bottom: 20px;'>
+                <h4 style='text-align: center; color: #e65100; margin-top:0; margin-bottom:15px;'>⏳ Upcoming Special Tasks</h4>
+            """
             for element in upcoming_ui_elements:
-                st.markdown(f"<p style='text-align: center; margin-bottom:5px; font-size:16px; color: #d84315;'>{element}</p>", unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
+                box_html += f"<p style='text-align: center; margin-bottom:5px; font-size:16px; color: #d84315;'>{element}</p>"
+            
+            box_html += "</div>"
+            
+            st.markdown(box_html, unsafe_allow_html=True)
 
         # --- CHECKLIST FEATURE ---
         if chk_list:

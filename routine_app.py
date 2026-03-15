@@ -7,13 +7,8 @@ import pytz
 import time
 from streamlit_autorefresh import st_autorefresh
 
-# 1. Configuration & Session State Init
+# 1. Configuration 
 st.set_page_config(page_title="Live Routine", page_icon="⏱️", layout="centered")
-
-if 'active_main_task' not in st.session_state:
-    st.session_state.active_main_task = None
-    st.session_state.active_sub_task = None
-    st.session_state.active_start_time = None
 
 st_autorefresh(interval=60000, key="routine_refresh")
 
@@ -76,10 +71,7 @@ def get_routine_data():
     data = sheet.get_all_values()
     df = pd.DataFrame(data[1:], columns=data[0])
     
-    # Pad to 7 columns if missing
-    while df.shape[1] < 7:
-        df[df.shape[1]] = ""
-            
+    while df.shape[1] < 7: df[df.shape[1]] = ""
     df = df.iloc[:, :7]
     df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list"]
     
@@ -97,10 +89,7 @@ def get_activity_log():
     
     df = pd.DataFrame(data[1:], columns=data[0])
     
-    # Pad to 8 columns if missing
-    while df.shape[1] < 8:
-        df[df.shape[1]] = ""
-            
+    while df.shape[1] < 8: df[df.shape[1]] = ""
     df = df.iloc[:, :8]
     df.columns = ["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"]
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
@@ -114,37 +103,32 @@ def parse_duration_to_minutes(dur_str):
         return 0
 
 def get_last_done_str(sub_task, log_df, now):
-    matches = log_df[log_df['Sub_Activities'].astype(str).str.strip().str.upper() == sub_task.upper()]
-    if matches.empty:
-        return "Never"
+    # Filter out RUNNING tasks from history check
+    completed_logs = log_df[log_df['End_Time'] != 'RUNNING']
+    matches = completed_logs[completed_logs['Sub_Activities'].astype(str).str.strip().str.upper() == sub_task.upper()]
+    if matches.empty: return "Never"
     
     max_dt = None
     for _, r in matches.iterrows():
         try:
             dt_str = f"{r['Date']} {r['End_Time']}"
             dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
-            if max_dt is None or dt > max_dt:
-                max_dt = dt
-        except:
-            continue
+            if max_dt is None or dt > max_dt: max_dt = dt
+        except: continue
             
     if not max_dt: return "Never"
     
     now_naive = now.replace(tzinfo=None)
     diff = now_naive - max_dt
     
-    if diff.days > 0:
-        return f"{diff.days}d ago"
-    elif diff.seconds >= 3600:
-        return f"{diff.seconds // 3600}h ago"
-    elif diff.seconds >= 60:
-        return f"{diff.seconds // 60}m ago"
-    else:
-        return "Just now"
+    if diff.days > 0: return f"{diff.days}d ago"
+    elif diff.seconds >= 3600: return f"{diff.seconds // 3600}h ago"
+    elif diff.seconds >= 60: return f"{diff.seconds // 60}m ago"
+    else: return "Just now"
 
 try:
     df = get_routine_data()
-    log_df = get_activity_log() # Fetch log early for checklists and last-done calculation
+    log_df = get_activity_log() 
     
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist_timezone)
@@ -176,10 +160,8 @@ try:
                 end_str = str(row['End_Time']).strip()
                 
                 start_t = datetime.strptime(start_str, '%H:%M').time()
-                if end_str == '0:00':
-                    end_t = datetime.strptime('23:59:59', '%H:%M:%S').time()
-                else:
-                    end_t = datetime.strptime(end_str, '%H:%M').time()
+                if end_str == '0:00': end_t = datetime.strptime('23:59:59', '%H:%M:%S').time()
+                else: end_t = datetime.strptime(end_str, '%H:%M').time()
 
                 if start_t <= current_time <= end_t:
                     current_activity = str(row['Activity']).strip().upper()
@@ -189,19 +171,15 @@ try:
                     if i + 1 < len(today_schedule):
                         next_row = today_schedule[i+1]
                         next_activity = str(next_row['Activity']).strip().upper()
-                        next_start_time = datetime.strptime(str(next_row['Start_Time']).strip(), '%H:%M')
-                        next_time_str = next_start_time.strftime('%I:%M %p')
-                    else:
-                        next_activity = "END OF DAY"
+                        next_time_str = datetime.strptime(str(next_row['Start_Time']).strip(), '%H:%M').strftime('%I:%M %p')
+                    else: next_activity = "END OF DAY"
                     break
                     
                 elif current_time < start_t and current_activity == "FREE TIME":
                     next_activity = str(row['Activity']).strip().upper()
-                    next_start_time = datetime.strptime(start_str, '%H:%M')
-                    next_time_str = next_start_time.strftime('%I:%M %p')
+                    next_time_str = datetime.strptime(start_str, '%H:%M').strftime('%I:%M %p')
                     break
-            except ValueError:
-                continue
+            except ValueError: continue
 
         if current_activity in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY"]: color = "#ff4b4b" 
         elif current_activity in ["WORK", "REPORT", "TASK"]: color = "#0068c9" 
@@ -228,67 +206,71 @@ try:
             logged_tasks = today_logs[today_logs['Activity'] == current_activity]['check_list'].tolist()
             
             for task in chk_list:
-                # Check if this task has already been clicked and logged today
                 is_done = any(task.upper() == str(x).strip().upper() for x in logged_tasks)
-                
-                # Render checkbox
                 checked = st.checkbox(task, value=is_done, disabled=is_done, key=f"chk_{task}_{current_activity}")
                 
-                # If user clicks it right now
                 if checked and not is_done:
                     sheet_log = get_sheet("activity_log")
                     sheet_log.append_row([
-                        today_str, 
-                        now.strftime('%H:%M'), 
-                        now.strftime('%H:%M'), 
-                        "0:00", 
-                        current_activity, 
-                        "", 
-                        task, 
-                        "Checked off"
+                        today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
+                        "0:00", current_activity, "", task, "Checked off"
                     ])
                     st.cache_data.clear()
                     st.rerun()
 
-        # --- ONE CLICK TRACKER (START/STOP) ---
+        # --- BULLETPROOF GOOGLE SHEETS TRACKER ---
         sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
         
-        if sub_list or st.session_state.active_main_task:
+        # Check Google Sheets to see if any task is currently marked as "RUNNING"
+        running_tasks = log_df[log_df['End_Time'] == 'RUNNING']
+        is_running = not running_tasks.empty
+        
+        if sub_list or is_running:
             st.markdown("---")
             st.markdown("<h4 style='text-align: center; color: #333;'>Tap to Track Activity</h4>", unsafe_allow_html=True)
             
-            if st.session_state.active_main_task:
-                elapsed_time = now - st.session_state.active_start_time
-                mins_elapsed = elapsed_time.seconds // 60
-                display_name = st.session_state.active_sub_task if st.session_state.active_sub_task else st.session_state.active_main_task
+            if is_running:
+                # Rebuild the timer directly from the Google Sheet timestamp
+                active_row = running_tasks.iloc[-1]
+                active_main = str(active_row['Activity'])
+                active_sub = str(active_row['Sub_Activities'])
+                display_name = active_sub if active_sub else active_main
+                
+                try:
+                    start_dt_str = f"{active_row['Date']} {active_row['Start_Time']}"
+                    dt_naive = datetime.strptime(start_dt_str, "%Y-%m-%d %H:%M")
+                    active_start_time = ist_timezone.localize(dt_naive)
+                    elapsed_time = now - active_start_time
+                    mins_elapsed = int(elapsed_time.total_seconds() // 60)
+                except:
+                    mins_elapsed = 0 # Fallback if time format is broken
                 
                 st.info(f"⏳ **In Progress:** {display_name} (Running for {mins_elapsed} min)")
                 
                 if st.button(f"🛑 STOP & SAVE {display_name}", use_container_width=True, type="primary"):
                     end_time_log = now.time()
-                    start_time_log = st.session_state.active_start_time.time()
                     
-                    hours, remainder = divmod(elapsed_time.seconds, 3600)
-                    minutes = remainder // 60
-                    duration_str = f"{hours}:{minutes:02d}"
+                    try:
+                        hours, remainder = divmod(int(elapsed_time.total_seconds()), 3600)
+                        minutes = remainder // 60
+                        duration_str = f"{hours}:{minutes:02d}"
+                    except:
+                        duration_str = "0:00"
 
                     log_sheet = get_sheet("activity_log")
-                    log_sheet.append_row([
-                        today_str, 
-                        start_time_log.strftime('%H:%M'), 
-                        end_time_log.strftime('%H:%M'), 
-                        duration_str, 
-                        st.session_state.active_main_task, 
-                        st.session_state.active_sub_task,
-                        "",
-                        "Auto-logged via One-Click Timer"
-                    ])
                     
-                    st.session_state.active_main_task = None
-                    st.session_state.active_sub_task = None
-                    st.session_state.active_start_time = None
+                    # Find exactly which row has the "RUNNING" tag to overwrite it
+                    cells = log_sheet.findall("RUNNING")
+                    for cell in cells:
+                        if cell.col == 3: # Column 3 is the End_Time column
+                            target_row = cell.row
+                            log_sheet.update_cell(target_row, 3, end_time_log.strftime('%H:%M')) # Update End Time
+                            log_sheet.update_cell(target_row, 4, duration_str)                   # Update Duration
+                            log_sheet.update_cell(target_row, 8, "Auto-logged via One-Click Timer") # Update Notes
+                            break
+                    
                     st.cache_data.clear()
-                    st.success("Activity logged successfully!")
+                    st.success("Activity saved successfully!")
                     time.sleep(1)
                     st.rerun()
 
@@ -296,20 +278,30 @@ try:
                 cols = st.columns(3)
                 for idx, task in enumerate(sub_list):
                     with cols[idx % 3]:
-                        # Calculate and display how long ago this sub-task was done
                         last_done = get_last_done_str(task, log_df, now)
                         
                         if st.button(f"▶️ {task}\n(Last: {last_done})", key=f"btn_{task}", use_container_width=True):
-                            st.session_state.active_main_task = current_activity
-                            st.session_state.active_sub_task = task
-                            st.session_state.active_start_time = now
+                            # Immediately write "RUNNING" to Google Sheets to survive phone crashes
+                            log_sheet = get_sheet("activity_log")
+                            log_sheet.append_row([
+                                today_str, 
+                                now.strftime('%H:%M'), 
+                                "RUNNING",    # End Time is running
+                                "RUNNING",    # Duration is running
+                                current_activity, 
+                                task,
+                                "",
+                                "In Progress"
+                            ])
+                            st.cache_data.clear()
                             st.rerun()
 
         st.markdown("---")
         
         # Today's Productivity Metrics
         st.markdown("<h4 style='text-align: center; color: #555; margin-bottom: 20px;'>📊 Today's Actual Productivity</h4>", unsafe_allow_html=True)
-        today_logs = log_df[log_df['Date'] == today_str].copy()
+        # Filter out anything currently 'RUNNING' so it doesn't break the math
+        today_logs = log_df[(log_df['Date'] == today_str) & (log_df['Duration'] != 'RUNNING')].copy()
         
         if not today_logs.empty:
             today_logs['Total_Minutes'] = today_logs['Duration'].apply(parse_duration_to_minutes)
@@ -323,7 +315,7 @@ try:
                     st.metric(label=act, value=display_time)
                 col_idx += 1
         else:
-            st.markdown("<p style='text-align: center; color: #888;'>No activities logged yet today.</p>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align: center; color: #888;'>No completed activities logged yet.</p>", unsafe_allow_html=True)
             
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -358,14 +350,9 @@ try:
                         
                         sheet_log = get_sheet("activity_log")
                         sheet_log.append_row([
-                            log_date.strftime('%Y-%m-%d'), 
-                            log_start.strftime('%H:%M'), 
-                            log_end.strftime('%H:%M'), 
-                            f"{h}:{m//60:02d}", 
-                            log_activity.upper().strip(), 
-                            log_sub_activity.upper().strip(),
-                            log_chk.strip(),
-                            log_notes
+                            log_date.strftime('%Y-%m-%d'), log_start.strftime('%H:%M'), log_end.strftime('%H:%M'), 
+                            f"{h}:{m//60:02d}", log_activity.upper().strip(), log_sub_activity.upper().strip(),
+                            log_chk.strip(), log_notes
                         ])
                         
                         st.cache_data.clear()

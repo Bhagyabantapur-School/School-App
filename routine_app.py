@@ -2,7 +2,7 @@ import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import time
 from streamlit_autorefresh import st_autorefresh
@@ -45,7 +45,6 @@ st.markdown("""
         margin-bottom: 15px;
     }
     
-    /* Style Checkboxes */
     div[data-testid="stCheckbox"] label {
         font-size: 18px !important;
         padding-top: 5px;
@@ -79,7 +78,6 @@ def get_routine_data():
     while df.shape[1] < 7: df[df.shape[1]] = ""
     df = df.iloc[:, :7]
     df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list"]
-    
     df = df[df["Day"].astype(str).str.strip() != ""]
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
     return df
@@ -93,19 +91,37 @@ def get_activity_log():
         return pd.DataFrame(columns=["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"])
     
     df = pd.DataFrame(data[1:], columns=data[0])
-    
     while df.shape[1] < 8: df[df.shape[1]] = ""
     df = df.iloc[:, :8]
     df.columns = ["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"]
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
     return df
 
+@st.cache_data(ttl=60)
+def get_future_tasks():
+    client = init_connection()
+    ss = client.open("MY ROUTINE 2026")
+    try:
+        sheet = ss.worksheet("future_tasks")
+    except gspread.exceptions.WorksheetNotFound:
+        sheet = ss.add_worksheet(title="future_tasks", rows="100", cols="5")
+        sheet.append_row(["Due_Date", "Due_Time", "Activity", "Type", "Task_Name"])
+    
+    data = sheet.get_all_values()
+    if len(data) <= 1:
+        return pd.DataFrame(columns=["Due_Date", "Due_Time", "Activity", "Type", "Task_Name"])
+    
+    df = pd.DataFrame(data[1:], columns=data[0])
+    while df.shape[1] < 5: df[df.shape[1]] = ""
+    df = df.iloc[:, :5]
+    df.columns = ["Due_Date", "Due_Time", "Activity", "Type", "Task_Name"]
+    return df
+
 def parse_duration_to_minutes(dur_str):
     try:
         h, m = map(int, str(dur_str).strip().split(':'))
         return (h * 60) + m
-    except:
-        return 0
+    except: return 0
 
 def get_last_done_str(sub_task, log_df, now):
     completed_logs = log_df[log_df['End_Time'] != 'RUNNING']
@@ -121,7 +137,6 @@ def get_last_done_str(sub_task, log_df, now):
         except: continue
             
     if not max_dt: return "Never"
-    
     now_naive = now.replace(tzinfo=None)
     diff = now_naive - max_dt
     
@@ -133,6 +148,7 @@ def get_last_done_str(sub_task, log_df, now):
 try:
     df = get_routine_data()
     log_df = get_activity_log() 
+    future_df = get_future_tasks()
     
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist_timezone)
@@ -200,17 +216,49 @@ try:
         else:
             st.markdown(f"<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
 
-        # --- CHECKLIST FEATURE ---
+        # --- SMART SCHEDULE INJECTION ---
+        sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
         chk_list = [c.strip() for c in current_check_list.split(',') if c.strip()]
+        all_logged_items = log_df['check_list'].tolist() + log_df['Sub_Activities'].tolist()
+
+        if not future_df.empty:
+            future_activity_df = future_df[future_df['Activity'].str.upper() == current_activity]
+            for _, r in future_activity_df.iterrows():
+                try:
+                    due_dt_str = f"{r['Due_Date']} {r['Due_Time']}"
+                    due_dt = ist_timezone.localize(datetime.strptime(due_dt_str, "%Y-%m-%d %H:%M"))
+                    hours_until_due = (due_dt - now).total_seconds() / 3600
+                    
+                    formatted_task = f"{r['Task_Name']} [Due: {r['Due_Date'][5:]} {r['Due_Time']}]"
+                    is_done = any(formatted_task.upper() == str(x).strip().upper() for x in all_logged_items)
+                    
+                    show_task = False
+                    # Rule 1: Starts showing 24h before, stays FOREVER until completed
+                    if not is_done and hours_until_due <= 24: 
+                        show_task = True 
+                    # Rule 2: If done, checklists stay visible for 24h as a completed box. Sub-activities hide immediately.
+                    elif is_done and hours_until_due >= -24 and r['Type'] == 'Checklist':
+                        show_task = True
+                        
+                    if show_task:
+                        if r['Type'] == 'Sub-Activity': sub_list.append(formatted_task)
+                        elif r['Type'] == 'Checklist': chk_list.append(formatted_task)
+                except: continue
+
+        # --- CHECKLIST FEATURE ---
         if chk_list:
             st.markdown("---")
             st.markdown("<h4 style='text-align: center; color: #333;'>✅ Tasks & Reminders</h4>", unsafe_allow_html=True)
             
             today_logs = log_df[log_df['Date'] == today_str]
-            logged_tasks = today_logs[today_logs['Activity'] == current_activity]['check_list'].tolist()
+            today_logged_tasks = today_logs[today_logs['Activity'] == current_activity]['check_list'].tolist()
             
             for task in chk_list:
-                is_done = any(task.upper() == str(x).strip().upper() for x in logged_tasks)
+                if "[Due:" in task:
+                    is_done = any(task.upper() == str(x).strip().upper() for x in all_logged_items)
+                else:
+                    is_done = any(task.upper() == str(x).strip().upper() for x in today_logged_tasks)
+                    
                 checked = st.checkbox(task, value=is_done, disabled=is_done, key=f"chk_{task}_{current_activity}")
                 
                 if checked and not is_done:
@@ -223,8 +271,6 @@ try:
                     st.rerun()
 
         # --- BULLETPROOF GOOGLE SHEETS TRACKER ---
-        sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
-        
         running_tasks = log_df[log_df['End_Time'] == 'RUNNING']
         is_running = not running_tasks.empty
         
@@ -249,19 +295,15 @@ try:
                 
                 st.info(f"⏳ **In Progress:** {display_name} (Running for {mins_elapsed} min)")
                 
-                # The Save & Cancel Buttons Layout
                 col_stop, col_cancel = st.columns(2)
-                
                 with col_stop:
                     if st.button("🛑 SAVE", use_container_width=True, type="primary"):
                         end_time_log = now.time()
-                        
                         try:
                             hours, remainder = divmod(int(elapsed_time.total_seconds()), 3600)
                             minutes = remainder // 60
                             duration_str = f"{hours}:{minutes:02d}"
-                        except:
-                            duration_str = "0:00"
+                        except: duration_str = "0:00"
 
                         log_sheet = get_sheet("activity_log")
                         cells = log_sheet.findall("RUNNING")
@@ -282,13 +324,10 @@ try:
                     if st.button("❌ CANCEL", use_container_width=True):
                         log_sheet = get_sheet("activity_log")
                         cells = log_sheet.findall("RUNNING")
-                        
-                        # Find the "RUNNING" cell in End_Time (Column C) and delete the entire row
                         for cell in cells:
                             if cell.col == 3: 
                                 log_sheet.delete_rows(cell.row)
                                 break
-                                
                         st.cache_data.clear()
                         st.warning("Activity cancelled.")
                         time.sleep(1)
@@ -299,18 +338,11 @@ try:
                 for idx, task in enumerate(sub_list):
                     with cols[idx % 3]:
                         last_done = get_last_done_str(task, log_df, now)
-                        
                         if st.button(f"▶️ {task}\n(Last: {last_done})", key=f"btn_{task}", use_container_width=True):
                             log_sheet = get_sheet("activity_log")
                             log_sheet.append_row([
-                                today_str, 
-                                now.strftime('%H:%M'), 
-                                "RUNNING",    
-                                "RUNNING",    
-                                current_activity, 
-                                task,
-                                "",
-                                "In Progress"
+                                today_str, now.strftime('%H:%M'), "RUNNING", "RUNNING",    
+                                current_activity, task, "", "In Progress"
                             ])
                             st.cache_data.clear()
                             st.rerun()
@@ -336,24 +368,57 @@ try:
             st.markdown("<p style='text-align: center; color: #888;'>No completed activities logged yet.</p>", unsafe_allow_html=True)
             
         st.markdown("<br>", unsafe_allow_html=True)
+        
+        # --- FUTURE SCHEDULER FORM ---
+        with st.expander("🗓️ Schedule Future Task"):
+            with st.form("schedule_future_form", clear_on_submit=True):
+                st.markdown("### Attach Task to a Future Activity")
+                
+                unique_activities = [act for act in df['Activity'].unique() if act.strip()]
+                f_act = st.selectbox("Parent Category", unique_activities, key="f_act")
+                f_type = st.radio("Task Type", ["Checklist", "Sub-Activity"], horizontal=True, key="f_type")
+                f_name = st.text_input("Task Details", placeholder="e.g., Pay Electricity Bill", key="f_name")
+                
+                col1, col2 = st.columns(2)
+                with col1: f_date = st.date_input("Due Date", value=now.date(), key="f_date")
+                with col2: f_time = st.time_input("Due Time", value=clean_now, key="f_time")
+                    
+                if st.form_submit_button("Schedule Task", use_container_width=True):
+                    if f_name:
+                        client = init_connection()
+                        ss = client.open("MY ROUTINE 2026")
+                        try:
+                            fsheet = ss.worksheet("future_tasks")
+                        except gspread.exceptions.WorksheetNotFound:
+                            fsheet = ss.add_worksheet(title="future_tasks", rows="100", cols="5")
+                            fsheet.append_row(["Due_Date", "Due_Time", "Activity", "Type", "Task_Name"])
+                        
+                        fsheet.append_row([
+                            f_date.strftime('%Y-%m-%d'),
+                            f_time.strftime('%H:%M'),
+                            f_act.upper().strip(),
+                            f_type,
+                            f_name.strip()
+                        ])
+                        st.cache_data.clear()
+                        st.success("Task Scheduled! It will appear 24 hours before due time.")
+                        time.sleep(1.5)
+                        st.rerun()
+                    else:
+                        st.error("Please enter task details.")
 
         # Manual Log Form
         with st.expander("📝 Manual Log Activity"):
             with st.form("log_activity_form", clear_on_submit=True):
                 st.markdown("### Manually Record Time")
                 log_date = st.date_input("Date", value=now.date(), key="log_date")
-                
                 col_act1, col_act2 = st.columns(2)
-                with col_act1:
-                    log_activity = st.text_input("Main Category", value=current_activity if current_activity != "FREE TIME" else "", key="log_act")
-                with col_act2:
-                    log_sub_activity = st.text_input("Sub-Activity", placeholder="e.g., YOGA", key="log_sub")
+                with col_act1: log_activity = st.text_input("Main Category", value=current_activity if current_activity != "FREE TIME" else "", key="log_act")
+                with col_act2: log_sub_activity = st.text_input("Sub-Activity", placeholder="e.g., YOGA", key="log_sub")
                     
                 col1, col2 = st.columns(2)
-                with col1:
-                    log_start = st.time_input("Started At", value=clean_now, key="log_start")
-                with col2:
-                    log_end = st.time_input("Ended At", value=clean_now, key="log_end")
+                with col1: log_start = st.time_input("Started At", value=clean_now, key="log_start")
+                with col2: log_end = st.time_input("Ended At", value=clean_now, key="log_end")
                 
                 log_chk = st.text_input("Checklist Item (Optional)", key="log_chk")    
                 log_notes = st.text_area("Notes", key="log_notes")
@@ -372,7 +437,6 @@ try:
                             f"{h}:{m//60:02d}", log_activity.upper().strip(), log_sub_activity.upper().strip(),
                             log_chk.strip(), log_notes
                         ])
-                        
                         st.cache_data.clear()
                         st.success("Activity logged!")
                         time.sleep(1)
@@ -396,8 +460,7 @@ try:
                 try:
                     if t_str.strip() == '0:00': return datetime.strptime('00:00', '%H:%M').time()
                     return datetime.strptime(t_str.strip(), '%H:%M').time()
-                except:
-                    return datetime.strptime('00:00', '%H:%M').time()
+                except: return datetime.strptime('00:00', '%H:%M').time()
 
             edit_df['Start_Time'] = edit_df['Start_Time'].apply(convert_to_time)
             edit_df['End_Time'] = edit_df['End_Time'].apply(convert_to_time)
@@ -439,7 +502,6 @@ try:
                         
                         sub_act = str(row.get('Sub_Activities', '')).strip()
                         if sub_act == 'nan': sub_act = ""
-                        
                         chk_act = str(row.get('check_list', '')).strip()
                         if chk_act == 'nan': chk_act = ""
                         

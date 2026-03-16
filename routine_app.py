@@ -616,9 +616,9 @@ try:
         
         # Replace these placeholder URLs with your actual deployed Streamlit Cloud links
         st.link_button("🏫 Admission Hub", "https://school-app-y4hesp5fcntdc44kktgrrb.streamlit.app", use_container_width=True)
-        st.link_button("📱 Main Dashboard (app.py)", "https://your-main-app-url.streamlit.app", use_container_width=True)
-        st.link_button("📋 Form Manager", "https://your-form-manager-url.streamlit.app", use_container_width=True)
-        st.link_button("🪪 ID Card Generator", "https://your-id-card-url.streamlit.app", use_container_width=True)
+        st.link_button("📱 Main Dashboard (app.py)", "https://bhagyabantapur-ps.streamlit.app", use_container_width=True)
+        st.link_button("📋 Form Manager", "https://school-app-rdpqdb8jbmnmdysvglhazh.streamlit.app", use_container_width=True)
+        st.link_button("🪪 ID Card Generator", "https://school-app-h6xgx5appv5i4f3kfv82mw6.streamlit.app", use_container_width=True)
 
 except Exception as e:
     st.error(f"System Error: {e}")

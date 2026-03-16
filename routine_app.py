@@ -159,7 +159,6 @@ try:
     today_str = now.strftime('%Y-%m-%d')
     current_time = now.time()
 
-    # Updated to 3 Tabs
     tab1, tab2, tab3 = st.tabs(["⏱️ Live View", "📅 Today's Schedule", "🔗 App Hub"])
 
     # ==========================================
@@ -235,7 +234,7 @@ try:
         chk_list = [c.strip() for c in current_check_list.split(',') if c.strip()]
         all_logged_items = log_df['check_list'].tolist() + log_df['Sub_Activities'].tolist()
         
-        upcoming_ui_elements = []
+        upcoming_ui_elements_raw = []
 
         if not future_df.empty:
             for _, r in future_df.iterrows():
@@ -269,19 +268,28 @@ try:
                             time_text = f"due in {time_str}"
                             text_color = "#0068c9"
                             
-                        upcoming_ui_elements.append(f"&gt; <b style='color: {text_color};'>{r['Task_Name']} ({r['Activity']})</b> {time_text}")
+                        html_string = f"&gt; <b style='color: {text_color};'>{r['Task_Name']} ({r['Activity']})</b> {time_text}"
+                        
+                        # Store as a tuple (due_datetime, html_string) so we can sort them chronologically
+                        upcoming_ui_elements_raw.append((due_dt, html_string))
                         
                     if hours_until_due <= 0 and str(r['Activity']).strip().upper() == current_activity:
                         if r['Type'] == 'Sub-Activity': sub_list.append(formatted_task)
                         elif r['Type'] == 'Checklist': chk_list.append(formatted_task)
                 except: continue
 
-        if upcoming_ui_elements:
+        # --- RENDER TOP COUNTDOWN BOX ---
+        if upcoming_ui_elements_raw:
+            # Sort the tasks by due date (oldest/soonest first)
+            upcoming_ui_elements_raw.sort(key=lambda x: x[0])
+            
             box_html = f"""
             <div style='background-color:#fff3e0; padding:15px; border-radius:10px; border: 1px solid #ffcc80; margin-bottom: 20px;'>
                 <h4 style='text-align: center; color: #e65100; margin-top:0; margin-bottom:15px;'>⏳ Upcoming Special Tasks</h4>
             """
-            for element in upcoming_ui_elements:
+            
+            # Loop through only the sorted HTML strings
+            for dt, element in upcoming_ui_elements_raw:
                 box_html += f"<p style='text-align: center; margin-bottom:5px; font-size:16px; color: #d84315;'>{element}</p>"
             
             box_html += "</div>"
@@ -614,11 +622,10 @@ try:
         st.markdown("<h3 style='text-align: center; color: #555; margin-bottom: 20px;'>🔗 Quick Links</h3>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #888; margin-bottom: 30px;'>Access your other modules directly from here.</p>", unsafe_allow_html=True)
         
-        # Replace these placeholder URLs with your actual deployed Streamlit Cloud links
-        st.link_button("🏫 Admission Hub", "https://school-app-y4hesp5fcntdc44kktgrrb.streamlit.app", use_container_width=True)
-        st.link_button("📱 Main Dashboard (app.py)", "https://bhagyabantapur-ps.streamlit.app", use_container_width=True)
-        st.link_button("📋 Form Manager", "https://school-app-rdpqdb8jbmnmdysvglhazh.streamlit.app", use_container_width=True)
-        st.link_button("🪪 ID Card Generator", "https://school-app-h6xgx5appv5i4f3kfv82mw6.streamlit.app", use_container_width=True)
+        st.link_button("🏫 Admission Hub", "https://your-admission-hub-url.streamlit.app", use_container_width=True)
+        st.link_button("📱 Main Dashboard (app.py)", "https://your-main-app-url.streamlit.app", use_container_width=True)
+        st.link_button("📋 Form Manager", "https://your-form-manager-url.streamlit.app", use_container_width=True)
+        st.link_button("🪪 ID Card Generator", "https://your-id-card-url.streamlit.app", use_container_width=True)
 
 except Exception as e:
     st.error(f"System Error: {e}")

@@ -104,17 +104,17 @@ def get_future_tasks():
     try:
         sheet = ss.worksheet("future_tasks")
     except gspread.exceptions.WorksheetNotFound:
-        sheet = ss.add_worksheet(title="future_tasks", rows="100", cols="7")
-        sheet.append_row(["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status"])
+        sheet = ss.add_worksheet(title="future_tasks", rows="100", cols="8")
+        sheet.append_row(["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason"])
     
     data = sheet.get_all_values()
     if len(data) <= 1:
-        return pd.DataFrame(columns=["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "row_index"])
+        return pd.DataFrame(columns=["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason", "row_index"])
     
     df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 7: df[df.shape[1]] = ""
-    df = df.iloc[:, :7]
-    df.columns = ["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status"]
+    while df.shape[1] < 8: df[df.shape[1]] = ""
+    df = df.iloc[:, :8]
+    df.columns = ["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason"]
     df['row_index'] = df.index + 2 
     return df
 
@@ -246,7 +246,8 @@ try:
                     
                     formatted_task = f"{r['Task_Name']} [Due: {r['Due_Date'][5:]} {r['Due_Time']}]"
                     
-                    is_done_in_sheet = str(r['Status']).strip().upper() == 'COMPLETED'
+                    status_val = str(r['Status']).strip().upper()
+                    is_done_in_sheet = status_val in ['COMPLETED', 'CANCELED']
                     is_done_in_log = any(formatted_task.upper() == str(x).strip().upper() for x in all_logged_items)
                     is_done = is_done_in_sheet or is_done_in_log
                     
@@ -270,8 +271,7 @@ try:
                             
                         html_string = f"&gt; <b style='color: {text_color};'>{r['Task_Name']} ({r['Activity']})</b> {time_text}"
                         
-                        # Store as a tuple (due_datetime, html_string) so we can sort them chronologically
-                        upcoming_ui_elements_raw.append((due_dt, html_string))
+                        upcoming_ui_elements_raw.append((due_dt, r, html_string))
                         
                     if hours_until_due <= 0 and str(r['Activity']).strip().upper() == current_activity:
                         if r['Type'] == 'Sub-Activity': sub_list.append(formatted_task)
@@ -280,20 +280,29 @@ try:
 
         # --- RENDER TOP COUNTDOWN BOX ---
         if upcoming_ui_elements_raw:
-            # Sort the tasks by due date (oldest/soonest first)
             upcoming_ui_elements_raw.sort(key=lambda x: x[0])
             
-            box_html = f"""
-            <div style='background-color:#fff3e0; padding:15px; border-radius:10px; border: 1px solid #ffcc80; margin-bottom: 20px;'>
-                <h4 style='text-align: center; color: #e65100; margin-top:0; margin-bottom:15px;'>⏳ Upcoming Special Tasks</h4>
-            """
+            st.markdown("<br><h4 style='text-align: center; color: #e65100; margin-top:0; margin-bottom:15px;'>⏳ Upcoming Special Tasks</h4>", unsafe_allow_html=True)
             
-            # Loop through only the sorted HTML strings
-            for dt, element in upcoming_ui_elements_raw:
-                box_html += f"<p style='text-align: center; margin-bottom:5px; font-size:16px; color: #d84315;'>{element}</p>"
-            
-            box_html += "</div>"
-            st.markdown(box_html, unsafe_allow_html=True)
+            for dt, r, html_text in upcoming_ui_elements_raw:
+                st.markdown(f"<p style='text-align: center; margin-bottom:5px; font-size:16px; color: #d84315;'>{html_text}</p>", unsafe_allow_html=True)
+                
+                with st.expander(f"❌ Cancel Task", expanded=False):
+                    col_r, col_b = st.columns([3, 1])
+                    with col_r:
+                        cancel_reason = st.text_input("Reason", placeholder="Why are you cancelling?", key=f"rsn_{r['row_index']}", label_visibility="collapsed")
+                    with col_b:
+                        if st.button("Confirm", key=f"cnf_{r['row_index']}", type="primary"):
+                            if not cancel_reason.strip():
+                                st.error("Enter reason")
+                            else:
+                                fsheet = get_sheet("future_tasks")
+                                fsheet.update_cell(int(r['row_index']), 7, "Canceled")
+                                fsheet.update_cell(int(r['row_index']), 8, cancel_reason)
+                                
+                                st.cache_data.clear()
+                                st.rerun()
+                st.markdown("<hr style='margin-top:5px; margin-bottom:15px;'>", unsafe_allow_html=True)
 
         if chk_list:
             st.markdown("---")
@@ -306,7 +315,7 @@ try:
                 if "[Due:" in task:
                     raw_task = task.split(" [Due:")[0].strip()
                     matches = future_df[(future_df['Task_Name'].str.strip() == raw_task) & (future_df['Type'] == 'Checklist')]
-                    if not matches.empty and str(matches.iloc[0]['Status']).strip().upper() == 'COMPLETED':
+                    if not matches.empty and str(matches.iloc[0]['Status']).strip().upper() in ['COMPLETED', 'CANCELED']:
                         is_done = True
                     else:
                         is_done = any(task.upper() == str(x).strip().upper() for x in all_logged_items)
@@ -467,8 +476,8 @@ try:
                         try:
                             fsheet = ss.worksheet("future_tasks")
                         except gspread.exceptions.WorksheetNotFound:
-                            fsheet = ss.add_worksheet(title="future_tasks", rows="100", cols="7")
-                            fsheet.append_row(["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status"])
+                            fsheet = ss.add_worksheet(title="future_tasks", rows="100", cols="8")
+                            fsheet.append_row(["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason"])
                         
                         fsheet.append_row([
                             f_date.strftime('%Y-%m-%d'),
@@ -477,7 +486,8 @@ try:
                             f_type,
                             f_name.strip(),
                             f_entity,
-                            "Pending"
+                            "Pending",
+                            ""
                         ])
                         st.cache_data.clear()
                         st.success("Task Scheduled! It will appear 24 hours before due time.")

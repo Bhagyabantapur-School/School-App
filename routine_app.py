@@ -74,7 +74,6 @@ def get_routine_data():
     sheet = get_sheet("routine_master")
     data = sheet.get_all_values()
     df = pd.DataFrame(data[1:], columns=data[0])
-    
     while df.shape[1] < 7: df[df.shape[1]] = ""
     df = df.iloc[:, :7]
     df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list"]
@@ -86,10 +85,8 @@ def get_routine_data():
 def get_activity_log():
     sheet = get_sheet("activity_log")
     data = sheet.get_all_values()
-    
     if len(data) <= 1:
         return pd.DataFrame(columns=["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"])
-    
     df = pd.DataFrame(data[1:], columns=data[0])
     while df.shape[1] < 8: df[df.shape[1]] = ""
     df = df.iloc[:, :8]
@@ -118,6 +115,27 @@ def get_future_tasks():
     df['row_index'] = df.index + 2 
     return df
 
+@st.cache_data(ttl=60)
+def get_water_log():
+    client = init_connection()
+    ss = client.open("MY ROUTINE 2026")
+    try:
+        sheet = ss.worksheet("water_log")
+    except gspread.exceptions.WorksheetNotFound:
+        sheet = ss.add_worksheet(title="water_log", rows="1000", cols="3")
+        sheet.append_row(["Date", "Time", "Amount_ml"])
+    
+    data = sheet.get_all_values()
+    if len(data) <= 1:
+        return pd.DataFrame(columns=["Date", "Time", "Amount_ml"])
+    
+    df = pd.DataFrame(data[1:], columns=data[0])
+    while df.shape[1] < 3: df[df.shape[1]] = ""
+    df = df.iloc[:, :3]
+    df.columns = ["Date", "Time", "Amount_ml"]
+    df['Amount_ml'] = pd.to_numeric(df['Amount_ml'], errors='coerce').fillna(0)
+    return df
+
 def parse_duration_to_minutes(dur_str):
     try:
         h, m = map(int, str(dur_str).strip().split(':'))
@@ -140,7 +158,6 @@ def get_last_done_str(sub_task, log_df, now):
     if not max_dt: return "Never"
     now_naive = now.replace(tzinfo=None)
     diff = now_naive - max_dt
-    
     if diff.days > 0: return f"{diff.days}d ago"
     elif diff.seconds >= 3600: return f"{diff.seconds // 3600}h ago"
     elif diff.seconds >= 60: return f"{diff.seconds // 60}m ago"
@@ -150,6 +167,7 @@ try:
     df = get_routine_data()
     log_df = get_activity_log() 
     future_df = get_future_tasks()
+    water_df = get_water_log()
     
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist_timezone)
@@ -159,7 +177,7 @@ try:
     today_str = now.strftime('%Y-%m-%d')
     current_time = now.time()
 
-    tab1, tab2, tab3 = st.tabs(["⏱️ Live View", "📅 Schedule Editor", "🔗 App Hub"])
+    tab1, tab2, tab3, tab4 = st.tabs(["⏱️ Live View", "📅 Schedule Editor", "💧 Hydration", "🔗 App Hub"])
 
     # ==========================================
     # TAB 1: LIVE DASHBOARD
@@ -259,6 +277,50 @@ try:
         elif next_activity == "END OF DAY":
             st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;'>Up Next: Schedule Complete</h4>", unsafe_allow_html=True)
 
+        # --- SMART HYDRATION TRACKER ---
+        st.markdown("---")
+        today_water = water_df[water_df['Date'] == today_str]
+        total_water_today = today_water['Amount_ml'].sum()
+        current_hour_dec = now.hour + now.minute / 60.0
+        
+        if 4.5 <= current_hour_dec <= 20.5: 
+            if not today_water.empty:
+                last_water_time_str = today_water.iloc[-1]['Time']
+                try:
+                    last_water_dt = datetime.strptime(f"{today_str} {last_water_time_str}", "%Y-%m-%d %H:%M")
+                    last_water_dt = ist_timezone.localize(last_water_dt)
+                    hours_since_water = (now - last_water_dt).total_seconds() / 3600
+                    if hours_since_water >= 2.0:
+                        st.warning(f"💧 **Hydration Reminder:** It's been {int(hours_since_water)} hours since your last drink. Time for water!")
+                except: pass
+            else:
+                st.warning("💧 **Hydration Reminder:** You haven't logged any water yet today!")
+        elif current_hour_dec > 20.5 or current_hour_dec < 4.5:
+            st.info("🛑 **Hydration Cut-off Active:** Limit fluid intake to prepare for uninterrupted sleep.")
+
+        st.markdown(f"<h4 style='text-align: center; color: #0288d1; margin-bottom:15px;'>💧 Quick Log Water (Today: {int(total_water_today)}ml)</h4>", unsafe_allow_html=True)
+        col_w1, col_w2, col_w3 = st.columns(3)
+        
+        with col_w1:
+            if st.button("🥃 250 ml", use_container_width=True):
+                wsheet = get_sheet("water_log")
+                wsheet.append_row([today_str, now.strftime('%H:%M'), 250])
+                st.cache_data.clear()
+                st.rerun()
+        with col_w2:
+            if st.button("🚰 500 ml", use_container_width=True):
+                wsheet = get_sheet("water_log")
+                wsheet.append_row([today_str, now.strftime('%H:%M'), 500])
+                st.cache_data.clear()
+                st.rerun()
+        with col_w3:
+            if st.button("🥛 1000 ml", use_container_width=True):
+                wsheet = get_sheet("water_log")
+                wsheet.append_row([today_str, now.strftime('%H:%M'), 1000])
+                st.cache_data.clear()
+                st.rerun()
+
+        # --- SMART SCHEDULE INJECTION & COUNTDOWN ---
         sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
         chk_list = [c.strip() for c in current_check_list.split(',') if c.strip()]
         all_logged_items = log_df['check_list'].tolist() + log_df['Sub_Activities'].tolist()
@@ -299,7 +361,6 @@ try:
                             text_color = "#0068c9"
                             
                         html_string = f"&gt; <b style='color: {text_color};'>{r['Task_Name']} ({r['Activity']})</b> {time_text}"
-                        
                         upcoming_ui_elements_raw.append((due_dt, r, html_string))
                         
                     if hours_until_due <= 0 and str(r['Activity']).strip().upper() == current_activity:
@@ -307,7 +368,6 @@ try:
                         elif r['Type'] == 'Checklist': chk_list.append(formatted_task)
                 except: continue
 
-        # --- RENDER TOP COUNTDOWN BOX ---
         if upcoming_ui_elements_raw:
             upcoming_ui_elements_raw.sort(key=lambda x: x[0])
             
@@ -316,26 +376,60 @@ try:
             for dt, r, html_text in upcoming_ui_elements_raw:
                 st.markdown(f"<p style='text-align: center; margin-bottom:5px; font-size:16px; color: #d84315;'>{html_text}</p>", unsafe_allow_html=True)
                 
-                with st.expander(f"❌ Cancel Task", expanded=False):
-                    col_r, col_b = st.columns([3, 1])
-                    with col_r:
-                        cancel_reason = st.text_input("Reason", placeholder="Why are you cancelling?", key=f"rsn_{r['row_index']}", label_visibility="collapsed")
-                    with col_b:
-                        if st.button("Confirm", key=f"cnf_{r['row_index']}", type="primary"):
-                            if not cancel_reason.strip():
-                                st.error("Enter reason")
-                            else:
-                                fsheet = get_sheet("future_tasks")
-                                fsheet.update_cell(int(r['row_index']), 7, "Canceled")
-                                fsheet.update_cell(int(r['row_index']), 8, cancel_reason)
-                                
-                                sheet_log = get_sheet("activity_log")
-                                sheet_log.append_row([
-                                    today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
-                                    "0:00", str(r['Activity']).upper(), "", f"{r['Task_Name']} [CANCELED]", f"Cancel Reason: {cancel_reason}"
-                                ])
-                                st.cache_data.clear()
-                                st.rerun()
+                with st.expander(f"✏️ Manage Task", expanded=False):
+                    tab_resched, tab_cancel = st.tabs(["📅 Reschedule", "❌ Cancel"])
+                    
+                    with tab_resched:
+                        col_d, col_t = st.columns(2)
+                        try:
+                            curr_date = datetime.strptime(str(r['Due_Date']).strip(), '%Y-%m-%d').date()
+                        except:
+                            curr_date = now.date()
+                            
+                        curr_time_str = str(r['Due_Time']).strip()
+                        time_opts = [f"{str(h).zfill(2)}:{str(m).zfill(2)}" for h in range(24) for m in range(60)]
+                        if curr_time_str not in time_opts: curr_time_str = "12:00"
+                        
+                        with col_d:
+                            new_date = st.date_input("New Date", value=curr_date, key=f"nd_{r['row_index']}")
+                        with col_t:
+                            new_time = st.selectbox("New Time", options=time_opts, index=time_opts.index(curr_time_str), key=f"nt_{r['row_index']}")
+                            
+                        if st.button("Save New Time", key=f"rs_btn_{r['row_index']}", type="primary", use_container_width=True):
+                            fsheet = get_sheet("future_tasks")
+                            fsheet.update_cell(int(r['row_index']), 1, new_date.strftime('%Y-%m-%d'))
+                            fsheet.update_cell(int(r['row_index']), 2, new_time)
+                            
+                            sheet_log = get_sheet("activity_log")
+                            sheet_log.append_row([
+                                today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
+                                "0:00", str(r['Activity']).upper(), "", f"{r['Task_Name']} [RESCHEDULED]", f"Moved to {new_date.strftime('%Y-%m-%d')} {new_time}"
+                            ])
+                            st.cache_data.clear()
+                            st.success("Task Rescheduled!")
+                            time.sleep(1)
+                            st.rerun()
+
+                    with tab_cancel:
+                        col_r, col_b = st.columns([3, 1])
+                        with col_r:
+                            cancel_reason = st.text_input("Reason", placeholder="Why are you cancelling?", key=f"rsn_{r['row_index']}", label_visibility="collapsed")
+                        with col_b:
+                            if st.button("Confirm", key=f"cnf_{r['row_index']}", type="primary"):
+                                if not cancel_reason.strip():
+                                    st.error("Enter reason")
+                                else:
+                                    fsheet = get_sheet("future_tasks")
+                                    fsheet.update_cell(int(r['row_index']), 7, "Canceled")
+                                    fsheet.update_cell(int(r['row_index']), 8, cancel_reason)
+                                    
+                                    sheet_log = get_sheet("activity_log")
+                                    sheet_log.append_row([
+                                        today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
+                                        "0:00", str(r['Activity']).upper(), "", f"{r['Task_Name']} [CANCELED]", f"Cancel Reason: {cancel_reason}"
+                                    ])
+                                    st.cache_data.clear()
+                                    st.rerun()
                 st.markdown("<hr style='margin-top:5px; margin-bottom:15px;'>", unsafe_allow_html=True)
 
         if chk_list:
@@ -464,7 +558,6 @@ try:
 
         st.markdown("---")
         
-        # Today's Productivity Metrics
         st.markdown("<h4 style='text-align: center; color: #555; margin-bottom: 20px;'>📊 Today's Actual Productivity</h4>", unsafe_allow_html=True)
         today_logs = log_df[(log_df['Date'] == today_str) & (log_df['Duration'] != 'RUNNING')].copy()
         
@@ -664,9 +757,50 @@ try:
             st.info(f"No routine scheduled for {target_day}.")
 
     # ==========================================
-    # TAB 3: APP HUB
+    # TAB 3: HYDRATION
     # ==========================================
     with tab3:
+        st.markdown("<h3 style='text-align: center; color: #0288d1;'>💧 Hydration Tracker</h3>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #888;'>Daily Target: 3500 ml</p>", unsafe_allow_html=True)
+        
+        water_df['Date_dt'] = pd.to_datetime(water_df['Date'], errors='coerce')
+        today_dt = pd.to_datetime(today_str)
+        
+        # Daily Tab
+        t_day, t_week, t_month = st.tabs(["Today", "Past 7 Days", "This Month"])
+        
+        with t_day:
+            today_sum = water_df[water_df['Date'] == today_str]['Amount_ml'].sum()
+            progress = min(today_sum / 3500.0, 1.0)
+            
+            st.markdown(f"<h2 style='text-align: center; color: #0288d1;'>{int(today_sum)} ml</h2>", unsafe_allow_html=True)
+            st.progress(progress)
+            if progress >= 1.0: st.success("Daily target reached!")
+            
+            today_logs = water_df[water_df['Date'] == today_str].copy()
+            if not today_logs.empty:
+                st.dataframe(today_logs[['Time', 'Amount_ml']].sort_values('Time', ascending=False), use_container_width=True, hide_index=True)
+                
+        with t_week:
+            last_7 = water_df[water_df['Date_dt'] >= (today_dt - timedelta(days=6))].copy()
+            if not last_7.empty:
+                daily_grouped = last_7.groupby(last_7['Date_dt'].dt.strftime('%a, %b %d'))['Amount_ml'].sum()
+                st.bar_chart(daily_grouped, color="#29b6f6")
+            else:
+                st.info("No data for the past 7 days.")
+                
+        with t_month:
+            this_month = water_df[water_df['Date_dt'].dt.month == today_dt.month].copy()
+            if not this_month.empty:
+                daily_grouped_m = this_month.groupby(this_month['Date_dt'].dt.day)['Amount_ml'].sum()
+                st.line_chart(daily_grouped_m, color="#0288d1")
+            else:
+                st.info("No data for this month.")
+
+    # ==========================================
+    # TAB 4: APP HUB
+    # ==========================================
+    with tab4:
         st.markdown("<h3 style='text-align: center; color: #555; margin-bottom: 20px;'>🔗 Quick Links</h3>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #888; margin-bottom: 30px;'>Access your other modules directly from here.</p>", unsafe_allow_html=True)
         

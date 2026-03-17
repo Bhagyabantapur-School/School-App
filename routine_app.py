@@ -159,7 +159,7 @@ try:
     today_str = now.strftime('%Y-%m-%d')
     current_time = now.time()
 
-    tab1, tab2, tab3 = st.tabs(["⏱️ Live View", "📅 Today's Schedule", "🔗 App Hub"])
+    tab1, tab2, tab3 = st.tabs(["⏱️ Live View", "📅 Schedule Editor", "🔗 App Hub"])
 
     # ==========================================
     # TAB 1: LIVE DASHBOARD
@@ -167,12 +167,12 @@ try:
     with tab1:
         st.markdown(f"<h3 style='text-align: center; color: #888;'>{current_day} | {now.strftime('%I:%M %p')}</h3>", unsafe_allow_html=True)
 
-        current_activity = "FREE TIME"
-        current_activity_start = None
+        scheduled_activity = "FREE TIME"
+        scheduled_activity_start = None
         next_activity = "NONE"
         next_time_str = ""
-        current_sub_activities = ""
-        current_check_list = ""
+        scheduled_sub_activities = ""
+        scheduled_check_list = ""
 
         today_schedule = df[df['Day'].str.strip() == current_day].to_dict('records')
 
@@ -186,10 +186,10 @@ try:
                 else: end_t = datetime.strptime(end_str, '%H:%M').time()
 
                 if start_t <= current_time <= end_t:
-                    current_activity = str(row['Activity']).strip().upper()
-                    current_activity_start = start_t
-                    current_sub_activities = str(row.get('Sub_Activities', '')).strip()
-                    current_check_list = str(row.get('check_list', '')).strip()
+                    scheduled_activity = str(row['Activity']).strip().upper()
+                    scheduled_activity_start = start_t
+                    scheduled_sub_activities = str(row.get('Sub_Activities', '')).strip()
+                    scheduled_check_list = str(row.get('check_list', '')).strip()
                     
                     if i + 1 < len(today_schedule):
                         next_row = today_schedule[i+1]
@@ -198,11 +198,40 @@ try:
                     else: next_activity = "END OF DAY"
                     break
                     
-                elif current_time < start_t and current_activity == "FREE TIME":
+                elif current_time < start_t and scheduled_activity == "FREE TIME":
                     next_activity = str(row['Activity']).strip().upper()
                     next_time_str = datetime.strptime(start_str, '%H:%M').strftime('%I:%M %p')
                     break
             except ValueError: continue
+
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            flex_on = st.toggle("🔀 Flex Mode (Override Schedule)", key="flex_toggle")
+
+        if flex_on:
+            unique_activities = sorted(list(set([act.strip().upper() for act in df['Activity'] if act.strip()])))
+            if "FREE TIME" not in unique_activities: unique_activities.append("FREE TIME")
+            
+            current_activity = st.selectbox("What are you actually doing right now?", unique_activities, key="flex_sel")
+            
+            matched_rows = df[df['Activity'].str.strip().str.upper() == current_activity]
+            agg_subs = []
+            agg_chks = []
+            for _, r in matched_rows.iterrows():
+                agg_subs.extend([s.strip() for s in str(r.get('Sub_Activities', '')).split(',') if s.strip()])
+                agg_chks.extend([c.strip() for c in str(r.get('check_list', '')).split(',') if c.strip()])
+            
+            current_sub_activities = ",".join(list(dict.fromkeys(agg_subs)))
+            current_check_list = ",".join(list(dict.fromkeys(agg_chks)))
+            
+            current_activity_start = None 
+            next_activity = "FLEX MODE ACTIVE"
+            next_time_str = "--:--"
+        else:
+            current_activity = scheduled_activity
+            current_activity_start = scheduled_activity_start
+            current_sub_activities = scheduled_sub_activities
+            current_check_list = scheduled_check_list
 
         if current_activity in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY"]: color = "#ff4b4b" 
         elif current_activity in ["WORK", "REPORT", "TASK"]: color = "#0068c9" 
@@ -210,9 +239,9 @@ try:
         elif current_activity in ["SLEEP", "PRE", "TEA", "OUT"]: color = "#ff9f36" 
         else: color = "#333333" 
 
-        st.markdown(f"<h1 style='text-align: center; font-size: 4.5rem; color: {color}; margin-top: 30px; margin-bottom: 5px; line-height: 1.2;'>{current_activity}</h1>", unsafe_allow_html=True)
+        st.markdown(f"<h1 style='text-align: center; font-size: 4.5rem; color: {color}; margin-top: 10px; margin-bottom: 5px; line-height: 1.2;'>{current_activity}</h1>", unsafe_allow_html=True)
 
-        if current_activity_start:
+        if current_activity_start and not flex_on:
             dt_start = datetime.combine(now.date(), current_activity_start)
             dt_start = ist_timezone.localize(dt_start)
             elapsed = now - dt_start
@@ -223,12 +252,12 @@ try:
         else:
             st.markdown("<div style='margin-bottom: 15px;'></div>", unsafe_allow_html=True)
 
-        if next_activity not in ["NONE", "END OF DAY"]:
+        if next_activity == "FLEX MODE ACTIVE":
+            st.markdown(f"<h4 style='text-align: center; color: #e65100; margin-bottom: 20px; font-weight: 400;'>⚠️ Schedule Paused - Logging Custom Activity</h4>", unsafe_allow_html=True)
+        elif next_activity not in ["NONE", "END OF DAY"]:
             st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;'>Up Next: <b>{next_activity}</b> at {next_time_str}</h4>", unsafe_allow_html=True)
         elif next_activity == "END OF DAY":
             st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;'>Up Next: Schedule Complete</h4>", unsafe_allow_html=True)
-        else:
-            st.markdown(f"<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
 
         sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
         chk_list = [c.strip() for c in current_check_list.split(',') if c.strip()]
@@ -300,6 +329,11 @@ try:
                                 fsheet.update_cell(int(r['row_index']), 7, "Canceled")
                                 fsheet.update_cell(int(r['row_index']), 8, cancel_reason)
                                 
+                                sheet_log = get_sheet("activity_log")
+                                sheet_log.append_row([
+                                    today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
+                                    "0:00", str(r['Activity']).upper(), "", f"{r['Task_Name']} [CANCELED]", f"Cancel Reason: {cancel_reason}"
+                                ])
                                 st.cache_data.clear()
                                 st.rerun()
                 st.markdown("<hr style='margin-top:5px; margin-bottom:15px;'>", unsafe_allow_html=True)
@@ -533,16 +567,20 @@ try:
                         st.error("Please enter a Main Category.")
 
     # ==========================================
-    # TAB 2: LIVE SPREADSHEET EDITOR
+    # TAB 2: SCHEDULE EDITOR
     # ==========================================
     with tab2:
-        st.markdown(f"<h3 style='text-align: center; color: #555; margin-bottom: 5px;'>{current_day}'s Full Routine</h3>", unsafe_allow_html=True)
+        days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        
+        target_day = st.selectbox("Select Day to Edit", days_of_week, index=days_of_week.index(current_day))
+        
+        st.markdown(f"<h3 style='text-align: center; color: #555; margin-bottom: 5px;'>{target_day}'s Full Routine</h3>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #888; font-size: 14px; margin-bottom: 20px;'>Tap any cell to edit. Scroll right to see Sub-Activities and Checklists.</p>", unsafe_allow_html=True)
         
-        today_full_df = df[df['Day'].str.strip() == current_day].copy()
+        target_full_df = df[df['Day'].str.strip() == target_day].copy()
         
-        if not today_full_df.empty:
-            edit_df = today_full_df[['Start_Time', 'End_Time', 'Activity', 'Sub_Activities', 'check_list']].copy()
+        if not target_full_df.empty:
+            edit_df = target_full_df[['Start_Time', 'End_Time', 'Activity', 'Sub_Activities', 'check_list']].copy()
             
             def convert_to_time(t_str):
                 try:
@@ -568,7 +606,7 @@ try:
                 key="schedule_editor"
             )
             
-            if st.button("💾 Save Changes to Google Sheet", use_container_width=True):
+            if st.button(f"💾 Save Changes for {target_day}", use_container_width=True):
                 with st.spinner("Syncing to Google Sheets..."):
                     new_rows = []
                     for _, row in edited_schedule.iterrows():
@@ -593,12 +631,12 @@ try:
                         chk_act = str(row.get('check_list', '')).strip()
                         if chk_act == 'nan': chk_act = ""
                         
-                        new_rows.append([current_day, start_str, end_str, duration_str, str(row['Activity']).strip().upper(), sub_act, chk_act])
+                        new_rows.append([target_day, start_str, end_str, duration_str, str(row['Activity']).strip().upper(), sub_act, chk_act])
 
                     full_df = df.copy()
-                    other_days_df = full_df[full_df['Day'].str.strip() != current_day]
-                    new_today_df = pd.DataFrame(new_rows, columns=["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list"])
-                    final_df = pd.concat([other_days_df, new_today_df], ignore_index=True)
+                    other_days_df = full_df[full_df['Day'].str.strip() != target_day]
+                    new_target_df = pd.DataFrame(new_rows, columns=["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list"])
+                    final_df = pd.concat([other_days_df, new_target_df], ignore_index=True)
                     
                     routine_sheet = get_sheet("routine_master")
                     routine_sheet.clear() 
@@ -612,8 +650,8 @@ try:
 
             st.markdown("---")
             st.markdown("<h4 style='text-align: center; color: #555; margin-bottom: 20px;'>📈 Scheduled Summary</h4>", unsafe_allow_html=True)
-            today_full_df['Total_Minutes'] = today_full_df['Duration'].apply(parse_duration_to_minutes)
-            schedule_summary = today_full_df.groupby('Activity')['Total_Minutes'].sum().sort_values(ascending=False)
+            target_full_df['Total_Minutes'] = target_full_df['Duration'].apply(parse_duration_to_minutes)
+            schedule_summary = target_full_df.groupby('Activity')['Total_Minutes'].sum().sort_values(ascending=False)
             cols_sched = st.columns(min(len(schedule_summary), 3))
             col_idx_sched = 0
             for act, total_mins in schedule_summary.items():
@@ -623,7 +661,7 @@ try:
                     st.metric(label=act, value=display_time)
                 col_idx_sched += 1
         else:
-            st.info(f"No routine scheduled for {current_day}.")
+            st.info(f"No routine scheduled for {target_day}.")
 
     # ==========================================
     # TAB 3: APP HUB
@@ -632,10 +670,10 @@ try:
         st.markdown("<h3 style='text-align: center; color: #555; margin-bottom: 20px;'>🔗 Quick Links</h3>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #888; margin-bottom: 30px;'>Access your other modules directly from here.</p>", unsafe_allow_html=True)
         
-        st.link_button("🏫 Admission Hub", "https://school-app-y4hesp5fcntdc44kktgrrb.streamlit.app", use_container_width=True)
-        st.link_button("📱 Main Dashboard (app.py)", "https://bhagyabantapur-ps.streamlit.app", use_container_width=True)
-        st.link_button("📋 Form Manager", "https://school-app-rdpqdb8jbmnmdysvglhazh.streamlit.app", use_container_width=True)
-        st.link_button("🪪 ID Card Generator", "https://school-app-h6xgx5appv5i4f3kfv82mw6.streamlit.app", use_container_width=True)
+        st.link_button("🏫 Admission Hub", "https://your-admission-hub-url.streamlit.app", use_container_width=True)
+        st.link_button("📱 Main Dashboard (app.py)", "https://your-main-app-url.streamlit.app", use_container_width=True)
+        st.link_button("📋 Form Manager", "https://your-form-manager-url.streamlit.app", use_container_width=True)
+        st.link_button("🪪 ID Card Generator", "https://your-id-card-url.streamlit.app", use_container_width=True)
 
 except Exception as e:
     st.error(f"System Error: {e}")

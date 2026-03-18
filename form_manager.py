@@ -221,6 +221,7 @@ expected_columns = [
     'Mobile Updated', 'Old Mobile Number',
     'Category Updated', 'Old Category', 
     'Data Corrected', 'Old Student Name', 'Old Father Name', 'Old Mother Name', 'Old DOB',
+    'Banglar Shiksha Updated',
     'Last Update Date'
 ]
 
@@ -237,7 +238,7 @@ else:
             if col == 'Return Status' or col == 'Date (returned)': form_df[col] = "Pending"
             elif col in ['WhatsApp Added', 'Mobile Updated']: form_df[col] = "Not Started"
             elif col in ['WhatsApp Group', 'Old Mobile Number', 'Old Category', 'Old Student Name', 'Old Father Name', 'Old Mother Name', 'Old DOB', 'Last Update Date']: form_df[col] = ""
-            elif col in ['Category Updated', 'Data Corrected']: form_df[col] = "No"
+            elif col in ['Category Updated', 'Data Corrected', 'Banglar Shiksha Updated']: form_df[col] = "No"
             else: form_df[col] = ""
     form_df['UID'] = form_df['Class'].astype(str) + "_" + form_df['Section'].astype(str) + "_" + form_df['Roll'].astype(str)
 
@@ -342,6 +343,7 @@ with tab1:
                                 'Old Father Name': '',
                                 'Old Mother Name': '',
                                 'Old DOB': '',
+                                'Banglar Shiksha Updated': 'No',
                                 'Last Update Date': ''
                             })
                             
@@ -615,7 +617,10 @@ with tab3:
             all_wa_df['DOB'] = all_wa_df['DOB'].fillna('')
             all_wa_df['Student Name'] = all_wa_df['Name'] # Ensure we use latest spelling from student DB
             all_wa_df['Social Category'] = all_wa_df['Social Category'].fillna("UNSPECIFIED")
+            
+            # Setup Checkboxes
             all_wa_df['Data Corrected Check'] = all_wa_df['Data Corrected'].apply(lambda x: True if str(x).strip().lower() == 'yes' else False)
+            all_wa_df['BS Updated Check'] = all_wa_df['Banglar Shiksha Updated'].apply(lambda x: True if str(x).strip().lower() == 'yes' else False)
             
             # --- ROMAN TO NUMBER MAPPING FOR WHATSAPP GROUPS ---
             class_to_number_map = {
@@ -644,13 +649,13 @@ with tab3:
             if pending_wa_df.empty:
                 st.success("All completed returns have been processed and moved out of the pending queue!")
             else:
-                st.info("💡 **Instructions:** Correct spellings or DOB directly in the table! If you edit a field, the old data will be saved in the master log's history. Once verified, select a RESOLVED WhatsApp status and click Save.")
+                st.info("💡 **Instructions:** Correct spellings or DOB directly in the table! Check '🌐 BS Portal Updated' once done online. Once everything is verified, select a RESOLVED WhatsApp status and click Save.")
                 
                 status_options = ["Not Started", "Contact Saved", "Invitation Sent", "Added via Link", "Added Directly", "No Smartphone"]
                 category_options = ["GENERAL", "SC", "ST", "OBC", "OBC-A", "OBC-B", "MINORITY", "UNSPECIFIED"]
                 
                 edited_wa = st.data_editor(
-                    pending_wa_df[['WhatsApp Status', 'Student Name', 'Father', 'Mother', 'DOB', 'Mobile', 'Social Category', 'Data Corrected Check', 'Group Name', 'Grad Year']],
+                    pending_wa_df[['WhatsApp Status', 'Student Name', 'Father', 'Mother', 'DOB', 'Mobile', 'Social Category', 'Data Corrected Check', 'BS Updated Check', 'Group Name', 'Grad Year']],
                     column_config={
                         "WhatsApp Status": st.column_config.SelectboxColumn("WhatsApp Status", options=status_options, required=True),
                         "Student Name": st.column_config.TextColumn("Student Name (Edit to Fix)"),
@@ -659,6 +664,7 @@ with tab3:
                         "DOB": st.column_config.TextColumn("DOB (Edit to Fix)"),
                         "Social Category": st.column_config.SelectboxColumn("🏷️ Category", options=category_options, required=True),
                         "Data Corrected Check": st.column_config.CheckboxColumn("✏️ Data Corrected?"),
+                        "BS Updated Check": st.column_config.CheckboxColumn("🌐 BS Portal Updated?"),
                         "Grad Year": None # Hide this from UI but keep it for export logic
                     },
                     hide_index=True,
@@ -725,6 +731,7 @@ with tab3:
                         new_mobile = edited_wa.loc[idx, 'Mobile']
                         new_category = edited_wa.loc[idx, 'Social Category']
                         is_corrected = edited_wa.loc[idx, 'Data Corrected Check']
+                        is_bs_updated = edited_wa.loc[idx, 'BS Updated Check']
                         new_s_name = edited_wa.loc[idx, 'Student Name']
                         new_f_name = edited_wa.loc[idx, 'Father']
                         new_m_name = edited_wa.loc[idx, 'Mother']
@@ -735,6 +742,7 @@ with tab3:
                         old_mobile = str(pending_wa_df.loc[idx, 'Mobile']).replace('.0', '')
                         old_category = pending_wa_df.loc[idx, 'Social Category']
                         old_corrected = pending_wa_df.loc[idx, 'Data Corrected Check']
+                        old_bs_updated = pending_wa_df.loc[idx, 'BS Updated Check']
                         old_s_name = pending_wa_df.loc[idx, 'Student Name']
                         old_f_name = pending_wa_df.loc[idx, 'Father']
                         old_m_name = pending_wa_df.loc[idx, 'Mother']
@@ -823,6 +831,13 @@ with tab3:
                             changes_made += 1
                             row_changed = True
                             
+                        # Banglar Shiksha Check
+                        if is_bs_updated != old_bs_updated:
+                            f_mask = updated_form_df['UID'] == uid
+                            updated_form_df.loc[f_mask, 'Banglar Shiksha Updated'] = 'Yes' if is_bs_updated else 'No'
+                            changes_made += 1
+                            row_changed = True
+                            
                         # Date Stamp
                         if row_changed:
                             f_mask = updated_form_df['UID'] == uid
@@ -849,7 +864,7 @@ with tab3:
             if saved_wa_df.empty:
                 st.info("No students have been fully processed for this section yet.")
             else:
-                display_saved = saved_wa_df[['Roll', 'Student Name', 'Father', 'DOB', 'Mobile', 'Social Category', 'Data Corrected Check', 'WhatsApp Status', 'Group Name', 'Last Update Date']].rename(columns={'Data Corrected Check': 'Data Corrected'})
+                display_saved = saved_wa_df[['Roll', 'Student Name', 'Father', 'DOB', 'Mobile', 'Social Category', 'Data Corrected Check', 'BS Updated Check', 'WhatsApp Status', 'Group Name', 'Last Update Date']].rename(columns={'Data Corrected Check': 'Data Corrected', 'BS Updated Check': 'BS Portal Updated'})
                 st.dataframe(
                     display_saved,
                     hide_index=True,
@@ -1180,6 +1195,10 @@ with tab6:
             # Data Corrected
             corr_df = form_df[form_df['Data Corrected'] == 'Yes']
             corr_counts = corr_df.groupby(['Class', 'Section']).size().reset_index(name='Data Corrected')
+            
+            # BS Portal Updated
+            bs_df = form_df[form_df['Banglar Shiksha Updated'] == 'Yes']
+            bs_counts = bs_df.groupby(['Class', 'Section']).size().reset_index(name='BS Portal Updated')
 
             # Merging everything
             summary_df = pd.merge(summary_df, gen_counts, on=['Class', 'Section'], how='left').fillna(0)
@@ -1193,6 +1212,7 @@ with tab6:
             summary_df = pd.merge(summary_df, mob_up_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, cat_up_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, corr_counts, on=['Class', 'Section'], how='left').fillna(0)
+            summary_df = pd.merge(summary_df, bs_counts, on=['Class', 'Section'], how='left').fillna(0)
             
             summary_df['Outstanding (With Guardian)'] = summary_df['Distributed'] - (summary_df['Returned (Complete)'] + summary_df['Returned (Incomplete)'])
             summary_df['Pending Desk Stack'] = summary_df['Forms Generated'] - summary_df['Distributed']
@@ -1202,12 +1222,12 @@ with tab6:
                 'Total Students', 'Forms Generated', 'Distributed', 'Returned (Complete)', 
                 'Returned (Incomplete)', 'WhatsApp Synced', 'Link Sent', 'Contact Saved', 
                 'No Smartphone', 'Mobile Numbers Changed', 'Category Updated', 'Data Corrected',
-                'Outstanding (With Guardian)', 'Pending Desk Stack', 'Not Generated Yet'
+                'BS Portal Updated', 'Outstanding (With Guardian)', 'Pending Desk Stack', 'Not Generated Yet'
             ]
             for col in cols_to_int:
                 summary_df[col] = summary_df[col].astype(int)
         else:
-            for col in ['Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'WhatsApp Synced', 'Link Sent', 'Contact Saved', 'No Smartphone', 'Mobile Numbers Changed', 'Category Updated', 'Data Corrected', 'Outstanding (With Guardian)', 'Pending Desk Stack']:
+            for col in ['Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'WhatsApp Synced', 'Link Sent', 'Contact Saved', 'No Smartphone', 'Mobile Numbers Changed', 'Category Updated', 'Data Corrected', 'BS Portal Updated', 'Outstanding (With Guardian)', 'Pending Desk Stack']:
                 summary_df[col] = 0
             summary_df['Not Generated Yet'] = summary_df['Total Students']
 
@@ -1239,6 +1259,7 @@ with tab6:
             'Mobile Numbers Changed': summary_df['Mobile Numbers Changed'].sum(),
             'Category Updated': summary_df['Category Updated'].sum(),
             'Data Corrected': summary_df['Data Corrected'].sum(),
+            'BS Portal Updated': summary_df['BS Portal Updated'].sum(),
             'Outstanding (With Guardian)': summary_df['Outstanding (With Guardian)'].sum(),
             'Pending Desk Stack': summary_df['Pending Desk Stack'].sum(),
             'Not Generated Yet': summary_df['Not Generated Yet'].sum()
@@ -1248,27 +1269,33 @@ with tab6:
 
         st.markdown("##### Overall School Progress")
         
-        # ROW 1: 7 metrics (The Paper & Returns Journey)
-        m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
+        # ROW 1: Distribution (5 metrics)
+        m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("Total Students", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Total Students'].values[0])
         m2.metric("Forms Generated", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Forms Generated'].values[0])
         m3.metric("Forms Distributed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Distributed'].values[0])
         m4.metric("📭 Desk Stack", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Pending Desk Stack'].values[0])
-        m5.metric("✅ Complete Returns", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Returned (Complete)'].values[0])
-        m6.metric("⚠️ Incomp. Returns", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Returned (Incomplete)'].values[0])
-        m7.metric("🏠 Outstanding", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Outstanding (With Guardian)'].values[0])
+        m5.metric("🏠 Outstanding", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Outstanding (With Guardian)'].values[0])
 
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # ROW 2: 7 metrics (The Digital & Data Updates Journey)
-        r1, r2, r3, r4, r5, r6, r7 = st.columns(7)
-        r1.metric("💾 Contact Saved", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Contact Saved'].values[0])
-        r2.metric("🔗 Invite Sent", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Link Sent'].values[0])
-        r3.metric("📱 WA Synced", summary_df.loc[summary_df['Class'] == 'TOTAL', 'WhatsApp Synced'].values[0])
-        r4.metric("📵 No Smartphone", summary_df.loc[summary_df['Class'] == 'TOTAL', 'No Smartphone'].values[0])
-        r5.metric("🔄 Nos Changed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Mobile Numbers Changed'].values[0])
-        r6.metric("🏷️ Cat. Updated", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Category Updated'].values[0])
-        r7.metric("✏️ Data Corrected", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Data Corrected'].values[0])
+        # ROW 2: Returns & Comms (5 metrics)
+        r1, r2, r3, r4, r5 = st.columns(5)
+        r1.metric("✅ Complete Returns", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Returned (Complete)'].values[0])
+        r2.metric("⚠️ Incomp. Returns", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Returned (Incomplete)'].values[0])
+        r3.metric("💾 Contact Saved", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Contact Saved'].values[0])
+        r4.metric("🔗 Invite Sent", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Link Sent'].values[0])
+        r5.metric("📱 WA Synced", summary_df.loc[summary_df['Class'] == 'TOTAL', 'WhatsApp Synced'].values[0])
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # ROW 3: Updates & Data Fixes (5 metrics)
+        b1, b2, b3, b4, b5 = st.columns(5)
+        b1.metric("📵 No Smartphone", summary_df.loc[summary_df['Class'] == 'TOTAL', 'No Smartphone'].values[0])
+        b2.metric("🔄 Nos Changed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Mobile Numbers Changed'].values[0])
+        b3.metric("🏷️ Cat. Updated", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Category Updated'].values[0])
+        b4.metric("✏️ Data Corrected", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Data Corrected'].values[0])
+        b5.metric("🌐 BS Portal Updated", summary_df.loc[summary_df['Class'] == 'TOTAL', 'BS Portal Updated'].values[0])
         
         st.divider()
         st.markdown("##### Detailed Breakdown by Section")

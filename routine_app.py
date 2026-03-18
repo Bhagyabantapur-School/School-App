@@ -1,1216 +1,813 @@
 import streamlit as st
-import pandas as pd
-from datetime import datetime, timedelta
-import os
 import gspread
 from google.oauth2.service_account import Credentials
-from fpdf import FPDF
+import pandas as pd
+from datetime import datetime, timedelta
+import pytz
+import time
+from streamlit_autorefresh import st_autorefresh
 
-# --- 1. CONFIGURATION & STYLING ---
-st.set_page_config(page_title="BPS Form Manager", page_icon="📝", layout="wide")
+# 1. Configuration & Session State Init
+st.set_page_config(page_title="Live Routine", page_icon="⏱️", layout="centered")
+
+if 'active_main_task' not in st.session_state:
+    st.session_state.active_main_task = None
+    st.session_state.active_sub_task = None
+    st.session_state.active_start_time = None
+
+st_autorefresh(interval=60000, key="routine_refresh")
 
 st.markdown("""
     <style>
-        .block-container { padding-top: 2rem; max-width: 1100px;}
-        .alert-box { padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 5px solid; }
-        .alert-success { background-color: #d4edda; border-color: #28a745; color: #155724; }
-        .alert-warning { background-color: #fff3cd; border-color: #ffc107; color: #856404; }
-        .alert-danger { background-color: #f8d7da; border-color: #dc3545; color: #721c24; }
-        .alert-info { background-color: #e2e3e5; border-color: #6c757d; color: #383d41; }
-        .stButton>button { border-radius: 8px; font-weight: bold; }
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    .block-container {padding-top: 2rem; padding-bottom: 2rem;}
+    
+    div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {
+        border-radius: 0px !important;
+        border: 1px solid #cccccc !important;
+        background-color: #ffffff !important;
+        box-shadow: none !important;
+    }
+    
+    input[type="text"], input[type="time"], textarea {
+        font-size: 16px !important;
+        padding: 8px !important;
+        color: #000000 !important;
+    }
+    
+    div[data-testid="metric-container"] {
+        text-align: center; 
+        background-color: #f0f2f6; 
+        padding: 10px; 
+        border-radius: 10px; 
+        margin-bottom: 15px;
+    }
+    
+    div[data-testid="stCheckbox"] label {
+        font-size: 18px !important;
+        padding-top: 5px;
+        padding-bottom: 5px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("📝 BPS Form Generator & Tracker")
-
-# --- 2. TIME & HELPERS ---
-utc_now = datetime.utcnow()
-now = utc_now + timedelta(hours=5, minutes=30)
-curr_date_str = now.strftime("%d-%m-%Y")
-
-# --- 3. DATABASE CONNECTION ---
+# 2. Database Connection
 @st.cache_resource
-def init_gsheets():
+def init_connection():
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"], scopes=scopes
+    )
+    return gspread.authorize(creds)
+
+def get_sheet(tab_name):
+    client = init_connection()
+    return client.open("MY ROUTINE 2026").worksheet(tab_name)
+
+@st.cache_data(ttl=60) 
+def get_routine_data():
+    sheet = get_sheet("routine_master")
+    data = sheet.get_all_values()
+    df = pd.DataFrame(data[1:], columns=data[0])
+    while df.shape[1] < 7: df[df.shape[1]] = ""
+    df = df.iloc[:, :7]
+    df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list"]
+    df = df[df["Day"].astype(str).str.strip() != ""]
+    df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
+    return df
+
+@st.cache_data(ttl=60)
+def get_activity_log():
+    sheet = get_sheet("activity_log")
+    data = sheet.get_all_values()
+    if len(data) <= 1:
+        return pd.DataFrame(columns=["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"])
+    df = pd.DataFrame(data[1:], columns=data[0])
+    while df.shape[1] < 8: df[df.shape[1]] = ""
+    df = df.iloc[:, :8]
+    df.columns = ["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"]
+    df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
+    return df
+
+@st.cache_data(ttl=60)
+def get_future_tasks():
+    client = init_connection()
+    ss = client.open("MY ROUTINE 2026")
     try:
-        skey = dict(st.secrets["gcp_service_account"])
-        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        credentials = Credentials.from_service_account_info(skey, scopes=scopes)
-        gc = gspread.authorize(credentials)
-        return gc.open("BPS_Database")
-    except Exception as e:
-        st.error("⚠️ Google Sheets Connection Failed! Check Streamlit Secrets.")
-        st.stop()
+        sheet = ss.worksheet("future_tasks")
+    except gspread.exceptions.WorksheetNotFound:
+        sheet = ss.add_worksheet(title="future_tasks", rows="100", cols="8")
+        sheet.append_row(["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason"])
+    
+    data = sheet.get_all_values()
+    if len(data) <= 1:
+        return pd.DataFrame(columns=["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason", "row_index"])
+    
+    df = pd.DataFrame(data[1:], columns=data[0])
+    while df.shape[1] < 8: df[df.shape[1]] = ""
+    df = df.iloc[:, :8]
+    df.columns = ["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason"]
+    df['row_index'] = df.index + 2 
+    return df
 
-sh = init_gsheets()
-
-@st.cache_data(ttl=5)
-def fetch_sheet_data(sheet_name):
+@st.cache_data(ttl=60)
+def get_water_log():
+    client = init_connection()
+    ss = client.open("MY ROUTINE 2026")
     try:
-        ws = sh.worksheet(sheet_name)
-        df = pd.DataFrame(ws.get_all_records())
-        return df
-    except:
-        return pd.DataFrame()
+        sheet = ss.worksheet("water_log")
+    except gspread.exceptions.WorksheetNotFound:
+        sheet = ss.add_worksheet(title="water_log", rows="1000", cols="3")
+        sheet.append_row(["Date", "Time", "Amount_ml"])
+    
+    data = sheet.get_all_values()
+    if len(data) <= 1:
+        return pd.DataFrame(columns=["Date", "Time", "Amount_ml"])
+    
+    df = pd.DataFrame(data[1:], columns=data[0])
+    while df.shape[1] < 3: df[df.shape[1]] = ""
+    df = df.iloc[:, :3]
+    df.columns = ["Date", "Time", "Amount_ml"]
+    df['Amount_ml'] = pd.to_numeric(df['Amount_ml'], errors='coerce').fillna(0)
+    return df
 
-def clear_cache():
-    fetch_sheet_data.clear()
+def parse_duration_to_minutes(dur_str):
+    try:
+        h, m = map(int, str(dur_str).strip().split(':'))
+        return (h * 60) + m
+    except: return 0
 
-def overwrite_sheet_df(sheet_name, df):
-    try: ws = sh.worksheet(sheet_name)
-    except: ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=20)
-    ws.clear()
-    df = df.fillna("").astype(str)
-    if not df.empty:
-        ws.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name='A1')
-        ws.freeze(rows=1) 
-    clear_cache()
+def get_last_done_str(sub_task, log_df, now):
+    completed_logs = log_df[log_df['End_Time'] != 'RUNNING']
+    matches = completed_logs[completed_logs['Sub_Activities'].astype(str).str.strip().str.upper() == sub_task.upper()]
+    if matches.empty: return "Never"
+    
+    max_dt = None
+    for _, r in matches.iterrows():
+        try:
+            dt_str = f"{r['Date']} {r['End_Time']}"
+            dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+            if max_dt is None or dt > max_dt: max_dt = dt
+        except: continue
+            
+    if not max_dt: return "Never"
+    now_naive = now.replace(tzinfo=None)
+    diff = now_naive - max_dt
+    if diff.days > 0: return f"{diff.days}d ago"
+    elif diff.seconds >= 3600: return f"{diff.seconds // 3600}h ago"
+    elif diff.seconds >= 60: return f"{diff.seconds // 60}m ago"
+    else: return "Just now"
 
-def append_sheet_df(sheet_name, df):
-    if df.empty: return
-    try: ws = sh.worksheet(sheet_name)
-    except:
-        ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=20)
-        ws.append_row(list(df.columns))
-    df = df.fillna("").astype(str)
-    ws.append_rows(df.values.tolist())
-    clear_cache()
+try:
+    df = get_routine_data()
+    log_df = get_activity_log() 
+    future_df = get_future_tasks()
+    water_df = get_water_log()
+    
+    ist_timezone = pytz.timezone('Asia/Kolkata')
+    now = datetime.now(ist_timezone)
+    clean_now = now.replace(second=0, microsecond=0).time()
+    
+    current_day = now.strftime('%A')
+    today_str = now.strftime('%Y-%m-%d')
+    current_time = now.time()
 
-# --- 4. PDF GENERATOR CLASS ---
-class BPS_Survey(FPDF):
-    def __init__(self):
-        super().__init__(orientation='P', unit='mm', format='A5')
-        self.add_font('Bengali', '', 'Bengali.ttf')
-        self.set_text_shaping(True) 
-        self.set_auto_page_break(auto=False)
+    tab1, tab2, tab3, tab4 = st.tabs(["⏱️ Live View", "📅 Schedule Editor", "💧 Hydration", "🔗 App Hub"])
 
-    def draw_digit_boxes(self, x, y, box_size=8):
-        for i in range(10):
-            self.rect(x + (i * box_size), y, box_size, box_size)
+    # ==========================================
+    # TAB 1: LIVE DASHBOARD
+    # ==========================================
+    with tab1:
+        st.markdown(f"<h3 style='text-align: center; color: #888;'>{current_day} | {now.strftime('%I:%M %p')}</h3>", unsafe_allow_html=True)
 
-    def draw_single_form(self, row):
-        x = 10 
-        y = 10
-        self.set_xy(x, y)
-        
-        try: self.image('logo.png', x, y, 20) 
-        except:
-            self.rect(x, y, 20, 20)
-            self.set_font('Helvetica', 'B', 8)
-            self.text(x + 3, y + 10, "LOGO")
+        scheduled_activity = "FREE TIME"
+        scheduled_activity_start = None
+        next_activity = "NONE"
+        next_time_str = ""
+        scheduled_sub_activities = ""
+        scheduled_check_list = ""
 
-        self.set_font('Helvetica', 'B', 14) 
-        self.set_xy(x + 24, y + 2)
-        self.cell(100, 8, "Bhagyabantapur Primary School (BPS)", ln=True)
-        
-        self.set_font('Bengali', '', 12) 
-        self.set_x(x + 24)
-        self.cell(100, 8, u"অভিভাবক তথ্য যাচাই ফর্ম", ln=True)
-        
-        curr_y = 35 
-        self.rect(x, curr_y, 128, 36) 
-        
-        mobile_val = str(row['Mobile']).split('.')[0] if pd.notna(row['Mobile']) and str(row['Mobile']).strip() != "" else "N/A"
-        roll_val = str(row['Roll']).split('.')[0] if 'Roll' in row and pd.notna(row['Roll']) and str(row['Roll']).strip() != "" else "N/A"
-        
-        dob_val = "N/A"
-        if 'DOB' in row and pd.notna(row['DOB']) and str(row['DOB']).strip() != "":
+        today_schedule = df[df['Day'].str.strip() == current_day].to_dict('records')
+
+        for i, row in enumerate(today_schedule):
             try:
-                parsed_date = pd.to_datetime(row['DOB'], dayfirst=True)
-                dob_val = parsed_date.strftime('%d-%m-%Y')
-            except:
-                dob_val = str(row['DOB'])
-        
-        self.set_font('Helvetica', '', 11)
-        self.text(x + 3, curr_y + 7, f"Student: {row['Name']}")
-        self.text(x + 70, curr_y + 7, f"DOB: {dob_val}")
-        self.text(x + 3, curr_y + 15, f"Father: {row['Father']}")
-        self.text(x + 70, curr_y + 15, f"Class: {row['Class']}")
-        self.text(x + 3, curr_y + 23, f"Mother: {row['Mother']}")
-        self.text(x + 70, curr_y + 23, f"Section: {row['Section']}")
-        self.text(x + 3, curr_y + 31, f"Mobile: {mobile_val}")
-        self.text(x + 70, curr_y + 31, f"Roll: {roll_val}") 
-        
-        curr_y = 78
-        self.set_xy(x, curr_y)
-        
-        self.set_font('Bengali', '', 11)
-        self.cell(26, 6, u"সঠিক ঘরে টিক (")
-        self.set_font('ZapfDingbats', '', 10) 
-        self.cell(4, 6, "4") 
-        self.set_font('Bengali', '', 11)
-        self.cell(15, 6, u") দিন:")
-        self.ln(10)
-        
-        curr_y = self.get_y()
-        self.set_xy(x, curr_y)
-        self.cell(60, 8, u"এই মোবাইল নম্বরটি কি সঠিক?")
-        self.set_x(x + 65)
-        self.cell(10, 8, u"হ্যাঁ")
-        self.rect(x + 75, curr_y + 1.5, 5, 5) 
-        self.set_x(x + 85)
-        self.cell(10, 8, u"না")
-        self.rect(x + 95, curr_y + 1.5, 5, 5) 
-        self.set_xy(x, curr_y + 10)
-        self.cell(0, 8, u"সঠিক না হলে, সঠিক নম্বরটি দিন:", ln=True)
-        self.draw_digit_boxes(x, self.get_y() + 2, box_size=8)
-        self.ln(15)
-        
-        curr_y = self.get_y()
-        self.set_xy(x, curr_y)
-        self.cell(65, 8, u"এটি কি আপনার হোয়াটসঅ্যাপ নম্বর?")
-        self.set_x(x + 70)
-        self.cell(10, 8, u"হ্যাঁ")
-        self.rect(x + 80, curr_y + 1.5, 5, 5) 
-        self.set_x(x + 90)
-        self.cell(10, 8, u"না")
-        self.rect(x + 100, curr_y + 1.5, 5, 5) 
-        self.set_xy(x, curr_y + 10)
-        self.cell(0, 8, u"হোয়াটসঅ্যাপ নম্বর না হলে সেটি দিন:", ln=True)
-        self.draw_digit_boxes(x, self.get_y() + 2, box_size=8)
-        self.ln(15)
-        
-        curr_y = self.get_y()
-        self.set_xy(x, curr_y)
-        self.cell(82, 8, u"ছাত্র/ছাত্রীর কি SC / ST / OBC সার্টিফিকেট আছে?")
-        self.set_x(x + 85)
-        self.cell(10, 8, u"হ্যাঁ")
-        self.rect(x + 95, curr_y + 1.5, 5, 5) 
-        self.set_x(x + 105)
-        self.cell(10, 8, u"না")
-        self.rect(x + 115, curr_y + 1.5, 5, 5) 
-        self.set_xy(x, curr_y + 10)
-        self.cell(0, 8, u"হ্যাঁ হলে, সার্টিফিকেটের জেরক্স (Xerox) কপি জমা দিন।", ln=True)
-        
-        curr_y = self.get_y() + 15 
-        self.set_font('Helvetica', '', 10)
-        self.text(x, curr_y, "__________________________")
-        self.text(x + 75, curr_y, "__________________________")
-        
-        self.set_font('Bengali', '', 10)
-        self.set_xy(x, curr_y + 2)
-        self.cell(40, 6, u"অভিভাবকের স্বাক্ষর")
-        self.set_xy(x + 75, curr_y + 2)
-        self.cell(40, 6, u"তারিখ")
+                start_str = str(row['Start_Time']).strip()
+                end_str = str(row['End_Time']).strip()
+                
+                start_t = datetime.strptime(start_str, '%H:%M').time()
+                if end_str == '0:00': end_t = datetime.strptime('23:59:59', '%H:%M:%S').time()
+                else: end_t = datetime.strptime(end_str, '%H:%M').time()
 
-# --- 5. LOAD DATA FROM CLOUD ---
-students_df = fetch_sheet_data('students_master')
-if not students_df.empty:
-    if 'Section' not in students_df.columns: 
-        students_df['Section'] = 'A'
-    if 'Social Category' not in students_df.columns:
-        students_df['Social Category'] = 'UNSPECIFIED'
-    students_df['UID'] = students_df['Class'].astype(str) + "_" + students_df['Section'].astype(str) + "_" + students_df['Roll'].astype(str)
-else:
-    st.error("⚠️ 'students_master' tab missing or empty in BPS_Database. Please copy your students.csv data into Google Sheets.")
-    st.stop()
+                if start_t <= current_time <= end_t:
+                    scheduled_activity = str(row['Activity']).strip().upper()
+                    scheduled_activity_start = start_t
+                    scheduled_sub_activities = str(row.get('Sub_Activities', '')).strip()
+                    scheduled_check_list = str(row.get('check_list', '')).strip()
+                    
+                    if i + 1 < len(today_schedule):
+                        next_row = today_schedule[i+1]
+                        next_activity = str(next_row['Activity']).strip().upper()
+                        next_time_str = datetime.strptime(str(next_row['Start_Time']).strip(), '%H:%M').strftime('%I:%M %p')
+                    else: next_activity = "END OF DAY"
+                    break
+                    
+                elif current_time < start_t and scheduled_activity == "FREE TIME":
+                    next_activity = str(row['Activity']).strip().upper()
+                    next_time_str = datetime.strptime(start_str, '%H:%M').strftime('%I:%M %p')
+                    break
+            except ValueError: continue
 
-mdm_df = fetch_sheet_data('mdm_log')
-if mdm_df.empty:
-    mdm_df = pd.DataFrame(columns=['Date', 'Teacher', 'Class', 'Section', 'Roll', 'Name', 'Time', 'UID'])
-else:
-    mdm_df['UID'] = mdm_df['Class'].astype(str) + "_" + mdm_df['Section'].astype(str) + "_" + mdm_df['Roll'].astype(str)
-
-form_df = fetch_sheet_data('form_distribution_log')
-
-expected_columns = [
-    'Class', 'Section', 'Roll', 'Student Name', 
-    'Date (form generated)', 'Date (receive form)', 
-    'Date (returned)', 'Return Status',
-    'WhatsApp Added', 'WhatsApp Group',
-    'Mobile Updated', 'Old Mobile Number',
-    'Category Updated', 'Data Corrected'
-]
-
-# Universal completed statuses list
-IN_GROUP_STATUSES = ['Yes', 'Added via Link', 'Added Directly']
-NO_WA_STATUSES = ['No Smartphone']
-RESOLVED_STATUSES = IN_GROUP_STATUSES + NO_WA_STATUSES
-
-if form_df.empty:
-    form_df = pd.DataFrame(columns=expected_columns + ['UID'])
-else:
-    for col in expected_columns:
-        if col not in form_df.columns:
-            if col == 'Return Status' or col == 'Date (returned)': form_df[col] = "Pending"
-            elif col in ['WhatsApp Added', 'Mobile Updated']: form_df[col] = "Not Started"
-            elif col in ['WhatsApp Group', 'Old Mobile Number']: form_df[col] = ""
-            elif col in ['Category Updated', 'Data Corrected']: form_df[col] = "No"
-            else: form_df[col] = ""
-    form_df['UID'] = form_df['Class'].astype(str) + "_" + form_df['Section'].astype(str) + "_" + form_df['Roll'].astype(str)
-
-# --- 6. UI TABS ---
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "🖨️ 1. Generate", 
-    "🤝 2. Distribute", 
-    "📥 3. Returns & WA", 
-    "💬 4. WhatsApp Report", 
-    "📊 5. Master Log", 
-    "📈 6. Summary"
-])
-
-# ==========================================
-# TAB 1: GENERATE PDF & LOG
-# ==========================================
-with tab1:
-    st.subheader("Step 1: Generate PDFs & Save to Database")
-    if students_df.empty:
-        st.warning("No student data found.")
-    else:
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col1:
-            classes = sorted(students_df['Class'].dropna().unique())
-            sel_class = st.selectbox("Select Class", classes, key="t1_c")
+        col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            sections = sorted(students_df[students_df['Class'] == sel_class]['Section'].unique())
-            sel_sec = st.selectbox("Select Section", sections, key="t1_s")
-        with col3:
-            gen_date_obj = st.date_input("Date to log on Database", now.date())
-            gen_date_str = gen_date_obj.strftime("%d-%m-%Y")
-            
-        filtered_students = students_df[(students_df['Class'] == sel_class) & (students_df['Section'] == sel_sec)].copy()
-        
-        existing_uids = form_df['UID'].tolist() if not form_df.empty else []
-        
-        unprinted_df = filtered_students[~filtered_students['UID'].isin(existing_uids)].copy()
-        printed_df = filtered_students[filtered_students['UID'].isin(existing_uids)].copy()
+            flex_on = st.toggle("🔀 Flex Mode (Override Schedule)", key="flex_toggle")
 
-        st.divider()
-        
-        # --- SECTION 1: NEW FORMS ---
-        st.markdown("#### 🆕 Section 1: Generate New Forms")
-        st.info("These students DO NOT have a form generated in the database yet.")
-        
-        filter_mode = st.radio("Filter unprinted students:", ["Show All Missing Forms", "Only Show Present Students (via MDM)"], horizontal=True)
-        
-        if filter_mode == "Only Show Present Students (via MDM)":
-            mdm_check_obj = st.date_input("Select MDM Date to Check Presence", now.date(), key="mdm_check_d")
-            mdm_check_str = mdm_check_obj.strftime("%d-%m-%Y")
+        if flex_on:
+            unique_activities = sorted(list(set([act.strip().upper() for act in df['Activity'] if act.strip()])))
+            if "FREE TIME" not in unique_activities: unique_activities.append("FREE TIME")
             
-            if mdm_df.empty:
-                st.warning("No MDM data found in the database.")
-                display_unprinted = pd.DataFrame()
+            current_activity = st.selectbox("What are you actually doing right now?", unique_activities, key="flex_sel")
+            
+            matched_rows = df[df['Activity'].str.strip().str.upper() == current_activity]
+            agg_subs = []
+            agg_chks = []
+            for _, r in matched_rows.iterrows():
+                agg_subs.extend([s.strip() for s in str(r.get('Sub_Activities', '')).split(',') if s.strip()])
+                agg_chks.extend([c.strip() for c in str(r.get('check_list', '')).split(',') if c.strip()])
+            
+            current_sub_activities = ",".join(list(dict.fromkeys(agg_subs)))
+            current_check_list = ",".join(list(dict.fromkeys(agg_chks)))
+            
+            current_activity_start = None 
+            next_activity = "FLEX MODE ACTIVE"
+            next_time_str = "--:--"
+        else:
+            current_activity = scheduled_activity
+            current_activity_start = scheduled_activity_start
+            current_sub_activities = scheduled_sub_activities
+            current_check_list = scheduled_check_list
+
+        if current_activity in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY"]: color = "#ff4b4b" 
+        elif current_activity in ["WORK", "REPORT", "TASK"]: color = "#0068c9" 
+        elif current_activity == "HEALTH": color = "#2e7b32" 
+        elif current_activity in ["SLEEP", "PRE", "TEA", "OUT"]: color = "#ff9f36" 
+        else: color = "#333333" 
+
+        st.markdown(f"<h1 style='text-align: center; font-size: 4.5rem; color: {color}; margin-top: 10px; margin-bottom: 5px; line-height: 1.2;'>{current_activity}</h1>", unsafe_allow_html=True)
+
+        if current_activity_start and not flex_on:
+            dt_start = datetime.combine(now.date(), current_activity_start)
+            dt_start = ist_timezone.localize(dt_start)
+            elapsed = now - dt_start
+            eh, erem = divmod(int(elapsed.total_seconds()), 3600)
+            em = erem // 60
+            elapsed_text = f"{eh}h {em}m" if eh > 0 else f"{em}m"
+            st.markdown(f"<h3 style='text-align: center; color: #555; margin-top: 0px; margin-bottom: 10px; font-weight: 400;'>⏱️ Elapsed: {elapsed_text}</h3>", unsafe_allow_html=True)
+        else:
+            st.markdown("<div style='margin-bottom: 15px;'></div>", unsafe_allow_html=True)
+
+        if next_activity == "FLEX MODE ACTIVE":
+            st.markdown(f"<h4 style='text-align: center; color: #e65100; margin-bottom: 20px; font-weight: 400;'>⚠️ Schedule Paused - Logging Custom Activity</h4>", unsafe_allow_html=True)
+        elif next_activity not in ["NONE", "END OF DAY"]:
+            st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;'>Up Next: <b>{next_activity}</b> at {next_time_str}</h4>", unsafe_allow_html=True)
+        elif next_activity == "END OF DAY":
+            st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;'>Up Next: Schedule Complete</h4>", unsafe_allow_html=True)
+
+        # --- SMART HYDRATION TRACKER ---
+        st.markdown("---")
+        today_water = water_df[water_df['Date'] == today_str]
+        total_water_today = today_water['Amount_ml'].sum()
+        current_hour_dec = now.hour + now.minute / 60.0
+        
+        if 4.5 <= current_hour_dec <= 20.5: 
+            if not today_water.empty:
+                last_water_time_str = today_water.iloc[-1]['Time']
+                try:
+                    last_water_dt = datetime.strptime(f"{today_str} {last_water_time_str}", "%Y-%m-%d %H:%M")
+                    last_water_dt = ist_timezone.localize(last_water_dt)
+                    hours_since_water = (now - last_water_dt).total_seconds() / 3600
+                    if hours_since_water >= 2.0:
+                        st.warning(f"💧 **Hydration Reminder:** It's been {int(hours_since_water)} hours since your last drink. Time for water!")
+                except: pass
             else:
-                present_uids = mdm_df[mdm_df['Date'].astype(str) == mdm_check_str]['UID'].tolist()
-                display_unprinted = unprinted_df[unprinted_df['UID'].isin(present_uids)]
-        else:
-            display_unprinted = unprinted_df
-            
-        if display_unprinted.empty:
-            st.success("No students found matching this criteria!")
-        else:
-            select_all_new = st.checkbox(f"Select All {len(display_unprinted)} Students", key="sa_new")
-            if select_all_new:
-                selected_new_idx = display_unprinted.index.tolist()
-            else:
-                selected_new_idx = st.multiselect(
-                    "Choose specific students:", 
-                    display_unprinted.index, 
-                    format_func=lambda i: f"Roll {display_unprinted.loc[i].get('Roll', 'N/A')} - {display_unprinted.loc[i]['Name']}",
-                    key="ms_new"
-                )
-                
-            if st.button("📄 Generate New PDFs & Log to Database", type="primary", key="btn_new"):
-                if selected_new_idx:
-                    with st.spinner("Building PDFs and updating cloud database..."):
-                        pdf = BPS_Survey()
-                        new_logs = []
-                        for i in selected_new_idx:
-                            row = display_unprinted.loc[i]
-                            pdf.add_page()
-                            pdf.draw_single_form(row)
-                            
-                            new_logs.append({
-                                'Class': row['Class'], 
-                                'Section': row['Section'], 
-                                'Roll': row['Roll'], 
-                                'Student Name': row['Name'], 
-                                'Date (form generated)': gen_date_str, 
-                                'Date (receive form)': 'Pending',
-                                'Date (returned)': 'Pending',
-                                'Return Status': 'Pending',
-                                'WhatsApp Added': 'Not Started',
-                                'WhatsApp Group': 'None',
-                                'Mobile Updated': 'No',
-                                'Old Mobile Number': '',
-                                'Category Updated': 'No',
-                                'Data Corrected': 'No'
-                            })
-                            
-                        pdf_bytes = bytes(pdf.output())
-                        
-                        if new_logs:
-                            append_sheet_df('form_distribution_log', pd.DataFrame(new_logs))
-                            st.success(f"✅ {len(new_logs)} forms safely logged to the database!")
-                            
-                        st.download_button(
-                            label="⬇️ Download New Survey Forms (PDF)", 
-                            data=pdf_bytes, 
-                            file_name=f"BPS_NEW_Surveys_{sel_class}_{sel_sec}.pdf",
-                            mime="application/pdf",
-                            key="dl_new"
-                        )
-                else:
-                    st.error("Please select at least one student.")
+                st.warning("💧 **Hydration Reminder:** You haven't logged any water yet today!")
+        elif current_hour_dec > 20.5 or current_hour_dec < 4.5:
+            st.info("🛑 **Hydration Cut-off Active:** Limit fluid intake to prepare for uninterrupted sleep.")
 
-        st.divider()
-
-        # --- SECTION 2: RE-PRINT FORMS ---
-        st.markdown("#### 🔄 Section 2: Re-Print Existing Forms")
-        st.warning("These students ALREADY have forms generated in the database. Generating here will NOT duplicate them.")
+        st.markdown(f"<h4 style='text-align: center; color: #0288d1; margin-bottom:15px;'>💧 Quick Log Water (Today: {int(total_water_today)}ml)</h4>", unsafe_allow_html=True)
+        col_w1, col_w2, col_w3 = st.columns(3)
         
-        if printed_df.empty:
-            st.success("No forms have been generated for this class/section yet.")
-        else:
-            select_all_rep = st.checkbox(f"Select All {len(printed_df)} Students", key="sa_rep")
-            if select_all_rep:
-                selected_rep_idx = printed_df.index.tolist()
-            else:
-                selected_rep_idx = st.multiselect(
-                    "Choose specific students to re-print:", 
-                    printed_df.index, 
-                    format_func=lambda i: f"Roll {printed_df.loc[i].get('Roll', 'N/A')} - {printed_df.loc[i]['Name']}",
-                    key="ms_rep"
-                )
-                
-            if st.button("🖨️ Re-Print PDFs (No DB Update)", key="btn_rep"):
-                if selected_rep_idx:
-                    with st.spinner("Building PDFs..."):
-                        pdf = BPS_Survey()
-                        for i in selected_rep_idx:
-                            row = printed_df.loc[i]
-                            pdf.add_page()
-                            pdf.draw_single_form(row)
-                            
-                        pdf_bytes = bytes(pdf.output())
-                        st.success(f"✅ Successfully prepared {len(selected_rep_idx)} forms for re-print!")
-                        
-                        st.download_button(
-                            label="⬇️ Download Re-Print Survey Forms (PDF)", 
-                            data=pdf_bytes, 
-                            file_name=f"BPS_REPRINT_Surveys_{sel_class}_{sel_sec}.pdf",
-                            mime="application/pdf",
-                            key="dl_rep"
-                        )
-                else:
-                    st.error("Please select at least one student to re-print.")
-
-# ==========================================
-# TAB 2: MDM AUTO-DISTRIBUTE
-# ==========================================
-with tab2:
-    st.subheader("Step 2: Sync with MDM & Auto-Distribute")
-    
-    if students_df.empty:
-        st.warning("No student data found.")
-    else:
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col1:
-            classes_t2 = sorted(students_df['Class'].dropna().unique())
-            sel_class_t2 = st.selectbox("Select Class", classes_t2, key="t2_c")
-        with col2:
-            sections_t2 = sorted(students_df[students_df['Class'] == sel_class_t2]['Section'].unique())
-            sel_sec_t2 = st.selectbox("Select Section", sections_t2, key="t2_s")
-        with col3:
-            sync_date_obj = st.date_input("Select MDM Date to Sync", now.date(), key="t2_d")
-            sync_date_str = sync_date_obj.strftime("%d-%m-%Y")
-        
-        st.info(f"Looking for **{sel_class_t2} - {sel_sec_t2}** students who ate MDM on **{sync_date_str}** and have a Pending form.")
-        
-        if mdm_df.empty:
-            st.error("No MDM data found in the database. Please ensure teachers have submitted MDM.")
-        else:
-            target_mdm = mdm_df[
-                (mdm_df['Date'].astype(str) == sync_date_str) & 
-                (mdm_df['Class'].astype(str) == str(sel_class_t2)) & 
-                (mdm_df['Section'].astype(str) == str(sel_sec_t2))
-            ]
-            
-            if target_mdm.empty:
-                st.warning(f"No MDM entries found for {sel_class_t2} - {sel_sec_t2} on the selected date ({sync_date_str}).")
-            else:
-                target_mdm_uids = target_mdm['UID'].tolist()
-                
-                all_class_forms = form_df[
-                    (form_df['Class'].astype(str) == str(sel_class_t2)) & 
-                    (form_df['Section'].astype(str) == str(sel_sec_t2))
-                ]
-                all_generated_uids = all_class_forms['UID'].tolist() if not all_class_forms.empty else []
-                pending_forms = all_class_forms[all_class_forms['Date (receive form)'] == 'Pending']
-                
-                ready_to_distribute = pending_forms[pending_forms['UID'].isin(target_mdm_uids)].copy()
-                mdm_no_form_uids = [u for u in target_mdm_uids if u not in all_generated_uids]
-                missing_forms = target_mdm[target_mdm['UID'].isin(mdm_no_form_uids)]
-                absent_forms = pending_forms[~pending_forms['UID'].isin(target_mdm_uids)]
-                
-                st.divider()
-                
-                st.markdown(f"<div class='alert-box alert-success'><h4>✅ Ready to Distribute ({len(ready_to_distribute)})</h4><p>These students have forms printed AND are present for MDM today. Uncheck anyone who didn't actually receive the form.</p></div>", unsafe_allow_html=True)
-                if not ready_to_distribute.empty:
-                    ready_to_distribute['Distributed'] = True
-                    
-                    edited_ready_df = st.data_editor(
-                        ready_to_distribute[['Distributed', 'Class', 'Section', 'Roll', 'Student Name', 'Date (form generated)']],
-                        hide_index=True,
-                        use_container_width=True,
-                        disabled=['Class', 'Section', 'Roll', 'Student Name', 'Date (form generated)']
-                    )
-                    
-                    if st.button(f"📦 Confirm Distribution & Update Database for {sel_class_t2} - {sel_sec_t2}", type="primary", key="btn_dist"):
-                        actually_distributed = edited_ready_df[edited_ready_df['Distributed'] == True]
-                        
-                        if not actually_distributed.empty:
-                            confirmed_uids = ready_to_distribute.loc[actually_distributed.index, 'UID'].tolist()
-                            
-                            updated_form_df = form_df.copy()
-                            mask = (updated_form_df['UID'].isin(confirmed_uids)) & (updated_form_df['Date (receive form)'] == 'Pending')
-                            updated_form_df.loc[mask, 'Date (receive form)'] = sync_date_str
-                            
-                            updated_form_df = updated_form_df.drop(columns=['UID'], errors='ignore')
-                            overwrite_sheet_df('form_distribution_log', updated_form_df)
-                            
-                            st.success(f"Database updated! {len(confirmed_uids)} Forms safely marked as received on {sync_date_str}.")
-                            st.rerun()
-                        else:
-                            st.warning("No students were selected for distribution.")
-
-                st.markdown(f"<div class='alert-box alert-warning'><h4>⚠️ Present but NO FORM ({len(missing_forms)})</h4><p>These students ate MDM today, but no form has been generated for them yet.</p></div>", unsafe_allow_html=True)
-                if not missing_forms.empty:
-                    st.dataframe(missing_forms[['Class', 'Section', 'Roll', 'Name']], hide_index=True, use_container_width=True)
-
-                st.markdown(f"<div class='alert-box alert-info'><h4>📭 Form Pending but ABSENT ({len(absent_forms)})</h4><p>Forms are printed, but these students did not eat MDM today. Do not distribute.</p></div>", unsafe_allow_html=True)
-                if not absent_forms.empty:
-                    st.dataframe(absent_forms[['Class', 'Section', 'Roll', 'Student Name']], hide_index=True, use_container_width=True)
-
-# ==========================================
-# TAB 3: LOG RETURNED FORMS & WHATSAPP
-# ==========================================
-with tab3:
-    st.subheader("Step 3: Log Returns & Assign WhatsApp Groups")
-    
-    col1, col2, col3 = st.columns([1, 1, 1])
-    with col1:
-        classes_t3 = sorted(students_df['Class'].dropna().unique())
-        sel_class_t3 = st.selectbox("Select Class", classes_t3, key="t3_c")
-    with col2:
-        sections_t3 = sorted(students_df[students_df['Class'] == sel_class_t3]['Section'].unique())
-        sel_sec_t3 = st.selectbox("Select Section", sections_t3, key="t3_s")
-    with col3:
-        ret_date_obj = st.date_input("Return Date", now.date(), key="t3_d")
-        ret_date_str = ret_date_obj.strftime("%d-%m-%Y")
-        
-    if not form_df.empty:
-        received_df = form_df[
-            (form_df['Date (receive form)'] != 'Pending') & 
-            (form_df['Class'].astype(str) == str(sel_class_t3)) & 
-            (form_df['Section'].astype(str) == str(sel_sec_t3))
-        ]
-        
-        pending_returns_df = received_df[received_df['Return Status'] == 'Pending'].copy()
-        incomplete_returns_df = received_df[received_df['Return Status'] == 'Incomplete'].copy()
-        completed_returns_df = received_df[received_df['Return Status'] == 'Complete'].copy()
-
-        st.divider()
-
-        # --- SECTION 3.1: NEW RETURNS ---
-        st.markdown("#### 📥 1. Log New Returns (First Time)")
-        if pending_returns_df.empty:
-            st.info("No pending returns outstanding for this section.")
-        else:
-            pending_returns_df['Mark Complete'] = False
-            pending_returns_df['Mark Incomplete'] = False
-            
-            edited_new_returns = st.data_editor(
-                pending_returns_df[['Mark Complete', 'Mark Incomplete', 'Roll', 'Student Name', 'Date (receive form)']],
-                hide_index=True,
-                use_container_width=True,
-                disabled=['Roll', 'Student Name', 'Date (receive form)']
-            )
-            
-            if st.button("💾 Save New Returns", type="primary", key="btn_new_ret"):
-                updated_form_df = form_df.copy()
-                changes_made = 0
-                
-                for idx in edited_new_returns.index:
-                    is_complete = edited_new_returns.loc[idx, 'Mark Complete']
-                    is_incomplete = edited_new_returns.loc[idx, 'Mark Incomplete']
-                    
-                    if is_complete or is_incomplete:
-                        uid = pending_returns_df.loc[idx, 'UID']
-                        mask = updated_form_df['UID'] == uid
-                        
-                        if is_complete: updated_form_df.loc[mask, 'Return Status'] = 'Complete'
-                        elif is_incomplete: updated_form_df.loc[mask, 'Return Status'] = 'Incomplete'
-                            
-                        updated_form_df.loc[mask, 'Date (returned)'] = ret_date_str
-                        changes_made += 1
-                        
-                if changes_made > 0:
-                    updated_form_df = updated_form_df.drop(columns=['UID'], errors='ignore')
-                    overwrite_sheet_df('form_distribution_log', updated_form_df)
-                    st.success(f"✅ Successfully updated {changes_made} new returns!")
-                    st.rerun()
-                else: st.warning("No boxes ticked.")
-
-        st.divider()
-
-        # --- SECTION 3.2: FIX INCOMPLETE FORMS ---
-        st.markdown("#### ✍️ 2. Fix Incomplete Forms")
-        if incomplete_returns_df.empty:
-            st.success("There are no incomplete forms waiting to be fixed for this section!")
-        else:
-            st.warning("These students returned forms previously, but data was missing. Tick the box to mark them fully complete.")
-            incomplete_returns_df['Fix & Mark Complete'] = False
-            
-            edited_fix_returns = st.data_editor(
-                incomplete_returns_df[['Fix & Mark Complete', 'Roll', 'Student Name', 'Date (returned)']],
-                hide_index=True,
-                use_container_width=True,
-                disabled=['Roll', 'Student Name', 'Date (returned)']
-            )
-            
-            if st.button("💾 Save Fixed Forms", type="primary", key="btn_fix_ret"):
-                updated_form_df = form_df.copy()
-                changes_made = 0
-                for idx in edited_fix_returns.index:
-                    if edited_fix_returns.loc[idx, 'Fix & Mark Complete']:
-                        uid = incomplete_returns_df.loc[idx, 'UID']
-                        mask = updated_form_df['UID'] == uid
-                        updated_form_df.loc[mask, 'Return Status'] = 'Complete'
-                        updated_form_df.loc[mask, 'Date (returned)'] = ret_date_str 
-                        changes_made += 1
-                        
-                if changes_made > 0:
-                    updated_form_df = updated_form_df.drop(columns=['UID'], errors='ignore')
-                    overwrite_sheet_df('form_distribution_log', updated_form_df)
-                    st.success(f"✅ Successfully completed {changes_made} forms!")
-                    st.rerun()
-                else: st.warning("No boxes ticked to fix.")
-
-        st.divider()
-
-        # --- PREPARE DATA FOR SECTIONS 3.3 AND 3.4 ---
-        if completed_returns_df.empty:
-            st.markdown("#### 💬 3. Pending WhatsApp Assignment")
-            st.success("No completed forms available for WhatsApp Assignment yet.")
-        else:
-            grad_year_map = {
-                'CLASS V': '26', 'CLASS IV': '27', 
-                'CLASS III': '28', 'CLASS II': '29', 
-                'CLASS I': '30', 'CLASS PP': '31', 'CLASS LPP': '32'
-            }
-
-            all_wa_df = pd.merge(completed_returns_df, students_df[['UID', 'Father', 'Mobile', 'Social Category']], on='UID', how='left')
-            all_wa_df['Grad Year'] = all_wa_df['Class'].map(grad_year_map).fillna('XX')
-            all_wa_df['Father'] = all_wa_df['Father'].fillna('Guardian')
-            all_wa_df['Contact Name (Copy)'] = "BPS " + all_wa_df['Grad Year'] + " " + all_wa_df['Student Name'] + " (" + all_wa_df['Father'] + ")"
-            all_wa_df['Social Category'] = all_wa_df['Social Category'].fillna("UNSPECIFIED")
-            all_wa_df['Data Corrected Check'] = all_wa_df['Data Corrected'].apply(lambda x: True if str(x).strip().lower() == 'yes' else False)
-            
-            # --- ROMAN TO NUMBER MAPPING FOR WHATSAPP GROUPS ---
-            class_to_number_map = {
-                'CLASS LPP': 'CLASS LPP',
-                'CLASS PP': 'CLASS PP',
-                'CLASS I': 'CLASS 1',
-                'CLASS II': 'CLASS 2',
-                'CLASS III': 'CLASS 3',
-                'CLASS IV': 'CLASS 4',
-                'CLASS V': 'CLASS 5'
-            }
-            mapped_class = all_wa_df['Class'].map(class_to_number_map).fillna(all_wa_df['Class'])
-            all_wa_df['Suggested Group'] = "BPS " + mapped_class.astype(str) + " " + all_wa_df['Section'].astype(str)
-            
-            # Map legacy 'No' and empty fields to 'Not Started'
-            all_wa_df['WhatsApp Status'] = all_wa_df['WhatsApp Added'].replace({'No': 'Not Started', '': 'Not Started'})
-            
-            # ---> FORCE OVERRIDE FIX: Always use the new Arabic numeral generated name!
-            all_wa_df['Group Name'] = all_wa_df['Suggested Group']
-            
-            all_wa_df['Mobile'] = all_wa_df['Mobile'].fillna("").astype(str).str.replace('.0', '', regex=False)
-
-            # Split into Pending and Saved lists based on new granular statuses
-            pending_wa_df = all_wa_df[~all_wa_df['WhatsApp Status'].isin(RESOLVED_STATUSES)].copy()
-            saved_wa_df = all_wa_df[all_wa_df['WhatsApp Status'].isin(RESOLVED_STATUSES)].copy()
-
-            # --- SECTION 3.3: PENDING WHATSAPP SYNC ---
-            st.markdown("#### 💬 3. Pending WhatsApp Assignment (Verify Data)")
-            if pending_wa_df.empty:
-                st.success("All completed returns have been processed and moved out of the pending queue!")
-            else:
-                st.info("💡 **Instructions:** Update any corrected fields (Mobile, Social Category). Tick '✏️ Data Corrected' if you fixed anything else manually. Once you select a RESOLVED status and click Save, they will move to Section 4.")
-                
-                # Granular Status Dropdown Options
-                status_options = ["Not Started", "Contact Saved", "Invitation Sent", "Added via Link", "Added Directly", "No Smartphone"]
-                category_options = ["GENERAL", "SC", "ST", "OBC", "OBC-A", "OBC-B", "MINORITY", "UNSPECIFIED"]
-                
-                edited_wa = st.data_editor(
-                    pending_wa_df[['WhatsApp Status', 'Contact Name (Copy)', 'Mobile', 'Social Category', 'Data Corrected Check', 'Group Name']],
-                    column_config={
-                        "WhatsApp Status": st.column_config.SelectboxColumn(
-                            "WhatsApp Status",
-                            help="Select the current sync status",
-                            options=status_options,
-                            required=True,
-                        ),
-                        "Social Category": st.column_config.SelectboxColumn(
-                            "🏷️ Social Category",
-                            help="Update the student's Social Category here",
-                            options=category_options,
-                            required=True,
-                        ),
-                        "Data Corrected Check": st.column_config.CheckboxColumn(
-                            "✏️ Data Corrected?",
-                            help="Check this if you made other manual corrections (like fixing DOB or Name spelling) so it tracks in the Master Log."
-                        )
-                    },
-                    hide_index=True,
-                    use_container_width=True,
-                    disabled=['Contact Name (Copy)', 'Group Name'] 
-                )
-
-                # --- EXPORT BUTTONS FOR PENDING CONTACTS (Uses the live edited table!) ---
-                st.markdown("##### 📲 Download Pending Contacts (No Duplicates)")
-                col_vcf, col_csv = st.columns(2)
-                
-                vcard_data = ""
-                for _, row in edited_wa.iterrows():
-                    c_name = row['Contact Name (Copy)']
-                    c_phone = str(row['Mobile']).strip()
-                    if c_phone and c_phone != "N/A" and c_phone != "nan":
-                        vcard_data += f"BEGIN:VCARD\nVERSION:3.0\nFN:{c_name}\nTEL:{c_phone}\nEND:VCARD\n"
-                
-                with col_vcf:
-                    if vcard_data:
-                        st.download_button(
-                            label="📥 Download Pending Mobile Contacts (.vcf)",
-                            data=vcard_data.encode('utf-8'),
-                            file_name=f"BPS_NEW_Contacts_{sel_class_t3}_{sel_sec_t3}.vcf",
-                            mime="text/vcard",
-                            key="vcf_pending"
-                        )
-                
-                with col_csv:
-                    valid_contacts_df = edited_wa[edited_wa['Mobile'].str.strip() != ""]
-                    valid_contacts_df = valid_contacts_df[valid_contacts_df['Mobile'].str.strip() != "nan"]
-                    valid_contacts_df = valid_contacts_df[valid_contacts_df['Mobile'].str.strip() != "N/A"]
-                    
-                    if not valid_contacts_df.empty:
-                        google_csv_df = pd.DataFrame({
-                            'Name': valid_contacts_df['Contact Name (Copy)'],
-                            'Group Membership': valid_contacts_df['Group Name'],
-                            'Phone 1 - Type': 'Mobile',
-                            'Phone 1 - Value': valid_contacts_df['Mobile']
-                        })
-                        
-                        st.download_button(
-                            label="📥 Download Pending Google Contacts (.csv)",
-                            data=google_csv_df.to_csv(index=False).encode('utf-8'),
-                            file_name=f"Google_BPS_NEW_Contacts_{sel_class_t3}_{sel_sec_t3}.csv",
-                            mime="text/csv",
-                            key="csv_pending"
-                        )
-
-                # --- SAVE BUTTON ---
-                if st.button("💾 Save Verified Data & Updates", type="primary", key="btn_wa_sync"):
-                    updated_form_df = form_df.copy()
-                    updated_students_df = students_df.copy()
-                    changes_made = 0
-                    student_db_changes = 0
-                    
-                    for idx in edited_wa.index:
-                        new_status = edited_wa.loc[idx, 'WhatsApp Status']
-                        group_name = edited_wa.loc[idx, 'Group Name']
-                        new_mobile = edited_wa.loc[idx, 'Mobile']
-                        new_category = edited_wa.loc[idx, 'Social Category']
-                        is_corrected = edited_wa.loc[idx, 'Data Corrected Check']
-                        
-                        uid = pending_wa_df.loc[idx, 'UID']
-                        
-                        old_status = pending_wa_df.loc[idx, 'WhatsApp Status']
-                        old_group = pending_wa_df.loc[idx, 'WhatsApp Group']
-                        old_mobile = str(pending_wa_df.loc[idx, 'Mobile']).replace('.0', '')
-                        old_category = pending_wa_df.loc[idx, 'Social Category']
-                        old_corrected = pending_wa_df.loc[idx, 'Data Corrected Check']
-                        
-                        # Set Group to None if No Smartphone
-                        if new_status == 'No Smartphone':
-                            group_name = 'None'
-
-                        if old_status != new_status or old_group != group_name:
-                            mask = updated_form_df['UID'] == uid
-                            updated_form_df.loc[mask, 'WhatsApp Added'] = new_status
-                            updated_form_df.loc[mask, 'WhatsApp Group'] = group_name if new_status != 'Not Started' else 'None'
-                            changes_made += 1
-                            
-                        # Mobile update & backup
-                        if str(old_mobile) != str(new_mobile):
-                            s_mask = updated_students_df['UID'] == uid
-                            updated_students_df.loc[s_mask, 'Mobile'] = new_mobile
-                            
-                            f_mask = updated_form_df['UID'] == uid
-                            updated_form_df.loc[f_mask, 'Mobile Updated'] = 'Yes'
-                            updated_form_df.loc[f_mask, 'Old Mobile Number'] = old_mobile
-                            student_db_changes += 1
-                            
-                        # Category update
-                        if str(old_category) != str(new_category):
-                            s_mask = updated_students_df['UID'] == uid
-                            updated_students_df.loc[s_mask, 'Social Category'] = new_category
-                            
-                            f_mask = updated_form_df['UID'] == uid
-                            updated_form_df.loc[f_mask, 'Category Updated'] = 'Yes'
-                            student_db_changes += 1
-                            
-                        # Data Corrected check track
-                        if is_corrected != old_corrected:
-                            f_mask = updated_form_df['UID'] == uid
-                            updated_form_df.loc[f_mask, 'Data Corrected'] = 'Yes' if is_corrected else 'No'
-                            changes_made += 1
-                            
-                    if changes_made > 0 or student_db_changes > 0:
-                        updated_form_df = updated_form_df.drop(columns=['UID'], errors='ignore')
-                        overwrite_sheet_df('form_distribution_log', updated_form_df)
-                        
-                    if student_db_changes > 0:
-                        updated_students_df = updated_students_df.drop(columns=['UID'], errors='ignore')
-                        overwrite_sheet_df('students_master', updated_students_df) 
-                        
-                    if changes_made > 0 or student_db_changes > 0:
-                        st.success(f"✅ Successfully updated your master database and logged all changes!")
-                        st.rerun()
-                    else:
-                        st.warning("No changes detected.")
-
-            st.divider()
-
-            # --- SECTION 3.4: PROCESSED & RESOLVED ---
-            st.markdown("#### ✅ 4. Processed & Resolved (In Group or No Smartphone)")
-            if saved_wa_df.empty:
-                st.info("No students have been fully processed for this section yet.")
-            else:
-                display_saved = saved_wa_df[['Roll', 'Student Name', 'Contact Name (Copy)', 'Mobile', 'Social Category', 'Data Corrected Check', 'WhatsApp Status', 'Group Name']].rename(columns={'Data Corrected Check': 'Data Corrected'})
-                st.dataframe(
-                    display_saved,
-                    hide_index=True,
-                    use_container_width=True
-                )
-                
-                with st.expander("📥 Need a Backup? Download ALL Saved Contacts for this class"):
-                    col_vcf_saved, col_csv_saved = st.columns(2)
-                    
-                    vcard_data_saved = ""
-                    for _, row in saved_wa_df.iterrows():
-                        # Only export actual groups, skip No Smartphone
-                        if row['WhatsApp Status'] != 'No Smartphone':
-                            c_name = row['Contact Name (Copy)']
-                            c_phone = str(row['Mobile']).strip()
-                            if c_phone and c_phone != "N/A" and c_phone != "nan":
-                                vcard_data_saved += f"BEGIN:VCARD\nVERSION:3.0\nFN:{c_name}\nTEL:{c_phone}\nEND:VCARD\n"
-                    
-                    with col_vcf_saved:
-                        if vcard_data_saved:
-                            st.download_button(
-                                label="📥 Download FULL Mobile Contacts (.vcf)",
-                                data=vcard_data_saved.encode('utf-8'),
-                                file_name=f"BPS_ALL_Contacts_{sel_class_t3}_{sel_sec_t3}.vcf",
-                                mime="text/vcard",
-                                key="vcf_saved"
-                            )
-                    
-                    with col_csv_saved:
-                        valid_saved_df = saved_wa_df[saved_wa_df['Mobile'].str.strip() != ""]
-                        valid_saved_df = valid_saved_df[valid_saved_df['Mobile'].str.strip() != "nan"]
-                        valid_saved_df = valid_saved_df[valid_saved_df['Mobile'].str.strip() != "N/A"]
-                        valid_saved_df = valid_saved_df[valid_saved_df['WhatsApp Status'] != 'No Smartphone']
-                        
-                        if not valid_saved_df.empty:
-                            google_csv_saved = pd.DataFrame({
-                                'Name': valid_saved_df['Contact Name (Copy)'],
-                                'Group Membership': valid_saved_df['Group Name'],
-                                'Phone 1 - Type': 'Mobile',
-                                'Phone 1 - Value': valid_saved_df['Mobile']
-                            })
-                            
-                            st.download_button(
-                                label="📥 Download FULL Google Contacts (.csv)",
-                                data=google_csv_saved.to_csv(index=False).encode('utf-8'),
-                                file_name=f"Google_BPS_ALL_Contacts_{sel_class_t3}_{sel_sec_t3}.csv",
-                                mime="text/csv",
-                                key="csv_saved"
-                            )
-
-# ==========================================
-# TAB 4: WHATSAPP REPORT (SMART STATUS)
-# ==========================================
-with tab4:
-    st.subheader("💬 WhatsApp Group Status Report")
-    
-    if students_df.empty:
-        st.warning("No student data found.")
-    else:
-        col1, col2 = st.columns(2)
-        with col1:
-            wa_classes = sorted(students_df['Class'].dropna().unique())
-            wa_sel_class = st.selectbox("Select Class", wa_classes, key="wa_c")
-        with col2:
-            wa_sections = sorted(students_df[students_df['Class'] == wa_sel_class]['Section'].unique())
-            wa_sel_sec = st.selectbox("Select Section", wa_sections, key="wa_s")
-
-        class_students = students_df[(students_df['Class'] == wa_sel_class) & (students_df['Section'] == wa_sel_sec)].copy()
-        
-        if not form_df.empty:
-            class_forms = form_df[(form_df['Class'] == wa_sel_class) & (form_df['Section'] == wa_sel_sec)].copy()
-        else:
-            class_forms = pd.DataFrame(columns=expected_columns)
-        
-        wa_merged = pd.merge(class_students, class_forms, on='UID', how='left', suffixes=('_stu', '_form'))
-        
-        wa_merged['WhatsApp Added'] = wa_merged['WhatsApp Added'].fillna('Not Started')
-        wa_merged['Date (receive form)'] = wa_merged['Date (receive form)'].fillna('Not Generated')
-        wa_merged['Return Status'] = wa_merged['Return Status'].fillna('N/A')
-        wa_merged['Mobile Updated'] = wa_merged['Mobile Updated'].fillna('No')
-        wa_merged['Old Mobile Number'] = wa_merged['Old Mobile Number'].fillna('')
-        
-        st.divider()
-        
-        # --- Part 1: In WhatsApp Group ---
-        st.markdown("#### ✅ Part 1: Members in WhatsApp Group")
-        part1_df = wa_merged[wa_merged['WhatsApp Added'].isin(IN_GROUP_STATUSES)].copy()
-        if part1_df.empty:
-            st.info("No students from this section have been added to the WhatsApp group yet.")
-        else:
-            part1_df['Number Status'] = part1_df['Mobile Updated'].apply(lambda x: '🔄 Changed' if x == 'Yes' else '✅ Unchanged')
-            part1_df['Method Added'] = part1_df['WhatsApp Added'].replace({'Yes': 'Added Directly'})
-            part1_df['Old Mobile'] = part1_df.apply(lambda r: r['Old Mobile Number'] if r['Mobile Updated'] == 'Yes' else '-', axis=1)
-            part1_df['Current Mobile'] = part1_df['Mobile']
-            
-            display_p1 = part1_df[['Roll_stu', 'Name', 'Method Added', 'Old Mobile', 'Current Mobile', 'Number Status']].rename(columns={'Roll_stu': 'Roll'})
-            
-            def highlight_changed_number(row):
-                if row['Number Status'] == '🔄 Changed':
-                    return [''] * 4 + ['background-color: #fff3cd; color: #856404; font-weight: bold;'] + ['']
-                return [''] * 6
-
-            st.dataframe(
-                display_p1.style.apply(highlight_changed_number, axis=1), 
-                hide_index=True, 
-                use_container_width=True
-            )
-            
-        st.divider()
-        
-        # --- Part 2: Took form, NOT in group (Pending & In Progress) ---
-        st.markdown("#### ⚠️ Part 2: Form Distributed but NOT in Group")
-        part2_df = wa_merged[(~wa_merged['WhatsApp Added'].isin(RESOLVED_STATUSES)) & (~wa_merged['Date (receive form)'].isin(['Pending', 'Not Generated']))].copy()
-        
-        if part2_df.empty:
-            st.success("All students who received a form are either added to the group, marked 'No Smartphone', or haven't received one yet.")
-        else:
-            def determine_reason(row):
-                if row['Return Status'] == 'Incomplete':
-                    return "Form Incomplete"
-                elif row['Return Status'] == 'Pending':
-                    return "Pending Return"
-                elif row['WhatsApp Added'] in ['Contact Saved', 'Invitation Sent']:
-                    return f"⏳ In Progress: {row['WhatsApp Added']}"
-                else:
-                    return "Form Complete but not started"
-
-            part2_df['Reason'] = part2_df.apply(determine_reason, axis=1)
-            
-            display_p2 = part2_df[['Roll_stu', 'Name', 'Date (receive form)', 'Reason']].rename(columns={'Roll_stu': 'Roll', 'Date (receive form)': 'Distributed On'})
-            
-            def highlight_ready_wa(row):
-                if "In Progress" in row['Reason'] or row['Reason'] == "Form Complete but not started":
-                    return ['background-color: #d4edda; color: #155724; font-weight: bold;'] * len(row)
-                return [''] * len(row)
-
-            st.dataframe(
-                display_p2.style.apply(highlight_ready_wa, axis=1), 
-                hide_index=True, 
-                use_container_width=True
-            )
-
-        st.divider()
-        
-        # --- Part 3: Form Printed (On Desk) ---
-        st.markdown("#### 📭 Part 3: Form Printed (On Desk) - Not in Group")
-        part3_df = wa_merged[wa_merged['Date (receive form)'] == 'Pending'].copy()
-        
-        if part3_df.empty:
-            st.success("No forms are currently sitting on the desk waiting to be distributed!")
-        else:
-            st.dataframe(
-                part3_df[['Roll_stu', 'Name', 'Father']].rename(columns={'Roll_stu': 'Roll'}), 
-                hide_index=True, 
-                use_container_width=True
-            )
-
-        st.divider()
-
-        # --- Part 4: Form Not Generated ---
-        st.markdown("#### ❌ Part 4: Form Not Generated - Not in Group")
-        part4_df = wa_merged[wa_merged['Date (receive form)'] == 'Not Generated'].copy()
-        
-        if part4_df.empty:
-            st.success("All students in this section have had their forms generated!")
-        else:
-            st.info("Check if these students were present on a specific date to see why forms aren't generated.")
-            col_d, _ = st.columns([1, 2])
-            with col_d:
-                p4_date_obj = st.date_input("Check presence on MDM Date:", now.date(), key="p4_date")
-                p4_date_str = p4_date_obj.strftime("%d-%m-%Y")
-                
-            present_uids = []
-            if not mdm_df.empty:
-                present_uids = mdm_df[mdm_df['Date'].astype(str) == p4_date_str]['UID'].tolist()
-                
-            part4_df['Reason'] = part4_df['UID'].apply(
-                lambda uid: "Came to school but not generated" if uid in present_uids else "Not came to school"
-            )
-            
-            display_p4 = part4_df[['Roll_stu', 'Name', 'Father', 'Reason']].rename(columns={'Roll_stu': 'Roll'})
-            
-            def highlight_urgent(row):
-                if row['Reason'] == "Came to school but not generated":
-                    return ['background-color: #f8d7da; color: #721c24; font-weight: bold;'] * len(row)
-                return [''] * len(row)
-
-            st.dataframe(
-                display_p4.style.apply(highlight_urgent, axis=1), 
-                hide_index=True, 
-                use_container_width=True
-            )
-
-        st.divider()
-
-        # --- Part 5: No Smartphone ---
-        st.markdown("#### 📵 Part 5: No Smartphone (Cannot Join)")
-        part5_df = wa_merged[wa_merged['WhatsApp Added'].isin(NO_WA_STATUSES)].copy()
-        
-        if part5_df.empty:
-            st.success("No families in this section have reported lacking a smartphone.")
-        else:
-            st.warning("These students require physical paper notices instead of WhatsApp messages.")
-            st.dataframe(
-                part5_df[['Roll_stu', 'Name', 'Father', 'Mobile']].rename(columns={'Roll_stu': 'Roll', 'Mobile': 'Contact Number'}), 
-                hide_index=True, 
-                use_container_width=True
-            )
-
-        st.divider()
-
-        # --- Part 6: Multiple Children (Siblings) ---
-        st.markdown("#### 👨‍👩‍👧‍👦 Part 6: Parents with Multiple Children (Siblings)")
-        
-        all_stu = students_df.copy()
-        all_stu['Clean_Mobile'] = all_stu['Mobile'].fillna("").astype(str).str.replace('.0', '', regex=False).str.strip()
-        valid_stu = all_stu[all_stu['Clean_Mobile'] != ""]
-        dup_mobiles = valid_stu[valid_stu.duplicated(subset=['Clean_Mobile'], keep=False)]['Clean_Mobile'].unique()
-        
-        part6_df = wa_merged.copy()
-        part6_df['Clean_Mobile'] = part6_df['Mobile'].fillna("").astype(str).str.replace('.0', '', regex=False).str.strip()
-        
-        mult_children_df = part6_df[part6_df['Clean_Mobile'].isin(dup_mobiles)].copy()
-        
-        if mult_children_df.empty:
-            st.success("No students in this section share a phone number with another student in the school.")
-        else:
-            def get_siblings(row):
-                mob = row['Clean_Mobile']
-                sibs = valid_stu[(valid_stu['Clean_Mobile'] == mob) & (valid_stu['UID'] != row['UID'])]
-                return " + ".join(sibs['Name'] + " (" + sibs['Class'] + " " + sibs['Section'] + ")")
-                
-            mult_children_df['Other Children (Siblings)'] = mult_children_df.apply(get_siblings, axis=1)
-            mult_children_df = mult_children_df[mult_children_df['Other Children (Siblings)'] != ""]
-            
-            if mult_children_df.empty:
-                st.success("No students in this section share a phone number with another student in the school.")
-            else:
-                st.info("💡 **Tip:** These students share a mobile number with other students in the school. Adding the parent to WhatsApp covers all these children!")
-                display_p6 = mult_children_df[['Roll_stu', 'Name', 'Father', 'Clean_Mobile', 'Other Children (Siblings)']].rename(columns={'Roll_stu': 'Roll', 'Clean_Mobile': 'Mobile'})
-                st.dataframe(
-                    display_p6, 
-                    hide_index=True, 
-                    use_container_width=True
-                )
-
-# ==========================================
-# TAB 5: MASTER LOG (EDITABLE)
-# ==========================================
-with tab5:
-    st.subheader("Database View & Corrections")
-    if not form_df.empty:
-        st.info("💡 **Made a mistake?** Edit any cell directly in the table below (like changing a status back to 'Pending') and click Save.")
-        
-        display_df = form_df.drop(columns=['UID'], errors='ignore')
-        
-        edited_master_df = st.data_editor(
-            display_df, 
-            num_rows="dynamic",
-            use_container_width=True,
-            key="master_editor"
-        )
-        
-        col_save, col_csv, col_clear = st.columns([2, 1, 1])
-        
-        with col_save:
-            if st.button("💾 Save Database Corrections", type="primary"):
-                edited_master_df['UID'] = edited_master_df['Class'].astype(str) + "_" + edited_master_df['Section'].astype(str) + "_" + edited_master_df['Roll'].astype(str)
-                overwrite_sheet_df('form_distribution_log', edited_master_df)
-                st.success("✅ Corrections saved to the cloud database successfully!")
+        with col_w1:
+            if st.button("🥃 250 ml", use_container_width=True):
+                wsheet = get_sheet("water_log")
+                wsheet.append_row([today_str, now.strftime('%H:%M'), 250])
+                st.cache_data.clear()
+                st.rerun()
+        with col_w2:
+            if st.button("🚰 500 ml", use_container_width=True):
+                wsheet = get_sheet("water_log")
+                wsheet.append_row([today_str, now.strftime('%H:%M'), 500])
+                st.cache_data.clear()
+                st.rerun()
+        with col_w3:
+            if st.button("🥛 1000 ml", use_container_width=True):
+                wsheet = get_sheet("water_log")
+                wsheet.append_row([today_str, now.strftime('%H:%M'), 1000])
+                st.cache_data.clear()
                 st.rerun()
 
-        with col_csv:
-            st.download_button("📥 Download Master Log CSV", display_df.to_csv(index=False).encode('utf-8'), "BPS_Master_Log.csv", "text/csv")
+        # --- SMART SCHEDULE INJECTION & COUNTDOWN ---
+        sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
+        chk_list = [c.strip() for c in current_check_list.split(',') if c.strip()]
+        all_logged_items = log_df['check_list'].tolist() + log_df['Sub_Activities'].tolist()
+        
+        upcoming_ui_elements_raw = []
+
+        if not future_df.empty:
+            for _, r in future_df.iterrows():
+                try:
+                    due_dt_str = f"{r['Due_Date']} {r['Due_Time']}"
+                    due_dt = ist_timezone.localize(datetime.strptime(due_dt_str, "%Y-%m-%d %H:%M"))
+                    time_diff = due_dt - now
+                    hours_until_due = time_diff.total_seconds() / 3600
+                    
+                    formatted_task = f"{r['Task_Name']} [Due: {r['Due_Date'][5:]} {r['Due_Time']}]"
+                    
+                    status_val = str(r['Status']).strip().upper()
+                    is_done_in_sheet = status_val in ['COMPLETED', 'CANCELED']
+                    is_done_in_log = any(formatted_task.upper() == str(x).strip().upper() for x in all_logged_items)
+                    is_done = is_done_in_sheet or is_done_in_log
+                    
+                    if is_done: continue
+                        
+                    if hours_until_due <= 24:
+                        sec_diff = time_diff.total_seconds()
+                        is_overdue = sec_diff < 0
+                        abs_sec = abs(int(sec_diff))
+                        
+                        h, rem = divmod(abs_sec, 3600)
+                        m = rem // 60
+                        time_str = f"{h}h {m}m" if h > 0 else f"{m}m"
+                        
+                        if is_overdue:
+                            time_text = f"overdue by {time_str}"
+                            text_color = "#ff4b4b" if abs_sec >= 1800 else "#0068c9"
+                        else:
+                            time_text = f"due in {time_str}"
+                            text_color = "#0068c9"
+                            
+                        html_string = f"&gt; <b style='color: {text_color};'>{r['Task_Name']} ({r['Activity']})</b> {time_text}"
+                        upcoming_ui_elements_raw.append((due_dt, r, html_string))
+                        
+                    if hours_until_due <= 0 and str(r['Activity']).strip().upper() == current_activity:
+                        if r['Type'] == 'Sub-Activity': sub_list.append(formatted_task)
+                        elif r['Type'] == 'Checklist': chk_list.append(formatted_task)
+                except: continue
+
+        if upcoming_ui_elements_raw:
+            upcoming_ui_elements_raw.sort(key=lambda x: x[0])
             
-        with col_clear:
-            with st.expander("⚠ Emergency Reset"):
-                if st.button("Clear Distribution Database"):
-                    overwrite_sheet_df('form_distribution_log', pd.DataFrame(columns=expected_columns))
-                    st.success("Database Cleared!")
+            st.markdown("<br><h4 style='text-align: center; color: #e65100; margin-top:0; margin-bottom:15px;'>⏳ Upcoming Special Tasks</h4>", unsafe_allow_html=True)
+            
+            for dt, r, html_text in upcoming_ui_elements_raw:
+                st.markdown(f"<p style='text-align: center; margin-bottom:5px; font-size:16px; color: #d84315;'>{html_text}</p>", unsafe_allow_html=True)
+                
+                with st.expander(f"✏️ Manage Task", expanded=False):
+                    tab_resched, tab_cancel = st.tabs(["📅 Reschedule", "❌ Cancel"])
+                    
+                    with tab_resched:
+                        col_d, col_t = st.columns(2)
+                        try:
+                            curr_date = datetime.strptime(str(r['Due_Date']).strip(), '%Y-%m-%d').date()
+                        except:
+                            curr_date = now.date()
+                            
+                        curr_time_str = str(r['Due_Time']).strip()
+                        time_opts = [f"{str(h).zfill(2)}:{str(m).zfill(2)}" for h in range(24) for m in range(60)]
+                        if curr_time_str not in time_opts: curr_time_str = "12:00"
+                        
+                        with col_d:
+                            new_date = st.date_input("New Date", value=curr_date, key=f"nd_{r['row_index']}")
+                        with col_t:
+                            new_time = st.selectbox("New Time", options=time_opts, index=time_opts.index(curr_time_str), key=f"nt_{r['row_index']}")
+                            
+                        if st.button("Save New Time", key=f"rs_btn_{r['row_index']}", type="primary", use_container_width=True):
+                            fsheet = get_sheet("future_tasks")
+                            fsheet.update_cell(int(r['row_index']), 1, new_date.strftime('%Y-%m-%d'))
+                            fsheet.update_cell(int(r['row_index']), 2, new_time)
+                            
+                            sheet_log = get_sheet("activity_log")
+                            sheet_log.append_row([
+                                today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
+                                "0:00", str(r['Activity']).upper(), "", f"{r['Task_Name']} [RESCHEDULED]", f"Moved to {new_date.strftime('%Y-%m-%d')} {new_time}"
+                            ])
+                            st.cache_data.clear()
+                            st.success("Task Rescheduled!")
+                            time.sleep(1)
+                            st.rerun()
+
+                    with tab_cancel:
+                        col_r, col_b = st.columns([3, 1])
+                        with col_r:
+                            cancel_reason = st.text_input("Reason", placeholder="Why are you cancelling?", key=f"rsn_{r['row_index']}", label_visibility="collapsed")
+                        with col_b:
+                            if st.button("Confirm", key=f"cnf_{r['row_index']}", type="primary"):
+                                if not cancel_reason.strip():
+                                    st.error("Enter reason")
+                                else:
+                                    fsheet = get_sheet("future_tasks")
+                                    fsheet.update_cell(int(r['row_index']), 7, "Canceled")
+                                    fsheet.update_cell(int(r['row_index']), 8, cancel_reason)
+                                    
+                                    sheet_log = get_sheet("activity_log")
+                                    sheet_log.append_row([
+                                        today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
+                                        "0:00", str(r['Activity']).upper(), "", f"{r['Task_Name']} [CANCELED]", f"Cancel Reason: {cancel_reason}"
+                                    ])
+                                    st.cache_data.clear()
+                                    st.rerun()
+                st.markdown("<hr style='margin-top:5px; margin-bottom:15px;'>", unsafe_allow_html=True)
+
+        if chk_list:
+            st.markdown("---")
+            st.markdown("<h4 style='text-align: center; color: #333;'>✅ Tasks & Reminders</h4>", unsafe_allow_html=True)
+            
+            today_logs = log_df[log_df['Date'] == today_str]
+            today_logged_tasks = today_logs[today_logs['Activity'] == current_activity]['check_list'].tolist()
+            
+            for task in chk_list:
+                if "[Due:" in task:
+                    raw_task = task.split(" [Due:")[0].strip()
+                    matches = future_df[(future_df['Task_Name'].str.strip() == raw_task) & (future_df['Type'] == 'Checklist')]
+                    if not matches.empty and str(matches.iloc[0]['Status']).strip().upper() in ['COMPLETED', 'CANCELED']:
+                        is_done = True
+                    else:
+                        is_done = any(task.upper() == str(x).strip().upper() for x in all_logged_items)
+                else:
+                    is_done = any(task.upper() == str(x).strip().upper() for x in today_logged_tasks)
+                    
+                checked = st.checkbox(task, value=is_done, disabled=is_done, key=f"chk_{task}_{current_activity}")
+                
+                if checked and not is_done:
+                    sheet_log = get_sheet("activity_log")
+                    sheet_log.append_row([
+                        today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
+                        "0:00", current_activity, "", task, "Checked off"
+                    ])
+                    
+                    if "[Due:" in task:
+                        raw_task = task.split(" [Due:")[0].strip()
+                        matches = future_df[(future_df['Task_Name'].str.strip() == raw_task) & (future_df['Type'] == 'Checklist')]
+                        if not matches.empty:
+                            r_idx = int(matches.iloc[0]['row_index'])
+                            fsheet = get_sheet("future_tasks")
+                            fsheet.update_cell(r_idx, 7, "Completed") 
+                            
+                    st.cache_data.clear()
                     st.rerun()
-    else:
-        st.info("No forms have been logged yet.")
 
-# ==========================================
-# TAB 6: SUMMARY & PROGRESS 
-# ==========================================
-with tab6:
-    st.subheader("📈 Class-Wise Distribution & Return Summary")
-    
-    if students_df.empty:
-        st.warning("No student data found to generate a summary.")
-    else:
-        summary_df = students_df.groupby(['Class', 'Section']).size().reset_index(name='Total Students')
+        running_tasks = log_df[log_df['End_Time'] == 'RUNNING']
+        is_running = not running_tasks.empty
         
-        if not form_df.empty:
-            gen_counts = form_df.groupby(['Class', 'Section']).size().reset_index(name='Forms Generated')
-            dist_df = form_df[form_df['Date (receive form)'] != 'Pending']
-            dist_counts = dist_df.groupby(['Class', 'Section']).size().reset_index(name='Distributed')
-            comp_df = form_df[form_df['Return Status'] == 'Complete']
-            comp_counts = comp_df.groupby(['Class', 'Section']).size().reset_index(name='Returned (Complete)')
-            incomp_df = form_df[form_df['Return Status'] == 'Incomplete']
-            incomp_counts = incomp_df.groupby(['Class', 'Section']).size().reset_index(name='Returned (Incomplete)')
+        if sub_list or is_running:
+            st.markdown("---")
+            st.markdown("<h4 style='text-align: center; color: #333;'>Tap to Track Activity</h4>", unsafe_allow_html=True)
             
-            # WhatsApp Metrics
-            wa_df = form_df[form_df['WhatsApp Added'].isin(IN_GROUP_STATUSES)]
-            wa_counts = wa_df.groupby(['Class', 'Section']).size().reset_index(name='WhatsApp Synced')
+            if is_running:
+                active_row = running_tasks.iloc[-1]
+                active_main = str(active_row['Activity'])
+                active_sub = str(active_row['Sub_Activities'])
+                display_name = active_sub if active_sub else active_main
+                
+                try:
+                    start_dt_str = f"{active_row['Date']} {active_row['Start_Time']}"
+                    dt_naive = datetime.strptime(start_dt_str, "%Y-%m-%d %H:%M")
+                    active_start_time = ist_timezone.localize(dt_naive)
+                    elapsed_time = now - active_start_time
+                    mins_elapsed = int(elapsed_time.total_seconds() // 60)
+                except:
+                    mins_elapsed = 0 
+                
+                st.info(f"⏳ **In Progress:** {display_name} (Running for {mins_elapsed} min)")
+                
+                col_stop, col_cancel = st.columns(2)
+                with col_stop:
+                    if st.button("🛑 SAVE", use_container_width=True, type="primary"):
+                        end_time_log = now.time()
+                        try:
+                            hours, remainder = divmod(int(elapsed_time.total_seconds()), 3600)
+                            minutes = remainder // 60
+                            duration_str = f"{hours}:{minutes:02d}"
+                        except: duration_str = "0:00"
 
-            # Link Sent Metrics
-            link_df = form_df[form_df['WhatsApp Added'] == 'Invitation Sent']
-            link_counts = link_df.groupby(['Class', 'Section']).size().reset_index(name='Link Sent')
+                        log_sheet = get_sheet("activity_log")
+                        cells = log_sheet.findall("RUNNING")
+                        for cell in cells:
+                            if cell.col == 3: 
+                                target_row = cell.row
+                                log_sheet.update_cell(target_row, 3, end_time_log.strftime('%H:%M')) 
+                                log_sheet.update_cell(target_row, 4, duration_str)                   
+                                log_sheet.update_cell(target_row, 8, "Auto-logged via Timer") 
+                                break
+                                
+                        if "[Due:" in active_sub:
+                            raw_task = active_sub.split(" [Due:")[0].strip()
+                            matches = future_df[(future_df['Task_Name'].str.strip() == raw_task) & (future_df['Type'] == 'Sub-Activity')]
+                            if not matches.empty:
+                                r_idx = int(matches.iloc[0]['row_index'])
+                                fsheet = get_sheet("future_tasks")
+                                fsheet.update_cell(r_idx, 7, "Completed") 
+                        
+                        st.cache_data.clear()
+                        st.success("Activity saved!")
+                        time.sleep(1)
+                        st.rerun()
 
-            # Contact Saved Metrics
-            saved_df = form_df[form_df['WhatsApp Added'] == 'Contact Saved']
-            saved_counts = saved_df.groupby(['Class', 'Section']).size().reset_index(name='Contact Saved')
+                with col_cancel:
+                    if st.button("❌ CANCEL", use_container_width=True):
+                        log_sheet = get_sheet("activity_log")
+                        cells = log_sheet.findall("RUNNING")
+                        for cell in cells:
+                            if cell.col == 3: 
+                                log_sheet.delete_rows(cell.row)
+                                break
+                        st.cache_data.clear()
+                        st.warning("Activity cancelled.")
+                        time.sleep(1)
+                        st.rerun()
 
-            # No Smartphone Metrics
-            nowa_df = form_df[form_df['WhatsApp Added'].isin(NO_WA_STATUSES)]
-            nowa_counts = nowa_df.groupby(['Class', 'Section']).size().reset_index(name='No Smartphone')
+            elif sub_list:
+                cols = st.columns(3)
+                for idx, task in enumerate(sub_list):
+                    with cols[idx % 3]:
+                        last_done = get_last_done_str(task, log_df, now)
+                        last_txt = f"\n(Last: {last_done})" if "[Due:" not in task else ""
+                        
+                        if st.button(f"▶️ {task}{last_txt}", key=f"btn_{task}", use_container_width=True):
+                            log_sheet = get_sheet("activity_log")
+                            log_sheet.append_row([
+                                today_str, now.strftime('%H:%M'), "RUNNING", "RUNNING",    
+                                current_activity, task, "", "In Progress"
+                            ])
+                            st.cache_data.clear()
+                            st.rerun()
 
-            # Mobile Numbers Changed
-            mob_up_df = form_df[form_df['Mobile Updated'] == 'Yes']
-            mob_up_counts = mob_up_df.groupby(['Class', 'Section']).size().reset_index(name='Mobile Numbers Changed')
-
-            # Category Updated
-            cat_up_df = form_df[form_df['Category Updated'] == 'Yes']
-            cat_up_counts = cat_up_df.groupby(['Class', 'Section']).size().reset_index(name='Category Updated')
-
-            # Data Corrected
-            corr_df = form_df[form_df['Data Corrected'] == 'Yes']
-            corr_counts = corr_df.groupby(['Class', 'Section']).size().reset_index(name='Data Corrected')
-
-            # Merging everything
-            summary_df = pd.merge(summary_df, gen_counts, on=['Class', 'Section'], how='left').fillna(0)
-            summary_df = pd.merge(summary_df, dist_counts, on=['Class', 'Section'], how='left').fillna(0)
-            summary_df = pd.merge(summary_df, comp_counts, on=['Class', 'Section'], how='left').fillna(0)
-            summary_df = pd.merge(summary_df, incomp_counts, on=['Class', 'Section'], how='left').fillna(0)
-            summary_df = pd.merge(summary_df, wa_counts, on=['Class', 'Section'], how='left').fillna(0)
-            summary_df = pd.merge(summary_df, link_counts, on=['Class', 'Section'], how='left').fillna(0)
-            summary_df = pd.merge(summary_df, saved_counts, on=['Class', 'Section'], how='left').fillna(0)
-            summary_df = pd.merge(summary_df, nowa_counts, on=['Class', 'Section'], how='left').fillna(0)
-            summary_df = pd.merge(summary_df, mob_up_counts, on=['Class', 'Section'], how='left').fillna(0)
-            summary_df = pd.merge(summary_df, cat_up_counts, on=['Class', 'Section'], how='left').fillna(0)
-            summary_df = pd.merge(summary_df, corr_counts, on=['Class', 'Section'], how='left').fillna(0)
-            
-            summary_df['Outstanding (With Guardian)'] = summary_df['Distributed'] - (summary_df['Returned (Complete)'] + summary_df['Returned (Incomplete)'])
-            summary_df['Pending Desk Stack'] = summary_df['Forms Generated'] - summary_df['Distributed']
-            summary_df['Not Generated Yet'] = summary_df['Total Students'] - summary_df['Forms Generated']
-            
-            cols_to_int = [
-                'Total Students', 'Forms Generated', 'Distributed', 'Returned (Complete)', 
-                'Returned (Incomplete)', 'WhatsApp Synced', 'Link Sent', 'Contact Saved', 
-                'No Smartphone', 'Mobile Numbers Changed', 'Category Updated', 'Data Corrected',
-                'Outstanding (With Guardian)', 'Pending Desk Stack', 'Not Generated Yet'
-            ]
-            for col in cols_to_int:
-                summary_df[col] = summary_df[col].astype(int)
+        st.markdown("---")
+        
+        st.markdown("<h4 style='text-align: center; color: #555; margin-bottom: 20px;'>📊 Today's Actual Productivity</h4>", unsafe_allow_html=True)
+        today_logs = log_df[(log_df['Date'] == today_str) & (log_df['Duration'] != 'RUNNING')].copy()
+        
+        if not today_logs.empty:
+            today_logs['Total_Minutes'] = today_logs['Duration'].apply(parse_duration_to_minutes)
+            summary = today_logs.groupby('Activity')['Total_Minutes'].sum().sort_values(ascending=False)
+            cols = st.columns(min(len(summary), 3))
+            col_idx = 0
+            for act, total_mins in summary.items():
+                hours, remainder_mins = divmod(total_mins, 60)
+                display_time = f"{int(hours)}:{int(remainder_mins):02d}"
+                with cols[col_idx % 3]:
+                    st.metric(label=act, value=display_time)
+                col_idx += 1
         else:
-            for col in ['Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'WhatsApp Synced', 'Link Sent', 'Contact Saved', 'No Smartphone', 'Mobile Numbers Changed', 'Category Updated', 'Data Corrected', 'Outstanding (With Guardian)', 'Pending Desk Stack']:
-                summary_df[col] = 0
-            summary_df['Not Generated Yet'] = summary_df['Total Students']
-
-        custom_dict = {
-            'CLASS LPP': -1, 'LPP': -1,
-            'CLASS PP': 0, 'PP': 0,
-            'CLASS I': 1, 'I': 1,
-            'CLASS II': 2, 'II': 2,
-            'CLASS III': 3, 'III': 3,
-            'CLASS IV': 4, 'IV': 4,
-            'CLASS V': 5, 'V': 5
-        }
-        
-        summary_df['Sort_Order'] = summary_df['Class'].map(custom_dict).fillna(99)
-        summary_df = summary_df.sort_values(by=['Sort_Order', 'Section']).drop(columns=['Sort_Order'])
-
-        total_row = pd.DataFrame([{
-            'Class': 'TOTAL',
-            'Section': '',
-            'Total Students': summary_df['Total Students'].sum(),
-            'Forms Generated': summary_df['Forms Generated'].sum(),
-            'Distributed': summary_df['Distributed'].sum(),
-            'Returned (Complete)': summary_df['Returned (Complete)'].sum(),
-            'Returned (Incomplete)': summary_df['Returned (Incomplete)'].sum(),
-            'WhatsApp Synced': summary_df['WhatsApp Synced'].sum(),
-            'Link Sent': summary_df['Link Sent'].sum(),
-            'Contact Saved': summary_df['Contact Saved'].sum(),
-            'No Smartphone': summary_df['No Smartphone'].sum(),
-            'Mobile Numbers Changed': summary_df['Mobile Numbers Changed'].sum(),
-            'Category Updated': summary_df['Category Updated'].sum(),
-            'Data Corrected': summary_df['Data Corrected'].sum(),
-            'Outstanding (With Guardian)': summary_df['Outstanding (With Guardian)'].sum(),
-            'Pending Desk Stack': summary_df['Pending Desk Stack'].sum(),
-            'Not Generated Yet': summary_df['Not Generated Yet'].sum()
-        }])
-        
-        summary_df = pd.concat([summary_df, total_row], ignore_index=True)
-
-        st.markdown("##### Overall School Progress")
-        
-        # ROW 1: 7 metrics (The Paper & Returns Journey)
-        m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
-        m1.metric("Total Students", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Total Students'].values[0])
-        m2.metric("Forms Generated", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Forms Generated'].values[0])
-        m3.metric("Forms Distributed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Distributed'].values[0])
-        m4.metric("📭 Desk Stack", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Pending Desk Stack'].values[0])
-        m5.metric("✅ Complete Returns", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Returned (Complete)'].values[0])
-        m6.metric("⚠️ Incomp. Returns", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Returned (Incomplete)'].values[0])
-        m7.metric("🏠 Outstanding", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Outstanding (With Guardian)'].values[0])
-
+            st.markdown("<p style='text-align: center; color: #888;'>No completed activities logged yet.</p>", unsafe_allow_html=True)
+            
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # ROW 2: 7 metrics (The Digital & Data Updates Journey)
-        r1, r2, r3, r4, r5, r6, r7 = st.columns(7)
-        r1.metric("💾 Contact Saved", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Contact Saved'].values[0])
-        r2.metric("🔗 Invite Sent", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Link Sent'].values[0])
-        r3.metric("📱 WA Synced", summary_df.loc[summary_df['Class'] == 'TOTAL', 'WhatsApp Synced'].values[0])
-        r4.metric("📵 No Smartphone", summary_df.loc[summary_df['Class'] == 'TOTAL', 'No Smartphone'].values[0])
-        r5.metric("🔄 Nos Changed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Mobile Numbers Changed'].values[0])
-        r6.metric("🏷️ Cat. Updated", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Category Updated'].values[0])
-        r7.metric("✏️ Data Corrected", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Data Corrected'].values[0])
+        with st.expander("🗓️ Schedule Future Task"):
+            with st.form("schedule_future_form", clear_on_submit=True):
+                st.markdown("### Attach Task to a Future Activity")
+                
+                unique_activities = [act for act in df['Activity'].unique() if act.strip()]
+                f_act = st.selectbox("Parent Category", unique_activities, key="f_act")
+                f_type = st.radio("Task Type", ["Checklist", "Sub-Activity"], horizontal=True, key="f_type")
+                f_entity = st.selectbox("Entity", ["Personal", "School", "People"], key="f_entity")
+                f_name = st.text_input("Task Details", placeholder="e.g., Pay Electricity Bill", key="f_name")
+                
+                time_options = [f"{str(h).zfill(2)}:{str(m).zfill(2)}" for h in range(24) for m in range(60)]
+                now_str = clean_now.strftime('%H:%M')
+                
+                col1, col2 = st.columns(2)
+                with col1: f_date = st.date_input("Due Date", value=now.date(), key="f_date")
+                with col2: 
+                    f_time_str = st.selectbox("Due Time (Type to search)", options=time_options, index=time_options.index(now_str), key="f_time")
+                    f_time = datetime.strptime(f_time_str, '%H:%M').time()
+                    
+                if st.form_submit_button("Schedule Task", use_container_width=True):
+                    if f_name:
+                        client = init_connection()
+                        ss = client.open("MY ROUTINE 2026")
+                        try:
+                            fsheet = ss.worksheet("future_tasks")
+                        except gspread.exceptions.WorksheetNotFound:
+                            fsheet = ss.add_worksheet(title="future_tasks", rows="100", cols="8")
+                            fsheet.append_row(["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason"])
+                        
+                        fsheet.append_row([
+                            f_date.strftime('%Y-%m-%d'),
+                            f_time.strftime('%H:%M'),
+                            f_act.upper().strip(),
+                            f_type,
+                            f_name.strip(),
+                            f_entity,
+                            "Pending",
+                            ""
+                        ])
+                        st.cache_data.clear()
+                        st.success("Task Scheduled! It will appear 24 hours before due time.")
+                        time.sleep(1.5)
+                        st.rerun()
+                    else:
+                        st.error("Please enter task details.")
+
+        with st.expander("📝 Manual Log Activity"):
+            with st.form("log_activity_form", clear_on_submit=True):
+                st.markdown("### Manually Record Time")
+                log_date = st.date_input("Date", value=now.date(), key="log_date")
+                col_act1, col_act2 = st.columns(2)
+                with col_act1: log_activity = st.text_input("Main Category", value=current_activity if current_activity != "FREE TIME" else "", key="log_act")
+                with col_act2: log_sub_activity = st.text_input("Sub-Activity", placeholder="e.g., YOGA", key="log_sub")
+                    
+                col1, col2 = st.columns(2)
+                with col1: log_start = st.time_input("Started At", value=clean_now, key="log_start")
+                with col2: log_end = st.time_input("Ended At", value=clean_now, key="log_end")
+                
+                log_chk = st.text_input("Checklist Item (Optional)", key="log_chk")    
+                log_notes = st.text_area("Notes", key="log_notes")
+                
+                if st.form_submit_button("Save to Activity Log", use_container_width=True):
+                    if log_activity:
+                        start_dt = datetime.combine(log_date, log_start)
+                        end_dt = datetime.combine(log_date, log_end)
+                        if end_dt < start_dt: end_dt = end_dt.replace(day=end_dt.day + 1)
+                        duration_td = end_dt - start_dt
+                        h, m = divmod(duration_td.seconds, 3600)
+                        
+                        sheet_log = get_sheet("activity_log")
+                        sheet_log.append_row([
+                            log_date.strftime('%Y-%m-%d'), log_start.strftime('%H:%M'), log_end.strftime('%H:%M'), 
+                            f"{h}:{m//60:02d}", log_activity.upper().strip(), log_sub_activity.upper().strip(),
+                            log_chk.strip(), log_notes
+                        ])
+                        st.cache_data.clear()
+                        st.success("Activity logged!")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("Please enter a Main Category.")
+
+    # ==========================================
+    # TAB 2: SCHEDULE EDITOR
+    # ==========================================
+    with tab2:
+        days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
         
-        st.divider()
-        st.markdown("##### Detailed Breakdown by Section")
-        st.dataframe(summary_df, hide_index=True, use_container_width=True)
+        target_day = st.selectbox("Select Day to Edit", days_of_week, index=days_of_week.index(current_day))
         
-        st.download_button("📥 Download Summary Report", summary_df.to_csv(index=False).encode('utf-8'), f"BPS_Return_Summary_Report_{curr_date_str}.csv", "text/csv")
+        st.markdown(f"<h3 style='text-align: center; color: #555; margin-bottom: 5px;'>{target_day}'s Full Routine</h3>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #888; font-size: 14px; margin-bottom: 20px;'>Tap any cell to edit. Scroll right to see Sub-Activities and Checklists.</p>", unsafe_allow_html=True)
+        
+        target_full_df = df[df['Day'].str.strip() == target_day].copy()
+        
+        if not target_full_df.empty:
+            edit_df = target_full_df[['Start_Time', 'End_Time', 'Activity', 'Sub_Activities', 'check_list']].copy()
+            
+            def convert_to_time(t_str):
+                try:
+                    if t_str.strip() == '0:00': return datetime.strptime('00:00', '%H:%M').time()
+                    return datetime.strptime(t_str.strip(), '%H:%M').time()
+                except: return datetime.strptime('00:00', '%H:%M').time()
+
+            edit_df['Start_Time'] = edit_df['Start_Time'].apply(convert_to_time)
+            edit_df['End_Time'] = edit_df['End_Time'].apply(convert_to_time)
+            
+            edited_schedule = st.data_editor(
+                edit_df,
+                column_config={
+                    "Start_Time": st.column_config.TimeColumn("Start", format="HH:mm", step=60, required=True),
+                    "End_Time": st.column_config.TimeColumn("End", format="HH:mm", step=60, required=True),
+                    "Activity": st.column_config.TextColumn("Activity", required=True),
+                    "Sub_Activities": st.column_config.TextColumn("Sub List (comma sep.)"),
+                    "check_list": st.column_config.TextColumn("Checklist (comma sep.)")
+                },
+                hide_index=True,
+                use_container_width=True,
+                num_rows="dynamic",
+                key="schedule_editor"
+            )
+            
+            if st.button(f"💾 Save Changes for {target_day}", use_container_width=True):
+                with st.spinner("Syncing to Google Sheets..."):
+                    new_rows = []
+                    for _, row in edited_schedule.iterrows():
+                        if pd.isna(row['Activity']) or str(row['Activity']).strip() == "": continue
+                        start_t, end_t = row['Start_Time'], row['End_Time']
+                        if pd.isna(start_t) or pd.isna(end_t): continue
+                            
+                        start_str = start_t.strftime('%H:%M')
+                        end_str = end_t.strftime('%H:%M')
+                        s_dt = datetime.combine(now.date(), start_t)
+                        e_dt = datetime.combine(now.date(), end_t)
+                        
+                        if end_str in ['00:00', '0:00'] or e_dt < s_dt:
+                            e_dt = e_dt.replace(day=e_dt.day + 1)
+                            
+                        duration_td = e_dt - s_dt
+                        h, m = divmod(duration_td.seconds, 3600)
+                        duration_str = f"{h}:{m//60:02d}"
+                        
+                        sub_act = str(row.get('Sub_Activities', '')).strip()
+                        if sub_act == 'nan': sub_act = ""
+                        chk_act = str(row.get('check_list', '')).strip()
+                        if chk_act == 'nan': chk_act = ""
+                        
+                        new_rows.append([target_day, start_str, end_str, duration_str, str(row['Activity']).strip().upper(), sub_act, chk_act])
+
+                    full_df = df.copy()
+                    other_days_df = full_df[full_df['Day'].str.strip() != target_day]
+                    new_target_df = pd.DataFrame(new_rows, columns=["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list"])
+                    final_df = pd.concat([other_days_df, new_target_df], ignore_index=True)
+                    
+                    routine_sheet = get_sheet("routine_master")
+                    routine_sheet.clear() 
+                    data_to_upload = [final_df.columns.values.tolist()] + final_df.values.tolist()
+                    routine_sheet.update(values=data_to_upload, range_name="A1")
+                    
+                    st.cache_data.clear()
+                    st.success("Schedule successfully updated!")
+                    time.sleep(1)
+                    st.rerun()
+
+            st.markdown("---")
+            st.markdown("<h4 style='text-align: center; color: #555; margin-bottom: 20px;'>📈 Scheduled Summary</h4>", unsafe_allow_html=True)
+            target_full_df['Total_Minutes'] = target_full_df['Duration'].apply(parse_duration_to_minutes)
+            schedule_summary = target_full_df.groupby('Activity')['Total_Minutes'].sum().sort_values(ascending=False)
+            cols_sched = st.columns(min(len(schedule_summary), 3))
+            col_idx_sched = 0
+            for act, total_mins in schedule_summary.items():
+                hours, remainder_mins = divmod(total_mins, 60)
+                display_time = f"{int(hours)}:{int(remainder_mins):02d}"
+                with cols_sched[col_idx_sched % 3]:
+                    st.metric(label=act, value=display_time)
+                col_idx_sched += 1
+        else:
+            st.info(f"No routine scheduled for {target_day}.")
+
+    # ==========================================
+    # TAB 3: HYDRATION
+    # ==========================================
+    with tab3:
+        st.markdown("<h3 style='text-align: center; color: #0288d1;'>💧 Hydration Tracker</h3>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #888;'>Daily Target: 3500 ml</p>", unsafe_allow_html=True)
+        
+        water_df['Date_dt'] = pd.to_datetime(water_df['Date'], errors='coerce')
+        today_dt = pd.to_datetime(today_str)
+        
+        # Daily Tab
+        t_day, t_week, t_month = st.tabs(["Today", "Past 7 Days", "This Month"])
+        
+        with t_day:
+            today_sum = water_df[water_df['Date'] == today_str]['Amount_ml'].sum()
+            progress = min(today_sum / 3500.0, 1.0)
+            
+            st.markdown(f"<h2 style='text-align: center; color: #0288d1;'>{int(today_sum)} ml</h2>", unsafe_allow_html=True)
+            st.progress(progress)
+            if progress >= 1.0: st.success("Daily target reached!")
+            
+            today_logs = water_df[water_df['Date'] == today_str].copy()
+            if not today_logs.empty:
+                st.dataframe(today_logs[['Time', 'Amount_ml']].sort_values('Time', ascending=False), use_container_width=True, hide_index=True)
+                
+        with t_week:
+            last_7 = water_df[water_df['Date_dt'] >= (today_dt - timedelta(days=6))].copy()
+            if not last_7.empty:
+                daily_grouped = last_7.groupby(last_7['Date_dt'].dt.strftime('%a, %b %d'))['Amount_ml'].sum()
+                st.bar_chart(daily_grouped, color="#29b6f6")
+            else:
+                st.info("No data for the past 7 days.")
+                
+        with t_month:
+            this_month = water_df[water_df['Date_dt'].dt.month == today_dt.month].copy()
+            if not this_month.empty:
+                daily_grouped_m = this_month.groupby(this_month['Date_dt'].dt.day)['Amount_ml'].sum()
+                st.line_chart(daily_grouped_m, color="#0288d1")
+            else:
+                st.info("No data for this month.")
+
+    # ==========================================
+    # TAB 4: APP HUB
+    # ==========================================
+    with tab4:
+        st.markdown("<h3 style='text-align: center; color: #555; margin-bottom: 20px;'>🔗 Quick Links</h3>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #888; margin-bottom: 30px;'>Access your other modules directly from here.</p>", unsafe_allow_html=True)
+        
+        st.link_button("🏫 Admission Hub", "https://school-app-y4hesp5fcntdc44kktgrrb.streamlit.app", use_container_width=True)
+        st.link_button("📱 Main Dashboard (app.py)", "https://bhagyabantapur-ps.streamlit.app", use_container_width=True)
+        st.link_button("📋 Form Manager", "https://school-app-rdpqdb8jbmnmdysvglhazh.streamlit.app", use_container_width=True)
+        st.link_button("🪪 ID Card Generator", "https://school-app-h6xgx5appv5i4f3kfv82mw6.streamlit.app", use_container_width=True)
+
+except Exception as e:
+    st.error(f"System Error: {e}")

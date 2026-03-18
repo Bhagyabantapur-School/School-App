@@ -195,10 +195,11 @@ class BPS_Survey(FPDF):
 # --- 5. LOAD DATA FROM CLOUD ---
 students_df = fetch_sheet_data('students_master')
 if not students_df.empty:
-    if 'Section' not in students_df.columns: 
-        students_df['Section'] = 'A'
-    if 'Social Category' not in students_df.columns:
-        students_df['Social Category'] = 'UNSPECIFIED'
+    if 'Section' not in students_df.columns: students_df['Section'] = 'A'
+    if 'Social Category' not in students_df.columns: students_df['Social Category'] = 'UNSPECIFIED'
+    if 'Father' not in students_df.columns: students_df['Father'] = ''
+    if 'Mother' not in students_df.columns: students_df['Mother'] = ''
+    if 'DOB' not in students_df.columns: students_df['DOB'] = ''
     students_df['UID'] = students_df['Class'].astype(str) + "_" + students_df['Section'].astype(str) + "_" + students_df['Roll'].astype(str)
 else:
     st.error("⚠️ 'students_master' tab missing or empty in BPS_Database. Please copy your students.csv data into Google Sheets.")
@@ -218,7 +219,9 @@ expected_columns = [
     'Date (returned)', 'Return Status',
     'WhatsApp Added', 'WhatsApp Group',
     'Mobile Updated', 'Old Mobile Number',
-    'Category Updated', 'Data Corrected', 'Last Update Date'
+    'Category Updated', 'Old Category', 
+    'Data Corrected', 'Old Student Name', 'Old Father Name', 'Old Mother Name', 'Old DOB',
+    'Last Update Date'
 ]
 
 # Universal completed statuses list
@@ -233,7 +236,7 @@ else:
         if col not in form_df.columns:
             if col == 'Return Status' or col == 'Date (returned)': form_df[col] = "Pending"
             elif col in ['WhatsApp Added', 'Mobile Updated']: form_df[col] = "Not Started"
-            elif col in ['WhatsApp Group', 'Old Mobile Number', 'Last Update Date']: form_df[col] = ""
+            elif col in ['WhatsApp Group', 'Old Mobile Number', 'Old Category', 'Old Student Name', 'Old Father Name', 'Old Mother Name', 'Old DOB', 'Last Update Date']: form_df[col] = ""
             elif col in ['Category Updated', 'Data Corrected']: form_df[col] = "No"
             else: form_df[col] = ""
     form_df['UID'] = form_df['Class'].astype(str) + "_" + form_df['Section'].astype(str) + "_" + form_df['Roll'].astype(str)
@@ -333,7 +336,12 @@ with tab1:
                                 'Mobile Updated': 'No',
                                 'Old Mobile Number': '',
                                 'Category Updated': 'No',
+                                'Old Category': '',
                                 'Data Corrected': 'No',
+                                'Old Student Name': '',
+                                'Old Father Name': '',
+                                'Old Mother Name': '',
+                                'Old DOB': '',
                                 'Last Update Date': ''
                             })
                             
@@ -600,10 +608,12 @@ with tab3:
                 'CLASS I': '30', 'CLASS PP': '31', 'CLASS LPP': '32'
             }
 
-            all_wa_df = pd.merge(completed_returns_df, students_df[['UID', 'Father', 'Mobile', 'Social Category']], on='UID', how='left')
+            all_wa_df = pd.merge(completed_returns_df, students_df[['UID', 'Name', 'Father', 'Mother', 'DOB', 'Mobile', 'Social Category']], on='UID', how='left')
             all_wa_df['Grad Year'] = all_wa_df['Class'].map(grad_year_map).fillna('XX')
             all_wa_df['Father'] = all_wa_df['Father'].fillna('Guardian')
-            all_wa_df['Contact Name (Copy)'] = "BPS " + all_wa_df['Grad Year'] + " " + all_wa_df['Student Name'] + " (" + all_wa_df['Father'] + ")"
+            all_wa_df['Mother'] = all_wa_df['Mother'].fillna('')
+            all_wa_df['DOB'] = all_wa_df['DOB'].fillna('')
+            all_wa_df['Student Name'] = all_wa_df['Name'] # Ensure we use latest spelling from student DB
             all_wa_df['Social Category'] = all_wa_df['Social Category'].fillna("UNSPECIFIED")
             all_wa_df['Data Corrected Check'] = all_wa_df['Data Corrected'].apply(lambda x: True if str(x).strip().lower() == 'yes' else False)
             
@@ -622,10 +632,7 @@ with tab3:
             
             # Map legacy 'No' and empty fields to 'Not Started'
             all_wa_df['WhatsApp Status'] = all_wa_df['WhatsApp Added'].replace({'No': 'Not Started', '': 'Not Started'})
-            
-            # ---> FORCE OVERRIDE FIX: Always use the new Arabic numeral generated name!
             all_wa_df['Group Name'] = all_wa_df['Suggested Group']
-            
             all_wa_df['Mobile'] = all_wa_df['Mobile'].fillna("").astype(str).str.replace('.0', '', regex=False)
 
             # Split into Pending and Saved lists based on new granular statuses
@@ -637,44 +644,36 @@ with tab3:
             if pending_wa_df.empty:
                 st.success("All completed returns have been processed and moved out of the pending queue!")
             else:
-                st.info("💡 **Instructions:** Update any corrected fields (Mobile, Social Category). Tick '✏️ Data Corrected' if you fixed anything else manually. Once you select a RESOLVED status and click Save, they will move to Section 4.")
+                st.info("💡 **Instructions:** Correct spellings or DOB directly in the table! If you edit a field, the old data will be saved in the master log's history. Once verified, select a RESOLVED WhatsApp status and click Save.")
                 
-                # Granular Status Dropdown Options
                 status_options = ["Not Started", "Contact Saved", "Invitation Sent", "Added via Link", "Added Directly", "No Smartphone"]
                 category_options = ["GENERAL", "SC", "ST", "OBC", "OBC-A", "OBC-B", "MINORITY", "UNSPECIFIED"]
                 
                 edited_wa = st.data_editor(
-                    pending_wa_df[['WhatsApp Status', 'Contact Name (Copy)', 'Mobile', 'Social Category', 'Data Corrected Check', 'Group Name']],
+                    pending_wa_df[['WhatsApp Status', 'Student Name', 'Father', 'Mother', 'DOB', 'Mobile', 'Social Category', 'Data Corrected Check', 'Group Name', 'Grad Year']],
                     column_config={
-                        "WhatsApp Status": st.column_config.SelectboxColumn(
-                            "WhatsApp Status",
-                            help="Select the current sync status",
-                            options=status_options,
-                            required=True,
-                        ),
-                        "Social Category": st.column_config.SelectboxColumn(
-                            "🏷️ Social Category",
-                            help="Update the student's Social Category here",
-                            options=category_options,
-                            required=True,
-                        ),
-                        "Data Corrected Check": st.column_config.CheckboxColumn(
-                            "✏️ Data Corrected?",
-                            help="Check this if you made other manual corrections (like fixing DOB or Name spelling) so it tracks in the Master Log."
-                        )
+                        "WhatsApp Status": st.column_config.SelectboxColumn("WhatsApp Status", options=status_options, required=True),
+                        "Student Name": st.column_config.TextColumn("Student Name (Edit to Fix)"),
+                        "Father": st.column_config.TextColumn("Father (Edit to Fix)"),
+                        "Mother": st.column_config.TextColumn("Mother (Edit to Fix)"),
+                        "DOB": st.column_config.TextColumn("DOB (Edit to Fix)"),
+                        "Social Category": st.column_config.SelectboxColumn("🏷️ Category", options=category_options, required=True),
+                        "Data Corrected Check": st.column_config.CheckboxColumn("✏️ Data Corrected?"),
+                        "Grad Year": None # Hide this from UI but keep it for export logic
                     },
                     hide_index=True,
                     use_container_width=True,
-                    disabled=['Contact Name (Copy)', 'Group Name'] 
+                    disabled=['Group Name'] 
                 )
 
                 # --- EXPORT BUTTONS FOR PENDING CONTACTS (Uses the live edited table!) ---
-                st.markdown("##### 📲 Download Pending Contacts (No Duplicates)")
+                st.markdown("##### 📲 Download Pending Contacts")
                 col_vcf, col_csv = st.columns(2)
                 
                 vcard_data = ""
                 for _, row in edited_wa.iterrows():
-                    c_name = row['Contact Name (Copy)']
+                    # Dynamically generate the name so edits are reflected immediately in the download
+                    c_name = f"BPS {row['Grad Year']} {row['Student Name']} ({row['Father']})"
                     c_phone = str(row['Mobile']).strip()
                     if c_phone and c_phone != "N/A" and c_phone != "nan":
                         vcard_data += f"BEGIN:VCARD\nVERSION:3.0\nFN:{c_name}\nTEL:{c_phone}\nEND:VCARD\n"
@@ -696,7 +695,7 @@ with tab3:
                     
                     if not valid_contacts_df.empty:
                         google_csv_df = pd.DataFrame({
-                            'Name': valid_contacts_df['Contact Name (Copy)'],
+                            'Name': valid_contacts_df.apply(lambda r: f"BPS {r['Grad Year']} {r['Student Name']} ({r['Father']})", axis=1),
                             'Group Membership': valid_contacts_df['Group Name'],
                             'Phone 1 - Type': 'Mobile',
                             'Phone 1 - Value': valid_contacts_df['Mobile']
@@ -718,25 +717,31 @@ with tab3:
                     student_db_changes = 0
                     
                     for idx in edited_wa.index:
+                        uid = pending_wa_df.loc[idx, 'UID']
+                        row_changed = False
+                        
                         new_status = edited_wa.loc[idx, 'WhatsApp Status']
                         group_name = edited_wa.loc[idx, 'Group Name']
                         new_mobile = edited_wa.loc[idx, 'Mobile']
                         new_category = edited_wa.loc[idx, 'Social Category']
                         is_corrected = edited_wa.loc[idx, 'Data Corrected Check']
-                        
-                        uid = pending_wa_df.loc[idx, 'UID']
+                        new_s_name = edited_wa.loc[idx, 'Student Name']
+                        new_f_name = edited_wa.loc[idx, 'Father']
+                        new_m_name = edited_wa.loc[idx, 'Mother']
+                        new_dob = edited_wa.loc[idx, 'DOB']
                         
                         old_status = pending_wa_df.loc[idx, 'WhatsApp Status']
                         old_group = pending_wa_df.loc[idx, 'WhatsApp Group']
                         old_mobile = str(pending_wa_df.loc[idx, 'Mobile']).replace('.0', '')
                         old_category = pending_wa_df.loc[idx, 'Social Category']
                         old_corrected = pending_wa_df.loc[idx, 'Data Corrected Check']
-                        
-                        row_changed = False
-                        
+                        old_s_name = pending_wa_df.loc[idx, 'Student Name']
+                        old_f_name = pending_wa_df.loc[idx, 'Father']
+                        old_m_name = pending_wa_df.loc[idx, 'Mother']
+                        old_dob = pending_wa_df.loc[idx, 'DOB']
+
                         # Set Group to None if No Smartphone
-                        if new_status == 'No Smartphone':
-                            group_name = 'None'
+                        if new_status == 'No Smartphone': group_name = 'None'
 
                         if old_status != new_status or old_group != group_name:
                             mask = updated_form_df['UID'] == uid
@@ -749,27 +754,72 @@ with tab3:
                         if str(old_mobile) != str(new_mobile):
                             s_mask = updated_students_df['UID'] == uid
                             updated_students_df.loc[s_mask, 'Mobile'] = new_mobile
-                            
                             f_mask = updated_form_df['UID'] == uid
                             updated_form_df.loc[f_mask, 'Mobile Updated'] = 'Yes'
                             updated_form_df.loc[f_mask, 'Old Mobile Number'] = old_mobile
                             student_db_changes += 1
                             row_changed = True
                             
-                        # Category update
+                        # Category update & backup
                         if str(old_category) != str(new_category):
                             s_mask = updated_students_df['UID'] == uid
                             updated_students_df.loc[s_mask, 'Social Category'] = new_category
-                            
                             f_mask = updated_form_df['UID'] == uid
                             updated_form_df.loc[f_mask, 'Category Updated'] = 'Yes'
+                            if updated_form_df.loc[f_mask, 'Old Category'].values[0] == "":
+                                updated_form_df.loc[f_mask, 'Old Category'] = old_category
+                            student_db_changes += 1
+                            row_changed = True
+
+                        # Spell Check: Student Name
+                        if str(old_s_name) != str(new_s_name):
+                            s_mask = updated_students_df['UID'] == uid
+                            updated_students_df.loc[s_mask, 'Name'] = new_s_name
+                            f_mask = updated_form_df['UID'] == uid
+                            updated_form_df.loc[f_mask, 'Student Name'] = new_s_name
+                            if updated_form_df.loc[f_mask, 'Old Student Name'].values[0] == "":
+                                updated_form_df.loc[f_mask, 'Old Student Name'] = old_s_name
+                            updated_form_df.loc[f_mask, 'Data Corrected'] = 'Yes'
+                            student_db_changes += 1
+                            row_changed = True
+
+                        # Spell Check: Father Name
+                        if str(old_f_name) != str(new_f_name):
+                            s_mask = updated_students_df['UID'] == uid
+                            updated_students_df.loc[s_mask, 'Father'] = new_f_name
+                            f_mask = updated_form_df['UID'] == uid
+                            if updated_form_df.loc[f_mask, 'Old Father Name'].values[0] == "":
+                                updated_form_df.loc[f_mask, 'Old Father Name'] = old_f_name
+                            updated_form_df.loc[f_mask, 'Data Corrected'] = 'Yes'
+                            student_db_changes += 1
+                            row_changed = True
+
+                        # Spell Check: Mother Name
+                        if str(old_m_name) != str(new_m_name):
+                            s_mask = updated_students_df['UID'] == uid
+                            updated_students_df.loc[s_mask, 'Mother'] = new_m_name
+                            f_mask = updated_form_df['UID'] == uid
+                            if updated_form_df.loc[f_mask, 'Old Mother Name'].values[0] == "":
+                                updated_form_df.loc[f_mask, 'Old Mother Name'] = old_m_name
+                            updated_form_df.loc[f_mask, 'Data Corrected'] = 'Yes'
+                            student_db_changes += 1
+                            row_changed = True
+
+                        # Check: DOB
+                        if str(old_dob) != str(new_dob):
+                            s_mask = updated_students_df['UID'] == uid
+                            updated_students_df.loc[s_mask, 'DOB'] = new_dob
+                            f_mask = updated_form_df['UID'] == uid
+                            if updated_form_df.loc[f_mask, 'Old DOB'].values[0] == "":
+                                updated_form_df.loc[f_mask, 'Old DOB'] = old_dob
+                            updated_form_df.loc[f_mask, 'Data Corrected'] = 'Yes'
                             student_db_changes += 1
                             row_changed = True
                             
-                        # Data Corrected check track
-                        if is_corrected != old_corrected:
+                        # Data Corrected check track (Manual Checkbox override)
+                        if is_corrected and not old_corrected:
                             f_mask = updated_form_df['UID'] == uid
-                            updated_form_df.loc[f_mask, 'Data Corrected'] = 'Yes' if is_corrected else 'No'
+                            updated_form_df.loc[f_mask, 'Data Corrected'] = 'Yes'
                             changes_made += 1
                             row_changed = True
                             
@@ -799,7 +849,7 @@ with tab3:
             if saved_wa_df.empty:
                 st.info("No students have been fully processed for this section yet.")
             else:
-                display_saved = saved_wa_df[['Roll', 'Student Name', 'Contact Name (Copy)', 'Mobile', 'Social Category', 'Data Corrected Check', 'WhatsApp Status', 'Group Name', 'Last Update Date']].rename(columns={'Data Corrected Check': 'Data Corrected'})
+                display_saved = saved_wa_df[['Roll', 'Student Name', 'Father', 'DOB', 'Mobile', 'Social Category', 'Data Corrected Check', 'WhatsApp Status', 'Group Name', 'Last Update Date']].rename(columns={'Data Corrected Check': 'Data Corrected'})
                 st.dataframe(
                     display_saved,
                     hide_index=True,
@@ -811,9 +861,8 @@ with tab3:
                     
                     vcard_data_saved = ""
                     for _, row in saved_wa_df.iterrows():
-                        # Only export actual groups, skip No Smartphone
                         if row['WhatsApp Status'] != 'No Smartphone':
-                            c_name = row['Contact Name (Copy)']
+                            c_name = f"BPS {row['Grad Year']} {row['Student Name']} ({row['Father']})"
                             c_phone = str(row['Mobile']).strip()
                             if c_phone and c_phone != "N/A" and c_phone != "nan":
                                 vcard_data_saved += f"BEGIN:VCARD\nVERSION:3.0\nFN:{c_name}\nTEL:{c_phone}\nEND:VCARD\n"
@@ -836,7 +885,7 @@ with tab3:
                         
                         if not valid_saved_df.empty:
                             google_csv_saved = pd.DataFrame({
-                                'Name': valid_saved_df['Contact Name (Copy)'],
+                                'Name': valid_saved_df.apply(lambda r: f"BPS {r['Grad Year']} {r['Student Name']} ({r['Father']})", axis=1),
                                 'Group Membership': valid_saved_df['Group Name'],
                                 'Phone 1 - Type': 'Mobile',
                                 'Phone 1 - Value': valid_saved_df['Mobile']

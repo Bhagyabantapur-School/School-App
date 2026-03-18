@@ -197,6 +197,8 @@ students_df = fetch_sheet_data('students_master')
 if not students_df.empty:
     if 'Section' not in students_df.columns: 
         students_df['Section'] = 'A'
+    if 'Social Category' not in students_df.columns:
+        students_df['Social Category'] = 'UNSPECIFIED'
     students_df['UID'] = students_df['Class'].astype(str) + "_" + students_df['Section'].astype(str) + "_" + students_df['Roll'].astype(str)
 else:
     st.error("⚠️ 'students_master' tab missing or empty in BPS_Database. Please copy your students.csv data into Google Sheets.")
@@ -215,7 +217,8 @@ expected_columns = [
     'Date (form generated)', 'Date (receive form)', 
     'Date (returned)', 'Return Status',
     'WhatsApp Added', 'WhatsApp Group',
-    'Mobile Updated', 'Old Mobile Number'
+    'Mobile Updated', 'Old Mobile Number',
+    'Category Updated', 'Data Corrected', 'Last Update Date'
 ]
 
 # Universal completed statuses list
@@ -230,7 +233,8 @@ else:
         if col not in form_df.columns:
             if col == 'Return Status' or col == 'Date (returned)': form_df[col] = "Pending"
             elif col in ['WhatsApp Added', 'Mobile Updated']: form_df[col] = "Not Started"
-            elif col in ['WhatsApp Group', 'Old Mobile Number']: form_df[col] = ""
+            elif col in ['WhatsApp Group', 'Old Mobile Number', 'Last Update Date']: form_df[col] = ""
+            elif col in ['Category Updated', 'Data Corrected']: form_df[col] = "No"
             else: form_df[col] = ""
     form_df['UID'] = form_df['Class'].astype(str) + "_" + form_df['Section'].astype(str) + "_" + form_df['Roll'].astype(str)
 
@@ -327,7 +331,10 @@ with tab1:
                                 'WhatsApp Added': 'Not Started',
                                 'WhatsApp Group': 'None',
                                 'Mobile Updated': 'No',
-                                'Old Mobile Number': ''
+                                'Old Mobile Number': '',
+                                'Category Updated': 'No',
+                                'Data Corrected': 'No',
+                                'Last Update Date': ''
                             })
                             
                         pdf_bytes = bytes(pdf.output())
@@ -593,10 +600,12 @@ with tab3:
                 'CLASS I': '30', 'CLASS PP': '31', 'CLASS LPP': '32'
             }
 
-            all_wa_df = pd.merge(completed_returns_df, students_df[['UID', 'Father', 'Mobile']], on='UID', how='left')
+            all_wa_df = pd.merge(completed_returns_df, students_df[['UID', 'Father', 'Mobile', 'Social Category']], on='UID', how='left')
             all_wa_df['Grad Year'] = all_wa_df['Class'].map(grad_year_map).fillna('XX')
             all_wa_df['Father'] = all_wa_df['Father'].fillna('Guardian')
             all_wa_df['Contact Name (Copy)'] = "BPS " + all_wa_df['Grad Year'] + " " + all_wa_df['Student Name'] + " (" + all_wa_df['Father'] + ")"
+            all_wa_df['Social Category'] = all_wa_df['Social Category'].fillna("UNSPECIFIED")
+            all_wa_df['Data Corrected Check'] = all_wa_df['Data Corrected'].apply(lambda x: True if str(x).strip().lower() == 'yes' else False)
             
             # --- ROMAN TO NUMBER MAPPING FOR WHATSAPP GROUPS ---
             class_to_number_map = {
@@ -624,23 +633,34 @@ with tab3:
             saved_wa_df = all_wa_df[all_wa_df['WhatsApp Status'].isin(RESOLVED_STATUSES)].copy()
 
             # --- SECTION 3.3: PENDING WHATSAPP SYNC ---
-            st.markdown("#### 💬 3. Pending WhatsApp Assignment")
+            st.markdown("#### 💬 3. Pending WhatsApp Assignment (Verify Data)")
             if pending_wa_df.empty:
                 st.success("All completed returns have been processed and moved out of the pending queue!")
             else:
-                st.info("💡 **Instructions:** Select the exact status from the dropdown. Once you select a RESOLVED status ('Added via Link', 'Added Directly', or 'No Smartphone') and click Save, they will move to Section 4.")
+                st.info("💡 **Instructions:** Update any corrected fields (Mobile, Social Category). Tick '✏️ Data Corrected' if you fixed anything else manually. Once you select a RESOLVED status and click Save, they will move to Section 4.")
                 
                 # Granular Status Dropdown Options
                 status_options = ["Not Started", "Contact Saved", "Invitation Sent", "Added via Link", "Added Directly", "No Smartphone"]
+                category_options = ["GENERAL", "SC", "ST", "OBC", "OBC-A", "OBC-B", "MINORITY", "UNSPECIFIED"]
                 
                 edited_wa = st.data_editor(
-                    pending_wa_df[['WhatsApp Status', 'Contact Name (Copy)', 'Mobile', 'Group Name']],
+                    pending_wa_df[['WhatsApp Status', 'Contact Name (Copy)', 'Mobile', 'Social Category', 'Data Corrected Check', 'Group Name']],
                     column_config={
                         "WhatsApp Status": st.column_config.SelectboxColumn(
                             "WhatsApp Status",
                             help="Select the current sync status",
                             options=status_options,
                             required=True,
+                        ),
+                        "Social Category": st.column_config.SelectboxColumn(
+                            "🏷️ Social Category",
+                            help="Update the student's Social Category here",
+                            options=category_options,
+                            required=True,
+                        ),
+                        "Data Corrected Check": st.column_config.CheckboxColumn(
+                            "✏️ Data Corrected?",
+                            help="Check this if you made other manual corrections (like fixing DOB or Name spelling) so it tracks in the Master Log."
                         )
                     },
                     hide_index=True,
@@ -691,21 +711,28 @@ with tab3:
                         )
 
                 # --- SAVE BUTTON ---
-                if st.button("💾 Save WhatsApp Status Updates", type="primary", key="btn_wa_sync"):
+                if st.button("💾 Save Verified Data & Updates", type="primary", key="btn_wa_sync"):
                     updated_form_df = form_df.copy()
                     updated_students_df = students_df.copy()
                     changes_made = 0
-                    mobile_changes = 0
+                    student_db_changes = 0
                     
                     for idx in edited_wa.index:
                         new_status = edited_wa.loc[idx, 'WhatsApp Status']
                         group_name = edited_wa.loc[idx, 'Group Name']
                         new_mobile = edited_wa.loc[idx, 'Mobile']
+                        new_category = edited_wa.loc[idx, 'Social Category']
+                        is_corrected = edited_wa.loc[idx, 'Data Corrected Check']
+                        
                         uid = pending_wa_df.loc[idx, 'UID']
                         
                         old_status = pending_wa_df.loc[idx, 'WhatsApp Status']
                         old_group = pending_wa_df.loc[idx, 'WhatsApp Group']
                         old_mobile = str(pending_wa_df.loc[idx, 'Mobile']).replace('.0', '')
+                        old_category = pending_wa_df.loc[idx, 'Social Category']
+                        old_corrected = pending_wa_df.loc[idx, 'Data Corrected Check']
+                        
+                        row_changed = False
                         
                         # Set Group to None if No Smartphone
                         if new_status == 'No Smartphone':
@@ -716,8 +743,9 @@ with tab3:
                             updated_form_df.loc[mask, 'WhatsApp Added'] = new_status
                             updated_form_df.loc[mask, 'WhatsApp Group'] = group_name if new_status != 'Not Started' else 'None'
                             changes_made += 1
+                            row_changed = True
                             
-                        # Write to Google Sheets for students & back up old number
+                        # Mobile update & backup
                         if str(old_mobile) != str(new_mobile):
                             s_mask = updated_students_df['UID'] == uid
                             updated_students_df.loc[s_mask, 'Mobile'] = new_mobile
@@ -725,18 +753,41 @@ with tab3:
                             f_mask = updated_form_df['UID'] == uid
                             updated_form_df.loc[f_mask, 'Mobile Updated'] = 'Yes'
                             updated_form_df.loc[f_mask, 'Old Mobile Number'] = old_mobile
-                            mobile_changes += 1
+                            student_db_changes += 1
+                            row_changed = True
                             
-                    if changes_made > 0 or mobile_changes > 0:
+                        # Category update
+                        if str(old_category) != str(new_category):
+                            s_mask = updated_students_df['UID'] == uid
+                            updated_students_df.loc[s_mask, 'Social Category'] = new_category
+                            
+                            f_mask = updated_form_df['UID'] == uid
+                            updated_form_df.loc[f_mask, 'Category Updated'] = 'Yes'
+                            student_db_changes += 1
+                            row_changed = True
+                            
+                        # Data Corrected check track
+                        if is_corrected != old_corrected:
+                            f_mask = updated_form_df['UID'] == uid
+                            updated_form_df.loc[f_mask, 'Data Corrected'] = 'Yes' if is_corrected else 'No'
+                            changes_made += 1
+                            row_changed = True
+                            
+                        # Date Stamp
+                        if row_changed:
+                            f_mask = updated_form_df['UID'] == uid
+                            updated_form_df.loc[f_mask, 'Last Update Date'] = curr_date_str
+                            
+                    if changes_made > 0 or student_db_changes > 0:
                         updated_form_df = updated_form_df.drop(columns=['UID'], errors='ignore')
                         overwrite_sheet_df('form_distribution_log', updated_form_df)
                         
-                    if mobile_changes > 0:
+                    if student_db_changes > 0:
                         updated_students_df = updated_students_df.drop(columns=['UID'], errors='ignore')
                         overwrite_sheet_df('students_master', updated_students_df) 
                         
-                    if changes_made > 0 or mobile_changes > 0:
-                        st.success(f"✅ Successfully updated {changes_made} WhatsApp statuses and {mobile_changes} mobile numbers!")
+                    if changes_made > 0 or student_db_changes > 0:
+                        st.success(f"✅ Successfully updated your master database and logged all changes!")
                         st.rerun()
                     else:
                         st.warning("No changes detected.")
@@ -748,8 +799,9 @@ with tab3:
             if saved_wa_df.empty:
                 st.info("No students have been fully processed for this section yet.")
             else:
+                display_saved = saved_wa_df[['Roll', 'Student Name', 'Contact Name (Copy)', 'Mobile', 'Social Category', 'Data Corrected Check', 'WhatsApp Status', 'Group Name', 'Last Update Date']].rename(columns={'Data Corrected Check': 'Data Corrected'})
                 st.dataframe(
-                    saved_wa_df[['Roll', 'Student Name', 'Contact Name (Copy)', 'Mobile', 'WhatsApp Status', 'Group Name']],
+                    display_saved,
                     hide_index=True,
                     use_container_width=True
                 )
@@ -962,7 +1014,6 @@ with tab4:
         # --- Part 6: Multiple Children (Siblings) ---
         st.markdown("#### 👨‍👩‍👧‍👦 Part 6: Parents with Multiple Children (Siblings)")
         
-        # Prepare master mobile list for sibling detection
         all_stu = students_df.copy()
         all_stu['Clean_Mobile'] = all_stu['Mobile'].fillna("").astype(str).str.replace('.0', '', regex=False).str.strip()
         valid_stu = all_stu[all_stu['Clean_Mobile'] != ""]
@@ -982,7 +1033,6 @@ with tab4:
                 return " + ".join(sibs['Name'] + " (" + sibs['Class'] + " " + sibs['Section'] + ")")
                 
             mult_children_df['Other Children (Siblings)'] = mult_children_df.apply(get_siblings, axis=1)
-            # Filter out any accidental empty strings
             mult_children_df = mult_children_df[mult_children_df['Other Children (Siblings)'] != ""]
             
             if mult_children_df.empty:
@@ -1074,6 +1124,15 @@ with tab6:
             mob_up_df = form_df[form_df['Mobile Updated'] == 'Yes']
             mob_up_counts = mob_up_df.groupby(['Class', 'Section']).size().reset_index(name='Mobile Numbers Changed')
 
+            # Category Updated
+            cat_up_df = form_df[form_df['Category Updated'] == 'Yes']
+            cat_up_counts = cat_up_df.groupby(['Class', 'Section']).size().reset_index(name='Category Updated')
+
+            # Data Corrected
+            corr_df = form_df[form_df['Data Corrected'] == 'Yes']
+            corr_counts = corr_df.groupby(['Class', 'Section']).size().reset_index(name='Data Corrected')
+
+            # Merging everything
             summary_df = pd.merge(summary_df, gen_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, dist_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, comp_counts, on=['Class', 'Section'], how='left').fillna(0)
@@ -1083,6 +1142,8 @@ with tab6:
             summary_df = pd.merge(summary_df, saved_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, nowa_counts, on=['Class', 'Section'], how='left').fillna(0)
             summary_df = pd.merge(summary_df, mob_up_counts, on=['Class', 'Section'], how='left').fillna(0)
+            summary_df = pd.merge(summary_df, cat_up_counts, on=['Class', 'Section'], how='left').fillna(0)
+            summary_df = pd.merge(summary_df, corr_counts, on=['Class', 'Section'], how='left').fillna(0)
             
             summary_df['Outstanding (With Guardian)'] = summary_df['Distributed'] - (summary_df['Returned (Complete)'] + summary_df['Returned (Incomplete)'])
             summary_df['Pending Desk Stack'] = summary_df['Forms Generated'] - summary_df['Distributed']
@@ -1091,13 +1152,13 @@ with tab6:
             cols_to_int = [
                 'Total Students', 'Forms Generated', 'Distributed', 'Returned (Complete)', 
                 'Returned (Incomplete)', 'WhatsApp Synced', 'Link Sent', 'Contact Saved', 
-                'No Smartphone', 'Mobile Numbers Changed', 'Outstanding (With Guardian)', 
-                'Pending Desk Stack', 'Not Generated Yet'
+                'No Smartphone', 'Mobile Numbers Changed', 'Category Updated', 'Data Corrected',
+                'Outstanding (With Guardian)', 'Pending Desk Stack', 'Not Generated Yet'
             ]
             for col in cols_to_int:
                 summary_df[col] = summary_df[col].astype(int)
         else:
-            for col in ['Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'WhatsApp Synced', 'Link Sent', 'Contact Saved', 'No Smartphone', 'Mobile Numbers Changed', 'Outstanding (With Guardian)', 'Pending Desk Stack']:
+            for col in ['Forms Generated', 'Distributed', 'Returned (Complete)', 'Returned (Incomplete)', 'WhatsApp Synced', 'Link Sent', 'Contact Saved', 'No Smartphone', 'Mobile Numbers Changed', 'Category Updated', 'Data Corrected', 'Outstanding (With Guardian)', 'Pending Desk Stack']:
                 summary_df[col] = 0
             summary_df['Not Generated Yet'] = summary_df['Total Students']
 
@@ -1127,6 +1188,8 @@ with tab6:
             'Contact Saved': summary_df['Contact Saved'].sum(),
             'No Smartphone': summary_df['No Smartphone'].sum(),
             'Mobile Numbers Changed': summary_df['Mobile Numbers Changed'].sum(),
+            'Category Updated': summary_df['Category Updated'].sum(),
+            'Data Corrected': summary_df['Data Corrected'].sum(),
             'Outstanding (With Guardian)': summary_df['Outstanding (With Guardian)'].sum(),
             'Pending Desk Stack': summary_df['Pending Desk Stack'].sum(),
             'Not Generated Yet': summary_df['Not Generated Yet'].sum()
@@ -1136,25 +1199,27 @@ with tab6:
 
         st.markdown("##### Overall School Progress")
         
-        # ROW 1: 6 metrics (The Paper & Returns Journey)
-        m1, m2, m3, m4, m5, m6 = st.columns(6)
+        # ROW 1: 7 metrics (The Paper & Returns Journey)
+        m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
         m1.metric("Total Students", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Total Students'].values[0])
         m2.metric("Forms Generated", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Forms Generated'].values[0])
         m3.metric("Forms Distributed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Distributed'].values[0])
         m4.metric("📭 Desk Stack", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Pending Desk Stack'].values[0])
         m5.metric("✅ Complete Returns", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Returned (Complete)'].values[0])
         m6.metric("⚠️ Incomp. Returns", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Returned (Incomplete)'].values[0])
+        m7.metric("🏠 Outstanding", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Outstanding (With Guardian)'].values[0])
 
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # ROW 2: 6 metrics (The Digital & WhatsApp Journey)
-        r1, r2, r3, r4, r5, r6 = st.columns(6)
-        r1.metric("🏠 Outstanding (Guardian)", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Outstanding (With Guardian)'].values[0])
-        r2.metric("💾 Contact Saved", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Contact Saved'].values[0])
-        r3.metric("🔗 Invite Sent", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Link Sent'].values[0])
-        r4.metric("📱 WA Synced", summary_df.loc[summary_df['Class'] == 'TOTAL', 'WhatsApp Synced'].values[0])
-        r5.metric("📵 No Smartphone", summary_df.loc[summary_df['Class'] == 'TOTAL', 'No Smartphone'].values[0])
-        r6.metric("🔄 Nos Changed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Mobile Numbers Changed'].values[0])
+        # ROW 2: 7 metrics (The Digital & Data Updates Journey)
+        r1, r2, r3, r4, r5, r6, r7 = st.columns(7)
+        r1.metric("💾 Contact Saved", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Contact Saved'].values[0])
+        r2.metric("🔗 Invite Sent", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Link Sent'].values[0])
+        r3.metric("📱 WA Synced", summary_df.loc[summary_df['Class'] == 'TOTAL', 'WhatsApp Synced'].values[0])
+        r4.metric("📵 No Smartphone", summary_df.loc[summary_df['Class'] == 'TOTAL', 'No Smartphone'].values[0])
+        r5.metric("🔄 Nos Changed", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Mobile Numbers Changed'].values[0])
+        r6.metric("🏷️ Cat. Updated", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Category Updated'].values[0])
+        r7.metric("✏️ Data Corrected", summary_df.loc[summary_df['Class'] == 'TOTAL', 'Data Corrected'].values[0])
         
         st.divider()
         st.markdown("##### Detailed Breakdown by Section")

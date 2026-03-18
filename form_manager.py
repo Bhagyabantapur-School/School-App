@@ -200,6 +200,7 @@ if not students_df.empty:
     if 'Father' not in students_df.columns: students_df['Father'] = ''
     if 'Mother' not in students_df.columns: students_df['Mother'] = ''
     if 'DOB' not in students_df.columns: students_df['DOB'] = ''
+    if 'Secondary Mobile' not in students_df.columns: students_df['Secondary Mobile'] = ''
     students_df['UID'] = students_df['Class'].astype(str) + "_" + students_df['Section'].astype(str) + "_" + students_df['Roll'].astype(str)
 else:
     st.error("⚠️ 'students_master' tab missing or empty in BPS_Database. Please copy your students.csv data into Google Sheets.")
@@ -610,13 +611,14 @@ with tab3:
                 'CLASS I': '30', 'CLASS PP': '31', 'CLASS LPP': '32'
             }
 
-            all_wa_df = pd.merge(completed_returns_df, students_df[['UID', 'Name', 'Father', 'Mother', 'DOB', 'Mobile', 'Social Category']], on='UID', how='left')
+            all_wa_df = pd.merge(completed_returns_df, students_df[['UID', 'Name', 'Father', 'Mother', 'DOB', 'Mobile', 'Secondary Mobile', 'Social Category']], on='UID', how='left')
             all_wa_df['Grad Year'] = all_wa_df['Class'].map(grad_year_map).fillna('XX')
             all_wa_df['Father'] = all_wa_df['Father'].fillna('Guardian')
             all_wa_df['Mother'] = all_wa_df['Mother'].fillna('')
             all_wa_df['DOB'] = all_wa_df['DOB'].fillna('')
             all_wa_df['Student Name'] = all_wa_df['Name'] # Ensure we use latest spelling from student DB
             all_wa_df['Social Category'] = all_wa_df['Social Category'].fillna("UNSPECIFIED")
+            all_wa_df['Secondary Mobile'] = all_wa_df['Secondary Mobile'].fillna("").astype(str).str.replace('.0', '', regex=False)
             
             # Setup Checkboxes
             all_wa_df['Data Corrected Check'] = all_wa_df['Data Corrected'].apply(lambda x: True if str(x).strip().lower() == 'yes' else False)
@@ -649,19 +651,20 @@ with tab3:
             if pending_wa_df.empty:
                 st.success("All completed returns have been processed and moved out of the pending queue!")
             else:
-                st.info("💡 **Instructions:** Correct spellings or DOB directly in the table! Check '🌐 BS Portal Updated' once done online. Once everything is verified, select a RESOLVED WhatsApp status and click Save.")
+                st.info("💡 **Instructions:** Add a Secondary Mobile number if provided. Correct spellings or DOB directly in the table! Check '🌐 BS Portal Updated' once done online. Once everything is verified, select a RESOLVED WhatsApp status and click Save.")
                 
                 status_options = ["Not Started", "Contact Saved", "Invitation Sent", "Added via Link", "Added Directly", "No Smartphone"]
                 category_options = ["GENERAL", "SC", "ST", "OBC", "OBC-A", "OBC-B", "MINORITY", "UNSPECIFIED"]
                 
                 edited_wa = st.data_editor(
-                    pending_wa_df[['WhatsApp Status', 'Student Name', 'Father', 'Mother', 'DOB', 'Mobile', 'Social Category', 'Data Corrected Check', 'BS Updated Check', 'Group Name', 'Grad Year']],
+                    pending_wa_df[['WhatsApp Status', 'Student Name', 'Father', 'Mother', 'DOB', 'Mobile', 'Secondary Mobile', 'Social Category', 'Data Corrected Check', 'BS Updated Check', 'Group Name', 'Grad Year']],
                     column_config={
                         "WhatsApp Status": st.column_config.SelectboxColumn("WhatsApp Status", options=status_options, required=True),
                         "Student Name": st.column_config.TextColumn("Student Name (Edit to Fix)"),
                         "Father": st.column_config.TextColumn("Father (Edit to Fix)"),
                         "Mother": st.column_config.TextColumn("Mother (Edit to Fix)"),
                         "DOB": st.column_config.TextColumn("DOB (Edit to Fix)"),
+                        "Secondary Mobile": st.column_config.TextColumn("Alt Mobile (Optional)"),
                         "Social Category": st.column_config.SelectboxColumn("🏷️ Category", options=category_options, required=True),
                         "Data Corrected Check": st.column_config.CheckboxColumn("✏️ Data Corrected?"),
                         "BS Updated Check": st.column_config.CheckboxColumn("🌐 BS Portal Updated?"),
@@ -678,11 +681,17 @@ with tab3:
                 
                 vcard_data = ""
                 for _, row in edited_wa.iterrows():
-                    # Dynamically generate the name so edits are reflected immediately in the download
                     c_name = f"BPS {row['Grad Year']} {row['Student Name']} ({row['Father']})"
                     c_phone = str(row['Mobile']).strip()
-                    if c_phone and c_phone != "N/A" and c_phone != "nan":
-                        vcard_data += f"BEGIN:VCARD\nVERSION:3.0\nFN:{c_name}\nTEL:{c_phone}\nEND:VCARD\n"
+                    c_phone2 = str(row['Secondary Mobile']).strip()
+                    
+                    if (c_phone and c_phone != "N/A" and c_phone != "nan") or (c_phone2 and c_phone2 != "N/A" and c_phone2 != "nan" and c_phone2 != "None"):
+                        vcard_data += f"BEGIN:VCARD\nVERSION:3.0\nFN:{c_name}\n"
+                        if c_phone and c_phone not in ["N/A", "nan"]:
+                            vcard_data += f"TEL;TYPE=CELL:{c_phone}\n"
+                        if c_phone2 and c_phone2 not in ["N/A", "nan", "None", ""]:
+                            vcard_data += f"TEL;TYPE=HOME:{c_phone2}\n"
+                        vcard_data += "END:VCARD\n"
                 
                 with col_vcf:
                     if vcard_data:
@@ -695,16 +704,20 @@ with tab3:
                         )
                 
                 with col_csv:
-                    valid_contacts_df = edited_wa[edited_wa['Mobile'].str.strip() != ""]
-                    valid_contacts_df = valid_contacts_df[valid_contacts_df['Mobile'].str.strip() != "nan"]
-                    valid_contacts_df = valid_contacts_df[valid_contacts_df['Mobile'].str.strip() != "N/A"]
+                    # Filter for rows that have AT LEAST one valid phone number
+                    valid_contacts_df = edited_wa[
+                        (edited_wa['Mobile'].str.strip() != "") & (edited_wa['Mobile'].str.strip() != "nan") & (edited_wa['Mobile'].str.strip() != "N/A") |
+                        (edited_wa['Secondary Mobile'].str.strip() != "") & (edited_wa['Secondary Mobile'].str.strip() != "nan") & (edited_wa['Secondary Mobile'].str.strip() != "None")
+                    ]
                     
                     if not valid_contacts_df.empty:
                         google_csv_df = pd.DataFrame({
                             'Name': valid_contacts_df.apply(lambda r: f"BPS {r['Grad Year']} {r['Student Name']} ({r['Father']})", axis=1),
                             'Group Membership': valid_contacts_df['Group Name'],
                             'Phone 1 - Type': 'Mobile',
-                            'Phone 1 - Value': valid_contacts_df['Mobile']
+                            'Phone 1 - Value': valid_contacts_df['Mobile'],
+                            'Phone 2 - Type': 'Home',
+                            'Phone 2 - Value': valid_contacts_df['Secondary Mobile']
                         })
                         
                         st.download_button(
@@ -729,6 +742,7 @@ with tab3:
                         new_status = edited_wa.loc[idx, 'WhatsApp Status']
                         group_name = edited_wa.loc[idx, 'Group Name']
                         new_mobile = edited_wa.loc[idx, 'Mobile']
+                        new_sec_mobile = edited_wa.loc[idx, 'Secondary Mobile']
                         new_category = edited_wa.loc[idx, 'Social Category']
                         is_corrected = edited_wa.loc[idx, 'Data Corrected Check']
                         is_bs_updated = edited_wa.loc[idx, 'BS Updated Check']
@@ -740,6 +754,7 @@ with tab3:
                         old_status = pending_wa_df.loc[idx, 'WhatsApp Status']
                         old_group = pending_wa_df.loc[idx, 'WhatsApp Group']
                         old_mobile = str(pending_wa_df.loc[idx, 'Mobile']).replace('.0', '')
+                        old_sec_mobile = str(pending_wa_df.loc[idx, 'Secondary Mobile']).replace('.0', '')
                         old_category = pending_wa_df.loc[idx, 'Social Category']
                         old_corrected = pending_wa_df.loc[idx, 'Data Corrected Check']
                         old_bs_updated = pending_wa_df.loc[idx, 'BS Updated Check']
@@ -765,6 +780,15 @@ with tab3:
                             f_mask = updated_form_df['UID'] == uid
                             updated_form_df.loc[f_mask, 'Mobile Updated'] = 'Yes'
                             updated_form_df.loc[f_mask, 'Old Mobile Number'] = old_mobile
+                            student_db_changes += 1
+                            row_changed = True
+
+                        # Secondary Mobile update
+                        if str(old_sec_mobile) != str(new_sec_mobile):
+                            s_mask = updated_students_df['UID'] == uid
+                            updated_students_df.loc[s_mask, 'Secondary Mobile'] = new_sec_mobile
+                            f_mask = updated_form_df['UID'] == uid
+                            updated_form_df.loc[f_mask, 'Mobile Updated'] = 'Yes' # Treat alternative numbers as a mobile change too
                             student_db_changes += 1
                             row_changed = True
                             
@@ -864,7 +888,7 @@ with tab3:
             if saved_wa_df.empty:
                 st.info("No students have been fully processed for this section yet.")
             else:
-                display_saved = saved_wa_df[['Roll', 'Student Name', 'Father', 'DOB', 'Mobile', 'Social Category', 'Data Corrected Check', 'BS Updated Check', 'WhatsApp Status', 'Group Name', 'Last Update Date']].rename(columns={'Data Corrected Check': 'Data Corrected', 'BS Updated Check': 'BS Portal Updated'})
+                display_saved = saved_wa_df[['Roll', 'Student Name', 'Father', 'DOB', 'Mobile', 'Secondary Mobile', 'Social Category', 'Data Corrected Check', 'BS Updated Check', 'WhatsApp Status', 'Group Name', 'Last Update Date']].rename(columns={'Data Corrected Check': 'Data Corrected', 'BS Updated Check': 'BS Portal Updated'})
                 st.dataframe(
                     display_saved,
                     hide_index=True,
@@ -879,8 +903,15 @@ with tab3:
                         if row['WhatsApp Status'] != 'No Smartphone':
                             c_name = f"BPS {row['Grad Year']} {row['Student Name']} ({row['Father']})"
                             c_phone = str(row['Mobile']).strip()
-                            if c_phone and c_phone != "N/A" and c_phone != "nan":
-                                vcard_data_saved += f"BEGIN:VCARD\nVERSION:3.0\nFN:{c_name}\nTEL:{c_phone}\nEND:VCARD\n"
+                            c_phone2 = str(row['Secondary Mobile']).strip()
+                            
+                            if (c_phone and c_phone != "N/A" and c_phone != "nan") or (c_phone2 and c_phone2 != "N/A" and c_phone2 != "nan" and c_phone2 != "None"):
+                                vcard_data_saved += f"BEGIN:VCARD\nVERSION:3.0\nFN:{c_name}\n"
+                                if c_phone and c_phone not in ["N/A", "nan"]:
+                                    vcard_data_saved += f"TEL;TYPE=CELL:{c_phone}\n"
+                                if c_phone2 and c_phone2 not in ["N/A", "nan", "None", ""]:
+                                    vcard_data_saved += f"TEL;TYPE=HOME:{c_phone2}\n"
+                                vcard_data_saved += "END:VCARD\n"
                     
                     with col_vcf_saved:
                         if vcard_data_saved:
@@ -893,9 +924,10 @@ with tab3:
                             )
                     
                     with col_csv_saved:
-                        valid_saved_df = saved_wa_df[saved_wa_df['Mobile'].str.strip() != ""]
-                        valid_saved_df = valid_saved_df[valid_saved_df['Mobile'].str.strip() != "nan"]
-                        valid_saved_df = valid_saved_df[valid_saved_df['Mobile'].str.strip() != "N/A"]
+                        valid_saved_df = saved_wa_df[
+                            (saved_wa_df['Mobile'].str.strip() != "") & (saved_wa_df['Mobile'].str.strip() != "nan") & (saved_wa_df['Mobile'].str.strip() != "N/A") |
+                            (saved_wa_df['Secondary Mobile'].str.strip() != "") & (saved_wa_df['Secondary Mobile'].str.strip() != "nan") & (saved_wa_df['Secondary Mobile'].str.strip() != "None")
+                        ]
                         valid_saved_df = valid_saved_df[valid_saved_df['WhatsApp Status'] != 'No Smartphone']
                         
                         if not valid_saved_df.empty:
@@ -903,7 +935,9 @@ with tab3:
                                 'Name': valid_saved_df.apply(lambda r: f"BPS {r['Grad Year']} {r['Student Name']} ({r['Father']})", axis=1),
                                 'Group Membership': valid_saved_df['Group Name'],
                                 'Phone 1 - Type': 'Mobile',
-                                'Phone 1 - Value': valid_saved_df['Mobile']
+                                'Phone 1 - Value': valid_saved_df['Mobile'],
+                                'Phone 2 - Type': 'Home',
+                                'Phone 2 - Value': valid_saved_df['Secondary Mobile']
                             })
                             
                             st.download_button(

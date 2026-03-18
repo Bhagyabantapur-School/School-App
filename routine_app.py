@@ -804,10 +804,10 @@ try:
         st.markdown("<h3 style='text-align: center; color: #555; margin-bottom: 20px;'>🔗 Quick Links</h3>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #888; margin-bottom: 30px;'>Access your other modules directly from here.</p>", unsafe_allow_html=True)
         
-        st.link_button("🏫 Admission Hub", "https://your-admission-hub-url.streamlit.app", use_container_width=True)
-        st.link_button("📱 Main Dashboard (app.py)", "https://your-main-app-url.streamlit.app", use_container_width=True)
-        st.link_button("📋 Form Manager", "https://your-form-manager-url.streamlit.app", use_container_width=True)
-        st.link_button("🪪 ID Card Generator", "https://your-id-card-url.streamlit.app", use_container_width=True)
+        st.link_button("🏫 Admission Hub", "https://school-app-y4hesp5fcntdc44kktgrrb.streamlit.app", use_container_width=True)
+        st.link_button("📱 Main Dashboard (app.py)", "https://bhagyabantapur-ps.streamlit.app", use_container_width=True)
+        st.link_button("📋 Form Manager", "https://school-app-rdpqdb8jbmnmdysvglhazh.streamlit.app", use_container_width=True)
+        st.link_button("🪪 ID Card Generator", "https://school-app-h6xgx5appv5i4f3kfv82mw6.streamlit.app", use_container_width=True)
 
 except Exception as e:
     st.error(f"System Error: {e}")

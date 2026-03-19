@@ -5,6 +5,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 import time
+import plotly.express as px
 from streamlit_autorefresh import st_autorefresh
 
 # 1. Configuration & Session State Init
@@ -103,11 +104,9 @@ def get_future_tasks():
     except gspread.exceptions.WorksheetNotFound:
         sheet = ss.add_worksheet(title="future_tasks", rows="100", cols="8")
         sheet.append_row(["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason"])
-    
     data = sheet.get_all_values()
     if len(data) <= 1:
         return pd.DataFrame(columns=["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason", "row_index"])
-    
     df = pd.DataFrame(data[1:], columns=data[0])
     while df.shape[1] < 8: df[df.shape[1]] = ""
     df = df.iloc[:, :8]
@@ -124,16 +123,33 @@ def get_water_log():
     except gspread.exceptions.WorksheetNotFound:
         sheet = ss.add_worksheet(title="water_log", rows="1000", cols="3")
         sheet.append_row(["Date", "Time", "Amount_ml"])
-    
     data = sheet.get_all_values()
     if len(data) <= 1:
         return pd.DataFrame(columns=["Date", "Time", "Amount_ml"])
-    
     df = pd.DataFrame(data[1:], columns=data[0])
     while df.shape[1] < 3: df[df.shape[1]] = ""
     df = df.iloc[:, :3]
     df.columns = ["Date", "Time", "Amount_ml"]
     df['Amount_ml'] = pd.to_numeric(df['Amount_ml'], errors='coerce').fillna(0)
+    return df
+
+@st.cache_data(ttl=60)
+def get_project_tasks():
+    client = init_connection()
+    ss = client.open("MY ROUTINE 2026")
+    try:
+        sheet = ss.worksheet("project_tasks")
+    except gspread.exceptions.WorksheetNotFound:
+        sheet = ss.add_worksheet(title="project_tasks", rows="200", cols="5")
+        sheet.append_row(["Task Name", "Project Name", "Status", "Start Date", "End Date"])
+    data = sheet.get_all_values()
+    if len(data) <= 1:
+        return pd.DataFrame(columns=["Task Name", "Project Name", "Status", "Start Date", "End Date", "row_index"])
+    df = pd.DataFrame(data[1:], columns=data[0])
+    while df.shape[1] < 5: df[df.shape[1]] = ""
+    df = df.iloc[:, :5]
+    df.columns = ["Task Name", "Project Name", "Status", "Start Date", "End Date"]
+    df['row_index'] = df.index + 2 
     return df
 
 def parse_duration_to_minutes(dur_str):
@@ -146,7 +162,6 @@ def get_last_done_str(sub_task, log_df, now):
     completed_logs = log_df[log_df['End_Time'] != 'RUNNING']
     matches = completed_logs[completed_logs['Sub_Activities'].astype(str).str.strip().str.upper() == sub_task.upper()]
     if matches.empty: return "Never"
-    
     max_dt = None
     for _, r in matches.iterrows():
         try:
@@ -154,7 +169,6 @@ def get_last_done_str(sub_task, log_df, now):
             dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
             if max_dt is None or dt > max_dt: max_dt = dt
         except: continue
-            
     if not max_dt: return "Never"
     now_naive = now.replace(tzinfo=None)
     diff = now_naive - max_dt
@@ -168,6 +182,7 @@ try:
     log_df = get_activity_log() 
     future_df = get_future_tasks()
     water_df = get_water_log()
+    proj_df = get_project_tasks()
     
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist_timezone)
@@ -177,7 +192,7 @@ try:
     today_str = now.strftime('%Y-%m-%d')
     current_time = now.time()
 
-    tab1, tab2, tab3, tab4 = st.tabs(["⏱️ Live View", "📅 Schedule Editor", "💧 Hydration", "🔗 App Hub"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["⏱️ Live View", "📅 Schedule Editor", "💧 Hydration", "📊 Projects", "🔗 App Hub"])
 
     # ==========================================
     # TAB 1: LIVE DASHBOARD
@@ -300,7 +315,6 @@ try:
 
         st.markdown(f"<h4 style='text-align: center; color: #0288d1; margin-bottom:15px;'>💧 Quick Log Water (Today: {int(total_water_today)}ml)</h4>", unsafe_allow_html=True)
         col_w1, col_w2, col_w3 = st.columns(3)
-        
         with col_w1:
             if st.button("🥃 250 ml", use_container_width=True):
                 wsheet = get_sheet("water_log")
@@ -348,7 +362,6 @@ try:
                         sec_diff = time_diff.total_seconds()
                         is_overdue = sec_diff < 0
                         abs_sec = abs(int(sec_diff))
-                        
                         h, rem = divmod(abs_sec, 3600)
                         m = rem // 60
                         time_str = f"{h}h {m}m" if h > 0 else f"{m}m"
@@ -370,36 +383,26 @@ try:
 
         if upcoming_ui_elements_raw:
             upcoming_ui_elements_raw.sort(key=lambda x: x[0])
-            
             st.markdown("<br><h4 style='text-align: center; color: #e65100; margin-top:0; margin-bottom:15px;'>⏳ Upcoming Special Tasks</h4>", unsafe_allow_html=True)
-            
             for dt, r, html_text in upcoming_ui_elements_raw:
                 st.markdown(f"<p style='text-align: center; margin-bottom:5px; font-size:16px; color: #d84315;'>{html_text}</p>", unsafe_allow_html=True)
-                
                 with st.expander(f"✏️ Manage Task", expanded=False):
                     tab_resched, tab_cancel = st.tabs(["📅 Reschedule", "❌ Cancel"])
-                    
                     with tab_resched:
                         col_d, col_t = st.columns(2)
-                        try:
-                            curr_date = datetime.strptime(str(r['Due_Date']).strip(), '%Y-%m-%d').date()
-                        except:
-                            curr_date = now.date()
-                            
+                        try: curr_date = datetime.strptime(str(r['Due_Date']).strip(), '%Y-%m-%d').date()
+                        except: curr_date = now.date()
                         curr_time_str = str(r['Due_Time']).strip()
                         time_opts = [f"{str(h).zfill(2)}:{str(m).zfill(2)}" for h in range(24) for m in range(60)]
                         if curr_time_str not in time_opts: curr_time_str = "12:00"
                         
-                        with col_d:
-                            new_date = st.date_input("New Date", value=curr_date, key=f"nd_{r['row_index']}")
-                        with col_t:
-                            new_time = st.selectbox("New Time", options=time_opts, index=time_opts.index(curr_time_str), key=f"nt_{r['row_index']}")
+                        with col_d: new_date = st.date_input("New Date", value=curr_date, key=f"nd_{r['row_index']}")
+                        with col_t: new_time = st.selectbox("New Time", options=time_opts, index=time_opts.index(curr_time_str), key=f"nt_{r['row_index']}")
                             
                         if st.button("Save New Time", key=f"rs_btn_{r['row_index']}", type="primary", use_container_width=True):
                             fsheet = get_sheet("future_tasks")
                             fsheet.update_cell(int(r['row_index']), 1, new_date.strftime('%Y-%m-%d'))
                             fsheet.update_cell(int(r['row_index']), 2, new_time)
-                            
                             sheet_log = get_sheet("activity_log")
                             sheet_log.append_row([
                                 today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
@@ -409,20 +412,16 @@ try:
                             st.success("Task Rescheduled!")
                             time.sleep(1)
                             st.rerun()
-
                     with tab_cancel:
                         col_r, col_b = st.columns([3, 1])
-                        with col_r:
-                            cancel_reason = st.text_input("Reason", placeholder="Why are you cancelling?", key=f"rsn_{r['row_index']}", label_visibility="collapsed")
+                        with col_r: cancel_reason = st.text_input("Reason", placeholder="Why are you cancelling?", key=f"rsn_{r['row_index']}", label_visibility="collapsed")
                         with col_b:
                             if st.button("Confirm", key=f"cnf_{r['row_index']}", type="primary"):
-                                if not cancel_reason.strip():
-                                    st.error("Enter reason")
+                                if not cancel_reason.strip(): st.error("Enter reason")
                                 else:
                                     fsheet = get_sheet("future_tasks")
                                     fsheet.update_cell(int(r['row_index']), 7, "Canceled")
                                     fsheet.update_cell(int(r['row_index']), 8, cancel_reason)
-                                    
                                     sheet_log = get_sheet("activity_log")
                                     sheet_log.append_row([
                                         today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
@@ -435,7 +434,6 @@ try:
         if chk_list:
             st.markdown("---")
             st.markdown("<h4 style='text-align: center; color: #333;'>✅ Tasks & Reminders</h4>", unsafe_allow_html=True)
-            
             today_logs = log_df[log_df['Date'] == today_str]
             today_logged_tasks = today_logs[today_logs['Activity'] == current_activity]['check_list'].tolist()
             
@@ -443,22 +441,17 @@ try:
                 if "[Due:" in task:
                     raw_task = task.split(" [Due:")[0].strip()
                     matches = future_df[(future_df['Task_Name'].str.strip() == raw_task) & (future_df['Type'] == 'Checklist')]
-                    if not matches.empty and str(matches.iloc[0]['Status']).strip().upper() in ['COMPLETED', 'CANCELED']:
-                        is_done = True
-                    else:
-                        is_done = any(task.upper() == str(x).strip().upper() for x in all_logged_items)
-                else:
-                    is_done = any(task.upper() == str(x).strip().upper() for x in today_logged_tasks)
+                    if not matches.empty and str(matches.iloc[0]['Status']).strip().upper() in ['COMPLETED', 'CANCELED']: is_done = True
+                    else: is_done = any(task.upper() == str(x).strip().upper() for x in all_logged_items)
+                else: is_done = any(task.upper() == str(x).strip().upper() for x in today_logged_tasks)
                     
                 checked = st.checkbox(task, value=is_done, disabled=is_done, key=f"chk_{task}_{current_activity}")
-                
                 if checked and not is_done:
                     sheet_log = get_sheet("activity_log")
                     sheet_log.append_row([
                         today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
                         "0:00", current_activity, "", task, "Checked off"
                     ])
-                    
                     if "[Due:" in task:
                         raw_task = task.split(" [Due:")[0].strip()
                         matches = future_df[(future_df['Task_Name'].str.strip() == raw_task) & (future_df['Type'] == 'Checklist')]
@@ -466,7 +459,6 @@ try:
                             r_idx = int(matches.iloc[0]['row_index'])
                             fsheet = get_sheet("future_tasks")
                             fsheet.update_cell(r_idx, 7, "Completed") 
-                            
                     st.cache_data.clear()
                     st.rerun()
 
@@ -489,8 +481,7 @@ try:
                     active_start_time = ist_timezone.localize(dt_naive)
                     elapsed_time = now - active_start_time
                     mins_elapsed = int(elapsed_time.total_seconds() // 60)
-                except:
-                    mins_elapsed = 0 
+                except: mins_elapsed = 0 
                 
                 st.info(f"⏳ **In Progress:** {display_name} (Running for {mins_elapsed} min)")
                 
@@ -521,7 +512,6 @@ try:
                                 r_idx = int(matches.iloc[0]['row_index'])
                                 fsheet = get_sheet("future_tasks")
                                 fsheet.update_cell(r_idx, 7, "Completed") 
-                        
                         st.cache_data.clear()
                         st.success("Activity saved!")
                         time.sleep(1)
@@ -546,7 +536,6 @@ try:
                     with cols[idx % 3]:
                         last_done = get_last_done_str(task, log_df, now)
                         last_txt = f"\n(Last: {last_done})" if "[Due:" not in task else ""
-                        
                         if st.button(f"▶️ {task}{last_txt}", key=f"btn_{task}", use_container_width=True):
                             log_sheet = get_sheet("activity_log")
                             log_sheet.append_row([
@@ -557,7 +546,6 @@ try:
                             st.rerun()
 
         st.markdown("---")
-        
         st.markdown("<h4 style='text-align: center; color: #555; margin-bottom: 20px;'>📊 Today's Actual Productivity</h4>", unsafe_allow_html=True)
         today_logs = log_df[(log_df['Date'] == today_str) & (log_df['Duration'] != 'RUNNING')].copy()
         
@@ -580,13 +568,11 @@ try:
         with st.expander("🗓️ Schedule Future Task"):
             with st.form("schedule_future_form", clear_on_submit=True):
                 st.markdown("### Attach Task to a Future Activity")
-                
                 unique_activities = [act for act in df['Activity'].unique() if act.strip()]
                 f_act = st.selectbox("Parent Category", unique_activities, key="f_act")
                 f_type = st.radio("Task Type", ["Checklist", "Sub-Activity"], horizontal=True, key="f_type")
                 f_entity = st.selectbox("Entity", ["Personal", "School", "People"], key="f_entity")
                 f_name = st.text_input("Task Details", placeholder="e.g., Pay Electricity Bill", key="f_name")
-                
                 time_options = [f"{str(h).zfill(2)}:{str(m).zfill(2)}" for h in range(24) for m in range(60)]
                 now_str = clean_now.strftime('%H:%M')
                 
@@ -598,14 +584,7 @@ try:
                     
                 if st.form_submit_button("Schedule Task", use_container_width=True):
                     if f_name:
-                        client = init_connection()
-                        ss = client.open("MY ROUTINE 2026")
-                        try:
-                            fsheet = ss.worksheet("future_tasks")
-                        except gspread.exceptions.WorksheetNotFound:
-                            fsheet = ss.add_worksheet(title="future_tasks", rows="100", cols="8")
-                            fsheet.append_row(["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason"])
-                        
+                        fsheet = get_sheet("future_tasks")
                         fsheet.append_row([
                             f_date.strftime('%Y-%m-%d'),
                             f_time.strftime('%H:%M'),
@@ -620,8 +599,7 @@ try:
                         st.success("Task Scheduled! It will appear 24 hours before due time.")
                         time.sleep(1.5)
                         st.rerun()
-                    else:
-                        st.error("Please enter task details.")
+                    else: st.error("Please enter task details.")
 
         with st.expander("📝 Manual Log Activity"):
             with st.form("log_activity_form", clear_on_submit=True):
@@ -656,15 +634,13 @@ try:
                         st.success("Activity logged!")
                         time.sleep(1)
                         st.rerun()
-                    else:
-                        st.error("Please enter a Main Category.")
+                    else: st.error("Please enter a Main Category.")
 
     # ==========================================
     # TAB 2: SCHEDULE EDITOR
     # ==========================================
     with tab2:
         days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-        
         target_day = st.selectbox("Select Day to Edit", days_of_week, index=days_of_week.index(current_day))
         
         st.markdown(f"<h3 style='text-align: center; color: #555; margin-bottom: 5px;'>{target_day}'s Full Routine</h3>", unsafe_allow_html=True)
@@ -693,10 +669,7 @@ try:
                     "Sub_Activities": st.column_config.TextColumn("Sub List (comma sep.)"),
                     "check_list": st.column_config.TextColumn("Checklist (comma sep.)")
                 },
-                hide_index=True,
-                use_container_width=True,
-                num_rows="dynamic",
-                key="schedule_editor"
+                hide_index=True, use_container_width=True, num_rows="dynamic", key="schedule_editor"
             )
             
             if st.button(f"💾 Save Changes for {target_day}", use_container_width=True):
@@ -712,9 +685,7 @@ try:
                         s_dt = datetime.combine(now.date(), start_t)
                         e_dt = datetime.combine(now.date(), end_t)
                         
-                        if end_str in ['00:00', '0:00'] or e_dt < s_dt:
-                            e_dt = e_dt.replace(day=e_dt.day + 1)
-                            
+                        if end_str in ['00:00', '0:00'] or e_dt < s_dt: e_dt = e_dt.replace(day=e_dt.day + 1)
                         duration_td = e_dt - s_dt
                         h, m = divmod(duration_td.seconds, 3600)
                         duration_str = f"{h}:{m//60:02d}"
@@ -753,8 +724,7 @@ try:
                 with cols_sched[col_idx_sched % 3]:
                     st.metric(label=act, value=display_time)
                 col_idx_sched += 1
-        else:
-            st.info(f"No routine scheduled for {target_day}.")
+        else: st.info(f"No routine scheduled for {target_day}.")
 
     # ==========================================
     # TAB 3: HYDRATION
@@ -766,7 +736,6 @@ try:
         water_df['Date_dt'] = pd.to_datetime(water_df['Date'], errors='coerce')
         today_dt = pd.to_datetime(today_str)
         
-        # Daily Tab
         t_day, t_week, t_month = st.tabs(["Today", "Past 7 Days", "This Month"])
         
         with t_day:
@@ -786,28 +755,147 @@ try:
             if not last_7.empty:
                 daily_grouped = last_7.groupby(last_7['Date_dt'].dt.strftime('%a, %b %d'))['Amount_ml'].sum()
                 st.bar_chart(daily_grouped, color="#29b6f6")
-            else:
-                st.info("No data for the past 7 days.")
+            else: st.info("No data for the past 7 days.")
                 
         with t_month:
             this_month = water_df[water_df['Date_dt'].dt.month == today_dt.month].copy()
             if not this_month.empty:
                 daily_grouped_m = this_month.groupby(this_month['Date_dt'].dt.day)['Amount_ml'].sum()
                 st.line_chart(daily_grouped_m, color="#0288d1")
-            else:
-                st.info("No data for this month.")
+            else: st.info("No data for this month.")
 
     # ==========================================
-    # TAB 4: APP HUB
+    # TAB 4: PROJECTS
     # ==========================================
     with tab4:
+        st.markdown("<h3 style='text-align: center; color: #0068c9;'>📊 Project Tracking</h3>", unsafe_allow_html=True)
+        st.markdown("---")
+        
+        status_colors = {"Completed": "#2e7b32", "In Progress": "#0068c9", "Not Started": "#ff9f36"}
+        
+        if not proj_df.empty:
+            plot_df = proj_df.copy()
+            plot_df['Start Date'] = pd.to_datetime(plot_df['Start Date'], errors='coerce')
+            plot_df['End Date'] = pd.to_datetime(plot_df['End Date'], errors='coerce')
+            plot_df = plot_df.dropna(subset=['Start Date', 'End Date'])
+            
+            if not plot_df.empty:
+                st.markdown("### 📈 Overall Progress")
+                project_stats = plot_df.groupby('Project Name').apply(
+                    lambda x: (x['Status'].str.strip().str.title() == 'Completed').sum() / len(x)
+                ).reset_index(name='Progress')
+                
+                cols = st.columns(len(project_stats))
+                for i, row in project_stats.iterrows():
+                    with cols[i]:
+                        percent_complete = int(row['Progress'] * 100)
+                        st.metric(label=row['Project Name'], value=f"{percent_complete}%")
+                        st.progress(row['Progress'])
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                col_gantt, col_pie = st.columns([2, 1])
+                with col_gantt:
+                    st.markdown("#### 🗓️ Task Timeline")
+                    plot_df['Status'] = plot_df['Status'].str.strip().str.title()
+                    plot_df = plot_df.sort_values('Start Date')
+                    fig_gantt = px.timeline(plot_df, x_start="Start Date", x_end="End Date", y="Task Name", color="Status", color_discrete_map=status_colors, hover_data=["Project Name"])
+                    fig_gantt.update_yaxes(autorange="reversed")
+                    fig_gantt.update_layout(margin=dict(l=0, r=0, t=30, b=0), xaxis_title="", yaxis_title="", showlegend=False)
+                    st.plotly_chart(fig_gantt, use_container_width=True)
+                    
+                with col_pie:
+                    st.markdown("#### 📌 Status")
+                    status_counts = plot_df['Status'].value_counts().reset_index()
+                    status_counts.columns = ['Status', 'Count']
+                    fig_pie = px.pie(status_counts, names='Status', values='Count', color='Status', color_discrete_map=status_colors, hole=0.45)
+                    fig_pie.update_layout(margin=dict(l=0, r=0, t=30, b=0), legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
+                    fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+                    st.plotly_chart(fig_pie, use_container_width=True)
+            else:
+                st.info("Project dates are missing or invalid. Please update them.")
+                
+            st.markdown("---")
+            
+            with st.expander("📝 Update Task & Log Work"):
+                with st.form("log_project_work"):
+                    st.markdown("Select a task, update its status, and log the time spent directly to today's Routine.")
+                    task_options = proj_df['Task Name'].astype(str) + " (" + proj_df['Project Name'].astype(str) + ")"
+                    selected_task_full = st.selectbox("Select Project Task", task_options.tolist())
+                    
+                    selected_task_raw = selected_task_full.split(" (")[0]
+                    curr_status = proj_df[proj_df['Task Name'] == selected_task_raw]['Status'].values[0]
+                    
+                    col_s, col_t = st.columns(2)
+                    with col_s: new_status = st.selectbox("New Status", ["Not Started", "In Progress", "Completed"], index=["Not Started", "In Progress", "Completed"].index(curr_status.title() if curr_status.title() in ["Not Started", "In Progress", "Completed"] else "Not Started"))
+                    with col_t: time_spent_mins = st.number_input("Time Spent (Minutes)", min_value=0, max_value=600, value=0, step=15)
+                        
+                    if st.form_submit_button("Update & Log Work", use_container_width=True):
+                        row_idx = int(proj_df[proj_df['Task Name'] == selected_task_raw]['row_index'].values[0])
+                        psheet = get_sheet("project_tasks")
+                        psheet.update_cell(row_idx, 3, new_status) 
+                        
+                        if time_spent_mins > 0:
+                            h, m = divmod(time_spent_mins, 60)
+                            dur_str = f"{h}:{str(m).zfill(2)}"
+                            sheet_log = get_sheet("activity_log")
+                            sheet_log.append_row([
+                                today_str, clean_now.strftime('%H:%M'), clean_now.strftime('%H:%M'), 
+                                dur_str, "WORK", selected_task_raw, "", f"Project Work Logged via Dashboard"
+                            ])
+                            st.success(f"Status updated to '{new_status}' and {time_spent_mins} mins logged to Routine!")
+                        else:
+                            st.success(f"Status updated to '{new_status}'.")
+                            
+                        st.cache_data.clear()
+                        time.sleep(1.5)
+                        st.rerun()
+        else:
+            st.info("No project tasks found. Add your first task below!")
+            
+        with st.expander("➕ Add New Project Task"):
+            with st.form("add_project_task"):
+                p_task = st.text_input("Task Name")
+                
+                # Fetch existing unique project names
+                if not proj_df.empty:
+                    existing_projects = ["-- Select Existing Project --"] + sorted(list(set(proj_df['Project Name'].dropna().tolist())))
+                else:
+                    existing_projects = ["-- Select Existing Project --"]
+                
+                col_p1, col_p2 = st.columns(2)
+                with col_p1: p_name_sel = st.selectbox("Existing Project", existing_projects)
+                with col_p2: p_name_new = st.text_input("OR New Project Name", placeholder="Type new name here")
+                
+                col_s, col_d1, col_d2 = st.columns(3)
+                with col_s: p_status = st.selectbox("Status", ["Not Started", "In Progress", "Completed"])
+                with col_d1: p_start = st.date_input("Start Date")
+                with col_d2: p_end = st.date_input("End Date")
+                
+                if st.form_submit_button("Add Task", use_container_width=True):
+                    # Prioritize new project name if typed, otherwise use selected
+                    final_p_name = p_name_new.strip() if p_name_new.strip() else (p_name_sel if p_name_sel != "-- Select Existing Project --" else "")
+                    
+                    if p_task and final_p_name:
+                        psheet = get_sheet("project_tasks")
+                        psheet.append_row([p_task.strip(), final_p_name, p_status, p_start.strftime('%Y-%m-%d'), p_end.strftime('%Y-%m-%d')])
+                        st.cache_data.clear()
+                        st.success("Task added!")
+                        time.sleep(1)
+                        st.rerun()
+                    else: st.error("Task Name and Project Name are required.")
+
+    # ==========================================
+    # TAB 5: APP HUB
+    # ==========================================
+    with tab5:
         st.markdown("<h3 style='text-align: center; color: #555; margin-bottom: 20px;'>🔗 Quick Links</h3>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #888; margin-bottom: 30px;'>Access your other modules directly from here.</p>", unsafe_allow_html=True)
         
-        st.link_button("🏫 Admission Hub", "https://school-app-y4hesp5fcntdc44kktgrrb.streamlit.app", use_container_width=True)
-        st.link_button("📱 Main Dashboard (app.py)", "https://bhagyabantapur-ps.streamlit.app", use_container_width=True)
-        st.link_button("📋 Form Manager", "https://school-app-rdpqdb8jbmnmdysvglhazh.streamlit.app", use_container_width=True)
-        st.link_button("🪪 ID Card Generator", "https://school-app-h6xgx5appv5i4f3kfv82mw6.streamlit.app", use_container_width=True)
+        st.link_button("🏫 Admission Hub", "https://your-admission-hub-url.streamlit.app", use_container_width=True)
+        st.link_button("📱 Main Dashboard (app.py)", "https://your-main-app-url.streamlit.app", use_container_width=True)
+        st.link_button("📋 Form Manager", "https://your-form-manager-url.streamlit.app", use_container_width=True)
+        st.link_button("🪪 ID Card Generator", "https://your-id-card-url.streamlit.app", use_container_width=True)
 
 except Exception as e:
     st.error(f"System Error: {e}")

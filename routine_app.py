@@ -478,7 +478,7 @@ try:
             # --- 1. RENDER ALL RUNNING TASKS ---
             if not running_tasks.empty:
                 for idx, active_row in running_tasks.iterrows():
-                    sheet_row = idx + 2 # +2 because gspread is 1-indexed and has a header row
+                    sheet_row = idx + 2 
                     active_main = str(active_row['Activity'])
                     active_sub = str(active_row['Sub_Activities'])
                     display_name = active_sub if active_sub else active_main
@@ -493,6 +493,24 @@ try:
                     
                     st.info(f"⏳ **In Progress:** {display_name} (Running for {mins_elapsed} min)")
                     
+                    # Logic to allow status update for project tasks upon saving
+                    is_project = str(active_row['Notes']).strip() == "Project Tracking"
+                    new_proj_status = None
+                    raw_task_name = ""
+                    
+                    if is_project:
+                        raw_task_name = active_sub.split(" (")[0]
+                        curr_stat_matches = proj_df[proj_df['Task Name'] == raw_task_name]['Status']
+                        curr_stat = curr_stat_matches.values[0].strip().title() if not curr_stat_matches.empty else "In Progress"
+                        
+                        status_opts = ["In Progress", "Completed", "Not Started"]
+                        try:
+                            def_idx = status_opts.index(curr_stat)
+                        except ValueError:
+                            def_idx = 0
+                            
+                        new_proj_status = st.selectbox("Update Project Status upon saving:", status_opts, index=def_idx, key=f"pstat_{sheet_row}")
+
                     col_stop, col_cancel = st.columns(2)
                     with col_stop:
                         if st.button("🛑 SAVE", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
@@ -507,18 +525,26 @@ try:
                             log_sheet.update_cell(sheet_row, 3, end_time_log.strftime('%H:%M')) 
                             log_sheet.update_cell(sheet_row, 4, duration_str)                   
                             
-                            # Preserve notes (for meetings/projects) or write Auto-logged
                             old_notes = str(active_row['Notes'])
                             if old_notes.strip() == "":
                                 log_sheet.update_cell(sheet_row, 8, "Auto-logged via Timer") 
                                 
                             if "[Due:" in active_sub:
-                                raw_task = active_sub.split(" [Due:")[0].strip()
-                                matches = future_df[(future_df['Task_Name'].str.strip() == raw_task) & (future_df['Type'] == 'Sub-Activity')]
+                                raw_r_task = active_sub.split(" [Due:")[0].strip()
+                                matches = future_df[(future_df['Task_Name'].str.strip() == raw_r_task) & (future_df['Type'] == 'Sub-Activity')]
                                 if not matches.empty:
                                     r_idx = int(matches.iloc[0]['row_index'])
                                     fsheet = get_sheet("future_tasks")
                                     fsheet.update_cell(r_idx, 7, "Completed") 
+                                    
+                            # Update Project task status dynamically if it is a project task
+                            if is_project and new_proj_status:
+                                p_matches = proj_df[proj_df['Task Name'] == raw_task_name]
+                                if not p_matches.empty:
+                                    p_idx = int(p_matches.iloc[0]['row_index'])
+                                    psheet = get_sheet("project_tasks")
+                                    psheet.update_cell(p_idx, 3, new_proj_status)
+                                    
                             st.cache_data.clear()
                             st.success(f"Saved: {display_name}")
                             time.sleep(1)
@@ -533,7 +559,6 @@ try:
                             time.sleep(1)
                             st.rerun()
             
-            # Extract names of currently running sub-activities so we don't show their start buttons
             running_subs = running_tasks['Sub_Activities'].tolist()
 
             # --- 2. RENDER ROUTINE SUB-ACTIVITIES (Not Currently Running) ---
@@ -890,45 +915,10 @@ try:
                     st.plotly_chart(fig_pie, use_container_width=True)
             else:
                 st.info("Project dates are missing or invalid. Please update them.")
-                
-            st.markdown("---")
-            
-            with st.expander("📝 Update Task Status Manually"):
-                with st.form("log_project_work"):
-                    st.markdown("Select a task and update its status without running the timer.")
-                    task_options = proj_df['Task Name'].astype(str) + " (" + proj_df['Project Name'].astype(str) + ")"
-                    selected_task_full = st.selectbox("Select Project Task", task_options.tolist())
-                    
-                    selected_task_raw = selected_task_full.split(" (")[0]
-                    curr_status = proj_df[proj_df['Task Name'] == selected_task_raw]['Status'].values[0]
-                    
-                    col_s, col_t = st.columns(2)
-                    with col_s: new_status = st.selectbox("New Status", ["Not Started", "In Progress", "Completed"], index=["Not Started", "In Progress", "Completed"].index(curr_status.title() if curr_status.title() in ["Not Started", "In Progress", "Completed"] else "Not Started"))
-                    with col_t: time_spent_mins = st.number_input("Time Spent (Minutes, optional)", min_value=0, max_value=600, value=0, step=15)
-                        
-                    if st.form_submit_button("Update Task", use_container_width=True):
-                        row_idx = int(proj_df[proj_df['Task Name'] == selected_task_raw]['row_index'].values[0])
-                        psheet = get_sheet("project_tasks")
-                        psheet.update_cell(row_idx, 3, new_status) 
-                        
-                        if time_spent_mins > 0:
-                            h, m = divmod(time_spent_mins, 60)
-                            dur_str = f"{h}:{str(m).zfill(2)}"
-                            sheet_log = get_sheet("activity_log")
-                            sheet_log.append_row([
-                                today_str, clean_now.strftime('%H:%M'), clean_now.strftime('%H:%M'), 
-                                dur_str, "WORK", selected_task_raw, "", f"Project Work Logged via Dashboard"
-                            ])
-                            st.success(f"Status updated to '{new_status}' and {time_spent_mins} mins logged to Routine!")
-                        else:
-                            st.success(f"Status updated to '{new_status}'.")
-                            
-                        st.cache_data.clear()
-                        time.sleep(1.5)
-                        st.rerun()
         else:
             st.info("No project tasks found. Add your first task below!")
             
+        st.markdown("---")    
         with st.expander("➕ Add New Project Task"):
             with st.form("add_project_task"):
                 p_task = st.text_input("Task Name")

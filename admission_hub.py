@@ -34,7 +34,8 @@ def get_gspread_client():
 
 def load_data():
     client = get_gspread_client()
-    sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID_HERE/edit").worksheet("students_master") # Remember to put your URL here if you used the conflict fix!
+    # Replace URL if you are using the direct link method to avoid conflicts
+    sheet = client.open("BPS_Database").worksheet("students_master")
     
     records = sheet.get_all_records()
     df = pd.DataFrame(records)
@@ -95,11 +96,10 @@ elif menu == "New Admission":
         with col1:
             name = st.text_input("Student Name").upper()
             gender = st.selectbox("Gender", ["BOYS", "GIRLS"])
+            religion = st.selectbox("Religion", ["HINDU", "MUSLIM", "CHRISTIAN", "OTHER"])
             cls = st.selectbox("Class", ["CLASS LPP", "CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V"])
             sec = st.selectbox("Section", ["A", "B", "C"])
             roll = st.number_input("Roll Number", min_value=1, step=1)
-            # NEW: Admission Date field
-            admission_date = st.date_input("Admission Date", datetime.today())
             
         with col2:
             father = st.text_input("Father's Name").upper()
@@ -107,28 +107,38 @@ elif menu == "New Admission":
             dob = st.date_input("Date of Birth", min_value=datetime(2010, 1, 1), max_value=datetime.today())
             mobile = st.text_input("Mobile Number")
             blood = st.selectbox("Blood Group", ["", "A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-"])
+            admission_date = st.date_input("Admission Date", datetime.today())
+            
+        st.divider()
+        st.subheader("System Information")
+        # NEW: Manual Student Code entry
+        manual_student_code = st.text_input("14-Digit Student Code (Leave blank to auto-generate temporary code)")
 
         submitted = st.form_submit_button("Confirm Admission")
         
         if submitted:
             if name and mobile:
                 new_sl = len(st.session_state.df) + 1
-                student_code = f"BPS{datetime.now().year}{roll:03d}".zfill(14) 
                 
-                # UPDATED: Now includes Admission Date at the very end (18th column)
+                # Logic: Use manual code if provided, otherwise generate temporary code
+                if manual_student_code.strip():
+                    final_student_code = manual_student_code.strip().zfill(14)
+                else:
+                    final_student_code = f"BPS{datetime.now().year}{roll:03d}".zfill(14)
+                
+                # UPDATED: Now 19 columns to match Google Sheets structure
                 row_to_append = [
                     new_sl, name, gender, cls, sec, roll, father, mother, 
-                    dob.strftime("%Y-%m-%d"), blood, mobile, student_code,
-                    "GENERAL", "", "", "", "", admission_date.strftime("%Y-%m-%d")
+                    dob.strftime("%Y-%m-%d"), blood, mobile, final_student_code,
+                    "GENERAL", "", "", "", "", admission_date.strftime("%Y-%m-%d"), religion
                 ]
                 
                 with st.spinner("Saving to BPS_Database..."):
                     try:
                         client = get_gspread_client()
-                        # Use your URL here if you applied the conflict fix earlier!
-                        sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID_HERE/edit").worksheet("students_master")
+                        sheet = client.open("BPS_Database").worksheet("students_master")
                         sheet.append_row(row_to_append)
-                        st.success(f"✅ Successfully admitted {name} to {cls} {sec}!")
+                        st.success(f"✅ Successfully admitted {name} to {cls} {sec} with code: {final_student_code}!")
                         
                         st.session_state.df = load_data() 
                     except Exception as e:
@@ -176,14 +186,13 @@ elif menu == "Student Transfer":
             with st.spinner("Processing Transfer..."):
                 try:
                     client = get_gspread_client()
-                    # Use your URL here if you applied the conflict fix earlier!
-                    db = client.open_by_url("https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID_HERE/edit")
+                    db = client.open("BPS_Database")
                     master_sheet = db.worksheet("students_master")
                     
                     try:
                         history_sheet = db.worksheet("transfer_history")
                     except gspread.exceptions.WorksheetNotFound:
-                        history_sheet = db.add_worksheet(title="transfer_history", rows="1000", cols="20")
+                        history_sheet = db.add_worksheet(title="transfer_history", rows="1000", cols="21")
                         headers = master_sheet.row_values(1)
                         headers.extend(["Transfer Date", "Transfer Reason"])
                         history_sheet.append_row(headers)
@@ -192,11 +201,10 @@ elif menu == "Student Transfer":
                     
                     if cell:
                         row_num = cell.row
-                        
                         row_data = master_sheet.row_values(row_num)
                         
-                        # UPDATED: We now pad up to 18 columns to account for the new Admission Date
-                        while len(row_data) < 18:
+                        # UPDATED: We now pad up to 19 columns to account for Religion at the end
+                        while len(row_data) < 19:
                             row_data.append("")
                             
                         row_data.extend([transfer_date.strftime("%Y-%m-%d"), transfer_reason])

@@ -200,6 +200,14 @@ try:
     with tab1:
         st.markdown(f"<h3 style='text-align: center; color: #888;'>{current_day} | {now.strftime('%I:%M %p')}</h3>", unsafe_allow_html=True)
 
+        col1, col2 = st.columns(2)
+        with col1:
+            flex_on = st.toggle("🔀 Flex Mode (Override)", key="flex_toggle")
+        with col2:
+            holiday_on = st.toggle("🎉 Holiday Mode", key="holiday_toggle")
+
+        effective_day = "Holiday" if holiday_on else current_day
+
         scheduled_activity = "FREE TIME"
         scheduled_activity_start = None
         next_activity = "NONE"
@@ -207,7 +215,8 @@ try:
         scheduled_sub_activities = ""
         scheduled_check_list = ""
 
-        today_schedule = df[df['Day'].str.strip() == current_day].to_dict('records')
+        # Use effective_day instead of current_day
+        today_schedule = df[df['Day'].str.strip().str.title() == effective_day.title()].to_dict('records')
 
         for i, row in enumerate(today_schedule):
             try:
@@ -236,10 +245,6 @@ try:
                     next_time_str = datetime.strptime(start_str, '%H:%M').strftime('%I:%M %p')
                     break
             except ValueError: continue
-
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            flex_on = st.toggle("🔀 Flex Mode (Override Schedule)", key="flex_toggle")
 
         if flex_on:
             unique_activities = sorted(list(set([act.strip().upper() for act in df['Activity'] if act.strip()])))
@@ -273,6 +278,9 @@ try:
         else: color = "#333333" 
 
         st.markdown(f"<h1 style='text-align: center; font-size: 4.5rem; color: {color}; margin-top: 10px; margin-bottom: 5px; line-height: 1.2;'>{current_activity}</h1>", unsafe_allow_html=True)
+
+        if holiday_on:
+            st.markdown("<p style='text-align: center; color: #ff9f36; font-weight: bold;'>🎉 Running Custom Holiday Schedule</p>", unsafe_allow_html=True)
 
         if current_activity_start and not flex_on:
             dt_start = datetime.combine(now.date(), current_activity_start)
@@ -493,7 +501,6 @@ try:
                     
                     st.info(f"⏳ **In Progress:** {display_name} (Running for {mins_elapsed} min)")
                     
-                    # Logic to allow status update for project tasks upon saving
                     is_project = str(active_row['Notes']).strip() == "Project Tracking"
                     new_proj_status = None
                     raw_task_name = ""
@@ -537,7 +544,6 @@ try:
                                     fsheet = get_sheet("future_tasks")
                                     fsheet.update_cell(r_idx, 7, "Completed") 
                                     
-                            # Update Project task status dynamically if it is a project task
                             if is_project and new_proj_status:
                                 p_matches = proj_df[proj_df['Task Name'] == raw_task_name]
                                 if not p_matches.empty:
@@ -741,13 +747,13 @@ try:
     # TAB 2: SCHEDULE EDITOR
     # ==========================================
     with tab2:
-        days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-        target_day = st.selectbox("Select Day to Edit", days_of_week, index=days_of_week.index(current_day))
+        days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Holiday"]
+        target_day = st.selectbox("Select Day to Edit", days_of_week, index=days_of_week.index(effective_day))
         
         st.markdown(f"<h3 style='text-align: center; color: #555; margin-bottom: 5px;'>{target_day}'s Full Routine</h3>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #888; font-size: 14px; margin-bottom: 20px;'>Tap any cell to edit. Scroll right to see Sub-Activities and Checklists.</p>", unsafe_allow_html=True)
         
-        target_full_df = df[df['Day'].str.strip() == target_day].copy()
+        target_full_df = df[df['Day'].str.strip().str.title() == target_day.title()].copy()
         
         if not target_full_df.empty:
             edit_df = target_full_df[['Start_Time', 'End_Time', 'Activity', 'Sub_Activities', 'check_list']].copy()
@@ -799,7 +805,7 @@ try:
                         new_rows.append([target_day, start_str, end_str, duration_str, str(row['Activity']).strip().upper(), sub_act, chk_act])
 
                     full_df = df.copy()
-                    other_days_df = full_df[full_df['Day'].str.strip() != target_day]
+                    other_days_df = full_df[full_df['Day'].str.strip().str.title() != target_day.title()]
                     new_target_df = pd.DataFrame(new_rows, columns=["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list"])
                     final_df = pd.concat([other_days_df, new_target_df], ignore_index=True)
                     
@@ -825,7 +831,7 @@ try:
                 with cols_sched[col_idx_sched % 3]:
                     st.metric(label=act, value=display_time)
                 col_idx_sched += 1
-        else: st.info(f"No routine scheduled for {target_day}.")
+        else: st.info(f"No routine scheduled for {target_day}. You can add one above!")
 
     # ==========================================
     # TAB 3: HYDRATION

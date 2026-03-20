@@ -24,7 +24,6 @@ st.markdown(f"""
 # --- 2. DATABASE CONNECTION ---
 @st.cache_resource
 def get_gspread_client():
-    # Define scopes for Google Sheets and Drive
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
@@ -35,9 +34,7 @@ def get_gspread_client():
 
 def load_data():
     client = get_gspread_client()
-    # Open the database and get the specific sheet
     sheet = client.open("BPS_Database").worksheet("students_master")
-    # Fetch all data and convert to Pandas DataFrame
     records = sheet.get_all_records()
     return pd.DataFrame(records)
 
@@ -51,7 +48,7 @@ if 'df' not in st.session_state:
 
 # --- 3. SIDEBAR NAVIGATION ---
 st.sidebar.title("🏫 BPS Admission Hub")
-menu = st.sidebar.radio("Navigate", ["Data Analytics", "New Admission", "System Settings"])
+menu = st.sidebar.radio("Navigate", ["Data Analytics", "New Admission", "Student Transfer", "System Settings"])
 
 # --- 4. DATA ANALYTICS TAB ---
 if menu == "Data Analytics":
@@ -64,8 +61,6 @@ if menu == "Data Analytics":
     col3.metric("Girls", len(df[df['Gender'].str.upper() == 'GIRLS']))
 
     st.subheader("Enrollment by Class")
-    
-    # Updated to 'CLASS LPP'
     class_order = ['CLASS LPP', 'CLASS PP', 'CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV', 'CLASS V']
     
     fig = px.histogram(df, x="Class", color="Gender", barmode='group', 
@@ -85,8 +80,6 @@ elif menu == "New Admission":
         with col1:
             name = st.text_input("Student Name").upper()
             gender = st.selectbox("Gender", ["BOYS", "GIRLS"])
-            
-            # Updated to 'CLASS LPP'
             cls = st.selectbox("Class", ["CLASS LPP", "CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V"])
             sec = st.selectbox("Section", ["A", "B", "C"])
             roll = st.number_input("Roll Number", min_value=1, step=1)
@@ -105,7 +98,6 @@ elif menu == "New Admission":
                 new_sl = len(st.session_state.df) + 1
                 student_code = f"BPS{datetime.now().year}{roll:03d}"
                 
-                # Create a list exactly matching the columns in your students_master.csv
                 row_to_append = [
                     new_sl, name, gender, cls, sec, roll, father, mother, 
                     dob.strftime("%Y-%m-%d"), blood, mobile, student_code,
@@ -116,27 +108,100 @@ elif menu == "New Admission":
                     try:
                         client = get_gspread_client()
                         sheet = client.open("BPS_Database").worksheet("students_master")
-                        
-                        # Append the list directly to the bottom of the Google Sheet
                         sheet.append_row(row_to_append)
-                        
                         st.success(f"✅ Successfully admitted {name} to {cls} {sec}!")
-                        
-                        # Refresh the cached data
                         st.session_state.df = load_data() 
                     except Exception as e:
                         st.error(f"Failed to save student: {e}")
             else:
                 st.error("⚠️ Please fill in at least the Student Name and Mobile Number.")
 
-# --- 6. SYSTEM SETTINGS ---
+# --- 6. STUDENT TRANSFER (TRANSFER OUT) ---
+elif menu == "Student Transfer":
+    st.title("📤 Transfer Out Student")
+    st.write("Remove a student from the active roster and archive them in the Transfer History log.")
+    
+    df = st.session_state.df
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        # Step 1: Filter by class to make finding the student easier
+        transfer_class = st.selectbox("Filter by Class", df['Class'].unique())
+        filtered_df = df[df['Class'] == transfer_class]
+    
+    with col2:
+        # Step 2: Select the specific student using Name and Student Code
+        student_display_list = filtered_df['Student Code'].astype(str) + " - " + filtered_df['Name']
+        selected_student_str = st.selectbox("Select Student to Transfer", student_display_list)
+    
+    st.divider()
+    
+    if selected_student_str:
+        # Extract the Student Code from the selection string
+        target_code = selected_student_str.split(" - ")[0]
+        student_data = filtered_df[filtered_df['Student Code'].astype(str) == target_code].iloc[0]
+        
+        st.subheader("Confirm Student Details")
+        st.write(f"**Name:** {student_data['Name']} | **Father:** {student_data['Father']} | **Roll:** {student_data['Roll']}")
+        
+        # Step 3: Transfer details
+        t_col1, t_col2 = st.columns(2)
+        with t_col1:
+            transfer_reason = st.text_input("Reason for Transfer (e.g., Passed Out, Relocated)", value="Passed Out")
+        with t_col2:
+            transfer_date = st.date_input("Transfer Date", datetime.today())
+            
+        st.warning("⚠️ This action will remove the student from the live system and move them to the history tab.")
+        
+        if st.button("Confirm Transfer Out", type="primary"):
+            with st.spinner("Processing Transfer..."):
+                try:
+                    client = get_gspread_client()
+                    db = client.open("BPS_Database")
+                    master_sheet = db.worksheet("students_master")
+                    
+                    # 1. Ensure 'transfer_history' tab exists, if not, create it
+                    try:
+                        history_sheet = db.worksheet("transfer_history")
+                    except gspread.exceptions.WorksheetNotFound:
+                        # Create new tab and copy headers + Add Transfer Date and Reason
+                        history_sheet = db.add_worksheet(title="transfer_history", rows="1000", cols="20")
+                        headers = master_sheet.row_values(1)
+                        headers.extend(["Transfer Date", "Transfer Reason"])
+                        history_sheet.append_row(headers)
+                    
+                    # 2. Find the row to delete in students_master
+                    cell = master_sheet.find(target_code)
+                    if cell:
+                        row_num = cell.row
+                        
+                        # Fetch the full row data
+                        row_data = master_sheet.row_values(row_num)
+                        
+                        # Add transfer details to the end of the row
+                        row_data.extend([transfer_date.strftime("%Y-%m-%d"), transfer_reason])
+                        
+                        # 3. Append to transfer_history
+                        history_sheet.append_row(row_data)
+                        
+                        # 4. Delete from students_master
+                        master_sheet.delete_row(row_num)
+                        
+                        st.success(f"✅ Successfully transferred out {student_data['Name']}!")
+                        
+                        # 5. Reload session data
+                        st.session_state.df = load_data()
+                        st.rerun() # Refresh UI
+                    else:
+                        st.error("Could not locate the student code in the live database.")
+                except Exception as e:
+                    st.error(f"Transfer failed: {e}")
+
+# --- 7. SYSTEM SETTINGS ---
 elif menu == "System Settings":
     st.title("⚙️ System Settings & Data Explorer")
     st.subheader("Class Configuration")
-    
-    # Updated text description
     st.info("**CLASS LPP (Lower Pre Primary) Section A** is currently active and available in the Admission portal.")
-    
     st.divider()
     
     st.subheader("Raw Master Data Explorer")

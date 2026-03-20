@@ -8,7 +8,6 @@ from datetime import datetime
 # --- 1. CONFIG & SECURITY ---
 st.set_page_config(page_title="BPS Admission Hub", layout="wide")
 
-# Custom CSS for BPS Branding & Security
 st.markdown(f"""
     <style>
     .stApp {{ background-color: #f0f2f6; }}
@@ -37,21 +36,17 @@ def load_data():
     client = get_gspread_client()
     sheet = client.open("BPS_Database").worksheet("students_master")
     
-    # Fetch data
     records = sheet.get_all_records()
     df = pd.DataFrame(records)
     
-    # FIX: Force 'Student Code' to be exactly a 14-digit string
     if 'Student Code' in df.columns:
         df['Student Code'] = df['Student Code'].astype(str).str.zfill(14)
         
-    # Force Roll to be an integer
     if 'Roll' in df.columns:
         df['Roll'] = pd.to_numeric(df['Roll'], errors='coerce').fillna(0).astype(int)
         
     return df
 
-# Initialize Data in Session State
 if 'df' not in st.session_state:
     with st.spinner("Connecting to BPS Database..."):
         try:
@@ -63,7 +58,6 @@ if 'df' not in st.session_state:
 # --- 3. SIDEBAR NAVIGATION ---
 st.sidebar.title("🏫 BPS Admission Hub")
 
-# Manual Sync Button
 if st.sidebar.button("🔄 Sync Live Database"):
     with st.spinner("Fetching latest data..."):
         st.session_state.df = load_data()
@@ -117,14 +111,12 @@ elif menu == "New Admission":
         if submitted:
             if name and mobile:
                 new_sl = len(st.session_state.df) + 1
-                # Generates a temporary 14-digit code format (padded with zeros)
                 student_code = f"BPS{datetime.now().year}{roll:03d}".zfill(14) 
                 
-                # Match the 17 columns of students_master.csv perfectly
                 row_to_append = [
                     new_sl, name, gender, cls, sec, roll, father, mother, 
                     dob.strftime("%Y-%m-%d"), blood, mobile, student_code,
-                    "GENERAL", "", "", "", "" # Empty strings for BSP columns and Secondary Mobile
+                    "GENERAL", "", "", "", "" 
                 ]
                 
                 with st.spinner("Saving to BPS_Database..."):
@@ -134,7 +126,6 @@ elif menu == "New Admission":
                         sheet.append_row(row_to_append)
                         st.success(f"✅ Successfully admitted {name} to {cls} {sec}!")
                         
-                        # Refresh cache automatically
                         st.session_state.df = load_data() 
                     except Exception as e:
                         st.error(f"Failed to save student: {e}")
@@ -154,14 +145,12 @@ elif menu == "Student Transfer":
         filtered_df = df[df['Class'] == transfer_class]
     
     with col2:
-        # Combine 14-digit Student Code and Name for the dropdown
         student_display_list = filtered_df['Student Code'].astype(str) + " - " + filtered_df['Name']
         selected_student_str = st.selectbox("Select Student to Transfer", student_display_list)
     
     st.divider()
     
     if selected_student_str:
-        # Extract the exact 14-digit Student Code
         target_code = selected_student_str.split(" - ")[0]
         student_data = filtered_df[filtered_df['Student Code'].astype(str) == target_code].iloc[0]
         
@@ -186,7 +175,6 @@ elif menu == "Student Transfer":
                     db = client.open("BPS_Database")
                     master_sheet = db.worksheet("students_master")
                     
-                    # 1. Ensure 'transfer_history' exists
                     try:
                         history_sheet = db.worksheet("transfer_history")
                     except gspread.exceptions.WorksheetNotFound:
@@ -195,25 +183,27 @@ elif menu == "Student Transfer":
                         headers.extend(["Transfer Date", "Transfer Reason"])
                         history_sheet.append_row(headers)
                     
-                    # 2. Find the exact row in Google Sheets
                     cell = master_sheet.find(target_code)
                     
                     if cell:
                         row_num = cell.row
                         
-                        # 3. Get the data, append tracking info
+                        # 3. Get the raw data from Google Sheets
                         row_data = master_sheet.row_values(row_num)
+                        
+                        # FIX: Pad the list to ensure it's exactly 17 columns long 
+                        # before appending the transfer date and reason!
+                        while len(row_data) < 17:
+                            row_data.append("")
+                            
+                        # Now it's safe to add the 2 extra columns
                         row_data.extend([transfer_date.strftime("%Y-%m-%d"), transfer_reason])
                         
-                        # 4. Move to history and delete from master
                         history_sheet.append_row(row_data)
-                        
-                        # FIX: Using delete_rows() instead of delete_row()
                         master_sheet.delete_rows(row_num)
                         
                         st.success(f"✅ Successfully transferred out {student_data['Name']}!")
                         
-                        # 5. Reload data to reflect deletion
                         st.session_state.df = load_data()
                         st.rerun() 
                     else:

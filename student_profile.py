@@ -110,10 +110,18 @@ if selected_class:
     if selected_section:
         filtered_by_section = filtered_by_class[filtered_by_class['Section'] == selected_section].copy()
         
-        # Create a unique display name using Name + Roll Number
+        # --- ROLL NUMBER SORTING LOGIC ---
+        # 1. Convert Roll to numeric values so 2 comes before 10
+        filtered_by_section['Roll_Numeric'] = pd.to_numeric(filtered_by_section['Roll'], errors='coerce')
+        
+        # 2. Sort the entire table by this new numeric roll column
+        filtered_by_section = filtered_by_section.sort_values(by='Roll_Numeric')
+        
+        # 3. Create the unique display name using Name + Roll Number
         filtered_by_section['Display_Name'] = filtered_by_section['Name'].astype(str) + " (Roll: " + filtered_by_section['Roll'].astype(str) + ")"
         
-        student_list = sorted(filtered_by_section['Display_Name'].unique().tolist())
+        # 4. Create the list directly from the sorted table (Do NOT use alphabetical sorted() here)
+        student_list = filtered_by_section['Display_Name'].unique().tolist()
         selected_display_name = st.sidebar.selectbox("3. Select Student", student_list)
 
         if selected_display_name:

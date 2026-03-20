@@ -462,100 +462,107 @@ try:
                     st.cache_data.clear()
                     st.rerun()
 
+        # ==========================================
+        # MULTI-TASKING LOGIC (LIVE TIMERS)
+        # ==========================================
         running_tasks = log_df[log_df['End_Time'] == 'RUNNING']
-        is_running = not running_tasks.empty
         
         pending_projs = pd.DataFrame()
         if not proj_df.empty:
             pending_projs = proj_df[proj_df['Status'].str.strip().str.title() != 'Completed']
         
-        if sub_list or is_running or not pending_projs.empty:
+        if sub_list or not running_tasks.empty or not pending_projs.empty:
             st.markdown("---")
             st.markdown("<h4 style='text-align: center; color: #333;'>Tap to Track Activity</h4>", unsafe_allow_html=True)
             
-            if is_running:
-                active_row = running_tasks.iloc[-1]
-                active_main = str(active_row['Activity'])
-                active_sub = str(active_row['Sub_Activities'])
-                display_name = active_sub if active_sub else active_main
-                
-                try:
-                    start_dt_str = f"{active_row['Date']} {active_row['Start_Time']}"
-                    dt_naive = datetime.strptime(start_dt_str, "%Y-%m-%d %H:%M")
-                    active_start_time = ist_timezone.localize(dt_naive)
-                    elapsed_time = now - active_start_time
-                    mins_elapsed = int(elapsed_time.total_seconds() // 60)
-                except: mins_elapsed = 0 
-                
-                st.info(f"⏳ **In Progress:** {display_name} (Running for {mins_elapsed} min)")
-                
-                col_stop, col_cancel = st.columns(2)
-                with col_stop:
-                    if st.button("🛑 SAVE", use_container_width=True, type="primary"):
-                        end_time_log = now.time()
-                        try:
-                            hours, remainder = divmod(int(elapsed_time.total_seconds()), 3600)
-                            minutes = remainder // 60
-                            duration_str = f"{hours}:{minutes:02d}"
-                        except: duration_str = "0:00"
+            # --- 1. RENDER ALL RUNNING TASKS ---
+            if not running_tasks.empty:
+                for idx, active_row in running_tasks.iterrows():
+                    sheet_row = idx + 2 # +2 because gspread is 1-indexed and has a header row
+                    active_main = str(active_row['Activity'])
+                    active_sub = str(active_row['Sub_Activities'])
+                    display_name = active_sub if active_sub else active_main
+                    
+                    try:
+                        start_dt_str = f"{active_row['Date']} {active_row['Start_Time']}"
+                        dt_naive = datetime.strptime(start_dt_str, "%Y-%m-%d %H:%M")
+                        active_start_time = ist_timezone.localize(dt_naive)
+                        elapsed_time = now - active_start_time
+                        mins_elapsed = int(elapsed_time.total_seconds() // 60)
+                    except: mins_elapsed = 0 
+                    
+                    st.info(f"⏳ **In Progress:** {display_name} (Running for {mins_elapsed} min)")
+                    
+                    col_stop, col_cancel = st.columns(2)
+                    with col_stop:
+                        if st.button("🛑 SAVE", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
+                            end_time_log = now.time()
+                            try:
+                                hours, remainder = divmod(int(elapsed_time.total_seconds()), 3600)
+                                minutes = remainder // 60
+                                duration_str = f"{hours}:{minutes:02d}"
+                            except: duration_str = "0:00"
 
-                        log_sheet = get_sheet("activity_log")
-                        cells = log_sheet.findall("RUNNING")
-                        for cell in cells:
-                            if cell.col == 3: 
-                                target_row = cell.row
-                                log_sheet.update_cell(target_row, 3, end_time_log.strftime('%H:%M')) 
-                                log_sheet.update_cell(target_row, 4, duration_str)                   
-                                # Notice we do NOT overwrite column 8 here so notes are preserved perfectly!
-                                break
+                            log_sheet = get_sheet("activity_log")
+                            log_sheet.update_cell(sheet_row, 3, end_time_log.strftime('%H:%M')) 
+                            log_sheet.update_cell(sheet_row, 4, duration_str)                   
+                            
+                            # Preserve notes (for meetings/projects) or write Auto-logged
+                            old_notes = str(active_row['Notes'])
+                            if old_notes.strip() == "":
+                                log_sheet.update_cell(sheet_row, 8, "Auto-logged via Timer") 
                                 
-                        if "[Due:" in active_sub:
-                            raw_task = active_sub.split(" [Due:")[0].strip()
-                            matches = future_df[(future_df['Task_Name'].str.strip() == raw_task) & (future_df['Type'] == 'Sub-Activity')]
-                            if not matches.empty:
-                                r_idx = int(matches.iloc[0]['row_index'])
-                                fsheet = get_sheet("future_tasks")
-                                fsheet.update_cell(r_idx, 7, "Completed") 
-                        st.cache_data.clear()
-                        st.success("Activity saved!")
-                        time.sleep(1)
-                        st.rerun()
+                            if "[Due:" in active_sub:
+                                raw_task = active_sub.split(" [Due:")[0].strip()
+                                matches = future_df[(future_df['Task_Name'].str.strip() == raw_task) & (future_df['Type'] == 'Sub-Activity')]
+                                if not matches.empty:
+                                    r_idx = int(matches.iloc[0]['row_index'])
+                                    fsheet = get_sheet("future_tasks")
+                                    fsheet.update_cell(r_idx, 7, "Completed") 
+                            st.cache_data.clear()
+                            st.success(f"Saved: {display_name}")
+                            time.sleep(1)
+                            st.rerun()
 
-                with col_cancel:
-                    if st.button("❌ CANCEL", use_container_width=True):
-                        log_sheet = get_sheet("activity_log")
-                        cells = log_sheet.findall("RUNNING")
-                        for cell in cells:
-                            if cell.col == 3: 
-                                log_sheet.delete_rows(cell.row)
-                                break
-                        st.cache_data.clear()
-                        st.warning("Activity cancelled.")
-                        time.sleep(1)
-                        st.rerun()
+                    with col_cancel:
+                        if st.button("❌ CANCEL", key=f"cancel_{sheet_row}", use_container_width=True):
+                            log_sheet = get_sheet("activity_log")
+                            log_sheet.delete_rows(sheet_row)
+                            st.cache_data.clear()
+                            st.warning(f"Cancelled: {display_name}")
+                            time.sleep(1)
+                            st.rerun()
+            
+            # Extract names of currently running sub-activities so we don't show their start buttons
+            running_subs = running_tasks['Sub_Activities'].tolist()
 
-            else:
-                # 1. Standard Routine Sub-Activities
-                if sub_list:
-                    cols = st.columns(3)
-                    for idx, task in enumerate(sub_list):
-                        with cols[idx % 3]:
-                            last_done = get_last_done_str(task, log_df, now)
-                            last_txt = f"\n(Last: {last_done})" if "[Due:" not in task else ""
-                            if st.button(f"▶️ {task}{last_txt}", key=f"btn_{task}", use_container_width=True):
-                                log_sheet = get_sheet("activity_log")
-                                log_sheet.append_row([
-                                    today_str, now.strftime('%H:%M'), "RUNNING", "RUNNING",    
-                                    current_activity, task, "", "Auto-logged via Timer"
-                                ])
-                                st.cache_data.clear()
-                                st.rerun()
-                
-                # 2. Project Task Tracker
-                if not pending_projs.empty:
+            # --- 2. RENDER ROUTINE SUB-ACTIVITIES (Not Currently Running) ---
+            avail_subs = [t for t in sub_list if t not in running_subs]
+            if avail_subs:
+                st.markdown("<div style='margin-top: 15px; margin-bottom: 5px; color: #333;'><b>▶️ Routine Tasks:</b></div>", unsafe_allow_html=True)
+                cols = st.columns(3)
+                for idx, task in enumerate(avail_subs):
+                    with cols[idx % 3]:
+                        last_done = get_last_done_str(task, log_df, now)
+                        last_txt = f"\n(Last: {last_done})" if "[Due:" not in task else ""
+                        if st.button(f"▶️ {task}{last_txt}", key=f"btn_{idx}_{task}", use_container_width=True):
+                            log_sheet = get_sheet("activity_log")
+                            log_sheet.append_row([
+                                today_str, now.strftime('%H:%M'), "RUNNING", "RUNNING",    
+                                current_activity, task, "", "Auto-logged via Timer"
+                            ])
+                            st.cache_data.clear()
+                            st.rerun()
+            
+            # --- 3. RENDER PROJECT TRACKER (Not Currently Running) ---
+            if not pending_projs.empty:
+                avail_projs = pending_projs[~pending_projs['Task Name'].isin([x.split(" (")[0] for x in running_subs])]
+                if not avail_projs.empty:
                     st.markdown("<div style='margin-top: 15px; margin-bottom: 5px; color: #0068c9;'><b>🚀 Start a Project Task:</b></div>", unsafe_allow_html=True)
                     col_sel, col_btn = st.columns([3, 1])
-                    proj_options = pending_projs['Task Name'].astype(str) + " (" + pending_projs['Project Name'].astype(str) + ")"
+                    
+                    proj_options = avail_projs['Task Name'].astype(str) + " (" + avail_projs['Project Name'].astype(str) + ")"
+                    
                     with col_sel:
                         selected_p_task = st.selectbox("Select Project Task", proj_options.tolist(), label_visibility="collapsed")
                     with col_btn:
@@ -576,44 +583,43 @@ try:
                             st.cache_data.clear()
                             st.rerun()
 
-                # 3. Smart Meeting & Visitor Live Tracker
-                st.markdown("<div style='margin-top: 15px; margin-bottom: 5px; color: #ff4b4b;'><b>👥 Start a Meeting / Visitor:</b></div>", unsafe_allow_html=True)
-                with st.expander("Enter Details & Start Timer", expanded=False):
-                    col_mt1, col_mt2 = st.columns(2)
-                    with col_mt1: 
-                        interaction_type = st.selectbox("Interaction Type", ["Attend Visitor", "Meet People"], key="live_mtg_type")
-                    
-                    # Extract unique old people names from log_df
-                    people_logs = log_df[log_df['Activity'] == 'PEOPLE']['Sub_Activities'].dropna().astype(str)
-                    extracted_names = []
-                    for val in people_logs:
-                        if " - " in val: extracted_names.append(val.split(" - ", 1)[-1].strip())
-                        else: extracted_names.append(val.strip())
-                    unique_old_people = sorted(list(set([n for n in extracted_names if n])))
-                    
-                    with col_mt2: 
-                        person_type = st.selectbox("Person", ["-- New Person --"] + unique_old_people, key="live_mtg_person")
-                    
-                    if person_type == "-- New Person --":
-                        person_name = st.text_input("Name of New Person", key="live_mtg_new_name")
-                    else:
-                        person_name = person_type
+            # --- 4. RENDER MEETING/VISITOR TRACKER ---
+            st.markdown("<div style='margin-top: 15px; margin-bottom: 5px; color: #ff4b4b;'><b>👥 Start a Meeting / Visitor:</b></div>", unsafe_allow_html=True)
+            with st.expander("Enter Details & Start Timer", expanded=False):
+                col_mt1, col_mt2 = st.columns(2)
+                with col_mt1: 
+                    interaction_type = st.selectbox("Interaction Type", ["Attend Visitor", "Meet People"], key="live_mtg_type")
+                
+                people_logs = log_df[log_df['Activity'] == 'PEOPLE']['Sub_Activities'].dropna().astype(str)
+                extracted_names = []
+                for val in people_logs:
+                    if " - " in val: extracted_names.append(val.split(" - ", 1)[-1].strip())
+                    else: extracted_names.append(val.strip())
+                unique_old_people = sorted(list(set([n for n in extracted_names if n])))
+                
+                with col_mt2: 
+                    person_type = st.selectbox("Person", ["-- New Person --"] + unique_old_people, key="live_mtg_person")
+                
+                if person_type == "-- New Person --":
+                    person_name = st.text_input("Name of New Person", key="live_mtg_new_name")
+                else:
+                    person_name = person_type
 
-                    topic_talk = st.text_input("Topic of Talking", key="live_mtg_topic")
-                    purpose_visit = st.text_input("Purpose of Visit", key="live_mtg_purpose")
+                topic_talk = st.text_input("Topic of Talking", key="live_mtg_topic")
+                purpose_visit = st.text_input("Purpose of Visit", key="live_mtg_purpose")
+                
+                if st.button("▶️ Start Meeting Timer", type="primary", use_container_width=True):
+                    final_name = person_name.strip() if person_name else "Unknown"
+                    sub_act_str = f"{interaction_type} - {final_name}"
+                    notes_str = f"Topic: {topic_talk} | Purpose: {purpose_visit}"
                     
-                    if st.button("▶️ Start Meeting Timer", type="primary", use_container_width=True):
-                        final_name = person_name.strip() if person_name else "Unknown"
-                        sub_act_str = f"{interaction_type} - {final_name}"
-                        notes_str = f"Topic: {topic_talk} | Purpose: {purpose_visit}"
-                        
-                        log_sheet = get_sheet("activity_log")
-                        log_sheet.append_row([
-                            today_str, now.strftime('%H:%M'), "RUNNING", "RUNNING",    
-                            "PEOPLE", sub_act_str.upper(), "", notes_str
-                        ])
-                        st.cache_data.clear()
-                        st.rerun()
+                    log_sheet = get_sheet("activity_log")
+                    log_sheet.append_row([
+                        today_str, now.strftime('%H:%M'), "RUNNING", "RUNNING",    
+                        "PEOPLE", sub_act_str.upper(), "", notes_str
+                    ])
+                    st.cache_data.clear()
+                    st.rerun()
 
         st.markdown("---")
         st.markdown("<h4 style='text-align: center; color: #555; margin-bottom: 20px;'>📊 Today's Actual Productivity</h4>", unsafe_allow_html=True)

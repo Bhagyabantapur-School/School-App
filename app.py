@@ -2,10 +2,12 @@ import streamlit as st
 import pandas as pd
 import os
 import calendar
+import base64
 from datetime import datetime, time, timedelta
 from streamlit_qrcode_scanner import qrcode_scanner
 import gspread
 from google.oauth2.service_account import Credentials
+from google.auth.transport.requests import AuthorizedSession
 
 # --- 1. CONFIGURATION & STYLING ---
 st.set_page_config(page_title="BPS Digital", page_icon="🏫", layout="centered")
@@ -69,16 +71,27 @@ if 'user_name' not in st.session_state: st.session_state.user_name = None
 
 # --- 3. GOOGLE SHEETS CONNECTION & DATABASE ENGINE ---
 @st.cache_resource
+def get_google_credentials():
+    """Loads credentials to be used for Drive and Sheets API access."""
+    skey = dict(st.secrets["gcp_service_account"])
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive.readonly"]
+    return Credentials.from_service_account_info(skey, scopes=scopes)
+
+@st.cache_resource
 def init_gsheets():
     try:
-        skey = dict(st.secrets["gcp_service_account"])
-        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        credentials = Credentials.from_service_account_info(skey, scopes=scopes)
-        gc = gspread.authorize(credentials)
+        creds = get_google_credentials()
+        gc = gspread.authorize(creds)
         return gc.open("BPS_Database")
     except Exception as e:
         st.error("⚠️ Google Sheets Connection Failed! Please check your Streamlit Secrets.")
         st.stop()
+
+@st.cache_resource
+def get_drive_session():
+    """Returns an AuthorizedSession for downloading drive images."""
+    creds = get_google_credentials()
+    return AuthorizedSession(creds)
 
 sh = init_gsheets()
 
@@ -126,14 +139,49 @@ def publish_notice(text):
     except: ws = sh.add_worksheet(title="notice", rows=10, cols=10)
     ws.update_acell("A1", text)
 
-# Local static files (Uploaded via GitHub)
 def get_local_csv(file):
     if os.path.exists(file): 
         try: return pd.read_csv(file)
         except: return pd.DataFrame()
     return pd.DataFrame()
 
-# --- 4. TIME HELPERS ---
+# --- 4. SECURE IMAGE FETCHING (Converted to Base64 for Data Editor) ---
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_secure_image_bytes(file_id):
+    """Securely downloads the image using the authorized service account."""
+    try:
+        authed_session = get_drive_session()
+        url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+        response = authed_session.get(url)
+        if response.status_code == 200:
+            return response.content
+    except Exception:
+        pass
+    return None
+
+def get_secure_photo_uri(url):
+    """Converts Drive URL to Base64 Data URI so it fits inside Streamlit's data_editor."""
+    fallback_image = "https://www.w3schools.com/howto/img_avatar.png"
+    
+    if pd.isna(url) or url == "" or not isinstance(url, str):
+        return fallback_image
+
+    file_id = None
+    if "drive.google.com/file/d/" in url:
+        try: file_id = url.split("/d/")[1].split("/")[0]
+        except IndexError: pass
+
+    if file_id:
+        image_bytes = fetch_secure_image_bytes(file_id)
+        if image_bytes:
+            # Convert secure bytes to base64 so Streamlit ImageColumn can display it
+            b64_str = base64.b64encode(image_bytes).decode()
+            return f"data:image/jpeg;base64,{b64_str}"
+            
+    # Fallback if standard web url
+    return url if url.startswith("http") else fallback_image
+
+# --- 5. TIME HELPERS ---
 utc_now = datetime.utcnow()
 now = utc_now + timedelta(hours=5, minutes=30)
 curr_date_str = now.strftime("%d-%m-%Y")
@@ -145,6 +193,7 @@ def parse_time_safe(t_str):
         try: return datetime.strptime(t_str, fmt).time()
         except: continue
     return None
+
 
 # ==========================================
 # LOGIN SCREEN
@@ -253,7 +302,10 @@ else:
                         if is_substituting: st.info(f"🔄 **SUBSTITUTION:** Covering for **{absent_teacher_name}** ({target_class} - {target_section})")
                         else: st.info(f"📌 Assigned **11:15 AM** class: **{target_class} - {target_section}**")
                         
-                        students = get_local_csv('students.csv')
+                        # Fetch Students (Try Google Sheets first, fallback to CSV)
+                        students = fetch_sheet_data('students')
+                        if students.empty: students = get_local_csv('students.csv')
+
                         if not students.empty:
                             if 'Section' not in students.columns: students['Section'] = 'A'
                             roster = students[(students['Class'] == target_class) & (students['Section'] == target_section)].copy()
@@ -283,7 +335,18 @@ else:
                                 roster['Scan_Key'] = roster['Roll'].astype(str) + "_" + roster['Name'].astype(str)
                                 roster['Ate_MDM'] = roster['Scan_Key'].isin(st.session_state.scanned_keys)
                                 
-                                edited = st.data_editor(roster[['Section', 'Roll', 'Name', 'Ate_MDM']], hide_index=True, use_container_width=True)
+                                # --- ADD TINY STAMP PHOTO UI ---
+                                if 'Photo_URL' not in roster.columns: roster['Photo_URL'] = ""
+                                roster['Photo'] = roster['Photo_URL'].apply(get_secure_photo_uri)
+
+                                edited = st.data_editor(
+                                    roster[['Photo', 'Section', 'Roll', 'Name', 'Ate_MDM']], 
+                                    hide_index=True, 
+                                    use_container_width=True,
+                                    column_config={
+                                        "Photo": st.column_config.ImageColumn("👤", width="small")
+                                    }
+                                )
                                 st.markdown(f"### ✅ Total Selected: {edited['Ate_MDM'].sum()}")
 
                                 if st.button("Submit MDM"):
@@ -459,7 +522,12 @@ else:
             
             if sel_c != "Select Class...":
                 t_class, t_sec = sel_c.rsplit(' ', 1)
-                std, mdm_log = get_local_csv('students.csv'), fetch_sheet_data('mdm_log')
+                
+                # Fetch Students (Try Google Sheets first, fallback to CSV)
+                std = fetch_sheet_data('students')
+                if std.empty: std = get_local_csv('students.csv')
+                
+                mdm_log = fetch_sheet_data('mdm_log')
                 
                 if not std.empty:
                     if 'Section' not in std.columns: std['Section'] = 'A'
@@ -469,7 +537,20 @@ else:
                         mdm_eaters = mdm_log[(mdm_log['Date'].astype(str) == curr_date_str) & (mdm_log['Class'] == t_class) & (mdm_log['Section'] == t_sec)]['Roll'].astype(str).tolist() if not mdm_log.empty else []
                         
                         ros['Present'], ros['MDM (Ate)'] = True, ros['Roll'].astype(str).isin(mdm_eaters)
-                        ed = st.data_editor(ros[['Roll', 'Name', 'Present', 'MDM (Ate)']], hide_index=True, use_container_width=True, disabled=["Roll", "Name", "MDM (Ate)"])
+                        
+                        # --- ADD TINY STAMP PHOTO UI ---
+                        if 'Photo_URL' not in ros.columns: ros['Photo_URL'] = ""
+                        ros['Photo'] = ros['Photo_URL'].apply(get_secure_photo_uri)
+
+                        ed = st.data_editor(
+                            ros[['Photo', 'Roll', 'Name', 'Present', 'MDM (Ate)']], 
+                            hide_index=True, 
+                            use_container_width=True, 
+                            disabled=["Photo", "Roll", "Name", "MDM (Ate)"],
+                            column_config={
+                                "Photo": st.column_config.ImageColumn("👤", width="small")
+                            }
+                        )
                         
                         c1, c2 = st.columns(2)
                         c1.markdown(f"<div class='att-badge att-neutral'>✅ Total Selected: {ed['Present'].sum()}</div>", unsafe_allow_html=True)
@@ -675,7 +756,10 @@ else:
         with tabs[4]: 
             s_c = st.selectbox("Class", CLASS_OPTIONS, key='shoe')
             if s_c != "Select Class...":
-                std, log = get_local_csv('students.csv'), fetch_sheet_data('shoe_log')
+                std = fetch_sheet_data('students')
+                if std.empty: std = get_local_csv('students.csv')
+                
+                log = fetch_sheet_data('shoe_log')
                 if not std.empty:
                     ros = std[std['Class'] == s_c].copy()
                     ros['Received'] = ros['Roll'].astype(str).isin(log[log['Class'] == s_c]['Roll'].astype(str).tolist() if not log.empty else [])

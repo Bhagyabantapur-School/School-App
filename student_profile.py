@@ -1,105 +1,3 @@
-import streamlit as st
-import pandas as pd
-import gspread
-from google.oauth2.service_account import Credentials
-from google.auth.transport.requests import AuthorizedSession
-import plotly.express as px
-
-# --- 1. PAGE CONFIGURATION ---
-st.set_page_config(page_title="BPS Student Profile", page_icon="🎓", layout="wide")
-
-# --- 2. SECURE CREDENTIALS & CONNECTIONS ---
-@st.cache_resource
-def get_google_credentials():
-    """Loads credentials once to be used by both Sheets and Drive API."""
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive.readonly" # Explicitly requesting read access for Drive
-    ]
-    return Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"], 
-        scopes=scopes
-    )
-
-@st.cache_resource
-def get_gspread_client():
-    creds = get_google_credentials()
-    return gspread.authorize(creds)
-
-# --- 3. DATA LOADING & CACHING ---
-@st.cache_data(ttl=600)
-def load_database_data():
-    client = get_gspread_client()
-    db = client.open("BPS_Database") 
-    
-    try:
-        df_master = pd.DataFrame(db.worksheet("students_master").get_all_records())
-        df_mdm = pd.DataFrame(db.worksheet("mdm_log").get_all_records())
-        df_attendance = pd.DataFrame(db.worksheet("student_attendance_master").get_all_records())
-        df_forms = pd.DataFrame(db.worksheet("form_distribution_log").get_all_records())
-    except gspread.exceptions.WorksheetNotFound as e:
-        st.error(f"Could not find worksheet: {e}. Please check your tab names.")
-        st.stop()
-        
-    return df_master, df_mdm, df_attendance, df_forms
-
-# --- 4. SECURE IMAGE FETCHER ---
-@st.cache_data(ttl=3600, show_spinner=False) # Cache images for 1 hour to load faster
-def fetch_secure_image_bytes(file_id):
-    """Securely downloads the image using the authorized service account."""
-    try:
-        creds = get_google_credentials()
-        authed_session = AuthorizedSession(creds)
-        # Drive API v3 endpoint for downloading file content
-        url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
-        response = authed_session.get(url)
-        
-        if response.status_code == 200:
-            return response.content # Returns raw image bytes
-        else:
-            return None
-    except Exception as e:
-        return None
-
-def display_student_photo(url):
-    """Extracts the ID and passes it to the secure fetcher, handling rendering."""
-    fallback_image = "https://www.w3schools.com/howto/img_avatar.png"
-    
-    if pd.isna(url) or url == "" or not isinstance(url, str):
-        st.image(fallback_image, width=150)
-        return
-
-    file_id = None
-    # Extract the file ID from a standard Google Drive sharing link
-    if "drive.google.com/file/d/" in url:
-        try:
-            file_id = url.split("/d/")[1].split("/")[0]
-        except IndexError:
-            pass
-
-    if file_id:
-        image_bytes = fetch_secure_image_bytes(file_id)
-        if image_bytes:
-            st.image(image_bytes, width=150)
-        else:
-            st.warning("Secure photo fetch failed.")
-            st.image(fallback_image, width=150)
-    else:
-        # If it's a regular web link (not drive), try to display it normally
-        try:
-            st.image(url, width=150)
-        except Exception:
-            st.image(fallback_image, width=150)
-
-# --- 5. MAIN APP LOGIC ---
-st.title("🎓 BPS Student Profile Dashboard")
-
-try:
-    df_master, df_mdm, df_attendance, df_forms = load_database_data()
-except Exception as e:
-    st.warning("Please configure your Google Sheets connection and secrets to view live data.")
-    st.stop()
-
 # --- SIDEBAR: EASY SEARCH ---
 st.sidebar.header("Find Student")
 
@@ -112,15 +10,26 @@ if selected_class:
     selected_section = st.sidebar.selectbox("2. Select Section", section_list)
     
     if selected_section:
-        filtered_by_section = filtered_by_class[filtered_by_class['Section'] == selected_section]
-        student_list = sorted(filtered_by_section['Name'].astype(str).unique().tolist())
-        selected_name = st.sidebar.selectbox("3. Select Student", student_list)
+        # Use .copy() to safely modify the dataframe
+        filtered_by_section = filtered_by_class[filtered_by_class['Section'] == selected_section].copy()
+        
+        # --- THE FIX: Create a unique display name using Name + Roll Number ---
+        filtered_by_section['Display_Name'] = filtered_by_section['Name'].astype(str) + " (Roll: " + filtered_by_section['Roll'].astype(str) + ")"
+        
+        # Sort and display the new unique names
+        student_list = sorted(filtered_by_section['Display_Name'].unique().tolist())
+        selected_display_name = st.sidebar.selectbox("3. Select Student", student_list)
 
-        if selected_name:
-            student_record = filtered_by_section[filtered_by_section['Name'] == selected_name]
+        if selected_display_name:
+            # Filter the master record using the exact Display Name
+            student_record = filtered_by_section[filtered_by_section['Display_Name'] == selected_display_name]
             
             if not student_record.empty:
                 student = student_record.iloc[0]
+                
+                # Extract the actual name and roll to use for filtering the logs
+                selected_name = student['Name']
+                selected_roll = student['Roll']
                 
                 # --- PROFILE HEADER ---
                 st.divider()
@@ -136,7 +45,6 @@ if selected_class:
 
                 with head_col1:
                     raw_url = student.get('Photo_URL', '')
-                    # Call the new secure display function
                     display_student_photo(raw_url)
 
                 with head_col2:
@@ -149,13 +57,14 @@ if selected_class:
                 # --- MAIN DATA MODULES ---
                 col1, col2, col3 = st.columns(3)
                 
-                # MODULE 1: OVERALL ATTENDANCE
+                # MODULE 1: OVERALL ATTENDANCE (Updated with Roll filter)
                 with col1:
                     st.write("### 📅 Master Attendance")
                     student_att = df_attendance[
                         (df_attendance['Class'] == selected_class) & 
                         (df_attendance['Section'] == selected_section) & 
-                        (df_attendance['Name'] == selected_name)
+                        (df_attendance['Name'] == selected_name) &
+                        (df_attendance['Roll'].astype(str) == str(selected_roll)) # Filters by exact Roll
                     ]
                     
                     if not student_att.empty:
@@ -170,13 +79,14 @@ if selected_class:
                     else:
                         st.info("No master attendance records found.")
 
-                # MODULE 2: MDM LOG
+                # MODULE 2: MDM LOG (Updated with Roll filter)
                 with col2:
                     st.write("### 🍛 MDM Participation")
                     student_mdm = df_mdm[
                         (df_mdm['Class'] == selected_class) & 
                         (df_mdm['Section'] == selected_section) & 
-                        (df_mdm['Name'] == selected_name)
+                        (df_mdm['Name'] == selected_name) &
+                        (df_mdm['Roll'].astype(str) == str(selected_roll)) # Filters by exact Roll
                     ]
                     
                     mdm_days = len(student_mdm)
@@ -189,13 +99,14 @@ if selected_class:
                     else:
                         st.info("No MDM entries found.")
 
-                # MODULE 3: ADMINISTRATIVE / FORMS
+                # MODULE 3: ADMINISTRATIVE / FORMS (Updated with Roll filter)
                 with col3:
                     st.write("### 📋 Admin & Forms")
                     student_forms = df_forms[
                         (df_forms['Class'] == selected_class) & 
                         (df_forms['Section'] == selected_section) & 
-                        (df_forms['Student Name'] == selected_name)
+                        (df_forms['Student Name'] == selected_name) &
+                        (df_forms['Roll'].astype(str) == str(selected_roll)) # Filters by exact Roll
                     ]
                     
                     if not student_forms.empty:

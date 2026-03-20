@@ -34,7 +34,7 @@ def get_gspread_client():
 
 def load_data():
     client = get_gspread_client()
-    sheet = client.open("BPS_Database").worksheet("students_master")
+    sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID_HERE/edit").worksheet("students_master") # Remember to put your URL here if you used the conflict fix!
     
     records = sheet.get_all_records()
     df = pd.DataFrame(records)
@@ -98,6 +98,8 @@ elif menu == "New Admission":
             cls = st.selectbox("Class", ["CLASS LPP", "CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V"])
             sec = st.selectbox("Section", ["A", "B", "C"])
             roll = st.number_input("Roll Number", min_value=1, step=1)
+            # NEW: Admission Date field
+            admission_date = st.date_input("Admission Date", datetime.today())
             
         with col2:
             father = st.text_input("Father's Name").upper()
@@ -113,16 +115,18 @@ elif menu == "New Admission":
                 new_sl = len(st.session_state.df) + 1
                 student_code = f"BPS{datetime.now().year}{roll:03d}".zfill(14) 
                 
+                # UPDATED: Now includes Admission Date at the very end (18th column)
                 row_to_append = [
                     new_sl, name, gender, cls, sec, roll, father, mother, 
                     dob.strftime("%Y-%m-%d"), blood, mobile, student_code,
-                    "GENERAL", "", "", "", "" 
+                    "GENERAL", "", "", "", "", admission_date.strftime("%Y-%m-%d")
                 ]
                 
                 with st.spinner("Saving to BPS_Database..."):
                     try:
                         client = get_gspread_client()
-                        sheet = client.open("BPS_Database").worksheet("students_master")
+                        # Use your URL here if you applied the conflict fix earlier!
+                        sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID_HERE/edit").worksheet("students_master")
                         sheet.append_row(row_to_append)
                         st.success(f"✅ Successfully admitted {name} to {cls} {sec}!")
                         
@@ -172,7 +176,8 @@ elif menu == "Student Transfer":
             with st.spinner("Processing Transfer..."):
                 try:
                     client = get_gspread_client()
-                    db = client.open("BPS_Database")
+                    # Use your URL here if you applied the conflict fix earlier!
+                    db = client.open_by_url("https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID_HERE/edit")
                     master_sheet = db.worksheet("students_master")
                     
                     try:
@@ -188,15 +193,12 @@ elif menu == "Student Transfer":
                     if cell:
                         row_num = cell.row
                         
-                        # 3. Get the raw data from Google Sheets
                         row_data = master_sheet.row_values(row_num)
                         
-                        # FIX: Pad the list to ensure it's exactly 17 columns long 
-                        # before appending the transfer date and reason!
-                        while len(row_data) < 17:
+                        # UPDATED: We now pad up to 18 columns to account for the new Admission Date
+                        while len(row_data) < 18:
                             row_data.append("")
                             
-                        # Now it's safe to add the 2 extra columns
                         row_data.extend([transfer_date.strftime("%Y-%m-%d"), transfer_reason])
                         
                         history_sheet.append_row(row_data)

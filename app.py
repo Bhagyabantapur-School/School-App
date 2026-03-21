@@ -373,30 +373,34 @@ else:
                                 # --- MDM CARD LIST UI ---
                                 st.markdown("### Roster Selection")
                                 
-                                # Wrap in custom CSS container
                                 st.markdown('<div class="roster-container">', unsafe_allow_html=True)
-                                with st.form("mdm_form"):
-                                    selected_mdm = []
-                                    for idx, r in roster.iterrows():
-                                        c1, c2, c3 = st.columns([1, 4, 2])
-                                        with c1:
-                                            st.image(r['Photo'], width=50) 
-                                        with c2:
-                                            st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']}</span></div>", unsafe_allow_html=True)
-                                        with c3:
-                                            is_scanned = r['Scan_Key'] in st.session_state.scanned_keys
-                                            if st.checkbox("Ate MDM", value=is_scanned, key=f"mdm_{r['Roll']}_{r['Name']}"):
-                                                selected_mdm.append(r)
-                                        st.divider()
-                                    
-                                    if st.form_submit_button("Submit MDM Data"):
-                                        if selected_mdm:
-                                            new_rows = [{'Date': curr_date_str, 'Teacher': t_name_select, 'Class': target_class, 'Section': target_section, 'Roll': sr['Roll'], 'Name': sr['Name'], 'Time': now.strftime("%H:%M")} for sr in selected_mdm]
-                                            append_sheet_df('mdm_log', pd.DataFrame(new_rows))
-                                            st.session_state.scanned_keys = []
-                                            st.success(f"Submitted {len(new_rows)} students to Cloud DB!")
-                                            st.rerun()
-                                        else: st.warning("No students selected.")
+                                selected_mdm = []
+                                
+                                # Removed st.form to enable live counting
+                                for idx, r in roster.iterrows():
+                                    c1, c2, c3 = st.columns([1, 4, 2])
+                                    with c1:
+                                        st.image(r['Photo'], width=85) 
+                                    with c2:
+                                        st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']}</span></div>", unsafe_allow_html=True)
+                                    with c3:
+                                        is_scanned = r['Scan_Key'] in st.session_state.scanned_keys
+                                        # When clicked, Streamlit will rerun instantly and update the counter
+                                        if st.checkbox("Ate MDM", value=is_scanned, key=f"mdm_{r['Roll']}_{r['Name']}"):
+                                            selected_mdm.append(r)
+                                    st.divider()
+                                
+                                # Live counter updates instantly on click!
+                                st.markdown(f"### ✅ Total Selected: {len(selected_mdm)}")
+                                
+                                if st.button("Submit MDM Data"):
+                                    if selected_mdm:
+                                        new_rows = [{'Date': curr_date_str, 'Teacher': t_name_select, 'Class': target_class, 'Section': target_section, 'Roll': sr['Roll'], 'Name': sr['Name'], 'Time': now.strftime("%H:%M")} for sr in selected_mdm]
+                                        append_sheet_df('mdm_log', pd.DataFrame(new_rows))
+                                        st.session_state.scanned_keys = []
+                                        st.success(f"Submitted {len(new_rows)} students to Cloud DB!")
+                                        st.rerun()
+                                    else: st.warning("No students selected.")
                                 st.markdown('</div>', unsafe_allow_html=True)
                                 
                                 att_df = fetch_sheet_data('student_attendance_master')
@@ -582,31 +586,39 @@ else:
                         # --- HORIZONTAL ATTENDANCE CARD UI ---
                         st.markdown("### Class Roster")
                         
-                        # Wrap in custom CSS container
                         st.markdown('<div class="roster-container">', unsafe_allow_html=True)
-                        with st.form("att_form"):
-                            attendance_data = []
-                            for idx, r in ros.iterrows():
-                                c1, c2, c3 = st.columns([1, 4, 2.5])
-                                with c1:
-                                    st.image(r['Photo'], width=50) 
-                                with c2:
-                                    st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']}</span></div>", unsafe_allow_html=True)
-                                with c3:
-                                    is_present = st.checkbox("Present", value=True, key=f"att_{r['Roll']}_{r['Name']}")
-                                    st.checkbox("MDM Entry", value=bool(r['MDM (Ate)']), disabled=True, key=f"mdm_ro_{r['Roll']}_{r['Name']}")
+                        attendance_data = []
+                        present_count = 0
+                        
+                        # Removed st.form to enable live counting
+                        for idx, r in ros.iterrows():
+                            c1, c2, c3 = st.columns([1, 4, 2.5])
+                            with c1:
+                                st.image(r['Photo'], width=85) 
+                            with c2:
+                                st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']}</span></div>", unsafe_allow_html=True)
+                            with c3:
+                                # This updates instantly when clicked
+                                is_present = st.checkbox("Present", value=True, key=f"att_{r['Roll']}_{r['Name']}")
+                                if is_present:
+                                    present_count += 1
                                     
-                                    attendance_data.append({
-                                        'Date': curr_date_str, 'Class': t_class, 'Section': t_sec, 
-                                        'Roll': r['Roll'], 'Name': r['Name'], 'Status': is_present
-                                    })
-                                st.divider()
+                                st.checkbox("MDM Entry", value=bool(r['MDM (Ate)']), disabled=True, key=f"mdm_ro_{r['Roll']}_{r['Name']}")
                                 
-                            if st.form_submit_button(f"Save Attendance for {t_class} - {t_sec}"):
-                                df = pd.DataFrame(attendance_data)
-                                append_sheet_df('student_attendance_master', df)
-                                st.success("✅ Saved to Cloud Database.")
-                                st.rerun()
+                                attendance_data.append({
+                                    'Date': curr_date_str, 'Class': t_class, 'Section': t_sec, 
+                                    'Roll': r['Roll'], 'Name': r['Name'], 'Status': is_present
+                                })
+                            st.divider()
+                        
+                        # Live counter updates instantly on click!
+                        st.markdown(f"### ✅ Total Present: {present_count}")
+                            
+                        if st.button(f"Save Attendance for {t_class} - {t_sec}"):
+                            df = pd.DataFrame(attendance_data)
+                            append_sheet_df('student_attendance_master', df)
+                            st.success("✅ Saved to Cloud Database.")
+                            st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
 
                         att_check = fetch_sheet_data('student_attendance_master')

@@ -348,13 +348,13 @@ else:
                                             st.write(f"**Roll:** {student_data['Roll']}")
                                             st.write(f"**Class:** {target_class} {target_section}")
 
-                                # --- INCREASED SIZE CONFIG ---
+                                # --- COMPACT SIZE CONFIG ---
                                 edited = st.data_editor(
                                     roster[['Photo', 'Section', 'Roll', 'Name', 'Ate_MDM']], 
                                     hide_index=True, 
                                     use_container_width=True,
                                     column_config={
-                                        "Photo": st.column_config.ImageColumn("👤 Photo", width="large")
+                                        "Photo": st.column_config.ImageColumn("👤", width="small")
                                     }
                                 )
                                 st.markdown(f"### ✅ Total Selected: {edited['Ate_MDM'].sum()}")
@@ -565,14 +565,14 @@ else:
                                     st.write(f"**Roll:** {student_data['Roll']}")
                                     st.write(f"**Class:** {t_class} {t_sec}")
 
-                        # --- INCREASED SIZE CONFIG ---
+                        # --- COMPACT SIZE CONFIG ---
                         ed = st.data_editor(
                             ros[['Photo', 'Roll', 'Name', 'Present', 'MDM (Ate)']], 
                             hide_index=True, 
                             use_container_width=True, 
                             disabled=["Photo", "Roll", "Name", "MDM (Ate)"],
                             column_config={
-                                "Photo": st.column_config.ImageColumn("👤 Photo", width="large")
+                                "Photo": st.column_config.ImageColumn("👤", width="small")
                             }
                         )
                         

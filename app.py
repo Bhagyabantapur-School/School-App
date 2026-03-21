@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import calendar
 import base64
+import re
 from datetime import datetime, time, timedelta
 from streamlit_qrcode_scanner import qrcode_scanner
 import gspread
@@ -153,11 +154,15 @@ def fetch_secure_image_bytes(file_id):
         authed_session = get_drive_session()
         url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
         response = authed_session.get(url)
+        
         if response.status_code == 200:
             return response.content
-    except Exception:
-        pass
-    return None
+        else:
+            print(f"❌ Google API Error for ID {file_id}: HTTP {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        print(f"❌ Python Error fetching {file_id}: {e}")
+        return None
 
 def get_secure_photo_uri(url):
     """Converts Drive URL to Base64 Data URI so it fits inside Streamlit's data_editor."""
@@ -167,9 +172,11 @@ def get_secure_photo_uri(url):
         return fallback_image
 
     file_id = None
-    if "drive.google.com/file/d/" in url:
-        try: file_id = url.split("/d/")[1].split("/")[0]
-        except IndexError: pass
+    
+    # SMARTER EXTRACTOR: Catches both '/d/123...' and '?id=123...' link formats
+    match = re.search(r"(?:id=|/d/)([\w-]+)", url)
+    if match:
+        file_id = match.group(1)
 
     if file_id:
         image_bytes = fetch_secure_image_bytes(file_id)
@@ -178,8 +185,9 @@ def get_secure_photo_uri(url):
             b64_str = base64.b64encode(image_bytes).decode()
             return f"data:image/jpeg;base64,{b64_str}"
             
-    # Fallback if standard web url
+    # Fallback if it's a standard web url (not Google Drive)
     return url if url.startswith("http") else fallback_image
+
 
 # --- 5. TIME HELPERS ---
 utc_now = datetime.utcnow()
@@ -302,9 +310,8 @@ else:
                         if is_substituting: st.info(f"🔄 **SUBSTITUTION:** Covering for **{absent_teacher_name}** ({target_class} - {target_section})")
                         else: st.info(f"📌 Assigned **11:15 AM** class: **{target_class} - {target_section}**")
                         
-                        # Fetch Students (Try Google Sheets first, fallback to CSV)
-                        students = fetch_sheet_data('students')
-                        if students.empty: students = get_local_csv('students.csv')
+                        # Fetch Students (Strictly Google Sheets -> 'students_master')
+                        students = fetch_sheet_data('students_master')
 
                         if not students.empty:
                             if 'Section' not in students.columns: students['Section'] = 'A'
@@ -523,9 +530,8 @@ else:
             if sel_c != "Select Class...":
                 t_class, t_sec = sel_c.rsplit(' ', 1)
                 
-                # Fetch Students (Try Google Sheets first, fallback to CSV)
-                std = fetch_sheet_data('students')
-                if std.empty: std = get_local_csv('students.csv')
+                # Fetch Students (Strictly Google Sheets -> 'students_master')
+                std = fetch_sheet_data('students_master')
                 
                 mdm_log = fetch_sheet_data('mdm_log')
                 
@@ -756,8 +762,8 @@ else:
         with tabs[4]: 
             s_c = st.selectbox("Class", CLASS_OPTIONS, key='shoe')
             if s_c != "Select Class...":
-                std = fetch_sheet_data('students')
-                if std.empty: std = get_local_csv('students.csv')
+                # Fetch Students (Strictly Google Sheets -> 'students_master')
+                std = fetch_sheet_data('students_master')
                 
                 log = fetch_sheet_data('shoe_log')
                 if not std.empty:

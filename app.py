@@ -43,6 +43,28 @@ def inject_security_css(user_name):
         .att-neutral {{ background-color: #e2e6ea; color: #333; border: 1px solid #ccc; }}
         .sub-card {{ background-color: #e3f2fd; padding: 10px; border-radius: 8px; margin-bottom: 5px; border-left: 4px solid #2196f3; }}
         .sub-row {{ background-color: #fff3cd !important; border-left: 5px solid #ffc107 !important; }}
+        
+        /* Make checkboxes tighter */
+        .stCheckbox {{ min-height: 1.5rem; }}
+        .stCheckbox p {{ font-size: 14px; margin-bottom: 0; }}
+        
+        /* 📱 MOBILE PROFILE CARD FIX: Forces Form Columns to stay side-by-side */
+        @media (max-width: 640px) {{
+            [data-testid="stForm"] [data-testid="stHorizontalBlock"] {{
+                flex-direction: row !important;
+                flex-wrap: nowrap !important;
+                align-items: center !important;
+                gap: 5px !important;
+            }}
+            [data-testid="stForm"] [data-testid="column"] {{
+                min-width: 0 !important; 
+                padding: 0 !important;
+            }}
+            /* Exact ratios for Photo (20%), Text (50%), Checkboxes (30%) */
+            [data-testid="stForm"] [data-testid="column"]:nth-child(1) {{ width: 20% !important; flex: 2 !important; }}
+            [data-testid="stForm"] [data-testid="column"]:nth-child(2) {{ width: 50% !important; flex: 5 !important; }}
+            [data-testid="stForm"] [data-testid="column"]:nth-child(3) {{ width: 30% !important; flex: 3 !important; }}
+        }}
     </style>
     <script>document.addEventListener('contextmenu', event => event.preventDefault());</script>
     <div class="watermark"></div>
@@ -336,15 +358,14 @@ else:
                                 with st.form("mdm_form"):
                                     selected_mdm = []
                                     for idx, r in roster.iterrows():
+                                        # Use standard ratio, CSS fixes it on mobile
                                         c1, c2, c3 = st.columns([1, 3, 2])
                                         with c1:
-                                            # Large image display inside the card!
-                                            st.image(r['Photo'], width=80) 
+                                            st.image(r['Photo'], width=65) 
                                         with c2:
-                                            st.markdown(f"**{r['Name']}**")
-                                            st.caption(f"Roll: {r['Roll']} | {target_class}")
+                                            # Tighter HTML formatting for name and roll
+                                            st.markdown(f"<div style='line-height:1.2; margin-top:5px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} | {target_class}</span></div>", unsafe_allow_html=True)
                                         with c3:
-                                            # Auto-check if they were scanned via QR
                                             is_scanned = r['Scan_Key'] in st.session_state.scanned_keys
                                             if st.checkbox("Ate MDM", value=is_scanned, key=f"mdm_{r['Roll']}_{r['Name']}"):
                                                 selected_mdm.append(r)
@@ -546,14 +567,14 @@ else:
                             for idx, r in ros.iterrows():
                                 c1, c2, c3 = st.columns([1, 3, 2])
                                 with c1:
-                                    st.image(r['Photo'], width=80) 
+                                    st.image(r['Photo'], width=65) 
                                 with c2:
-                                    st.markdown(f"**{r['Name']}**")
-                                    st.caption(f"Roll: {r['Roll']}")
+                                    # Tighter formatting
+                                    st.markdown(f"<div style='line-height:1.2; margin-top:5px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']}</span></div>", unsafe_allow_html=True)
                                 with c3:
                                     # Present Checkbox (Active)
                                     is_present = st.checkbox("Present", value=True, key=f"att_{r['Roll']}_{r['Name']}")
-                                    # MDM Checkbox (Read Only / Disabled)
+                                    # MDM Checkbox (Read Only / Disabled) stacked directly below
                                     st.checkbox("MDM Entry", value=bool(r['MDM (Ate)']), disabled=True, key=f"mdm_ro_{r['Roll']}_{r['Name']}")
                                     
                                     attendance_data.append({

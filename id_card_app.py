@@ -26,6 +26,10 @@ st.set_page_config(page_title="BPS Digital - ID Generator", page_icon="🏫", la
 if 'attendance_log' not in st.session_state:
     st.session_state['attendance_log'] = pd.DataFrame(columns=['Time', 'Name', 'Roll', 'Class', 'Status', 'MDM'])
 
+# Store the generated PDF so the download button stays visible
+if 'generated_pdf_data' not in st.session_state:
+    st.session_state['generated_pdf_data'] = None
+
 # --- 2. GOOGLE CREDENTIALS & DRIVE CONNECTIONS ---
 @st.cache_resource
 def get_google_credentials():
@@ -48,7 +52,6 @@ sh = init_gsheets()
 # --- 3. HELPER FUNCTIONS ---
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_secure_image_bytes(file_id):
-    """Securely downloads high-res images for the PDF generator."""
     try:
         creds = get_google_credentials()
         authed_session = AuthorizedSession(creds)
@@ -59,14 +62,12 @@ def fetch_secure_image_bytes(file_id):
         return None
 
 def extract_drive_id(url):
-    """Extracts Drive ID for high-res PDF photos."""
     if pd.isna(url) or not isinstance(url, str) or "drive.google.com" not in url: return None
     if "/d/" in url:
         return url.split("/d/")[1].split("/")[0]
     return None
 
 def make_drive_image_url(url):
-    """Converts Drive link to a direct-stream link for Streamlit Thumbnails."""
     if pd.isna(url) or not isinstance(url, str) or "drive.google.com" not in url: return url
     if "/d/" in url:
         file_id = url.split("/d/")[1].split("/")[0]
@@ -87,7 +88,6 @@ def clear_sheet_cache():
     fetch_sheet_data.clear()
 
 def append_sheet_df(sheet_name, df):
-    """Appends data for the MDM Scanner."""
     if df.empty: return
     try: 
         ws = sh.worksheet(sheet_name)
@@ -102,14 +102,25 @@ def append_sheet_df(sheet_name, df):
     except Exception as e:
         st.error(f"⚠️ Cloud sync error: {e}")
 
-def update_photo_status_in_cloud(student_name, roll, student_class):
-    """Logs manual photo checks from the Explorer Tab."""
+def batch_log_action(sheet_name, df, action):
+    """Dynamically logs bulk actions like 'Generated', 'Distributed', or 'Taken'."""
+    if df.empty: return
     try:
-        log_ws = sh.worksheet("photo_log")
-        log_ws.append_row([datetime.now().strftime("%d-%m-%Y"), student_class, roll, student_name, "Taken"])
+        log_ws = sh.worksheet(sheet_name)
+    except WorksheetNotFound:
+        # Create sheet if it doesn't exist
+        log_ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=5)
+        log_ws.append_row(["Date", "Class", "Roll", "Name", "Action"])
+    
+    rows = []
+    now_str = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+    for _, r in df.iterrows():
+        name_val = str(r.get('Name', r.get('Name_x', 'Unknown')))
+        rows.append([now_str, str(r.get('Class', '')), str(r.get('Roll', '')), name_val, action])
+    
+    if rows:
+        log_ws.append_rows(rows)
         clear_sheet_cache()
-    except:
-        st.error("Cloud update failed. Ensure 'photo_log' sheet exists in BPS_Database.")
 
 def parse_qr_data(qr_string):
     try:
@@ -123,14 +134,15 @@ def parse_qr_data(qr_string):
     except:
         return None
 
-# --- 4. ORIGINAL LANDSCAPE PDF GENERATOR ---
-def generate_pdf(students_list, photo_dict):
+# --- 4. ORIGINAL LANDSCAPE PDF GENERATOR WITH PROGRESS BAR ---
+def generate_pdf(students_list, photo_dict, progress_bar=None):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.set_auto_page_break(auto=True, margin=10)
     pdf.add_page()
     
     x_start, y_start, card_w, card_h, gap = 10, 10, 86, 54, 8
     col, row = 0, 0
+    total_cards = len(students_list)
     
     bg_img = None
     for ext in ['background.jpg', 'background.jpeg', 'background.png']:
@@ -138,20 +150,23 @@ def generate_pdf(students_list, photo_dict):
             bg_img = ext
             break
             
-    for student in students_list:
+    for idx, student in enumerate(students_list):
+        if progress_bar:
+            progress_bar.progress(0.5 + (idx / total_cards) * 0.5, text=f"Drawing Card {idx + 1} of {total_cards}...")
+
         x = x_start + (col * (card_w + gap))
         y = y_start + (row * (card_h + gap))
         
-        # --- 1. FULL CARD BACKGROUND IMAGE ---
+        # Background
         if bg_img:
             try: pdf.image(bg_img, x=x, y=y, w=card_w, h=card_h)
             except: pass 
 
-        # --- 2. Draw Card Border & Darker Blue Header ---
+        # Border & Blue Header
         pdf.set_draw_color(0, 0, 0); pdf.set_line_width(0.3); pdf.rect(x, y, card_w, card_h)
         pdf.set_fill_color(0, 51, 153); pdf.rect(x, y, card_w, 11, 'F')
         
-        # --- LOGO ON THE RIGHT SIDE ---
+        # Logo
         if os.path.exists('logo.png'): 
             pdf.image('logo.png', x=x+68.5, y=y+1, w=16, h=16)
             
@@ -160,7 +175,7 @@ def generate_pdf(students_list, photo_dict):
         pdf.set_font("Arial", '', 6)
         pdf.set_xy(x+2, y+6.5); pdf.cell(66, 3, "Mob: 7908390822  |  ID CARD - SESSION 2026", 0, 1, 'C')
         
-        # --- PHOTO ---
+        # Photo
         photo_x, photo_y, photo_w, photo_h = x+3, y+14, 18, 22
         student_id = str(student.get('Sl', 0)) + "_" + str(student.get('Roll', '0'))
         
@@ -176,7 +191,7 @@ def generate_pdf(students_list, photo_dict):
             pdf.set_text_color(150); pdf.set_font("Arial", '', 5)
             pdf.set_xy(photo_x, y+20); pdf.cell(photo_w, 5, "NO PHOTO", 0, 0, 'C')
         
-        # --- STUDENT DETAILS ---
+        # Details
         pdf.set_text_color(0); detail_x, curr_y, line_h = x+24, y+14, 4
         pdf.set_font("Arial", 'B', 9); pdf.set_xy(detail_x, curr_y)
         pdf.cell(44, line_h, f"{student.get('Name', '')}".upper()[:25], 0, 1); curr_y += 4.5
@@ -193,38 +208,38 @@ def generate_pdf(students_list, photo_dict):
         pdf.set_xy(detail_x, curr_y); pdf.set_font("Arial", 'B', 7)
         pdf.cell(44, line_h, f"Mob: {student.get('Mobile', '')}", 0, 1)
 
-        # --- QR CODE ---
+        # QR Code
         qr_data = f"Name:{student.get('Name', '')}|Roll:{student.get('Roll', '')}|Mob:{student.get('Mobile', '')}"
         qr = qrcode.make(qr_data); qr_path = tempfile.mktemp(suffix=".png"); qr.save(qr_path)
         pdf.image(qr_path, x=x+4.5, y=y+37, w=15, h=15)
         
-        # --- FOOTER IMAGE ---
+        # Footer Image
         if os.path.exists('image_2.png'):
             try: pdf.image('image_2.png', x=x, y=y+44, w=card_w, h=10)
             except: pass
 
-        # --- WATERMARK & SIGNATURE ---
+        # Watermark
         wm_x, wm_y = x + 55, y + 42
         pdf.set_draw_color(220, 240, 255); pdf.set_line_width(0.4)
         pdf.line(wm_x, wm_y, wm_x, wm_y + 6); pdf.line(wm_x, wm_y, wm_x + 2, wm_y); pdf.line(wm_x, wm_y + 6, wm_x + 2, wm_y + 6)
         pdf.line(wm_x + 27, wm_y, wm_x + 27, wm_y + 6); pdf.line(wm_x + 25, wm_y, wm_x + 27, wm_y); pdf.line(wm_x + 25, wm_y + 6, wm_x + 27, wm_y + 6)
-
         pdf.set_text_color(210, 235, 255); pdf.set_font("Arial", 'B', 6); pdf.set_xy(wm_x, wm_y + 1); pdf.cell(27, 4, "BPS DIGITAL", 0, 0, 'C')
 
+        # Signature
         if os.path.exists('signature.png'): 
             try: pdf.image('signature.png', x=x+58, y=y+40, w=22, h=8)
             except: pass
         
-        # --- FOOTER TEXT ---
         pdf.set_text_color(0); pdf.set_font("Arial", 'I', 6); pdf.set_xy(x, y+49); pdf.cell(card_w-5, 3, "Sukhamay Kisku", 0, 1, 'R')
         pdf.set_font("Arial", '', 5); pdf.set_xy(x, y+51); pdf.cell(card_w-5, 2, "Head Teacher", 0, 0, 'R')
         
-        # 2 Columns x 5 Rows = 10 Cards Per Page
+        # 10 Cards Per Page Logic
         col += 1
         if col >= 2: col, row = 0, row + 1
         if row >= 5: pdf.add_page(); col, row = 0, 0
             
-    # --- STREAMLIT CLOUD FPDF FIX ---
+    # Final Output Fix
+    if progress_bar: progress_bar.progress(1.0, text="✅ PDF Rendering Complete!")
     pdf_output = pdf.output(dest='S')
     if isinstance(pdf_output, str):
         return pdf_output.encode('latin-1')
@@ -248,16 +263,26 @@ with tabs[0]:
 
     df_master = fetch_sheet_data("students_master")
     df_log = fetch_sheet_data("form_distribution_log")
+    df_id_log = fetch_sheet_data("id_card_log")
     
     if not df_master.empty and not df_log.empty:
         df_master['Roll'] = df_master['Roll'].astype(str)
         df_log['Roll'] = df_log['Roll'].astype(str)
-        merged = pd.merge(df_master, df_log, on=['Class', 'Section', 'Roll'], how='inner')
+        merged = pd.merge(df_master, df_log, on=['Class', 'Section', 'Roll'], how='inner', suffixes=('', '_log'))
+        
+        # Get generated keys to show status
+        gen_keys = []
+        if not df_id_log.empty:
+            df_id_log['Key'] = df_id_log['Class'].astype(str) + "_" + df_id_log['Roll'].astype(str)
+            gen_keys = df_id_log[df_id_log['Action'] == 'Generated']['Key'].unique().tolist()
+            
+        merged['Key'] = merged['Class'].astype(str) + "_" + merged['Roll'].astype(str)
+        merged['Generated'] = merged['Key'].isin(gen_keys)
         
         def is_ready_to_print(row):
             has_photo = pd.notna(row.get('Photo_URL')) and str(row.get('Photo_URL')).strip() != ""
             is_returned = str(row.get('Return Status', '')).strip() == 'Complete'
-            has_corr = any([str(row.get(f'Old {f}', '')).strip() not in ['','nan','None'] for f in ['Student Name', 'Father Name']])
+            has_corr = any([str(row.get(f'Old {f}', '')).strip() not in ['','nan','None'] for f in ['Student Name', 'Father Name', 'Mobile Number']])
             is_verified = str(row.get('Data Corrected', '')).strip() == 'Yes'
             return has_photo and is_returned and (is_verified if has_corr else True)
 
@@ -268,24 +293,28 @@ with tabs[0]:
             print_ready.insert(0, "Select", False)
             
             edited_df = st.data_editor(
-                print_ready[['Select', 'Roll', 'Name', 'Class', 'Section', 'Photo_URL']],
+                print_ready[['Select', 'Roll', 'Name', 'Class', 'Generated']],
                 hide_index=True, use_container_width=True, key="gen_editor",
-                disabled=['Roll', 'Name', 'Class', 'Section', 'Photo_URL']
+                disabled=['Roll', 'Name', 'Class', 'Generated']
             )
             
             selected_students = print_ready.loc[edited_df[edited_df["Select"] == True].index].copy()
 
             if not selected_students.empty:
                 num_students = len(selected_students)
-                pages_needed = math.ceil(num_students / 10) # 10 cards per page
+                pages_needed = math.ceil(num_students / 10)
                 
                 st.divider()
-                st.info(f"🖨️ **Print Summary:** You have selected **{num_students}** students. You will need **{pages_needed}** A4 paper(s) loaded into the printer (10 cards per page).")
+                st.info(f"🖨️ **Print Summary:** You selected **{num_students}** students. Requires **{pages_needed}** A4 page(s).")
                 
+                # Generation Button
                 if st.button("Generate Secure PDF", type="primary"):
+                    st.session_state['generated_pdf_data'] = None 
                     photo_dict = {}
-                    my_bar = st.progress(0, text="Fetching Secure Photos from Google Drive...")
                     
+                    my_bar = st.progress(0, text="Starting secure fetch...")
+                    
+                    # Phase 1: Downloading Photos
                     for idx, (index, student) in enumerate(selected_students.iterrows()):
                         sid = str(student.get('Sl', index)) + "_" + str(student.get('Roll', '0'))
                         photo_url = str(student.get('Photo_URL', ''))
@@ -296,15 +325,28 @@ with tabs[0]:
                             if img_bytes:
                                 photo_dict[sid] = img_bytes
                                 
-                        my_bar.progress((idx + 1) / num_students, text=f"Fetched photo {idx + 1} of {num_students}")
+                        my_bar.progress((idx + 1) / num_students * 0.5, text=f"Fetching photo {idx + 1} of {num_students}...")
                     
-                    my_bar.empty()
+                    # Phase 2: Building PDF
+                    pdf_bytes = generate_pdf(selected_students.to_dict('records'), photo_dict, progress_bar=my_bar)
                     
-                    with st.spinner("Compiling PDF Document..."):
-                        pdf_bytes = generate_pdf(selected_students.to_dict('records'), photo_dict)
+                    # Log generation to Cloud
+                    batch_log_action("id_card_log", selected_students, "Generated")
                         
+                    # Save to memory and trigger balloons!
+                    st.session_state['generated_pdf_data'] = pdf_bytes
                     st.balloons()
-                    st.download_button("📥 Download ID Cards (PDF)", pdf_bytes, f"BPS_ID_Cards_{datetime.now().strftime('%Y%m%d')}.pdf", "application/pdf")
+                
+                # Persistent Download Button
+                if st.session_state['generated_pdf_data'] is not None:
+                    st.success("✅ Your PDF is ready! Click below to save it.")
+                    st.download_button(
+                        label="📥 Download ID Cards (PDF)", 
+                        data=st.session_state['generated_pdf_data'], 
+                        file_name=f"BPS_ID_Cards_{datetime.now().strftime('%Y%m%d')}.pdf", 
+                        mime="application/pdf"
+                    )
+
         else:
             st.info("No students found with a linked Photo URL and a cleared form.")
 
@@ -321,9 +363,13 @@ with tabs[1]:
         data = parse_qr_data(qr_code)
         if data:
             student_name = data.get('Name', 'Unknown')
-            student_class = data.get('Class', 'Unknown')
             student_roll = data.get('Roll', 'Unknown')
             
+            # Use master data to find class
+            m_df = fetch_sheet_data("students_master")
+            s_match = m_df[(m_df['Name'] == student_name) & (m_df['Roll'].astype(str) == str(student_roll))]
+            student_class = s_match.iloc[0]['Class'] if not s_match.empty else "Unknown"
+
             existing = st.session_state['attendance_log'][
                 (st.session_state['attendance_log']['Name'] == student_name) & 
                 (st.session_state['attendance_log']['Roll'] == student_roll)
@@ -369,17 +415,34 @@ with tabs[1]:
 # TAB 3: DATABASE EXPLORER
 # ==========================================
 with tabs[2]:
-    st.subheader("📂 Student Database & Media Tracker")
+    st.subheader("📂 ID Lifecycle & Media Tracker")
     
     df_m = fetch_sheet_data("students_master")
     df_l = fetch_sheet_data("form_distribution_log")
+    df_photo = fetch_sheet_data("photo_log")
+    df_id_log = fetch_sheet_data("id_card_log")
     
     if not df_m.empty and not df_l.empty:
         df_m['Roll'] = df_m['Roll'].astype(str)
         df_l['Roll'] = df_l['Roll'].astype(str)
         
-        explorer_db = pd.merge(df_m, df_l, on=['Class', 'Section', 'Roll'], how='left')
+        # Merge Master and Form Logs
+        explorer_db = pd.merge(df_m, df_l, on=['Class', 'Section', 'Roll'], how='left', suffixes=('', '_log'))
+        explorer_db['Key'] = explorer_db['Class'].astype(str) + "_" + explorer_db['Roll'].astype(str)
         
+        # 1. Parse Status Logs
+        photo_keys, gen_keys, dist_keys = [], [], []
+        
+        if not df_photo.empty:
+            df_photo['Key'] = df_photo['Class'].astype(str) + "_" + df_photo['Roll'].astype(str)
+            photo_keys = df_photo[df_photo['Action'] == 'Taken']['Key'].unique().tolist()
+            
+        if not df_id_log.empty:
+            df_id_log['Key'] = df_id_log['Class'].astype(str) + "_" + df_id_log['Roll'].astype(str)
+            gen_keys = df_id_log[df_id_log['Action'] == 'Generated']['Key'].unique().tolist()
+            dist_keys = df_id_log[df_id_log['Action'] == 'Distributed']['Key'].unique().tolist()
+
+        # 2. Assign Statuses
         if 'Thumb_URL' in explorer_db.columns:
             explorer_db['Display_Thumb'] = explorer_db['Thumb_URL'].apply(make_drive_image_url)
         else:
@@ -388,36 +451,72 @@ with tabs[2]:
         explorer_db['Photo_Link'] = explorer_db['Photo_URL'].apply(lambda x: True if pd.notna(x) and "drive" in str(x) else False)
         explorer_db['Form_OK'] = explorer_db['Return Status'].apply(lambda x: True if str(x) == "Complete" else False)
         explorer_db['Verified'] = explorer_db['Data Corrected'].apply(lambda x: True if str(x) == "Yes" else False)
-        explorer_db['Photo Taken'] = False 
+        
+        # Live Database Statuses
+        explorer_db['Photo Taken'] = explorer_db['Key'].isin(photo_keys)
+        explorer_db['Generated'] = explorer_db['Key'].isin(gen_keys)
+        explorer_db['Distributed'] = explorer_db['Key'].isin(dist_keys)
+        
+        # Hidden Tracker to prevent double-syncs
+        explorer_db['Already_Photo'] = explorer_db['Photo Taken']
+        explorer_db['Already_Dist'] = explorer_db['Distributed']
 
-        cat_filter = st.selectbox("Filter Students:", ["All Students", "Missing Photo Link", "Form Pending"])
+        # 3. Smart Filters
+        cat_filter = st.selectbox("Filter Tracking View:", [
+            "All Students", 
+            "Missing Photo Link", 
+            "Form/Data Pending", 
+            "Ready to Print", 
+            "Printed (Needs Distribution)"
+        ])
         
         filtered_view = explorer_db.copy()
         if cat_filter == "Missing Photo Link":
             filtered_view = filtered_view[filtered_view['Photo_Link'] == False]
-        elif cat_filter == "Form Pending":
-            filtered_view = filtered_view[filtered_view['Form_OK'] == False]
+        elif cat_filter == "Form/Data Pending":
+            filtered_view = filtered_view[(filtered_view['Form_OK'] == False) | (filtered_view['Verified'] == False)]
+        elif cat_filter == "Ready to Print":
+            filtered_view = filtered_view[(filtered_view['Photo_Link'] == True) & (filtered_view['Form_OK'] == True) & (filtered_view['Verified'] == True) & (filtered_view['Generated'] == False)]
+        elif cat_filter == "Printed (Needs Distribution)":
+            filtered_view = filtered_view[(filtered_view['Generated'] == True) & (filtered_view['Distributed'] == False)]
 
+        # 4. The Data Grid
         st.write("---")
+        cols_to_show = ['Photo Taken', 'Display_Thumb', 'Name', 'Class', 'Roll', 'Form_OK', 'Verified', 'Generated', 'Distributed']
+        
         final_ed = st.data_editor(
-            filtered_view[['Photo Taken', 'Display_Thumb', 'Name', 'Class', 'Roll', 'Photo_Link', 'Form_OK', 'Verified']],
+            filtered_view[cols_to_show + ['Already_Photo', 'Already_Dist']],
+            column_order=cols_to_show, # Hides the 'Already_' tracking columns from the user
             column_config={
                 "Photo Taken": st.column_config.CheckboxColumn("Photo Taken"),
                 "Display_Thumb": st.column_config.ImageColumn("Thumbnail", width="small"),
-                "Photo_Link": st.column_config.CheckboxColumn("Link OK?", disabled=True),
                 "Form_OK": st.column_config.CheckboxColumn("Form OK?", disabled=True),
                 "Verified": st.column_config.CheckboxColumn("Verified?", disabled=True),
+                "Generated": st.column_config.CheckboxColumn("Generated?", disabled=True),
+                "Distributed": st.column_config.CheckboxColumn("Distributed?"),
             },
-            disabled=['Display_Thumb', 'Name', 'Class', 'Roll', 'Photo_Link', 'Form_OK', 'Verified'],
+            disabled=['Display_Thumb', 'Name', 'Class', 'Roll', 'Form_OK', 'Verified', 'Generated'],
             hide_index=True,
             use_container_width=True,
             key="db_explorer_grid"
         )
 
-        if st.button("💾 Sync Manual Photo Status"):
-            taken_list = final_ed[final_ed['Photo Taken'] == True]
-            if not taken_list.empty:
-                for _, row in taken_list.iterrows():
-                    update_photo_status_in_cloud(row['Name'], row['Roll'], row['Class'])
-                st.success(f"Synced {len(taken_list)} records to Cloud!")
+        # 5. Sync System
+        if st.button("💾 Sync Manual Updates to Cloud"):
+            new_photos = final_ed[(final_ed['Photo Taken'] == True) & (final_ed['Already_Photo'] == False)]
+            new_dist = final_ed[(final_ed['Distributed'] == True) & (final_ed['Already_Dist'] == False)]
+            
+            updated = False
+            with st.spinner("Writing updates to BPS_Database..."):
+                if not new_photos.empty:
+                    batch_log_action("photo_log", new_photos, "Taken")
+                    updated = True
+                if not new_dist.empty:
+                    batch_log_action("id_card_log", new_dist, "Distributed")
+                    updated = True
+                    
+            if updated:
+                st.success("✅ Successfully synced updates to Cloud!")
                 st.rerun()
+            else:
+                st.info("No new boxes were checked to sync.")

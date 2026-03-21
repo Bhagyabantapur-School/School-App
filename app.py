@@ -336,10 +336,10 @@ else:
                                 with st.form("mdm_form"):
                                     selected_mdm = []
                                     for idx, r in roster.iterrows():
-                                        c1, c2, c3 = st.columns([1, 3, 1])
+                                        c1, c2, c3 = st.columns([1, 3, 2])
                                         with c1:
                                             # Large image display inside the card!
-                                            st.image(r['Photo'], width=90) 
+                                            st.image(r['Photo'], width=80) 
                                         with c2:
                                             st.markdown(f"**{r['Name']}**")
                                             st.caption(f"Roll: {r['Roll']} | {target_class}")
@@ -539,22 +539,23 @@ else:
                             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                                 ros['Photo'] = list(executor.map(get_secure_photo_uri, ros['Thumb_URL'].tolist()))
 
-                        # --- ATTENDANCE CARD LIST UI ---
+                        # --- HORIZONTAL ATTENDANCE CARD UI ---
                         st.markdown("### Class Roster")
                         with st.form("att_form"):
                             attendance_data = []
                             for idx, r in ros.iterrows():
-                                c1, c2, c3 = st.columns([1, 3, 1])
+                                c1, c2, c3 = st.columns([1, 3, 2])
                                 with c1:
-                                    st.image(r['Photo'], width=90) # Large Image!
+                                    st.image(r['Photo'], width=80) 
                                 with c2:
                                     st.markdown(f"**{r['Name']}**")
                                     st.caption(f"Roll: {r['Roll']}")
-                                    if r['MDM (Ate)']:
-                                        st.markdown("🍲 *Ate MDM Today*")
                                 with c3:
-                                    # Default to present
+                                    # Present Checkbox (Active)
                                     is_present = st.checkbox("Present", value=True, key=f"att_{r['Roll']}_{r['Name']}")
+                                    # MDM Checkbox (Read Only / Disabled)
+                                    st.checkbox("MDM Entry", value=bool(r['MDM (Ate)']), disabled=True, key=f"mdm_ro_{r['Roll']}_{r['Name']}")
+                                    
                                     attendance_data.append({
                                         'Date': curr_date_str, 'Class': t_class, 'Section': t_sec, 
                                         'Roll': r['Roll'], 'Name': r['Name'], 'Status': is_present

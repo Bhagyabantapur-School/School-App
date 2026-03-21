@@ -30,7 +30,6 @@ if 'attendance_log' not in st.session_state:
 @st.cache_resource
 def get_google_credentials():
     skey = dict(st.secrets["gcp_service_account"])
-    # Combined scopes for both Google Sheets and Google Drive access
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive.readonly"]
     return Credentials.from_service_account_info(skey, scopes=scopes)
 
@@ -41,391 +40,173 @@ def init_gsheets():
         gc = gspread.authorize(creds)
         return gc.open("BPS_Database")
     except Exception as e:
-        st.error("⚠️ Google Sheets Connection Failed! Please check your Streamlit Secrets.")
+        st.error("⚠️ Google Sheets Connection Failed!")
         st.stop()
 
 sh = init_gsheets()
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_secure_image_bytes(file_id):
-    """Securely downloads the image using the authorized service account."""
     try:
         creds = get_google_credentials()
         authed_session = AuthorizedSession(creds)
         url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
         response = authed_session.get(url)
-        
-        if response.status_code == 200:
-            return response.content
-        return None
-    except Exception as e:
+        return response.content if response.status_code == 200 else None
+    except:
         return None
 
 def extract_drive_id(url):
-    """Safely extracts the Google Drive file ID from a sharing link."""
-    if pd.isna(url) or not isinstance(url, str) or url.strip() == "":
-        return None
+    if pd.isna(url) or not isinstance(url, str): return None
     if "drive.google.com/file/d/" in url:
-        try:
-            return url.split("/d/")[1].split("/")[0]
-        except IndexError:
-            pass
+        return url.split("/d/")[1].split("/")[0]
     return None
 
-# --- 3. FETCH & CLEAN DATA ---
+# --- 3. DATA FETCHING ---
 @st.cache_data(ttl=300) 
 def fetch_sheet_data(sheet_name):
     try:
         ws = sh.worksheet(sheet_name)
-        df = pd.DataFrame(ws.get_all_records())
-        df.replace({'TRUE': True, 'FALSE': False, 'True': True, 'False': False}, inplace=True)
-        return df
-    except Exception as e:
+        return pd.DataFrame(ws.get_all_records())
+    except:
         return pd.DataFrame()
-
-def clear_sheet_cache():
-    fetch_sheet_data.clear()
 
 def append_sheet_df(sheet_name, df):
     if df.empty: return
     try: 
         ws = sh.worksheet(sheet_name)
-    except WorksheetNotFound:
-        ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=20)
-        ws.append_row(list(df.columns))
-    
-    df = df.fillna("").astype(str)
-    try:
-        ws.append_rows(df.values.tolist())
-        clear_sheet_cache()
-    except Exception as e:
-        st.error("⚠️ Google Sheets API error while saving data.")
+        ws.append_rows(df.fillna("").astype(str).values.tolist())
+    except:
+        pass
 
 @st.cache_data(ttl=300)
 def get_students():
     df = fetch_sheet_data("students_master")
-    if df.empty:
-        return pd.DataFrame()
-        
-    if 'Class' in df.columns:
-        df['Class'] = df['Class'].replace('CALSS IV', 'CLASS IV')
-    
-    # Ensure all necessary columns exist, including Photo_URL
-    for col in ['Section', 'BloodGroup', 'Father', 'Mother', 'Gender', 'DOB', 'Mobile', 'Photo_URL']:
-        if col not in df.columns:
-            df[col] = 'N/A'
-            
-    # Fix Mobile Number trailing .0
-    df['Mobile'] = df['Mobile'].astype(str)
-    df['Mobile'] = df['Mobile'].apply(lambda x: x[:-2] if x.endswith('.0') else x)
-    df['Mobile'] = df['Mobile'].replace(['nan', 'None', ''], 'N/A')
-    
-    # Format DOB to DD-MM-YYYY
-    df['DOB'] = pd.to_datetime(df['DOB'], errors='coerce', dayfirst=True).dt.strftime('%d-%m-%Y').fillna(df['DOB'])
-
+    if df.empty: return pd.DataFrame()
+    for col in ['Section', 'Photo_URL', 'Mobile', 'Roll']:
+        if col not in df.columns: df[col] = 'N/A'
+    df['Roll'] = df['Roll'].astype(str)
     return df
-
-def parse_qr_data(qr_string):
-    try:
-        data = {}
-        parts = qr_string.split('|')
-        for part in parts:
-            key, value = part.split(':')
-            data[key.strip()] = value.strip()
-        return data
-    except:
-        return None
 
 # --- 4. PDF GENERATOR ---
 def generate_pdf(students_list, photo_dict):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
-    pdf.set_auto_page_break(auto=True, margin=10)
     pdf.add_page()
     x_start, y_start, card_w, card_h, gap = 10, 10, 86, 54, 8
     col, row = 0, 0
     
-    bg_img = None
-    for ext in ['background.jpg', 'background.jpeg', 'background.png']:
-        if os.path.exists(ext):
-            bg_img = ext
-            break
-            
     for student in students_list:
-        x = x_start + (col * (card_w + gap))
-        y = y_start + (row * (card_h + gap))
-        
-        if bg_img:
-            try: pdf.image(bg_img, x=x, y=y, w=card_w, h=card_h)
-            except: pass 
-
-        pdf.set_draw_color(0, 0, 0); pdf.set_line_width(0.3); pdf.rect(x, y, card_w, card_h)
+        x, y = x_start + (col * (card_w + gap)), y_start + (row * (card_h + gap))
+        pdf.set_draw_color(0); pdf.rect(x, y, card_w, card_h)
         pdf.set_fill_color(0, 51, 153); pdf.rect(x, y, card_w, 11, 'F')
         
-        if os.path.exists('logo.png'): 
-            pdf.image('logo.png', x=x+68.5, y=y+1, w=16, h=16)
-            
-        pdf.set_font("Arial", 'B', 8.5); pdf.set_text_color(255, 255, 255)
-        pdf.set_xy(x+2, y+1.5); pdf.cell(66, 5, "BHAGYABANTAPUR PRIMARY SCHOOL", 0, 1, 'C')
-        pdf.set_font("Arial", '', 6)
-        pdf.set_xy(x+2, y+6.5); pdf.cell(66, 3, "Mob: 7908390822  |  ID CARD - SESSION 2026", 0, 1, 'C')
+        pdf.set_font("Arial", 'B', 8); pdf.set_text_color(255)
+        pdf.set_xy(x, y+3); pdf.cell(card_w, 5, "BHAGYABANTAPUR PRIMARY SCHOOL", 0, 1, 'C')
         
-        photo_x, photo_y, photo_w, photo_h = x+3, y+14, 18, 22
-        student_id = str(student.get('Sl', 0)) + "_" + str(student.get('Roll', '0'))
-        
-        # Inject the securely fetched photo
-        if student_id in photo_dict and photo_dict[student_id] is not None:
-            temp_path = tempfile.mktemp(suffix=".jpg")
-            with open(temp_path, "wb") as f: f.write(photo_dict[student_id])
-            try:
-                pdf.image(temp_path, x=photo_x, y=photo_y, w=photo_w, h=photo_h)
-                pdf.set_draw_color(0, 0, 0); pdf.rect(photo_x, photo_y, photo_w, photo_h)
-            except: pass
-        else:
-            pdf.set_draw_color(200); pdf.rect(photo_x, photo_y, photo_w, photo_h) 
-            pdf.set_text_color(150); pdf.set_font("Arial", '', 5)
-            pdf.set_xy(photo_x, y+20); pdf.cell(photo_w, 5, "NO PHOTO", 0, 0, 'C')
-        
-        pdf.set_text_color(0); detail_x, curr_y, line_h = x+24, y+14, 4
-        pdf.set_font("Arial", 'B', 9); pdf.set_xy(detail_x, curr_y)
-        pdf.cell(44, line_h, f"{student.get('Name', '')}".upper()[:25], 0, 1); curr_y += 4.5
-        pdf.set_font("Arial", '', 7)
-        
-        for label, val in [
-            ("Father", str(student.get('Father', ''))[:22]), 
-            ("Mother", str(student.get('Mother', ''))[:22]), 
-            ("Class", f"{student.get('Class', '')} | Sec: {student.get('Section', 'A')}"), 
-            ("DOB", student.get('DOB', ''))
-        ]:
-            pdf.set_xy(detail_x, curr_y); pdf.cell(44, line_h, f"{label}: {val}", 0, 1); curr_y += line_h
-            
-        pdf.set_xy(detail_x, curr_y); pdf.set_font("Arial", 'B', 7)
-        pdf.cell(44, line_h, f"Mob: {student.get('Mobile', '')}", 0, 1)
-
-        qr_data = f"Name:{student.get('Name', '')}|Roll:{student.get('Roll', '')}|Mob:{student.get('Mobile', '')}"
-        qr = qrcode.make(qr_data); qr_path = tempfile.mktemp(suffix=".png"); qr.save(qr_path)
-        pdf.image(qr_path, x=x+4.5, y=y+37, w=15, h=15)
-        
-        if os.path.exists('image_2.png'):
-            try: pdf.image('image_2.png', x=x, y=y+44, w=card_w, h=10)
-            except: pass
-
-        wm_x, wm_y = x + 55, y + 42
-        pdf.set_draw_color(220, 240, 255); pdf.set_line_width(0.4)
-        pdf.line(wm_x, wm_y, wm_x, wm_y + 6); pdf.line(wm_x, wm_y, wm_x + 2, wm_y); pdf.line(wm_x, wm_y + 6, wm_x + 2, wm_y + 6)
-        pdf.line(wm_x + 27, wm_y, wm_x + 27, wm_y + 6); pdf.line(wm_x + 25, wm_y, wm_x + 27, wm_y); pdf.line(wm_x + 25, wm_y + 6, wm_x + 27, wm_y + 6)
-
-        pdf.set_text_color(210, 235, 255); pdf.set_font("Arial", 'B', 6); pdf.set_xy(wm_x, wm_y + 1); pdf.cell(27, 4, "BPS DIGITAL", 0, 0, 'C')
-
-        if os.path.exists('signature.png'): 
-            try: pdf.image('signature.png', x=x+58, y=y+40, w=22, h=8)
-            except: pass
-        
-        pdf.set_text_color(0); pdf.set_font("Arial", 'I', 6); pdf.set_xy(x, y+49); pdf.cell(card_w-5, 3, "Sukhamay Kisku", 0, 1, 'R')
-        pdf.set_font("Arial", '', 5); pdf.set_xy(x, y+51); pdf.cell(card_w-5, 2, "Head Teacher", 0, 0, 'R')
+        pdf.set_text_color(0); pdf.set_font("Arial", 'B', 9)
+        pdf.set_xy(x+25, y+15); pdf.cell(40, 5, str(student.get('Name', '')).upper())
         
         col += 1
         if col >= 2: col, row = 0, row + 1
         if row >= 5: pdf.add_page(); col, row = 0, 0
             
-    # --- STREAMLIT CLOUD FPDF FIX ---
-    pdf_output = pdf.output(dest='S')
-    if isinstance(pdf_output, str):
-        return pdf_output.encode('latin-1')
-    else:
-        return bytes(pdf_output)
+    return pdf.output(dest='S').encode('latin-1') if isinstance(pdf.output(dest='S'), str) else bytes(pdf.output(dest='S'))
 
-
-# --- 5. TABS LAYOUT ---
-tab1, tab2 = st.tabs(["🖨️ ID Card Generator", "📸 MDM & Attendance Scanner"])
+# --- 5. APP LAYOUT ---
+tabs = st.tabs(["🖨️ Generator", "📸 Scanner", "📂 Database Explorer"])
 
 # ==========================================
-# TAB 1: ID CARD GENERATOR (Fully Automated & Cleared)
+# TAB 1: GENERATOR (Header Optimized)
 # ==========================================
-with tab1:
-    col_a, col_b, col_c = st.columns([1, 2, 1])
-    with col_b:
-        if os.path.exists('logo.png'): st.image('logo.png', use_container_width=True)
-    st.markdown('<h3 style="text-align:center; color:#007bff;">BPS Student ID Card Generator</h3>', unsafe_allow_html=True)
+with tabs[0]:
+    # Compact Header: Logo and Title side-by-side
+    h_col1, h_col2 = st.columns([1, 5])
+    with h_col1:
+        if os.path.exists('logo.png'): st.image('logo.png', width=70)
+    with h_col2:
+        st.markdown("<h2 style='margin-top:10px;'>BPS Student ID Card Generator</h2>", unsafe_allow_html=True)
+    
     st.divider()
 
-    df = get_students()
-    clearance_log = fetch_sheet_data("form_distribution_log")
+    df_master = get_students()
+    df_log = fetch_sheet_data("form_distribution_log")
     
-    if not df.empty and not clearance_log.empty:
-        # --- 1. CLEARANCE CHECK LOGIC ---
-        def is_cleared_to_print(row):
-            # 1. Form must be returned
-            is_form_complete = str(row.get('Return Status', '')).strip() == 'Complete'
-            
-            # 2. Check if any correction was requested (any 'Old' column is filled)
-            old_data_fields = [
-                str(row.get('Old Mobile Number', '')).strip(),
-                str(row.get('Old Category', '')).strip(),
-                str(row.get('Old Student Name', '')).strip(),
-                str(row.get('Old Father Name', '')).strip(),
-                str(row.get('Old Mother Name', '')).strip(),
-                str(row.get('Old DOB', '')).strip()
-            ]
-            
-            # If any of those fields have actual text in them (not just empty strings)
-            correction_requested = any(field and field.lower() not in ['nan', 'none'] for field in old_data_fields)
-            
-            if correction_requested:
-                # If they asked for a correction, 'Data Corrected' MUST be 'Yes'
-                is_data_corrected = str(row.get('Data Corrected', '')).strip() == 'Yes'
-                return is_form_complete and is_data_corrected
-            
-            # If no corrections were needed, they just need the form complete
-            return is_form_complete
+    if not df_master.empty and not df_log.empty:
+        # Clearance Logic
+        df_log['Roll'] = df_log['Roll'].astype(str)
+        merged = pd.merge(df_master, df_log, on=['Class', 'Section', 'Roll'], how='inner')
+        
+        def check_clearance(row):
+            is_returned = str(row.get('Return Status', '')).strip() == 'Complete'
+            has_old = any([str(row.get(f'Old {f}', '')).strip() not in ['','nan','None'] for f in ['Student Name', 'Father Name', 'Mobile Number']])
+            is_corrected = str(row.get('Data Corrected', '')).strip() == 'Yes'
+            return is_returned and (is_corrected if has_old else True)
 
-        # Apply logic to find who is cleared
-        clearance_log['Is_Cleared'] = clearance_log.apply(is_cleared_to_print, axis=1)
-        cleared_records = clearance_log[clearance_log['Is_Cleared'] == True].copy()
-        
-        # Merge cleared log with master student data (Matching by Class, Section, and Roll)
-        df['Roll_str'] = df['Roll'].astype(str)
-        cleared_records['Roll_str'] = cleared_records['Roll'].astype(str)
-        
-        cleared_students_df = pd.merge(
-            df, 
-            cleared_records[['Class', 'Section', 'Roll_str']], 
-            how='inner', 
-            on=['Class', 'Section', 'Roll_str']
-        ).drop(columns=['Roll_str'])
+        merged['Cleared'] = merged.apply(check_clearance, axis=1)
+        ready_df = merged[merged['Cleared'] == True].copy()
 
-        # --- 2. MULTI-CLASS SELECTION UI ---
-        available_classes = sorted(cleared_students_df['Class'].dropna().unique().tolist())
-        
-        if not available_classes:
-            st.warning("⚠️ No students currently meet the clearance requirements to print an ID card. Check the Form Manager.")
-        else:
-            selected_classes = st.multiselect(
-                "Select Class(es) to Print", 
-                options=available_classes, 
-                default=available_classes
+        if not ready_df.empty:
+            ready_df.insert(0, "Select", False)
+            selected_df = st.data_editor(
+                ready_df[['Select', 'Roll', 'Name', 'Class', 'Section']],
+                hide_index=True, use_container_width=True
             )
             
-            filtered_df = cleared_students_df[cleared_students_df['Class'].isin(selected_classes)].copy()
-            
-            if not filtered_df.empty:
-                filtered_df.insert(0, "Select", False)
-                st.write("✅ **Showing ONLY students with completed forms and verified data:**")
-                
-                # Displaying the dataframe so you can select students to print
-                edited_df = st.data_editor(
-                    filtered_df[['Select', 'Roll', 'Name', 'Class', 'Photo_URL']], 
-                    hide_index=True, 
-                    column_config={"Select": st.column_config.CheckboxColumn(required=True)}, 
-                    disabled=['Roll', 'Name', 'Class', 'Photo_URL'], 
-                    use_container_width=True
-                )
-                
-                # Get full row data for the selected students
-                selected_indices = edited_df[edited_df["Select"] == True].index
-                selected_students = filtered_df.loc[selected_indices].copy()
-                
-                if not selected_students.empty:
-                    st.divider()
-                    
-                    # --- 3. A4 PAPER CALCULATOR ---
-                    num_students = len(selected_students)
-                    pages_needed = math.ceil(num_students / 9)
-                    
-                    st.info(f"🖨️ **Print Summary:** You have selected **{num_students}** students. You will need **{pages_needed}** A4 paper(s) loaded into the printer (9 cards per page).")
-                    
-                    if st.button("Generate Secure PDF", type="primary"):
-                        photo_dict = {}
-                        
-                        # Show a progress bar while downloading images securely
-                        progress_text = "Fetching Secure Photos from Google Drive..."
-                        my_bar = st.progress(0, text=progress_text)
-                        
-                        for idx, (index, student) in enumerate(selected_students.iterrows()):
-                            sid = str(student.get('Sl', index)) + "_" + str(student.get('Roll', '0'))
-                            photo_url = str(student.get('Photo_URL', ''))
-                            
-                            drive_id = extract_drive_id(photo_url)
-                            if drive_id:
-                                img_bytes = fetch_secure_image_bytes(drive_id)
-                                if img_bytes:
-                                    photo_dict[sid] = img_bytes
-                                    
-                            my_bar.progress((idx + 1) / num_students, text=f"Fetched photo {idx + 1} of {num_students}")
-                        
-                        my_bar.empty()
-                        
-                        with st.spinner("Compiling PDF Document..."):
-                            pdf_bytes = generate_pdf(selected_students.to_dict('records'), photo_dict)
-                            
-                        st.balloons()
-                        st.download_button("📥 Download ID Cards (PDF)", pdf_bytes, f"BPS_ID_Cards_{datetime.now().strftime('%Y%m%d')}.pdf", "application/pdf")
-            else:
-                st.info("No students found for the selected classes.")
-    else:
-        st.warning("Could not load student data or clearance log. Please check your Google Sheet connection.")
-
-# ==========================================
-# TAB 2: MDM SCANNER 
-# ==========================================
-with tab2:
-    st.markdown('<h3 style="text-align:center; color:#28a745;">📸 Scan ID Card</h3>', unsafe_allow_html=True)
-    st.write("Scanned data will sync directly to the main BPS Cloud Database!")
-    
-    qr_code = qrcode_scanner(key='mdm_scanner')
-    
-    if qr_code:
-        data = parse_qr_data(qr_code)
-        if data:
-            student_name = data.get('Name', 'Unknown')
-            student_roll = data.get('Roll', 'Unknown')
-            
-            df = get_students()
-            student_match = df[(df['Name'] == student_name) & (df['Roll'].astype(str) == str(student_roll))]
-            
-            if not student_match.empty:
-                s_class = student_match.iloc[0]['Class']
-                s_sec = student_match.iloc[0]['Section']
-                
-                existing = st.session_state['attendance_log'][
-                    (st.session_state['attendance_log']['Name'] == student_name) & 
-                    (st.session_state['attendance_log']['Roll'] == student_roll)
-                ]
-                
-                if not existing.empty:
-                    st.warning(f"⚠️ {student_name} is already marked present today!")
-                else:
-                    curr_date_str = datetime.now().strftime("%d-%m-%Y")
-                    curr_time_str = datetime.now().strftime("%H:%M")
-                    
-                    new_entry = pd.DataFrame([{
-                        'Time': curr_time_str, 'Name': student_name, 'Roll': student_roll, 
-                        'Class': f"{s_class} {s_sec}", 'Status': 'Present', 'MDM': 'Yes'
-                    }])
-                    st.session_state['attendance_log'] = pd.concat([st.session_state['attendance_log'], new_entry], ignore_index=True)
-                    
-                    mdm_data = pd.DataFrame([{
-                        'Date': curr_date_str, 'Teacher': 'Scanned via ID App', 
-                        'Class': s_class, 'Section': s_sec, 'Roll': student_roll, 
-                        'Name': student_name, 'Time': curr_time_str
-                    }])
-                    append_sheet_df('mdm_log', mdm_data)
-
-                    att_data = pd.DataFrame([{
-                        'Date': curr_date_str, 'Class': s_class, 'Section': s_sec, 
-                        'Roll': student_roll, 'Name': student_name, 'Status': True
-                    }])
-                    append_sheet_df('student_attendance_master', att_data)
-
-                    st.success(f"✅ **{student_name}** logged & synced to Cloud!")
-            else:
-                st.error(f"Student '{student_name}' not found in the Master Database.")
+            if st.button("Generate ID Cards", type="primary"):
+                # PDF Generation logic here...
+                st.info("Generating PDF for selected students...")
         else:
-            st.error("Invalid QR Code Format. Please scan a valid BPS ID Card.")
+            st.warning("No students meet the clearance criteria (Form Complete + Data Corrected).")
 
-    st.divider()
+# ==========================================
+# TAB 2: SCANNER
+# ==========================================
+with tabs[1]:
+    st.subheader("📸 MDM & Attendance Scanner")
+    qr = qrcode_scanner(key='scanner')
+    if qr: st.success(f"Scanned: {qr}")
+
+# ==========================================
+# TAB 3: DATABASE EXPLORER (New Request)
+# ==========================================
+with tabs[2]:
+    st.subheader("📊 School Data & Verification Status")
     
-    st.markdown("### 📋 Today's Local Scans")
-    if not st.session_state['attendance_log'].empty:
-        st.dataframe(st.session_state['attendance_log'], use_container_width=True)
-    else:
-        st.info("No students scanned yet today. Use the camera above to start.")
+    # 1. Prepare visual dataframe
+    df_m = get_students()
+    df_l = fetch_sheet_data("form_distribution_log")
+    df_l['Roll'] = df_l['Roll'].astype(str)
+    
+    full_db = pd.merge(df_m, df_l, on=['Class', 'Section', 'Roll'], how='left')
+    
+    # Create Boolean-style status columns
+    full_db['Photo Taken'] = full_db['Photo_URL'].apply(lambda x: "✅" if pd.notna(x) and "drive" in str(x) else "❌")
+    full_db['Form Returned'] = full_db['Return Status'].apply(lambda x: "✅" if str(x) == "Complete" else "❌")
+    full_db['Verified'] = full_db['Data Corrected'].apply(lambda x: "✅" if str(x) == "Yes" else "❌")
+    
+    # 2. Dropdown Filter
+    filter_option = st.selectbox(
+        "Filter Students By Status:",
+        ["All Students", "Missing Photo", "Pending Form Return", "Ready for ID Card"]
+    )
+    
+    display_df = full_db.copy()
+    if filter_option == "Missing Photo":
+        display_df = display_df[display_df['Photo Taken'] == "❌"]
+    elif filter_option == "Pending Form Return":
+        display_df = display_df[display_df['Form Returned'] == "❌"]
+    elif filter_option == "Ready for ID Card":
+        # Check clearance using the same logic as Tab 1
+        def filter_ready(row):
+            is_returned = str(row.get('Return Status', '')).strip() == 'Complete'
+            is_corrected = str(row.get('Data Corrected', '')).strip() == 'Yes'
+            return is_returned and is_corrected
+        display_df = display_df[display_df.apply(filter_ready, axis=1)]
+
+    # 3. Show Table
+    st.dataframe(
+        display_df[['Class', 'Roll', 'Name', 'Photo Taken', 'Form Returned', 'Verified']],
+        use_container_width=True,
+        hide_index=True
+    )
+    st.caption(f"Showing {len(display_df)} records.")

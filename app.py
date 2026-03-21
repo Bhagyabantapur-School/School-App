@@ -4,6 +4,7 @@ import os
 import calendar
 import base64
 import re
+import concurrent.futures  # <-- NEW: Added for parallel, high-speed downloading
 from datetime import datetime, time, timedelta
 from streamlit_qrcode_scanner import qrcode_scanner
 import gspread
@@ -172,20 +173,15 @@ def get_secure_photo_uri(url):
         return fallback_image
 
     file_id = None
-    
-    # SMARTER EXTRACTOR: Catches both '/d/123...' and '?id=123...' link formats
     match = re.search(r"(?:id=|/d/)([\w-]+)", url)
-    if match:
-        file_id = match.group(1)
+    if match: file_id = match.group(1)
 
     if file_id:
         image_bytes = fetch_secure_image_bytes(file_id)
         if image_bytes:
-            # Convert secure bytes to base64 so Streamlit ImageColumn can display it
             b64_str = base64.b64encode(image_bytes).decode()
             return f"data:image/jpeg;base64,{b64_str}"
             
-    # Fallback if it's a standard web url (not Google Drive)
     return url if url.startswith("http") else fallback_image
 
 
@@ -310,7 +306,6 @@ else:
                         if is_substituting: st.info(f"🔄 **SUBSTITUTION:** Covering for **{absent_teacher_name}** ({target_class} - {target_section})")
                         else: st.info(f"📌 Assigned **11:15 AM** class: **{target_class} - {target_section}**")
                         
-                        # Fetch Students (Strictly Google Sheets -> 'students_master')
                         students = fetch_sheet_data('students_master')
 
                         if not students.empty:
@@ -342,16 +337,20 @@ else:
                                 roster['Scan_Key'] = roster['Roll'].astype(str) + "_" + roster['Name'].astype(str)
                                 roster['Ate_MDM'] = roster['Scan_Key'].isin(st.session_state.scanned_keys)
                                 
-                                # --- ADD TINY STAMP PHOTO UI ---
+                                # --- FAST PARALLEL PHOTO DOWNLOADING ---
                                 if 'Photo_URL' not in roster.columns: roster['Photo_URL'] = ""
-                                roster['Photo'] = roster['Photo_URL'].apply(get_secure_photo_uri)
+                                
+                                with st.spinner("Downloading high-quality photos..."):
+                                    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                                        roster['Photo'] = list(executor.map(get_secure_photo_uri, roster['Photo_URL'].tolist()))
 
+                                # --- INCREASED SIZE CONFIG ---
                                 edited = st.data_editor(
                                     roster[['Photo', 'Section', 'Roll', 'Name', 'Ate_MDM']], 
                                     hide_index=True, 
                                     use_container_width=True,
                                     column_config={
-                                        "Photo": st.column_config.ImageColumn("👤", width="small")
+                                        "Photo": st.column_config.ImageColumn("👤 Photo", width="large")
                                     }
                                 )
                                 st.markdown(f"### ✅ Total Selected: {edited['Ate_MDM'].sum()}")
@@ -530,9 +529,7 @@ else:
             if sel_c != "Select Class...":
                 t_class, t_sec = sel_c.rsplit(' ', 1)
                 
-                # Fetch Students (Strictly Google Sheets -> 'students_master')
                 std = fetch_sheet_data('students_master')
-                
                 mdm_log = fetch_sheet_data('mdm_log')
                 
                 if not std.empty:
@@ -544,17 +541,21 @@ else:
                         
                         ros['Present'], ros['MDM (Ate)'] = True, ros['Roll'].astype(str).isin(mdm_eaters)
                         
-                        # --- ADD TINY STAMP PHOTO UI ---
+                        # --- FAST PARALLEL PHOTO DOWNLOADING ---
                         if 'Photo_URL' not in ros.columns: ros['Photo_URL'] = ""
-                        ros['Photo'] = ros['Photo_URL'].apply(get_secure_photo_uri)
+                        
+                        with st.spinner("Downloading high-quality photos..."):
+                            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                                ros['Photo'] = list(executor.map(get_secure_photo_uri, ros['Photo_URL'].tolist()))
 
+                        # --- INCREASED SIZE CONFIG ---
                         ed = st.data_editor(
                             ros[['Photo', 'Roll', 'Name', 'Present', 'MDM (Ate)']], 
                             hide_index=True, 
                             use_container_width=True, 
                             disabled=["Photo", "Roll", "Name", "MDM (Ate)"],
                             column_config={
-                                "Photo": st.column_config.ImageColumn("👤", width="small")
+                                "Photo": st.column_config.ImageColumn("👤 Photo", width="large")
                             }
                         )
                         
@@ -762,9 +763,7 @@ else:
         with tabs[4]: 
             s_c = st.selectbox("Class", CLASS_OPTIONS, key='shoe')
             if s_c != "Select Class...":
-                # Fetch Students (Strictly Google Sheets -> 'students_master')
                 std = fetch_sheet_data('students_master')
-                
                 log = fetch_sheet_data('shoe_log')
                 if not std.empty:
                     ros = std[std['Class'] == s_c].copy()

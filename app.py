@@ -4,6 +4,7 @@ import os
 import calendar
 import base64
 import re
+import concurrent.futures
 from datetime import datetime, time, timedelta
 from streamlit_qrcode_scanner import qrcode_scanner
 import gspread
@@ -323,32 +324,40 @@ else:
                                     except: st.warning("⚠️ Invalid ID Card.")
 
                                 roster['Scan_Key'] = roster['Roll'].astype(str) + "_" + roster['Name'].astype(str)
-                                roster['Ate_MDM'] = roster['Scan_Key'].isin(st.session_state.scanned_keys)
                                 
-                                # --- LOOKING ONLY FOR Thumb_URL ---
                                 if 'Thumb_URL' not in roster.columns: roster['Thumb_URL'] = ""
-                                roster['Photo'] = roster['Thumb_URL'].apply(get_secure_photo_uri)
+                                
+                                with st.spinner("Loading student profiles..."):
+                                    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                                        roster['Photo'] = list(executor.map(get_secure_photo_uri, roster['Thumb_URL'].tolist()))
 
-                                edited = st.data_editor(
-                                    roster[['Photo', 'Section', 'Roll', 'Name', 'Ate_MDM']], 
-                                    hide_index=True, 
-                                    use_container_width=True,
-                                    column_config={
-                                        "Photo": st.column_config.ImageColumn("👤", width="small")
-                                    }
-                                )
-                                st.markdown(f"### ✅ Total Selected: {edited['Ate_MDM'].sum()}")
-
-                                if st.button("Submit MDM"):
-                                    ate = edited[edited['Ate_MDM'] == True]
-                                    new_rows = [{'Date': curr_date_str, 'Teacher': t_name_select, 'Class': target_class, 'Section': target_section, 'Roll': r['Roll'], 'Name': r['Name'], 'Time': now.strftime("%H:%M")} for _, r in ate.iterrows()]
+                                # --- MDM CARD LIST UI ---
+                                st.markdown("### Roster Selection")
+                                with st.form("mdm_form"):
+                                    selected_mdm = []
+                                    for idx, r in roster.iterrows():
+                                        c1, c2, c3 = st.columns([1, 3, 1])
+                                        with c1:
+                                            # Large image display inside the card!
+                                            st.image(r['Photo'], width=90) 
+                                        with c2:
+                                            st.markdown(f"**{r['Name']}**")
+                                            st.caption(f"Roll: {r['Roll']} | {target_class}")
+                                        with c3:
+                                            # Auto-check if they were scanned via QR
+                                            is_scanned = r['Scan_Key'] in st.session_state.scanned_keys
+                                            if st.checkbox("Ate MDM", value=is_scanned, key=f"mdm_{r['Roll']}_{r['Name']}"):
+                                                selected_mdm.append(r)
+                                        st.divider()
                                     
-                                    if new_rows:
-                                        append_sheet_df('mdm_log', pd.DataFrame(new_rows))
-                                        st.session_state.scanned_keys = []
-                                        st.success(f"Submitted {len(new_rows)} students to Cloud DB!")
-                                        st.rerun()
-                                    else: st.warning("No students selected.")
+                                    if st.form_submit_button("Submit MDM Data"):
+                                        if selected_mdm:
+                                            new_rows = [{'Date': curr_date_str, 'Teacher': t_name_select, 'Class': target_class, 'Section': target_section, 'Roll': sr['Roll'], 'Name': sr['Name'], 'Time': now.strftime("%H:%M")} for sr in selected_mdm]
+                                            append_sheet_df('mdm_log', pd.DataFrame(new_rows))
+                                            st.session_state.scanned_keys = []
+                                            st.success(f"Submitted {len(new_rows)} students to Cloud DB!")
+                                            st.rerun()
+                                        else: st.warning("No students selected.")
                                 
                                 att_df = fetch_sheet_data('student_attendance_master')
                                 is_att_marked = False
@@ -522,26 +531,41 @@ else:
                     
                     if not ros.empty:
                         mdm_eaters = mdm_log[(mdm_log['Date'].astype(str) == curr_date_str) & (mdm_log['Class'] == t_class) & (mdm_log['Section'] == t_sec)]['Roll'].astype(str).tolist() if not mdm_log.empty else []
+                        ros['MDM (Ate)'] = ros['Roll'].astype(str).isin(mdm_eaters)
                         
-                        ros['Present'], ros['MDM (Ate)'] = True, ros['Roll'].astype(str).isin(mdm_eaters)
-                        
-                        # --- LOOKING ONLY FOR Thumb_URL ---
                         if 'Thumb_URL' not in ros.columns: ros['Thumb_URL'] = ""
-                        ros['Photo'] = ros['Thumb_URL'].apply(get_secure_photo_uri)
-
-                        ed = st.data_editor(
-                            ros[['Photo', 'Roll', 'Name', 'Present', 'MDM (Ate)']], 
-                            hide_index=True, 
-                            use_container_width=True, 
-                            disabled=["Photo", "Roll", "Name", "MDM (Ate)"],
-                            column_config={
-                                "Photo": st.column_config.ImageColumn("👤", width="small")
-                            }
-                        )
                         
-                        c1, c2 = st.columns(2)
-                        c1.markdown(f"<div class='att-badge att-neutral'>✅ Total Selected: {ed['Present'].sum()}</div>", unsafe_allow_html=True)
-                        c2.markdown(f"<div class='att-badge {'att-done' if mdm_eaters else 'att-wait'}'>MDM Entry: {len(mdm_eaters) if mdm_eaters else 'Wait'}</div>", unsafe_allow_html=True)
+                        with st.spinner("Loading student profiles..."):
+                            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                                ros['Photo'] = list(executor.map(get_secure_photo_uri, ros['Thumb_URL'].tolist()))
+
+                        # --- ATTENDANCE CARD LIST UI ---
+                        st.markdown("### Class Roster")
+                        with st.form("att_form"):
+                            attendance_data = []
+                            for idx, r in ros.iterrows():
+                                c1, c2, c3 = st.columns([1, 3, 1])
+                                with c1:
+                                    st.image(r['Photo'], width=90) # Large Image!
+                                with c2:
+                                    st.markdown(f"**{r['Name']}**")
+                                    st.caption(f"Roll: {r['Roll']}")
+                                    if r['MDM (Ate)']:
+                                        st.markdown("🍲 *Ate MDM Today*")
+                                with c3:
+                                    # Default to present
+                                    is_present = st.checkbox("Present", value=True, key=f"att_{r['Roll']}_{r['Name']}")
+                                    attendance_data.append({
+                                        'Date': curr_date_str, 'Class': t_class, 'Section': t_sec, 
+                                        'Roll': r['Roll'], 'Name': r['Name'], 'Status': is_present
+                                    })
+                                st.divider()
+                                
+                            if st.form_submit_button(f"Save Attendance for {t_class} - {t_sec}"):
+                                df = pd.DataFrame(attendance_data)
+                                append_sheet_df('student_attendance_master', df)
+                                st.success("✅ Saved to Cloud Database.")
+                                st.rerun()
 
                         att_check = fetch_sheet_data('student_attendance_master')
                         is_submitted = not att_check[(att_check['Date'].astype(str) == curr_date_str) & (att_check['Class'] == t_class) & (att_check['Section'] == t_sec)].empty if not att_check.empty else False
@@ -552,12 +576,6 @@ else:
                                 temp_att = att_check[~((att_check['Date'].astype(str) == curr_date_str) & (att_check['Class'] == t_class) & (att_check['Section'] == t_sec))]
                                 overwrite_sheet_df('student_attendance_master', temp_att)
                                 st.success("Attendance Cleared!")
-                                st.rerun()
-                        else:
-                            if st.button(f"Save Attendance for {t_class} - {t_sec}"):
-                                df = pd.DataFrame({'Date': curr_date_str, 'Class': t_class, 'Section': t_sec, 'Roll': ed['Roll'], 'Name': ed['Name'], 'Status': ed['Present']})
-                                append_sheet_df('student_attendance_master', df)
-                                st.success("✅ Saved to Cloud Database.")
                                 st.rerun()
 
             st.divider()

@@ -48,43 +48,39 @@ def inject_security_css(user_name):
         .stCheckbox {{ min-height: 1.5rem; }}
         .stCheckbox p {{ font-size: 14px; margin-bottom: 0; }}
         
-        /* 📱 MOBILE PROFILE CARD FIX: Perfect fit, no horizontal scrolling */
+        /* 📱 MOBILE PROFILE CARD FIX: Fluid Percentages */
         @media (max-width: 640px) {{
-            /* Prevent the entire page from scrolling horizontally */
             .block-container {{ overflow-x: hidden !important; padding-left: 5px !important; padding-right: 5px !important; }}
             
             [data-testid="stForm"] [data-testid="stHorizontalBlock"] {{
                 flex-direction: row !important;
                 flex-wrap: nowrap !important;
                 align-items: center !important;
-                gap: 5px !important;
+                gap: 2% !important;
                 width: 100% !important;
-                overflow: hidden !important;
             }}
             [data-testid="stForm"] [data-testid="column"] {{
                 min-width: 0 !important; 
                 padding: 0 !important;
             }}
-            /* Column 1: Photo (Strictly 60px) */
+            /* Column 1: Photo (20%) */
             [data-testid="stForm"] [data-testid="column"]:nth-child(1) {{ 
-                flex: 0 0 60px !important; 
-                width: 60px !important; 
+                width: 20% !important; 
+                flex: 0 0 20% !important; 
             }}
-            /* Column 2: Text (Flexible, shrinks/grows) */
+            /* Column 2: Name & Roll (48%) */
             [data-testid="stForm"] [data-testid="column"]:nth-child(2) {{ 
-                flex: 1 1 100px !important; 
-                width: auto !important;
-                overflow: hidden !important;
+                width: 48% !important; 
+                flex: 0 0 48% !important; 
             }}
-            /* Column 3: Checkboxes (Strictly 90px to fit toggles) */
+            /* Column 3: Checkboxes (30%) */
             [data-testid="stForm"] [data-testid="column"]:nth-child(3) {{ 
-                flex: 0 0 90px !important; 
-                width: 90px !important; 
+                width: 30% !important; 
+                flex: 0 0 30% !important; 
             }}
             
-            /* Shrink text slightly on mobile to ensure perfect fit */
-            .stCheckbox p {{ font-size: 13px !important; margin-bottom: 0px !important; padding-left: 1.5rem !important; }}
-            .stCheckbox {{ min-height: 1.2rem; }}
+            /* Shrink checkbox text slightly on mobile */
+            .stCheckbox p {{ font-size: 13px !important; padding-left: 1.2rem !important; line-height: 1.2 !important; }}
         }}
     </style>
     <script>document.addEventListener('contextmenu', event => event.preventDefault());</script>
@@ -379,12 +375,14 @@ else:
                                 with st.form("mdm_form"):
                                     selected_mdm = []
                                     for idx, r in roster.iterrows():
-                                        # Adjusting Python columns to support the new CSS width fix
-                                        c1, c2, c3 = st.columns([1.5, 5, 2.5])
+                                        # Use standard ratio, CSS fixes it on mobile
+                                        c1, c2, c3 = st.columns([2, 5, 3])
                                         with c1:
-                                            st.image(r['Photo'], width=60) 
+                                            # use_container_width automatically fits the photo perfectly to the column!
+                                            st.image(r['Photo'], use_container_width=True) 
                                         with c2:
-                                            st.markdown(f"<div style='line-height:1.2; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']}</span></div>", unsafe_allow_html=True)
+                                            # Word-wrap added to prevent long names from pushing boundaries
+                                            st.markdown(f"<div style='line-height:1.2; margin-top:2px; word-wrap:break-word;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} | {target_class}</span></div>", unsafe_allow_html=True)
                                         with c3:
                                             is_scanned = r['Scan_Key'] in st.session_state.scanned_keys
                                             if st.checkbox("Ate MDM", value=is_scanned, key=f"mdm_{r['Roll']}_{r['Name']}"):
@@ -585,16 +583,16 @@ else:
                         with st.form("att_form"):
                             attendance_data = []
                             for idx, r in ros.iterrows():
-                                # Adjusting Python columns to support the new CSS width fix
-                                c1, c2, c3 = st.columns([1.5, 5, 2.5])
+                                # Use standard ratio, CSS fixes it on mobile
+                                c1, c2, c3 = st.columns([2, 5, 3])
                                 with c1:
-                                    st.image(r['Photo'], width=60) 
+                                    # use_container_width automatically fits the photo perfectly!
+                                    st.image(r['Photo'], use_container_width=True) 
                                 with c2:
-                                    st.markdown(f"<div style='line-height:1.2; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']}</span></div>", unsafe_allow_html=True)
+                                    # Word-wrap added to prevent long names from pushing boundaries
+                                    st.markdown(f"<div style='line-height:1.2; margin-top:2px; word-wrap:break-word;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']}</span></div>", unsafe_allow_html=True)
                                 with c3:
-                                    # Present Checkbox (Active)
                                     is_present = st.checkbox("Present", value=True, key=f"att_{r['Roll']}_{r['Name']}")
-                                    # MDM Checkbox (Read Only / Disabled) stacked directly below
                                     st.checkbox("MDM Entry", value=bool(r['MDM (Ate)']), disabled=True, key=f"mdm_ro_{r['Roll']}_{r['Name']}")
                                     
                                     attendance_data.append({

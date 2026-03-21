@@ -376,7 +376,6 @@ else:
                                 st.markdown('<div class="roster-container">', unsafe_allow_html=True)
                                 selected_mdm = []
                                 
-                                # Removed st.form to enable live counting
                                 for idx, r in roster.iterrows():
                                     c1, c2, c3 = st.columns([1, 4, 2])
                                     with c1:
@@ -385,12 +384,10 @@ else:
                                         st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']}</span></div>", unsafe_allow_html=True)
                                     with c3:
                                         is_scanned = r['Scan_Key'] in st.session_state.scanned_keys
-                                        # When clicked, Streamlit will rerun instantly and update the counter
                                         if st.checkbox("Ate MDM", value=is_scanned, key=f"mdm_{r['Roll']}_{r['Name']}"):
                                             selected_mdm.append(r)
                                     st.divider()
                                 
-                                # Live counter updates instantly on click!
                                 st.markdown(f"### ✅ Total Selected: {len(selected_mdm)}")
                                 
                                 if st.button("Submit MDM Data"):
@@ -484,9 +481,10 @@ else:
                 leave_log = fetch_sheet_data('teacher_leave')
                 if not leave_log.empty and 'Teacher' in leave_log.columns:
                     my_leaves = leave_log[leave_log['Teacher'] == t_name_select]
-                    c1, c2 = st.columns(2)
+                    c1, c2, c3 = st.columns(3)
                     c1.metric("CL Remaining", f"{14 - len(my_leaves[my_leaves['Type'] == 'CL'])}")
                     c2.metric("SL Taken", f"{len(my_leaves[my_leaves['Type'] == 'SL'])}")
+                    c3.metric("Commuted", f"{len(my_leaves[my_leaves['Type'] == 'Commuted Leave'])}")
                     st.dataframe(my_leaves[~my_leaves['Type'].isin(['Half Day', 'On Duty'])][['Date', 'Type', 'Substitute']], hide_index=True)
             
             with at_tabs[3]: # Holidays
@@ -590,7 +588,6 @@ else:
                         attendance_data = []
                         present_count = 0
                         
-                        # Removed st.form to enable live counting
                         for idx, r in ros.iterrows():
                             c1, c2, c3 = st.columns([1, 4, 2.5])
                             with c1:
@@ -598,7 +595,6 @@ else:
                             with c2:
                                 st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']}</span></div>", unsafe_allow_html=True)
                             with c3:
-                                # This updates instantly when clicked
                                 is_present = st.checkbox("Present", value=True, key=f"att_{r['Roll']}_{r['Name']}")
                                 if is_present:
                                     present_count += 1
@@ -611,7 +607,6 @@ else:
                                 })
                             st.divider()
                         
-                        # Live counter updates instantly on click!
                         st.markdown(f"### ✅ Total Present: {present_count}")
                             
                         if st.button(f"Save Attendance for {t_class} - {t_sec}"):
@@ -764,7 +759,7 @@ else:
                                     if slot not in busy_subs: busy_subs[slot] = []
                                     busy_subs[slot].append(sub.strip())
                                         
-                    lt = st.selectbox("Leave Type", ["CL", "SL", "Half Day", "On Duty"])
+                    lt = st.selectbox("Leave Type", ["CL", "SL", "Commuted Leave", "Half Day", "On Duty"])
 
                     if not missed.empty:
                         assigns = []
@@ -806,7 +801,15 @@ else:
                 for t in ([rep_teacher] if rep_teacher != "All Teachers" else TEACHER_LIST):
                     t_data = valid_leaves[valid_leaves['Teacher'] == t]
                     p, c = t_data[t_data['Period'] == 'prev'], t_data[t_data['Period'] == 'curr']
-                    summary_data.append({'Teacher': t, 'Prev CL': len(p[p['Type'] == 'CL']), 'Prev SL': len(p[p['Type'] == 'SL']), 'Curr CL': len(c[c['Type'] == 'CL']), 'Curr SL': len(c[c['Type'] == 'SL'])})
+                    summary_data.append({
+                        'Teacher': t, 
+                        'Prev CL': len(p[p['Type'] == 'CL']), 
+                        'Prev SL': len(p[p['Type'] == 'SL']), 
+                        'Prev Commuted': len(p[p['Type'] == 'Commuted Leave']),
+                        'Curr CL': len(c[c['Type'] == 'CL']), 
+                        'Curr SL': len(c[c['Type'] == 'SL']),
+                        'Curr Commuted': len(c[c['Type'] == 'Commuted Leave'])
+                    })
                     
                 st.dataframe(pd.DataFrame(summary_data), hide_index=True, use_container_width=True)
                 st.dataframe(valid_leaves if rep_teacher == "All Teachers" else valid_leaves[valid_leaves['Teacher'] == rep_teacher][['Date', 'Teacher', 'Type', 'Substitute']], hide_index=True)

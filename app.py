@@ -153,11 +153,9 @@ def append_sheet_df(sheet_name, df):
     try: 
         ws = sh.worksheet(sheet_name)
     except WorksheetNotFound:
-        # Only create a new sheet if we are 100% sure it does not exist
         ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=20)
         ws.append_row(list(df.columns))
     except Exception as e:
-        # If it's a quota error, stop gracefully
         st.error("⚠️ Google Sheets API is busy (Rate Limit). Please wait 30 seconds and try again.")
         return
     
@@ -750,61 +748,106 @@ else:
             st.subheader("Substitution Manager")
             with st.expander("📂 View Cloud Leave Database"): st.dataframe(fetch_sheet_data('teacher_leave'))
             
-            sub_date_str = st.date_input("Select Date for Substitutions", datetime.now(), key="sub_date").strftime("%d-%m-%Y")
-            target_day = datetime.strptime(sub_date_str, "%d-%m-%Y").strftime('%A')
             abs_t = st.selectbox("Absent Teacher", ["Select..."] + TEACHER_LIST)
             
             if abs_t != "Select...":
-                routine = get_local_csv('routine.csv')
-                code = TEACHER_INITIALS.get(abs_t, abs_t)
-                missed = routine[(routine['Teacher'] == code) & (routine['Day'] == target_day)].copy() if not routine.empty else pd.DataFrame()
+                lt = st.selectbox("Leave Type", ["CL", "SL", "Commuted Leave", "Half Day", "On Duty"])
                 
-                leave_log = fetch_sheet_data('teacher_leave')
-                existing_leave = leave_log[(leave_log['Date'].astype(str) == sub_date_str) & (leave_log['Teacher'] == abs_t)] if not leave_log.empty else pd.DataFrame()
+                is_multi = False
+                if lt == "Commuted Leave":
+                    is_multi = st.checkbox("Mark for Multiple Days?", value=True)
                 
-                if not existing_leave.empty:
-                    st.success(f"✅ Leave Submitted: **{abs_t}** marked for **{existing_leave.iloc[0]['Type']}** on **{sub_date_str}**.")
-                    if st.button("🗑️ Undo / Re-assign Leave"):
-                        overwrite_sheet_df('teacher_leave', leave_log.drop(existing_leave.index))
-                        st.rerun()
-                else:
-                    busy_subs = {}
-                    if not leave_log.empty:
-                        for _, row in leave_log[leave_log['Date'].astype(str) == sub_date_str].iterrows():
-                            for assign in str(row.get('Detailed_Sub_Log', '')).split(" | "):
-                                if ": " in assign:
-                                    slot, sub = assign.split(": ")
-                                    if slot not in busy_subs: busy_subs[slot] = []
-                                    busy_subs[slot].append(sub.strip())
+                if is_multi:
+                    st.info("📅 Select the date range. Substitutes for individual days can be assigned later.")
+                    c1, c2 = st.columns(2)
+                    start_date = c1.date_input("Start Date", datetime.now(), key="m_start")
+                    end_date = c2.date_input("End Date", start_date, key="m_end")
+                    
+                    if st.button(f"Save {lt} (Multi-Day)"):
+                        delta = end_date - start_date
+                        if delta.days < 0:
+                            st.error("❌ End Date cannot be before Start Date!")
+                        else:
+                            leave_log = fetch_sheet_data('teacher_leave')
+                            new_leaves = []
+                            for i in range(delta.days + 1):
+                                day_str = (start_date + timedelta(days=i)).strftime("%d-%m-%Y")
+                                
+                                # Check if already recorded
+                                exists = False
+                                if not leave_log.empty and 'Date' in leave_log.columns:
+                                    if not leave_log[(leave_log['Date'].astype(str) == day_str) & (leave_log['Teacher'] == abs_t)].empty:
+                                        exists = True
                                         
-                    lt = st.selectbox("Leave Type", ["CL", "SL", "Commuted Leave", "Half Day", "On Duty"])
-
-                    if not missed.empty:
-                        assigns = []
-                        for idx, row in missed.iterrows():
-                            slot = str(row['Start_Time']).strip()
-                            busy_codes = routine[(routine['Day'] == target_day) & (routine['Start_Time'] == slot)]['Teacher'].tolist() if not routine.empty else []
+                                if not exists:
+                                    new_leaves.append({
+                                        "Date": day_str, 
+                                        "Teacher": abs_t, 
+                                        "Type": lt, 
+                                        "Substitute": "None", 
+                                        "Detailed_Sub_Log": "None"
+                                    })
                             
-                            free_options, busy_options = [], []
-                            for t_name in TEACHER_LIST:
-                                if t_name == abs_t: continue 
-                                t_code = TEACHER_INITIALS.get(t_name, "")
-                                if slot in busy_subs and t_name in busy_subs[slot]: busy_options.append(f"⛔ {t_name} (Already Subbing)")
-                                elif t_code not in busy_codes: free_options.append(f"✅ {t_name} (Free)")
-                                else: busy_options.append(f"⚠️ {t_name} (Busy)")
-                            
-                            st.markdown(f"<div class='routine-card'><b>{slot}</b> | {row['Class']}</div>", unsafe_allow_html=True)
-                            choice = st.selectbox(f"Sub for {slot}", ["Select..."] + free_options + busy_options, key=f"s_{idx}")
-                            if choice != "Select...": assigns.append(f"{slot}: {choice.split(' (')[0].replace('✅ ', '').replace('⚠️ ', '').replace('⛔ ', '')}")
-                        
-                        if st.button("Confirm Substitutes"):
-                            append_sheet_df('teacher_leave', pd.DataFrame([{"Date": sub_date_str, "Teacher": abs_t, "Type": lt, "Substitute": "Multiple", "Detailed_Sub_Log": " | ".join(assigns)}]))
+                            if new_leaves:
+                                append_sheet_df('teacher_leave', pd.DataFrame(new_leaves))
+                                st.success(f"✅ {lt} saved successfully from {start_date.strftime('%d-%m-%Y')} to {end_date.strftime('%d-%m-%Y')}!")
+                                st.rerun()
+                            else:
+                                st.warning("Leave is already recorded for these dates.")
+                
+                else:
+                    # ORIGINAL SINGLE DAY SUBSTITUTION LOGIC
+                    sub_date_str = st.date_input("Select Date for Substitutions", datetime.now(), key="sub_date").strftime("%d-%m-%Y")
+                    target_day = datetime.strptime(sub_date_str, "%d-%m-%Y").strftime('%A')
+                    
+                    routine = get_local_csv('routine.csv')
+                    code = TEACHER_INITIALS.get(abs_t, abs_t)
+                    missed = routine[(routine['Teacher'] == code) & (routine['Day'] == target_day)].copy() if not routine.empty else pd.DataFrame()
+                    
+                    leave_log = fetch_sheet_data('teacher_leave')
+                    existing_leave = leave_log[(leave_log['Date'].astype(str) == sub_date_str) & (leave_log['Teacher'] == abs_t)] if not leave_log.empty else pd.DataFrame()
+                    
+                    if not existing_leave.empty:
+                        st.success(f"✅ Leave Submitted: **{abs_t}** marked for **{existing_leave.iloc[0]['Type']}** on **{sub_date_str}**.")
+                        if st.button("🗑️ Undo / Re-assign Leave"):
+                            overwrite_sheet_df('teacher_leave', leave_log.drop(existing_leave.index))
                             st.rerun()
                     else:
-                        st.info("No classes scheduled for this teacher on this day.")
-                        if st.button("Mark Leave (No Sub)"):
-                            append_sheet_df('teacher_leave', pd.DataFrame([{"Date": sub_date_str, "Teacher": abs_t, "Type": lt, "Substitute": "None", "Detailed_Sub_Log": "None"}]))
-                            st.rerun()
+                        busy_subs = {}
+                        if not leave_log.empty:
+                            for _, row in leave_log[leave_log['Date'].astype(str) == sub_date_str].iterrows():
+                                for assign in str(row.get('Detailed_Sub_Log', '')).split(" | "):
+                                    if ": " in assign:
+                                        slot, sub = assign.split(": ")
+                                        if slot not in busy_subs: busy_subs[slot] = []
+                                        busy_subs[slot].append(sub.strip())
+
+                        if not missed.empty:
+                            assigns = []
+                            for idx, row in missed.iterrows():
+                                slot = str(row['Start_Time']).strip()
+                                busy_codes = routine[(routine['Day'] == target_day) & (routine['Start_Time'] == slot)]['Teacher'].tolist() if not routine.empty else []
+                                
+                                free_options, busy_options = [], []
+                                for t_name in TEACHER_LIST:
+                                    if t_name == abs_t: continue 
+                                    t_code = TEACHER_INITIALS.get(t_name, "")
+                                    if slot in busy_subs and t_name in busy_subs[slot]: busy_options.append(f"⛔ {t_name} (Already Subbing)")
+                                    elif t_code not in busy_codes: free_options.append(f"✅ {t_name} (Free)")
+                                    else: busy_options.append(f"⚠️ {t_name} (Busy)")
+                                
+                                st.markdown(f"<div class='routine-card'><b>{slot}</b> | {row['Class']}</div>", unsafe_allow_html=True)
+                                choice = st.selectbox(f"Sub for {slot}", ["Select..."] + free_options + busy_options, key=f"s_{idx}")
+                                if choice != "Select...": assigns.append(f"{slot}: {choice.split(' (')[0].replace('✅ ', '').replace('⚠️ ', '').replace('⛔ ', '')}")
+                            
+                            if st.button("Confirm Substitutes"):
+                                append_sheet_df('teacher_leave', pd.DataFrame([{"Date": sub_date_str, "Teacher": abs_t, "Type": lt, "Substitute": "Multiple", "Detailed_Sub_Log": " | ".join(assigns)}]))
+                                st.rerun()
+                        else:
+                            st.info("No classes scheduled for this teacher on this day.")
+                            if st.button("Mark Leave (No Sub)"):
+                                append_sheet_df('teacher_leave', pd.DataFrame([{"Date": sub_date_str, "Teacher": abs_t, "Type": lt, "Substitute": "None", "Detailed_Sub_Log": "None"}]))
+                                st.rerun()
 
             st.divider()
             st.subheader("📊 Comprehensive Leave Report")

@@ -13,20 +13,10 @@ from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound
 from google.auth.transport.requests import AuthorizedSession
 
-# --- IMPORT THE SCANNER ---
-try:
-    from streamlit_qrcode_scanner import qrcode_scanner
-except ImportError:
-    st.error("Please add 'streamlit-qrcode-scanner' to your requirements.txt")
-    st.stop()
-
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="BPS Digital - ID Generator", page_icon="🏫", layout="wide")
 
-if 'attendance_log' not in st.session_state:
-    st.session_state['attendance_log'] = pd.DataFrame(columns=['Time', 'Name', 'Roll', 'Class', 'Status', 'MDM'])
-
-# --- 2. GOOGLE CREDENTIALS & DRIVE FETCHING ---
+# --- 2. GOOGLE CONNECTION ---
 @st.cache_resource
 def get_google_credentials():
     skey = dict(st.secrets["gcp_service_account"])
@@ -45,25 +35,8 @@ def init_gsheets():
 
 sh = init_gsheets()
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def fetch_secure_image_bytes(file_id):
-    try:
-        creds = get_google_credentials()
-        authed_session = AuthorizedSession(creds)
-        url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
-        response = authed_session.get(url)
-        return response.content if response.status_code == 200 else None
-    except:
-        return None
-
-def extract_drive_id(url):
-    if pd.isna(url) or not isinstance(url, str): return None
-    if "drive.google.com/file/d/" in url:
-        return url.split("/d/")[1].split("/")[0]
-    return None
-
-# --- 3. DATA FETCHING ---
-@st.cache_data(ttl=300) 
+# --- 3. DATA PERSISTENCE FUNCTIONS ---
+@st.cache_data(ttl=60) 
 def fetch_sheet_data(sheet_name):
     try:
         ws = sh.worksheet(sheet_name)
@@ -71,55 +44,26 @@ def fetch_sheet_data(sheet_name):
     except:
         return pd.DataFrame()
 
-def append_sheet_df(sheet_name, df):
-    if df.empty: return
-    try: 
-        ws = sh.worksheet(sheet_name)
-        ws.append_rows(df.fillna("").astype(str).values.tolist())
+def update_photo_status_in_cloud(student_name, roll, student_class):
+    """Updates the database when a teacher confirms a photo is taken."""
+    try:
+        ws = sh.worksheet("students_master")
+        cell = ws.find(student_name) # Simplification: in production use a Unique ID
+        # Logic to update a 'Photo_Status' column if you have one, 
+        # or logging into a separate 'photo_log' sheet
+        log_ws = sh.worksheet("photo_log")
+        log_ws.append_row([datetime.now().strftime("%d-%m-%Y"), student_class, roll, student_name, "Taken"])
+        st.cache_data.clear()
     except:
-        pass
+        st.error("Cloud update failed.")
 
-@st.cache_data(ttl=300)
-def get_students():
-    df = fetch_sheet_data("students_master")
-    if df.empty: return pd.DataFrame()
-    for col in ['Section', 'Photo_URL', 'Mobile', 'Roll']:
-        if col not in df.columns: df[col] = 'N/A'
-    df['Roll'] = df['Roll'].astype(str)
-    return df
-
-# --- 4. PDF GENERATOR ---
-def generate_pdf(students_list, photo_dict):
-    pdf = FPDF(orientation='P', unit='mm', format='A4')
-    pdf.add_page()
-    x_start, y_start, card_w, card_h, gap = 10, 10, 86, 54, 8
-    col, row = 0, 0
-    
-    for student in students_list:
-        x, y = x_start + (col * (card_w + gap)), y_start + (row * (card_h + gap))
-        pdf.set_draw_color(0); pdf.rect(x, y, card_w, card_h)
-        pdf.set_fill_color(0, 51, 153); pdf.rect(x, y, card_w, 11, 'F')
-        
-        pdf.set_font("Arial", 'B', 8); pdf.set_text_color(255)
-        pdf.set_xy(x, y+3); pdf.cell(card_w, 5, "BHAGYABANTAPUR PRIMARY SCHOOL", 0, 1, 'C')
-        
-        pdf.set_text_color(0); pdf.set_font("Arial", 'B', 9)
-        pdf.set_xy(x+25, y+15); pdf.cell(40, 5, str(student.get('Name', '')).upper())
-        
-        col += 1
-        if col >= 2: col, row = 0, row + 1
-        if row >= 5: pdf.add_page(); col, row = 0, 0
-            
-    return pdf.output(dest='S').encode('latin-1') if isinstance(pdf.output(dest='S'), str) else bytes(pdf.output(dest='S'))
-
-# --- 5. APP LAYOUT ---
-tabs = st.tabs(["🖨️ Generator", "📸 Scanner", "📂 Database Explorer"])
+# --- 4. APP LAYOUT ---
+tabs = st.tabs(["🖨️ ID Generator", "📸 Scanner", "📂 Database Explorer"])
 
 # ==========================================
-# TAB 1: GENERATOR (Header Optimized)
+# TAB 1: GENERATOR (Filtered by Photo_URL)
 # ==========================================
 with tabs[0]:
-    # Compact Header: Logo and Title side-by-side
     h_col1, h_col2 = st.columns([1, 5])
     with h_col1:
         if os.path.exists('logo.png'): st.image('logo.png', width=70)
@@ -128,85 +72,91 @@ with tabs[0]:
     
     st.divider()
 
-    df_master = get_students()
+    df_master = fetch_sheet_data("students_master")
     df_log = fetch_sheet_data("form_distribution_log")
     
     if not df_master.empty and not df_log.empty:
-        # Clearance Logic
+        # Merge data
+        df_master['Roll'] = df_master['Roll'].astype(str)
         df_log['Roll'] = df_log['Roll'].astype(str)
         merged = pd.merge(df_master, df_log, on=['Class', 'Section', 'Roll'], how='inner')
         
-        def check_clearance(row):
+        # CRITERIA: Must have Photo_URL AND meet Form Return criteria
+        def is_ready_to_print(row):
+            has_photo = pd.notna(row.get('Photo_URL')) and str(row.get('Photo_URL')).strip() != ""
             is_returned = str(row.get('Return Status', '')).strip() == 'Complete'
-            has_old = any([str(row.get(f'Old {f}', '')).strip() not in ['','nan','None'] for f in ['Student Name', 'Father Name', 'Mobile Number']])
-            is_corrected = str(row.get('Data Corrected', '')).strip() == 'Yes'
-            return is_returned and (is_corrected if has_old else True)
-
-        merged['Cleared'] = merged.apply(check_clearance, axis=1)
-        ready_df = merged[merged['Cleared'] == True].copy()
-
-        if not ready_df.empty:
-            ready_df.insert(0, "Select", False)
-            selected_df = st.data_editor(
-                ready_df[['Select', 'Roll', 'Name', 'Class', 'Section']],
-                hide_index=True, use_container_width=True
-            )
+            # Check for corrections
+            has_corr = any([str(row.get(f'Old {f}', '')).strip() not in ['','nan','None'] for f in ['Student Name', 'Father Name']])
+            is_corr_done = str(row.get('Data Corrected', '')).strip() == 'Yes'
             
-            if st.button("Generate ID Cards", type="primary"):
-                # PDF Generation logic here...
-                st.info("Generating PDF for selected students...")
+            return has_photo and is_returned and (is_corr_done if has_corr else True)
+
+        merged['Ready'] = merged.apply(is_ready_to_print, axis=1)
+        print_list = merged[merged['Ready'] == True].copy()
+
+        if not print_list.empty:
+            print_list.insert(0, "Select", False)
+            st.write("### Students Ready for Printing")
+            st.caption("Only students with linked Photo URLs and completed forms appear here.")
+            
+            ed_df = st.data_editor(
+                print_list[['Select', 'Roll', 'Name', 'Class', 'Section']],
+                hide_index=True, use_container_width=True, key="print_editor"
+            )
         else:
-            st.warning("No students meet the clearance criteria (Form Complete + Data Corrected).")
+            st.info("No students found with both a Photo URL and a completed form.")
 
 # ==========================================
-# TAB 2: SCANNER
-# ==========================================
-with tabs[1]:
-    st.subheader("📸 MDM & Attendance Scanner")
-    qr = qrcode_scanner(key='scanner')
-    if qr: st.success(f"Scanned: {qr}")
-
-# ==========================================
-# TAB 3: DATABASE EXPLORER (New Request)
+# TAB 3: DATABASE EXPLORER (Interactive)
 # ==========================================
 with tabs[2]:
-    st.subheader("📊 School Data & Verification Status")
+    st.subheader("📊 Photo & Form Verification Tracker")
     
-    # 1. Prepare visual dataframe
-    df_m = get_students()
+    df_m = fetch_sheet_data("students_master")
     df_l = fetch_sheet_data("form_distribution_log")
+    df_m['Roll'] = df_m['Roll'].astype(str)
     df_l['Roll'] = df_l['Roll'].astype(str)
     
-    full_db = pd.merge(df_m, df_l, on=['Class', 'Section', 'Roll'], how='left')
+    explorer_db = pd.merge(df_m, df_l, on=['Class', 'Section', 'Roll'], how='left')
     
-    # Create Boolean-style status columns
-    full_db['Photo Taken'] = full_db['Photo_URL'].apply(lambda x: "✅" if pd.notna(x) and "drive" in str(x) else "❌")
-    full_db['Form Returned'] = full_db['Return Status'].apply(lambda x: "✅" if str(x) == "Complete" else "❌")
-    full_db['Verified'] = full_db['Data Corrected'].apply(lambda x: "✅" if str(x) == "Yes" else "❌")
+    # Logic for columns
+    explorer_db['Photo_URL_Exists'] = explorer_db['Photo_URL'].apply(lambda x: True if pd.notna(x) and "drive" in str(x) else False)
+    explorer_db['Form_Returned'] = explorer_db['Return Status'].apply(lambda x: True if str(x) == "Complete" else False)
+    explorer_db['Data_Verified'] = explorer_db['Data Corrected'].apply(lambda x: True if str(x) == "Yes" else False)
     
-    # 2. Dropdown Filter
-    filter_option = st.selectbox(
-        "Filter Students By Status:",
-        ["All Students", "Missing Photo", "Pending Form Return", "Ready for ID Card"]
-    )
-    
-    display_df = full_db.copy()
-    if filter_option == "Missing Photo":
-        display_df = display_df[display_df['Photo Taken'] == "❌"]
-    elif filter_option == "Pending Form Return":
-        display_df = display_df[display_df['Form Returned'] == "❌"]
-    elif filter_option == "Ready for ID Card":
-        # Check clearance using the same logic as Tab 1
-        def filter_ready(row):
-            is_returned = str(row.get('Return Status', '')).strip() == 'Complete'
-            is_corrected = str(row.get('Data Corrected', '')).strip() == 'Yes'
-            return is_returned and is_corrected
-        display_df = display_df[display_df.apply(filter_ready, axis=1)]
+    # Checkbox for "Photo Taken" (Interactive)
+    # We use a helper column to see if it's already in the cloud log
+    explorer_db['Photo Taken'] = False 
 
-    # 3. Show Table
-    st.dataframe(
-        display_df[['Class', 'Roll', 'Name', 'Photo Taken', 'Form Returned', 'Verified']],
+    # Filter Dropdown
+    mode = st.selectbox("View Category:", ["All Students", "Missing Photo Link", "Form Pending"])
+    
+    filt_df = explorer_db.copy()
+    if mode == "Missing Photo Link": filt_df = filt_df[filt_df['Photo_URL_Exists'] == False]
+    elif mode == "Form Pending": filt_df = filt_df[filt_df['Form_Returned'] == False]
+
+    # Data Editor with requested columns
+    st.write("#### Data Grid")
+    st.caption("Click 'Photo Taken' to mark progress. Once checked and saved, it syncs to cloud.")
+    
+    tracked_df = st.data_editor(
+        filt_df[['Photo Taken', 'Name', 'Class', 'Roll', 'Photo_URL_Exists', 'Form_Returned', 'Data_Verified']],
+        column_config={
+            "Photo Taken": st.column_config.CheckboxColumn("Photo Taken", help="Mark if physical photo session is done"),
+            "Photo_URL_Exists": st.column_config.CheckboxColumn("Photo Link?", disabled=True),
+            "Form_Returned": st.column_config.CheckboxColumn("Form Back?", disabled=True),
+            "Data_Verified": st.column_config.CheckboxColumn("Verified?", disabled=True),
+        },
+        disabled=['Name', 'Class', 'Roll', 'Photo_URL_Exists', 'Form_Returned', 'Data_Verified'],
+        hide_index=True,
         use_container_width=True,
-        hide_index=True
+        key="explorer_editor"
     )
-    st.caption(f"Showing {len(display_df)} records.")
+
+    if st.button("Sync Status to Cloud"):
+        newly_taken = tracked_df[tracked_df['Photo Taken'] == True]
+        if not newly_taken.empty:
+            for _, row in newly_taken.iterrows():
+                update_photo_status_in_cloud(row['Name'], row['Roll'], row['Class'])
+            st.success(f"Synced {len(newly_taken)} updates to BPS_Database!")
+            st.rerun()

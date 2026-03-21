@@ -123,41 +123,45 @@ def parse_qr_data(qr_string):
     except:
         return None
 
-# --- 4. PORTRAIT PDF GENERATOR ---
+# --- 4. ORIGINAL LANDSCAPE PDF GENERATOR ---
 def generate_pdf(students_list, photo_dict):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.set_auto_page_break(auto=True, margin=10)
     pdf.add_page()
     
-    # Standard Portrait Card: 54mm x 86mm. 3 columns, 3 rows = 9 per page.
-    x_start, y_start = 12, 12
-    card_w, card_h = 54, 86
-    x_gap, y_gap = 8, 8
+    x_start, y_start, card_w, card_h, gap = 10, 10, 86, 54, 8
     col, row = 0, 0
     
+    bg_img = None
+    for ext in ['background.jpg', 'background.jpeg', 'background.png']:
+        if os.path.exists(ext):
+            bg_img = ext
+            break
+            
     for student in students_list:
-        x = x_start + (col * (card_w + x_gap))
-        y = y_start + (row * (card_h + y_gap))
+        x = x_start + (col * (card_w + gap))
+        y = y_start + (row * (card_h + gap))
         
-        # Border
-        pdf.set_draw_color(0, 0, 0)
-        pdf.set_line_width(0.3)
-        pdf.rect(x, y, card_w, card_h)
+        # --- 1. FULL CARD BACKGROUND IMAGE ---
+        if bg_img:
+            try: pdf.image(bg_img, x=x, y=y, w=card_w, h=card_h)
+            except: pass 
+
+        # --- 2. Draw Card Border & Darker Blue Header ---
+        pdf.set_draw_color(0, 0, 0); pdf.set_line_width(0.3); pdf.rect(x, y, card_w, card_h)
+        pdf.set_fill_color(0, 51, 153); pdf.rect(x, y, card_w, 11, 'F')
         
-        # Header Box
-        pdf.set_fill_color(0, 51, 153)
-        pdf.rect(x, y, card_w, 12, 'F')
+        # --- LOGO ON THE RIGHT SIDE ---
+        if os.path.exists('logo.png'): 
+            pdf.image('logo.png', x=x+68.5, y=y+1, w=16, h=16)
+            
+        pdf.set_font("Arial", 'B', 8.5); pdf.set_text_color(255, 255, 255)
+        pdf.set_xy(x+2, y+1.5); pdf.cell(66, 5, "BHAGYABANTAPUR PRIMARY SCHOOL", 0, 1, 'C')
+        pdf.set_font("Arial", '', 6)
+        pdf.set_xy(x+2, y+6.5); pdf.cell(66, 3, "Mob: 7908390822  |  ID CARD - SESSION 2026", 0, 1, 'C')
         
-        pdf.set_font("Arial", 'B', 7)
-        pdf.set_text_color(255, 255, 255)
-        pdf.set_xy(x, y+2)
-        pdf.cell(card_w, 4, "BHAGYABANTAPUR PRIMARY SCHOOL", 0, 1, 'C')
-        pdf.set_font("Arial", '', 5)
-        pdf.set_xy(x, y+6)
-        pdf.cell(card_w, 3, "Mob: 7908390822  |  SESSION 2026", 0, 1, 'C')
-        
-        # Photo
-        photo_x, photo_y, photo_w, photo_h = x+18, y+14, 18, 22
+        # --- PHOTO ---
+        photo_x, photo_y, photo_w, photo_h = x+3, y+14, 18, 22
         student_id = str(student.get('Sl', 0)) + "_" + str(student.get('Roll', '0'))
         
         if student_id in photo_dict and photo_dict[student_id] is not None:
@@ -170,57 +174,57 @@ def generate_pdf(students_list, photo_dict):
         else:
             pdf.set_draw_color(200); pdf.rect(photo_x, photo_y, photo_w, photo_h) 
             pdf.set_text_color(150); pdf.set_font("Arial", '', 5)
-            pdf.set_xy(photo_x, photo_y+10); pdf.cell(photo_w, 5, "NO PHOTO", 0, 0, 'C')
+            pdf.set_xy(photo_x, y+20); pdf.cell(photo_w, 5, "NO PHOTO", 0, 0, 'C')
         
-        # Student Name
-        pdf.set_text_color(0)
-        pdf.set_font("Arial", 'B', 9)
-        pdf.set_xy(x, y+37)
-        pdf.cell(card_w, 5, str(student.get('Name', '')).upper()[:22], 0, 1, 'C')
-        
-        # Details
+        # --- STUDENT DETAILS ---
+        pdf.set_text_color(0); detail_x, curr_y, line_h = x+24, y+14, 4
+        pdf.set_font("Arial", 'B', 9); pdf.set_xy(detail_x, curr_y)
+        pdf.cell(44, line_h, f"{student.get('Name', '')}".upper()[:25], 0, 1); curr_y += 4.5
         pdf.set_font("Arial", '', 7)
-        detail_x, curr_y, line_h = x+4, y+43, 4
         
         for label, val in [
-            ("Father", str(student.get('Father', ''))[:20]), 
+            ("Father", str(student.get('Father', ''))[:22]), 
+            ("Mother", str(student.get('Mother', ''))[:22]), 
             ("Class", f"{student.get('Class', '')} | Sec: {student.get('Section', 'A')}"), 
-            ("Roll", str(student.get('Roll', ''))),
-            ("DOB", student.get('DOB', '')),
-            ("Mob", student.get('Mobile', ''))
+            ("DOB", student.get('DOB', ''))
         ]:
-            pdf.set_xy(detail_x, curr_y)
-            pdf.cell(card_w-8, line_h, f"{label}: {val}", 0, 1)
-            curr_y += line_h
-
-        # QR Code
-        qr_data = f"Name:{student.get('Name', '')}|Class:{student.get('Class', '')}|Roll:{student.get('Roll', '')}"
-        qr = qrcode.make(qr_data)
-        qr_path = tempfile.mktemp(suffix=".png")
-        qr.save(qr_path)
-        pdf.image(qr_path, x=x+36, y=y+66, w=15, h=15)
-
-        # Signature
-        if os.path.exists('signature.png'): 
-            try: pdf.image('signature.png', x=x+35, y=y+75, w=15, h=5)
-            except: pass
+            pdf.set_xy(detail_x, curr_y); pdf.cell(44, line_h, f"{label}: {val}", 0, 1); curr_y += line_h
             
-        pdf.set_font("Arial", 'I', 5)
-        pdf.set_xy(x, y+80)
-        pdf.cell(card_w-4, 3, "Sukhamay Kisku", 0, 1, 'R')
-        pdf.set_font("Arial", '', 4)
-        pdf.set_xy(x, y+82)
-        pdf.cell(card_w-4, 2, "Head Teacher", 0, 0, 'R')
+        pdf.set_xy(detail_x, curr_y); pdf.set_font("Arial", 'B', 7)
+        pdf.cell(44, line_h, f"Mob: {student.get('Mobile', '')}", 0, 1)
+
+        # --- QR CODE ---
+        qr_data = f"Name:{student.get('Name', '')}|Roll:{student.get('Roll', '')}|Mob:{student.get('Mobile', '')}"
+        qr = qrcode.make(qr_data); qr_path = tempfile.mktemp(suffix=".png"); qr.save(qr_path)
+        pdf.image(qr_path, x=x+4.5, y=y+37, w=15, h=15)
         
+        # --- FOOTER IMAGE ---
+        if os.path.exists('image_2.png'):
+            try: pdf.image('image_2.png', x=x, y=y+44, w=card_w, h=10)
+            except: pass
+
+        # --- WATERMARK & SIGNATURE ---
+        wm_x, wm_y = x + 55, y + 42
+        pdf.set_draw_color(220, 240, 255); pdf.set_line_width(0.4)
+        pdf.line(wm_x, wm_y, wm_x, wm_y + 6); pdf.line(wm_x, wm_y, wm_x + 2, wm_y); pdf.line(wm_x, wm_y + 6, wm_x + 2, wm_y + 6)
+        pdf.line(wm_x + 27, wm_y, wm_x + 27, wm_y + 6); pdf.line(wm_x + 25, wm_y, wm_x + 27, wm_y); pdf.line(wm_x + 25, wm_y + 6, wm_x + 27, wm_y + 6)
+
+        pdf.set_text_color(210, 235, 255); pdf.set_font("Arial", 'B', 6); pdf.set_xy(wm_x, wm_y + 1); pdf.cell(27, 4, "BPS DIGITAL", 0, 0, 'C')
+
+        if os.path.exists('signature.png'): 
+            try: pdf.image('signature.png', x=x+58, y=y+40, w=22, h=8)
+            except: pass
+        
+        # --- FOOTER TEXT ---
+        pdf.set_text_color(0); pdf.set_font("Arial", 'I', 6); pdf.set_xy(x, y+49); pdf.cell(card_w-5, 3, "Sukhamay Kisku", 0, 1, 'R')
+        pdf.set_font("Arial", '', 5); pdf.set_xy(x, y+51); pdf.cell(card_w-5, 2, "Head Teacher", 0, 0, 'R')
+        
+        # 2 Columns x 5 Rows = 10 Cards Per Page
         col += 1
-        if col >= 3: 
-            col = 0
-            row += 1
-        if row >= 3: 
-            pdf.add_page()
-            col, row = 0, 0
+        if col >= 2: col, row = 0, row + 1
+        if row >= 5: pdf.add_page(); col, row = 0, 0
             
-    # Streamlit Cloud FPDF Fix
+    # --- STREAMLIT CLOUD FPDF FIX ---
     pdf_output = pdf.output(dest='S')
     if isinstance(pdf_output, str):
         return pdf_output.encode('latin-1')
@@ -273,10 +277,10 @@ with tabs[0]:
 
             if not selected_students.empty:
                 num_students = len(selected_students)
-                pages_needed = math.ceil(num_students / 9)
+                pages_needed = math.ceil(num_students / 10) # 10 cards per page
                 
                 st.divider()
-                st.info(f"🖨️ **Print Summary:** You have selected **{num_students}** students. You will need **{pages_needed}** A4 paper(s) loaded into the printer.")
+                st.info(f"🖨️ **Print Summary:** You have selected **{num_students}** students. You will need **{pages_needed}** A4 paper(s) loaded into the printer (10 cards per page).")
                 
                 if st.button("Generate Secure PDF", type="primary"):
                     photo_dict = {}
@@ -296,7 +300,7 @@ with tabs[0]:
                     
                     my_bar.empty()
                     
-                    with st.spinner("Compiling Portrait PDF Document..."):
+                    with st.spinner("Compiling PDF Document..."):
                         pdf_bytes = generate_pdf(selected_students.to_dict('records'), photo_dict)
                         
                     st.balloons()
@@ -376,19 +380,16 @@ with tabs[2]:
         
         explorer_db = pd.merge(df_m, df_l, on=['Class', 'Section', 'Roll'], how='left')
         
-        # 1. Prepare Thumbnail Links for Streamlit
         if 'Thumb_URL' in explorer_db.columns:
             explorer_db['Display_Thumb'] = explorer_db['Thumb_URL'].apply(make_drive_image_url)
         else:
             explorer_db['Display_Thumb'] = None
 
-        # 2. Status Flags
         explorer_db['Photo_Link'] = explorer_db['Photo_URL'].apply(lambda x: True if pd.notna(x) and "drive" in str(x) else False)
         explorer_db['Form_OK'] = explorer_db['Return Status'].apply(lambda x: True if str(x) == "Complete" else False)
         explorer_db['Verified'] = explorer_db['Data Corrected'].apply(lambda x: True if str(x) == "Yes" else False)
         explorer_db['Photo Taken'] = False 
 
-        # 3. Filter UI
         cat_filter = st.selectbox("Filter Students:", ["All Students", "Missing Photo Link", "Form Pending"])
         
         filtered_view = explorer_db.copy()
@@ -397,7 +398,6 @@ with tabs[2]:
         elif cat_filter == "Form Pending":
             filtered_view = filtered_view[filtered_view['Form_OK'] == False]
 
-        # 4. The Data Grid
         st.write("---")
         final_ed = st.data_editor(
             filtered_view[['Photo Taken', 'Display_Thumb', 'Name', 'Class', 'Roll', 'Photo_Link', 'Form_OK', 'Verified']],

@@ -6,6 +6,12 @@ from fpdf import FPDF
 import tempfile
 from datetime import datetime
 
+# --- GOOGLE SHEETS CONFIGURATION ---
+# REPLACE THIS WITH YOUR ACTUAL GOOGLE SHEET ID
+SHEET_ID = "PASTE_YOUR_SHEET_ID_HERE" 
+SHEET_TAB = "students_master"
+GSHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={SHEET_TAB}"
+
 # --- IMPORT THE SCANNER ---
 try:
     from streamlit_qrcode_scanner import qrcode_scanner
@@ -21,32 +27,33 @@ if 'attendance_log' not in st.session_state:
     st.session_state['attendance_log'] = pd.DataFrame(columns=['Time', 'Name', 'Roll', 'Mobile', 'Status', 'MDM'])
 
 # --- 3. HELPER FUNCTIONS ---
-@st.cache_data
+@st.cache_data(ttl=300) # Caches the sheet data for 5 minutes
 def get_students():
-    if os.path.exists('students.csv'):
-        try:
-            df = pd.read_csv('students.csv')
-            if 'Class' in df.columns:
-                df['Class'] = df['Class'].replace('CALSS IV', 'CLASS IV')
-            
-            # Ensure all necessary columns exist
-            for col in ['Section', 'BloodGroup', 'Father', 'Mother', 'Gender', 'DOB', 'Mobile']:
-                if col not in df.columns:
-                    df[col] = 'N/A'
-                    
-            # Fix Mobile Number trailing .0
-            df['Mobile'] = df['Mobile'].astype(str)
-            df['Mobile'] = df['Mobile'].apply(lambda x: x[:-2] if x.endswith('.0') else x)
-            df['Mobile'] = df['Mobile'].replace(['nan', 'None'], 'N/A')
-            
-            # Format DOB to DD-MM-YYYY
-            df['DOB'] = pd.to_datetime(df['DOB'], errors='coerce', dayfirst=True).dt.strftime('%d-%m-%Y').fillna(df['DOB'])
+    try:
+        # Read directly from the Google Sheet URL
+        df = pd.read_csv(GSHEET_URL)
+        
+        if 'Class' in df.columns:
+            df['Class'] = df['Class'].replace('CALSS IV', 'CLASS IV')
+        
+        # Ensure all necessary columns exist
+        for col in ['Section', 'BloodGroup', 'Father', 'Mother', 'Gender', 'DOB', 'Mobile']:
+            if col not in df.columns:
+                df[col] = 'N/A'
+                
+        # Fix Mobile Number trailing .0
+        df['Mobile'] = df['Mobile'].astype(str)
+        df['Mobile'] = df['Mobile'].apply(lambda x: x[:-2] if x.endswith('.0') else x)
+        df['Mobile'] = df['Mobile'].replace(['nan', 'None'], 'N/A')
+        
+        # Format DOB to DD-MM-YYYY
+        df['DOB'] = pd.to_datetime(df['DOB'], errors='coerce', dayfirst=True).dt.strftime('%d-%m-%Y').fillna(df['DOB'])
 
-            return df
-        except Exception as e:
-            st.error(f"Error loading CSV: {e}")
-            return pd.DataFrame()
-    return pd.DataFrame()
+        return df
+    except Exception as e:
+        st.error(f"Error loading data from Google Sheets: {e}")
+        st.info("Check that your SHEET_ID is correct and the sheet is shared as 'Anyone with the link' (Viewer).")
+        return pd.DataFrame()
 
 def parse_qr_data(qr_string):
     """Parses the QR string: 'Name:Suborno|Roll:12|Mob:987...'"""
@@ -232,7 +239,7 @@ with tab1:
                 pdf_bytes = generate_pdf(selected_students.to_dict('records'), uploaded_photos)
                 st.download_button("📥 Download PDF", pdf_bytes, "bps_cards.pdf", "application/pdf")
     else:
-        st.error("students.csv not found")
+        st.warning("Could not load student data. Please check your Google Sheet link.")
 
 # ==========================================
 # TAB 2: MDM SCANNER

@@ -6,10 +6,11 @@ from fpdf import FPDF
 import tempfile
 from datetime import datetime
 
-# --- NEW IMPORTS FOR GOOGLE SHEETS API ---
+# --- NEW IMPORTS FOR GOOGLE SHEETS & DRIVE API ---
 import gspread
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound
+from google.auth.transport.requests import AuthorizedSession
 
 # --- IMPORT THE SCANNER ---
 try:
@@ -24,10 +25,11 @@ st.set_page_config(page_title="BPS Digital - ID Generator", page_icon="🏫", la
 if 'attendance_log' not in st.session_state:
     st.session_state['attendance_log'] = pd.DataFrame(columns=['Time', 'Name', 'Roll', 'Class', 'Status', 'MDM'])
 
-# --- 2. GOOGLE SHEETS CONNECTION (Same as app.py) ---
+# --- 2. GOOGLE CREDENTIALS & DRIVE FETCHING ---
 @st.cache_resource
 def get_google_credentials():
     skey = dict(st.secrets["gcp_service_account"])
+    # Combined scopes for both Google Sheets and Google Drive access
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive.readonly"]
     return Credentials.from_service_account_info(skey, scopes=scopes)
 
@@ -43,6 +45,33 @@ def init_gsheets():
 
 sh = init_gsheets()
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_secure_image_bytes(file_id):
+    """Securely downloads the image using the authorized service account."""
+    try:
+        creds = get_google_credentials()
+        authed_session = AuthorizedSession(creds)
+        url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+        response = authed_session.get(url)
+        
+        if response.status_code == 200:
+            return response.content
+        return None
+    except Exception as e:
+        return None
+
+def extract_drive_id(url):
+    """Safely extracts the Google Drive file ID from a sharing link."""
+    if pd.isna(url) or not isinstance(url, str) or url.strip() == "":
+        return None
+    if "drive.google.com/file/d/" in url:
+        try:
+            return url.split("/d/")[1].split("/")[0]
+        except IndexError:
+            pass
+    return None
+
+# --- 3. FETCH & CLEAN DATA ---
 @st.cache_data(ttl=300) 
 def fetch_sheet_data(sheet_name):
     try:
@@ -71,7 +100,6 @@ def append_sheet_df(sheet_name, df):
     except Exception as e:
         st.error("⚠️ Google Sheets API error while saving data.")
 
-# --- 3. FETCH & CLEAN DATA ---
 @st.cache_data(ttl=300)
 def get_students():
     df = fetch_sheet_data("students_master")
@@ -81,8 +109,8 @@ def get_students():
     if 'Class' in df.columns:
         df['Class'] = df['Class'].replace('CALSS IV', 'CLASS IV')
     
-    # Ensure all necessary columns exist
-    for col in ['Section', 'BloodGroup', 'Father', 'Mother', 'Gender', 'DOB', 'Mobile']:
+    # Ensure all necessary columns exist, including Photo_URL
+    for col in ['Section', 'BloodGroup', 'Father', 'Mother', 'Gender', 'DOB', 'Mobile', 'Photo_URL']:
         if col not in df.columns:
             df[col] = 'N/A'
             
@@ -97,7 +125,6 @@ def get_students():
     return df
 
 def parse_qr_data(qr_string):
-    """Parses the QR string: 'Name:Suborno|Roll:12|Mob:987...'"""
     try:
         data = {}
         parts = qr_string.split('|')
@@ -144,7 +171,8 @@ def generate_pdf(students_list, photo_dict):
         photo_x, photo_y, photo_w, photo_h = x+3, y+14, 18, 22
         student_id = str(student.get('Sl', 0)) + "_" + str(student.get('Roll', '0'))
         
-        if student_id in photo_dict:
+        # Inject the securely fetched photo
+        if student_id in photo_dict and photo_dict[student_id] is not None:
             temp_path = tempfile.mktemp(suffix=".jpg")
             with open(temp_path, "wb") as f: f.write(photo_dict[student_id])
             try:
@@ -198,14 +226,19 @@ def generate_pdf(students_list, photo_dict):
         if col >= 2: col, row = 0, row + 1
         if row >= 5: pdf.add_page(); col, row = 0, 0
             
-    return pdf.output(dest='S').encode('latin-1')
+    # --- STREAMLIT CLOUD FPDF FIX ---
+    pdf_output = pdf.output(dest='S')
+    if isinstance(pdf_output, str):
+        return pdf_output.encode('latin-1')
+    else:
+        return bytes(pdf_output)
 
 
 # --- 5. TABS LAYOUT ---
 tab1, tab2 = st.tabs(["🖨️ ID Card Generator", "📸 MDM & Attendance Scanner"])
 
 # ==========================================
-# TAB 1: ID CARD GENERATOR
+# TAB 1: ID CARD GENERATOR (Fully Automated)
 # ==========================================
 with tab1:
     col_a, col_b, col_c = st.columns([1, 2, 1])
@@ -225,31 +258,59 @@ with tab1:
         if selected_section != "All": filtered_df = filtered_df[filtered_df['Section'] == selected_section]
         
         filtered_df.insert(0, "Select", False)
-        edited_df = st.data_editor(filtered_df, hide_index=True, column_config={"Select": st.column_config.CheckboxColumn(required=True)}, disabled=filtered_df.columns.drop("Select"), use_container_width=True)
-        selected_students = edited_df[edited_df["Select"] == True].copy()
+        # Displaying the dataframe so you can select students to print
+        edited_df = st.data_editor(
+            filtered_df[['Select', 'Roll', 'Name', 'Class', 'Photo_URL']], 
+            hide_index=True, 
+            column_config={"Select": st.column_config.CheckboxColumn(required=True)}, 
+            disabled=['Roll', 'Name', 'Class', 'Photo_URL'], 
+            use_container_width=True
+        )
         
-        uploaded_photos = {}
+        # Get full row data for the selected students
+        selected_indices = edited_df[edited_df["Select"] == True].index
+        selected_students = filtered_df.loc[selected_indices].copy()
+        
         if not selected_students.empty:
             st.divider()
-            st.info(f"Selected {len(selected_students)} students. Upload photos below.")
-            for index, student in selected_students.iterrows():
-                sid = str(student.get('Sl', index)) + "_" + str(student.get('Roll', '0'))
-                with st.expander(f"{student.get('Name')} (Roll: {student.get('Roll')})"):
-                    photo = st.file_uploader("Image", type=['jpg','png'], key=f"p_{sid}")
-                    if photo: uploaded_photos[sid] = photo.getvalue()
+            st.success(f"Selected {len(selected_students)} student(s). Photos will be fetched securely from BPS Google Drive.")
             
-            if st.button("Generate PDF"):
-                pdf_bytes = generate_pdf(selected_students.to_dict('records'), uploaded_photos)
-                st.download_button("📥 Download PDF", pdf_bytes, "bps_cards.pdf", "application/pdf")
+            if st.button("Generate Secure PDF", type="primary"):
+                photo_dict = {}
+                
+                # Show a progress bar while downloading images securely
+                progress_text = "Fetching Secure Photos from Google Drive..."
+                my_bar = st.progress(0, text=progress_text)
+                
+                total_students = len(selected_students)
+                for idx, (index, student) in enumerate(selected_students.iterrows()):
+                    sid = str(student.get('Sl', index)) + "_" + str(student.get('Roll', '0'))
+                    photo_url = str(student.get('Photo_URL', ''))
+                    
+                    drive_id = extract_drive_id(photo_url)
+                    if drive_id:
+                        img_bytes = fetch_secure_image_bytes(drive_id)
+                        if img_bytes:
+                            photo_dict[sid] = img_bytes
+                            
+                    my_bar.progress((idx + 1) / total_students, text=f"Fetched photo {idx + 1} of {total_students}")
+                
+                my_bar.empty()
+                
+                with st.spinner("Compiling PDF Document..."):
+                    pdf_bytes = generate_pdf(selected_students.to_dict('records'), photo_dict)
+                    
+                st.balloons()
+                st.download_button("📥 Download ID Cards (PDF)", pdf_bytes, f"BPS_ID_Cards_{datetime.now().strftime('%Y%m%d')}.pdf", "application/pdf")
     else:
         st.warning("Could not load student data. Please check your Google Sheet Secrets.")
 
 # ==========================================
-# TAB 2: MDM SCANNER (NOW SYNCS TO CLOUD!)
+# TAB 2: MDM SCANNER 
 # ==========================================
 with tab2:
     st.markdown('<h3 style="text-align:center; color:#28a745;">📸 Scan ID Card</h3>', unsafe_allow_html=True)
-    st.write("Scanned data will now sync directly to the main BPS Cloud Database!")
+    st.write("Scanned data will sync directly to the main BPS Cloud Database!")
     
     qr_code = qrcode_scanner(key='mdm_scanner')
     
@@ -259,7 +320,6 @@ with tab2:
             student_name = data.get('Name', 'Unknown')
             student_roll = data.get('Roll', 'Unknown')
             
-            # Lookup the student's class and section from the master database
             df = get_students()
             student_match = df[(df['Name'] == student_name) & (df['Roll'].astype(str) == str(student_roll))]
             
@@ -267,7 +327,6 @@ with tab2:
                 s_class = student_match.iloc[0]['Class']
                 s_sec = student_match.iloc[0]['Section']
                 
-                # Check if already scanned today
                 existing = st.session_state['attendance_log'][
                     (st.session_state['attendance_log']['Name'] == student_name) & 
                     (st.session_state['attendance_log']['Roll'] == student_roll)
@@ -279,14 +338,12 @@ with tab2:
                     curr_date_str = datetime.now().strftime("%d-%m-%Y")
                     curr_time_str = datetime.now().strftime("%H:%M")
                     
-                    # 1. Save to local session (for the table below)
                     new_entry = pd.DataFrame([{
                         'Time': curr_time_str, 'Name': student_name, 'Roll': student_roll, 
                         'Class': f"{s_class} {s_sec}", 'Status': 'Present', 'MDM': 'Yes'
                     }])
                     st.session_state['attendance_log'] = pd.concat([st.session_state['attendance_log'], new_entry], ignore_index=True)
                     
-                    # 2. Sync to Cloud MDM Log
                     mdm_data = pd.DataFrame([{
                         'Date': curr_date_str, 'Teacher': 'Scanned via ID App', 
                         'Class': s_class, 'Section': s_sec, 'Roll': student_roll, 
@@ -294,7 +351,6 @@ with tab2:
                     }])
                     append_sheet_df('mdm_log', mdm_data)
 
-                    # 3. Sync to Cloud Attendance
                     att_data = pd.DataFrame([{
                         'Date': curr_date_str, 'Class': s_class, 'Section': s_sec, 
                         'Roll': student_roll, 'Name': student_name, 'Status': True

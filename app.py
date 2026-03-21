@@ -2,10 +2,13 @@ import streamlit as st
 import pandas as pd
 import os
 import calendar
+import base64
+import re
 from datetime import datetime, time, timedelta
 from streamlit_qrcode_scanner import qrcode_scanner
 import gspread
 from google.oauth2.service_account import Credentials
+from google.auth.transport.requests import AuthorizedSession
 
 # --- 1. CONFIGURATION & STYLING ---
 st.set_page_config(page_title="BPS Digital", page_icon="🏫", layout="centered")
@@ -71,7 +74,7 @@ if 'user_name' not in st.session_state: st.session_state.user_name = None
 @st.cache_resource
 def get_google_credentials():
     skey = dict(st.secrets["gcp_service_account"])
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive.readonly"]
     return Credentials.from_service_account_info(skey, scopes=scopes)
 
 @st.cache_resource
@@ -83,6 +86,11 @@ def init_gsheets():
     except Exception as e:
         st.error("⚠️ Google Sheets Connection Failed! Please check your Streamlit Secrets.")
         st.stop()
+
+@st.cache_resource
+def get_drive_session():
+    creds = get_google_credentials()
+    return AuthorizedSession(creds)
 
 sh = init_gsheets()
 
@@ -135,7 +143,38 @@ def get_local_csv(file):
         except: return pd.DataFrame()
     return pd.DataFrame()
 
-# --- 4. TIME HELPERS ---
+# --- 4. SECURE IMAGE FETCHING (Thumbnails) ---
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_secure_image_bytes(file_id):
+    try:
+        authed_session = get_drive_session()
+        url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+        response = authed_session.get(url)
+        if response.status_code == 200:
+            return response.content
+        return None
+    except Exception:
+        return None
+
+def get_secure_photo_uri(url):
+    fallback_image = "https://www.w3schools.com/howto/img_avatar.png"
+    if pd.isna(url) or url == "" or not isinstance(url, str):
+        return fallback_image
+
+    file_id = None
+    match = re.search(r"(?:id=|/d/)([\w-]+)", url)
+    if match: file_id = match.group(1)
+
+    if file_id:
+        image_bytes = fetch_secure_image_bytes(file_id)
+        if image_bytes:
+            b64_str = base64.b64encode(image_bytes).decode()
+            return f"data:image/jpeg;base64,{b64_str}"
+            
+    return url if url.startswith("http") else fallback_image
+
+
+# --- 5. TIME HELPERS ---
 utc_now = datetime.utcnow()
 now = utc_now + timedelta(hours=5, minutes=30)
 curr_date_str = now.strftime("%d-%m-%Y")
@@ -285,11 +324,18 @@ else:
 
                                 roster['Scan_Key'] = roster['Roll'].astype(str) + "_" + roster['Name'].astype(str)
                                 roster['Ate_MDM'] = roster['Scan_Key'].isin(st.session_state.scanned_keys)
+                                
+                                # --- LOOKING ONLY FOR Thumb_URL ---
+                                if 'Thumb_URL' not in roster.columns: roster['Thumb_URL'] = ""
+                                roster['Photo'] = roster['Thumb_URL'].apply(get_secure_photo_uri)
 
                                 edited = st.data_editor(
-                                    roster[['Section', 'Roll', 'Name', 'Ate_MDM']], 
+                                    roster[['Photo', 'Section', 'Roll', 'Name', 'Ate_MDM']], 
                                     hide_index=True, 
-                                    use_container_width=True
+                                    use_container_width=True,
+                                    column_config={
+                                        "Photo": st.column_config.ImageColumn("👤", width="small")
+                                    }
                                 )
                                 st.markdown(f"### ✅ Total Selected: {edited['Ate_MDM'].sum()}")
 
@@ -478,12 +524,19 @@ else:
                         mdm_eaters = mdm_log[(mdm_log['Date'].astype(str) == curr_date_str) & (mdm_log['Class'] == t_class) & (mdm_log['Section'] == t_sec)]['Roll'].astype(str).tolist() if not mdm_log.empty else []
                         
                         ros['Present'], ros['MDM (Ate)'] = True, ros['Roll'].astype(str).isin(mdm_eaters)
+                        
+                        # --- LOOKING ONLY FOR Thumb_URL ---
+                        if 'Thumb_URL' not in ros.columns: ros['Thumb_URL'] = ""
+                        ros['Photo'] = ros['Thumb_URL'].apply(get_secure_photo_uri)
 
                         ed = st.data_editor(
-                            ros[['Roll', 'Name', 'Present', 'MDM (Ate)']], 
+                            ros[['Photo', 'Roll', 'Name', 'Present', 'MDM (Ate)']], 
                             hide_index=True, 
                             use_container_width=True, 
-                            disabled=["Roll", "Name", "MDM (Ate)"]
+                            disabled=["Photo", "Roll", "Name", "MDM (Ate)"],
+                            column_config={
+                                "Photo": st.column_config.ImageColumn("👤", width="small")
+                            }
                         )
                         
                         c1, c2 = st.columns(2)

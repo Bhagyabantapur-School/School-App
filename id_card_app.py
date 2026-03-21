@@ -5,12 +5,11 @@ from fpdf import FPDF
 from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
-from google.auth.transport.requests import AuthorizedSession
 
-# --- CONFIGURATION ---
+# --- 1. CONFIGURATION ---
 st.set_page_config(page_title="BPS Digital - ID Generator", page_icon="🏫", layout="wide")
 
-# --- GOOGLE CONNECTION ---
+# --- 2. GOOGLE CONNECTION ---
 @st.cache_resource
 def get_google_credentials():
     skey = dict(st.secrets["gcp_service_account"])
@@ -29,7 +28,7 @@ def init_gsheets():
 
 sh = init_gsheets()
 
-# --- DATA FETCHING ---
+# --- 3. HELPER FUNCTIONS ---
 @st.cache_data(ttl=60) 
 def fetch_sheet_data(sheet_name):
     try:
@@ -38,17 +37,26 @@ def fetch_sheet_data(sheet_name):
     except:
         return pd.DataFrame()
 
+def make_drive_image_url(url):
+    """Converts a standard Drive share link into a direct-view link for Streamlit."""
+    if pd.isna(url) or not isinstance(url, str) or "drive.google.com" not in url:
+        return url
+    # Extract file ID and convert to direct link format
+    if "/d/" in url:
+        file_id = url.split("/d/")[1].split("/")[0]
+        return f"https://drive.google.com/uc?id={file_id}"
+    return url
+
 def update_photo_status_in_cloud(student_name, roll, student_class):
-    """Logs the manual 'Photo Taken' confirmation to the cloud."""
     try:
         log_ws = sh.worksheet("photo_log")
         log_ws.append_row([datetime.now().strftime("%d-%m-%Y"), student_class, roll, student_name, "Taken"])
         st.cache_data.clear()
     except:
-        st.error("Cloud update failed. Check if 'photo_log' sheet exists.")
+        st.error("Cloud update failed. Ensure 'photo_log' sheet exists.")
 
-# --- APP LAYOUT ---
-tabs = st.tabs(["🖨️ ID Generator", "📸 Scanner", "📂 Database Explorer"])
+# --- 4. APP LAYOUT ---
+tabs = st.tabs(["🖨️ ID Generator", "📂 Database Explorer"])
 
 # ==========================================
 # TAB 1: ID GENERATOR (Strict Filter)
@@ -70,14 +78,12 @@ with tabs[0]:
         df_log['Roll'] = df_log['Roll'].astype(str)
         merged = pd.merge(df_master, df_log, on=['Class', 'Section', 'Roll'], how='inner')
         
-        # CRITERIA: High-Res Photo_URL must exist + Form must be cleared
         def is_ready_to_print(row):
-            has_photo_link = pd.notna(row.get('Photo_URL')) and str(row.get('Photo_URL')).strip() != ""
+            has_photo = pd.notna(row.get('Photo_URL')) and str(row.get('Photo_URL')).strip() != ""
             is_returned = str(row.get('Return Status', '')).strip() == 'Complete'
-            has_corr_request = any([str(row.get(f'Old {f}', '')).strip() not in ['','nan','None'] for f in ['Student Name', 'Father Name']])
+            has_corr = any([str(row.get(f'Old {f}', '')).strip() not in ['','nan','None'] for f in ['Student Name', 'Father Name']])
             is_verified = str(row.get('Data Corrected', '')).strip() == 'Yes'
-            
-            return has_photo_link and is_returned and (is_verified if has_corr_request else True)
+            return has_photo and is_returned and (is_verified if has_corr else True)
 
         merged['Ready'] = merged.apply(is_ready_to_print, axis=1)
         print_ready = merged[merged['Ready'] == True].copy()
@@ -88,15 +94,13 @@ with tabs[0]:
                 print_ready[['Select', 'Roll', 'Name', 'Class', 'Section']],
                 hide_index=True, use_container_width=True, key="gen_editor"
             )
-            if st.button("Generate PDF", type="primary"):
-                st.info("Preparing PDF document...")
         else:
             st.info("No students found with a linked Photo URL and a cleared form.")
 
 # ==========================================
-# TAB 3: DATABASE EXPLORER (With Thumbnails)
+# TAB 2: DATABASE EXPLORER (With Thumbnails)
 # ==========================================
-with tabs[2]:
+with tabs[1]:
     st.subheader("📂 Student Database & Media Tracker")
     
     df_m = fetch_sheet_data("students_master")
@@ -106,49 +110,48 @@ with tabs[2]:
     
     explorer_db = pd.merge(df_m, df_l, on=['Class', 'Section', 'Roll'], how='left')
     
-    # Process Status Boolean Flags
-    explorer_db['Photo_URL_Exists'] = explorer_db['Photo_URL'].apply(lambda x: True if pd.notna(x) and "drive" in str(x) else False)
-    explorer_db['Form_Returned'] = explorer_db['Return Status'].apply(lambda x: True if str(x) == "Complete" else False)
-    explorer_db['Data_Verified'] = explorer_db['Data Corrected'].apply(lambda x: True if str(x) == "Yes" else False)
-    
-    # Initialize interactive checkbox
+    # 1. Prepare Thumbnail Links for Streamlit
+    if 'Thumb_URL' in explorer_db.columns:
+        explorer_db['Display_Thumb'] = explorer_db['Thumb_URL'].apply(make_drive_image_url)
+    else:
+        explorer_db['Display_Thumb'] = None
+
+    # 2. Status Flags
+    explorer_db['Photo_Link'] = explorer_db['Photo_URL'].apply(lambda x: True if pd.notna(x) and "drive" in str(x) else False)
+    explorer_db['Form_OK'] = explorer_db['Return Status'].apply(lambda x: True if str(x) == "Complete" else False)
+    explorer_db['Verified'] = explorer_db['Data Corrected'].apply(lambda x: True if str(x) == "Yes" else False)
     explorer_db['Photo Taken'] = False 
 
-    # Filter UI
-    f_col1, f_col2 = st.columns([1, 1])
-    with f_col1:
-        cat_filter = st.selectbox("View Status:", ["All Students", "Missing Photo Link", "Form Pending"])
+    # 3. Filter UI
+    cat_filter = st.selectbox("Filter Students:", ["All Students", "Missing Photo Link", "Form Pending"])
     
     filtered_view = explorer_db.copy()
     if cat_filter == "Missing Photo Link":
-        filtered_view = filtered_view[filtered_view['Photo_URL_Exists'] == False]
+        filtered_view = filtered_view[filtered_view['Photo_Link'] == False]
     elif cat_filter == "Form Pending":
-        filtered_view = filtered_view[filtered_view['Form_Returned'] == False]
+        filtered_view = filtered_view[filtered_view['Form_OK'] == False]
 
-    # Data Editor with Thumbnail Rendering
+    # 4. The Data Grid
     st.write("---")
-    st.caption("The 'Thumbnail' column renders images directly from your 'Thumb_URL' column in GSheets.")
-    
     final_ed = st.data_editor(
-        filtered_view[['Photo Taken', 'Thumb_URL', 'Name', 'Class', 'Roll', 'Photo_URL_Exists', 'Form_Returned', 'Data_Verified']],
+        filtered_view[['Photo Taken', 'Display_Thumb', 'Name', 'Class', 'Roll', 'Photo_Link', 'Form_OK', 'Verified']],
         column_config={
-            "Photo Taken": st.column_config.CheckboxColumn("Photo Taken", help="Check this if you just took the student's photo"),
-            "Thumb_URL": st.column_config.ImageColumn("Thumbnail", help="Small preview from BPS_Database"),
-            "Photo_URL_Exists": st.column_config.CheckboxColumn("Link OK?", disabled=True),
-            "Form_Returned": st.column_config.CheckboxColumn("Form OK?", disabled=True),
-            "Data_Verified": st.column_config.CheckboxColumn("Verified?", disabled=True),
+            "Photo Taken": st.column_config.CheckboxColumn("Photo Taken"),
+            "Display_Thumb": st.column_config.ImageColumn("Thumbnail", width="small"),
+            "Photo_Link": st.column_config.CheckboxColumn("Link OK?", disabled=True),
+            "Form_OK": st.column_config.CheckboxColumn("Form OK?", disabled=True),
+            "Verified": st.column_config.CheckboxColumn("Verified?", disabled=True),
         },
-        disabled=['Thumb_URL', 'Name', 'Class', 'Roll', 'Photo_URL_Exists', 'Form_Returned', 'Data_Verified'],
+        disabled=['Display_Thumb', 'Name', 'Class', 'Roll', 'Photo_Link', 'Form_OK', 'Verified'],
         hide_index=True,
         use_container_width=True,
         key="db_explorer_grid"
     )
 
-    if st.button("💾 Sync Manual Photo Status to Cloud"):
+    if st.button("💾 Sync Manual Photo Status"):
         taken_list = final_ed[final_ed['Photo Taken'] == True]
         if not taken_list.empty:
-            with st.spinner("Updating Cloud..."):
-                for _, row in taken_list.iterrows():
-                    update_photo_status_in_cloud(row['Name'], row['Roll'], row['Class'])
-            st.success(f"Successfully logged {len(taken_list)} students to 'photo_log'!")
+            for _, row in taken_list.iterrows():
+                update_photo_status_in_cloud(row['Name'], row['Roll'], row['Class'])
+            st.success("Synced to Cloud!")
             st.rerun()

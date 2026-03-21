@@ -5,9 +5,10 @@ import calendar
 import base64
 import re
 import concurrent.futures
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from streamlit_qrcode_scanner import qrcode_scanner
 import gspread
+from gspread.exceptions import WorksheetNotFound
 from google.oauth2.service_account import Credentials
 from google.auth.transport.requests import AuthorizedSession
 
@@ -149,24 +150,41 @@ def clear_sheet_cache():
 
 def append_sheet_df(sheet_name, df):
     if df.empty: return
-    try: ws = sh.worksheet(sheet_name)
-    except:
+    try: 
+        ws = sh.worksheet(sheet_name)
+    except WorksheetNotFound:
+        # Only create a new sheet if we are 100% sure it does not exist
         ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=20)
         ws.append_row(list(df.columns))
+    except Exception as e:
+        # If it's a quota error, stop gracefully
+        st.error("⚠️ Google Sheets API is busy (Rate Limit). Please wait 30 seconds and try again.")
+        return
     
     df = df.fillna("").astype(str)
-    ws.append_rows(df.values.tolist())
-    clear_sheet_cache()
+    try:
+        ws.append_rows(df.values.tolist())
+        clear_sheet_cache()
+    except Exception as e:
+        st.error("⚠️ Google Sheets API is busy. Please try submitting again in a moment.")
 
 def overwrite_sheet_df(sheet_name, df):
-    try: ws = sh.worksheet(sheet_name)
-    except: ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=20)
-    
-    ws.clear()
-    df = df.fillna("").astype(str)
-    if not df.empty:
-        ws.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name='A1')
-    clear_sheet_cache()
+    try: 
+        ws = sh.worksheet(sheet_name)
+    except WorksheetNotFound:
+        ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=20)
+    except Exception as e:
+        st.error("⚠️ Google Sheets API is busy (Rate Limit). Please wait 30 seconds and try again.")
+        return
+        
+    try:
+        ws.clear()
+        df = df.fillna("").astype(str)
+        if not df.empty:
+            ws.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name='A1')
+        clear_sheet_cache()
+    except Exception as e:
+        st.error("⚠️ Google Sheets API is busy. Please try submitting again in a moment.")
 
 def get_notice():
     try: return sh.worksheet("notice").acell("A1").value or ""
@@ -215,7 +233,7 @@ def get_secure_photo_uri(url):
 
 
 # --- 5. TIME HELPERS ---
-utc_now = datetime.utcnow()
+utc_now = datetime.now(timezone.utc)
 now = utc_now + timedelta(hours=5, minutes=30)
 curr_date_str = now.strftime("%d-%m-%Y")
 curr_time = now.time()

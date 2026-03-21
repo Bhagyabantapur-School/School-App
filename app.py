@@ -44,33 +44,38 @@ def inject_security_css(user_name):
         .sub-card {{ background-color: #e3f2fd; padding: 10px; border-radius: 8px; margin-bottom: 5px; border-left: 4px solid #2196f3; }}
         .sub-row {{ background-color: #fff3cd !important; border-left: 5px solid #ffc107 !important; }}
         
-        /* 📱 EXACT PIXEL LAYOUT FIX FOR MOBILE PROFILE CARDS */
-        @media (max-width: 640px) {{
+        /* 📱 AGGRESSIVE MOBILE LAYOUT LOCK */
+        @media (max-width: 768px) {{
             .roster-container [data-testid="stHorizontalBlock"] {{
+                display: flex !important;
                 flex-direction: row !important;
                 flex-wrap: nowrap !important;
                 align-items: center !important;
-                gap: 5px !important;
                 width: 100% !important;
             }}
             .roster-container [data-testid="column"] {{
+                display: block !important;
                 min-width: 0 !important; 
-                padding: 0 !important;
+                margin-top: 0 !important;
+                padding: 0 4px !important;
             }}
-            /* Photo Column: Exactly 55px */
+            /* Photo Column: Force to 55px */
             .roster-container [data-testid="column"]:nth-child(1) {{ 
                 flex: 0 0 55px !important; 
-                width: 55px !important; 
+                max-width: 55px !important; 
+                width: 55px !important;
             }}
             /* Text Column: Take all remaining space */
             .roster-container [data-testid="column"]:nth-child(2) {{ 
                 flex: 1 1 0% !important; 
-                width: auto !important; 
+                max-width: calc(100% - 150px) !important; 
+                width: auto !important;
             }}
-            /* Checkbox Column: Exactly 95px */
+            /* Checkbox Column: Force to 95px */
             .roster-container [data-testid="column"]:nth-child(3) {{ 
                 flex: 0 0 95px !important; 
-                width: 95px !important; 
+                max-width: 95px !important; 
+                width: 95px !important;
             }}
             
             /* Text Wrapping and Tightening */
@@ -368,18 +373,16 @@ else:
                                 # --- MDM CARD LIST UI ---
                                 st.markdown("### Roster Selection")
                                 
-                                # Wrapping form in custom class for precise CSS targeting
+                                # Wrap in custom CSS container
                                 st.markdown('<div class="roster-container">', unsafe_allow_html=True)
                                 with st.form("mdm_form"):
                                     selected_mdm = []
                                     for idx, r in roster.iterrows():
                                         c1, c2, c3 = st.columns([1, 4, 2])
                                         with c1:
-                                            # Hardcoded width prevents image blowup on mobile
                                             st.image(r['Photo'], width=50) 
                                         with c2:
-                                            # Clean, wrapped text formatting
-                                            st.markdown(f"<div style='line-height:1.2; font-size:14px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']}</span></div>", unsafe_allow_html=True)
+                                            st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']}</span></div>", unsafe_allow_html=True)
                                         with c3:
                                             is_scanned = r['Scan_Key'] in st.session_state.scanned_keys
                                             if st.checkbox("Ate MDM", value=is_scanned, key=f"mdm_{r['Roll']}_{r['Name']}"):
@@ -394,7 +397,7 @@ else:
                                             st.success(f"Submitted {len(new_rows)} students to Cloud DB!")
                                             st.rerun()
                                         else: st.warning("No students selected.")
-                                st.markdown('</div>', unsafe_allow_html=True) # End roster-container
+                                st.markdown('</div>', unsafe_allow_html=True)
                                 
                                 att_df = fetch_sheet_data('student_attendance_master')
                                 is_att_marked = False
@@ -586,11 +589,9 @@ else:
                             for idx, r in ros.iterrows():
                                 c1, c2, c3 = st.columns([1, 4, 2.5])
                                 with c1:
-                                    # Locked image width to 50px so it never gets too large
                                     st.image(r['Photo'], width=50) 
                                 with c2:
-                                    # Clean text rendering
-                                    st.markdown(f"<div style='line-height:1.2; font-size:14px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']}</span></div>", unsafe_allow_html=True)
+                                    st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']}</span></div>", unsafe_allow_html=True)
                                 with c3:
                                     is_present = st.checkbox("Present", value=True, key=f"att_{r['Roll']}_{r['Name']}")
                                     st.checkbox("MDM Entry", value=bool(r['MDM (Ate)']), disabled=True, key=f"mdm_ro_{r['Roll']}_{r['Name']}")
@@ -606,7 +607,7 @@ else:
                                 append_sheet_df('student_attendance_master', df)
                                 st.success("✅ Saved to Cloud Database.")
                                 st.rerun()
-                        st.markdown('</div>', unsafe_allow_html=True) # End roster-container
+                        st.markdown('</div>', unsafe_allow_html=True)
 
                         att_check = fetch_sheet_data('student_attendance_master')
                         is_submitted = not att_check[(att_check['Date'].astype(str) == curr_date_str) & (att_check['Class'] == t_class) & (att_check['Section'] == t_sec)].empty if not att_check.empty else False

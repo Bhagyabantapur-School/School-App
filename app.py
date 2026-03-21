@@ -4,7 +4,7 @@ import os
 import calendar
 import base64
 import re
-import concurrent.futures  # <-- NEW: Added for parallel, high-speed downloading
+import concurrent.futures
 from datetime import datetime, time, timedelta
 from streamlit_qrcode_scanner import qrcode_scanner
 import gspread
@@ -74,7 +74,6 @@ if 'user_name' not in st.session_state: st.session_state.user_name = None
 # --- 3. GOOGLE SHEETS CONNECTION & DATABASE ENGINE ---
 @st.cache_resource
 def get_google_credentials():
-    """Loads credentials to be used for Drive and Sheets API access."""
     skey = dict(st.secrets["gcp_service_account"])
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive.readonly"]
     return Credentials.from_service_account_info(skey, scopes=scopes)
@@ -91,18 +90,16 @@ def init_gsheets():
 
 @st.cache_resource
 def get_drive_session():
-    """Returns an AuthorizedSession for downloading drive images."""
     creds = get_google_credentials()
     return AuthorizedSession(creds)
 
 sh = init_gsheets()
 
-@st.cache_data(ttl=5) # Refreshes every 5 seconds to get live data
+@st.cache_data(ttl=5) 
 def fetch_sheet_data(sheet_name):
     try:
         ws = sh.worksheet(sheet_name)
         df = pd.DataFrame(ws.get_all_records())
-        # Automatically convert string TRUE/FALSE back to python booleans
         df.replace({'TRUE': True, 'FALSE': False, 'True': True, 'False': False}, inplace=True)
         return df
     except:
@@ -150,12 +147,10 @@ def get_local_csv(file):
 # --- 4. SECURE IMAGE FETCHING (Converted to Base64 for Data Editor) ---
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_secure_image_bytes(file_id):
-    """Securely downloads the image using the authorized service account."""
     try:
         authed_session = get_drive_session()
         url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
         response = authed_session.get(url)
-        
         if response.status_code == 200:
             return response.content
         else:
@@ -166,9 +161,7 @@ def fetch_secure_image_bytes(file_id):
         return None
 
 def get_secure_photo_uri(url):
-    """Converts Drive URL to Base64 Data URI so it fits inside Streamlit's data_editor."""
     fallback_image = "https://www.w3schools.com/howto/img_avatar.png"
-    
     if pd.isna(url) or url == "" or not isinstance(url, str):
         return fallback_image
 
@@ -184,7 +177,6 @@ def get_secure_photo_uri(url):
             
     return url if url.startswith("http") else fallback_image
 
-
 # --- 5. TIME HELPERS ---
 utc_now = datetime.utcnow()
 now = utc_now + timedelta(hours=5, minutes=30)
@@ -197,7 +189,6 @@ def parse_time_safe(t_str):
         try: return datetime.strptime(t_str, fmt).time()
         except: continue
     return None
-
 
 # ==========================================
 # LOGIN SCREEN
@@ -343,6 +334,19 @@ else:
                                 with st.spinner("Downloading high-quality photos..."):
                                     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                                         roster['Photo'] = list(executor.map(get_secure_photo_uri, roster['Photo_URL'].tolist()))
+
+                                # --- 🔍 FOCUS VIEWER (View Large Photo) ---
+                                with st.expander("🔍 Identity Verification (View Large Photo)", expanded=False):
+                                    verify_name = st.selectbox("Select student to enlarge:", ["None"] + roster['Name'].tolist(), key=f"focus_mdm_{target_class}_{target_section}")
+                                    if verify_name != "None":
+                                        student_data = roster[roster['Name'] == verify_name].iloc[0]
+                                        col_pic, col_details = st.columns([1, 2])
+                                        with col_pic:
+                                            st.image(student_data['Photo'], width=200) 
+                                        with col_details:
+                                            st.markdown(f"### {student_data['Name']}")
+                                            st.write(f"**Roll:** {student_data['Roll']}")
+                                            st.write(f"**Class:** {target_class} {target_section}")
 
                                 # --- INCREASED SIZE CONFIG ---
                                 edited = st.data_editor(
@@ -547,6 +551,19 @@ else:
                         with st.spinner("Downloading high-quality photos..."):
                             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                                 ros['Photo'] = list(executor.map(get_secure_photo_uri, ros['Photo_URL'].tolist()))
+
+                        # --- 🔍 FOCUS VIEWER (View Large Photo) ---
+                        with st.expander("🔍 Identity Verification (View Large Photo)", expanded=False):
+                            verify_name = st.selectbox("Select student to enlarge:", ["None"] + ros['Name'].tolist(), key=f"focus_att_{t_class}_{t_sec}")
+                            if verify_name != "None":
+                                student_data = ros[ros['Name'] == verify_name].iloc[0]
+                                col_pic, col_details = st.columns([1, 2])
+                                with col_pic:
+                                    st.image(student_data['Photo'], width=200) 
+                                with col_details:
+                                    st.markdown(f"### {student_data['Name']}")
+                                    st.write(f"**Roll:** {student_data['Roll']}")
+                                    st.write(f"**Class:** {t_class} {t_sec}")
 
                         # --- INCREASED SIZE CONFIG ---
                         ed = st.data_editor(

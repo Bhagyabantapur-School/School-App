@@ -2,11 +2,12 @@ import streamlit as st
 import pandas as pd
 import qrcode
 import os
+import math
 from fpdf import FPDF
 import tempfile
 from datetime import datetime
 
-# --- NEW IMPORTS FOR GOOGLE SHEETS & DRIVE API ---
+# --- IMPORTS FOR GOOGLE SHEETS & DRIVE API ---
 import gspread
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound
@@ -20,7 +21,7 @@ except ImportError:
     st.stop()
 
 # --- 1. CONFIGURATION ---
-st.set_page_config(page_title="BPS Digital - ID Generator", page_icon="🏫", layout="centered")
+st.set_page_config(page_title="BPS Digital - ID Generator", page_icon="🏫", layout="wide")
 
 if 'attendance_log' not in st.session_state:
     st.session_state['attendance_log'] = pd.DataFrame(columns=['Time', 'Name', 'Roll', 'Class', 'Status', 'MDM'])
@@ -238,7 +239,7 @@ def generate_pdf(students_list, photo_dict):
 tab1, tab2 = st.tabs(["🖨️ ID Card Generator", "📸 MDM & Attendance Scanner"])
 
 # ==========================================
-# TAB 1: ID CARD GENERATOR (Fully Automated)
+# TAB 1: ID CARD GENERATOR (Fully Automated & Cleared)
 # ==========================================
 with tab1:
     col_a, col_b, col_c = st.columns([1, 2, 1])
@@ -248,62 +249,120 @@ with tab1:
     st.divider()
 
     df = get_students()
-    if not df.empty:
-        c1, c2 = st.columns(2)
-        with c1: selected_class = st.selectbox("Class", ["All"] + sorted(df['Class'].dropna().unique().tolist()))
-        with c2: selected_section = st.selectbox("Section", ["All"] + sorted(df['Section'].dropna().unique().tolist()))
-
-        filtered_df = df.copy()
-        if selected_class != "All": filtered_df = filtered_df[filtered_df['Class'] == selected_class]
-        if selected_section != "All": filtered_df = filtered_df[filtered_df['Section'] == selected_section]
-        
-        filtered_df.insert(0, "Select", False)
-        # Displaying the dataframe so you can select students to print
-        edited_df = st.data_editor(
-            filtered_df[['Select', 'Roll', 'Name', 'Class', 'Photo_URL']], 
-            hide_index=True, 
-            column_config={"Select": st.column_config.CheckboxColumn(required=True)}, 
-            disabled=['Roll', 'Name', 'Class', 'Photo_URL'], 
-            use_container_width=True
-        )
-        
-        # Get full row data for the selected students
-        selected_indices = edited_df[edited_df["Select"] == True].index
-        selected_students = filtered_df.loc[selected_indices].copy()
-        
-        if not selected_students.empty:
-            st.divider()
-            st.success(f"Selected {len(selected_students)} student(s). Photos will be fetched securely from BPS Google Drive.")
+    clearance_log = fetch_sheet_data("form_distribution_log")
+    
+    if not df.empty and not clearance_log.empty:
+        # --- 1. CLEARANCE CHECK LOGIC ---
+        def is_cleared_to_print(row):
+            # 1. Form must be returned
+            is_form_complete = str(row.get('Return Status', '')).strip() == 'Complete'
             
-            if st.button("Generate Secure PDF", type="primary"):
-                photo_dict = {}
+            # 2. Check if any correction was requested (any 'Old' column is filled)
+            old_data_fields = [
+                str(row.get('Old Mobile Number', '')).strip(),
+                str(row.get('Old Category', '')).strip(),
+                str(row.get('Old Student Name', '')).strip(),
+                str(row.get('Old Father Name', '')).strip(),
+                str(row.get('Old Mother Name', '')).strip(),
+                str(row.get('Old DOB', '')).strip()
+            ]
+            
+            # If any of those fields have actual text in them (not just empty strings)
+            correction_requested = any(field and field.lower() not in ['nan', 'none'] for field in old_data_fields)
+            
+            if correction_requested:
+                # If they asked for a correction, 'Data Corrected' MUST be 'Yes'
+                is_data_corrected = str(row.get('Data Corrected', '')).strip() == 'Yes'
+                return is_form_complete and is_data_corrected
+            
+            # If no corrections were needed, they just need the form complete
+            return is_form_complete
+
+        # Apply logic to find who is cleared
+        clearance_log['Is_Cleared'] = clearance_log.apply(is_cleared_to_print, axis=1)
+        cleared_records = clearance_log[clearance_log['Is_Cleared'] == True].copy()
+        
+        # Merge cleared log with master student data (Matching by Class, Section, and Roll)
+        df['Roll_str'] = df['Roll'].astype(str)
+        cleared_records['Roll_str'] = cleared_records['Roll'].astype(str)
+        
+        cleared_students_df = pd.merge(
+            df, 
+            cleared_records[['Class', 'Section', 'Roll_str']], 
+            how='inner', 
+            on=['Class', 'Section', 'Roll_str']
+        ).drop(columns=['Roll_str'])
+
+        # --- 2. MULTI-CLASS SELECTION UI ---
+        available_classes = sorted(cleared_students_df['Class'].dropna().unique().tolist())
+        
+        if not available_classes:
+            st.warning("⚠️ No students currently meet the clearance requirements to print an ID card. Check the Form Manager.")
+        else:
+            selected_classes = st.multiselect(
+                "Select Class(es) to Print", 
+                options=available_classes, 
+                default=available_classes
+            )
+            
+            filtered_df = cleared_students_df[cleared_students_df['Class'].isin(selected_classes)].copy()
+            
+            if not filtered_df.empty:
+                filtered_df.insert(0, "Select", False)
+                st.write("✅ **Showing ONLY students with completed forms and verified data:**")
                 
-                # Show a progress bar while downloading images securely
-                progress_text = "Fetching Secure Photos from Google Drive..."
-                my_bar = st.progress(0, text=progress_text)
+                # Displaying the dataframe so you can select students to print
+                edited_df = st.data_editor(
+                    filtered_df[['Select', 'Roll', 'Name', 'Class', 'Photo_URL']], 
+                    hide_index=True, 
+                    column_config={"Select": st.column_config.CheckboxColumn(required=True)}, 
+                    disabled=['Roll', 'Name', 'Class', 'Photo_URL'], 
+                    use_container_width=True
+                )
                 
-                total_students = len(selected_students)
-                for idx, (index, student) in enumerate(selected_students.iterrows()):
-                    sid = str(student.get('Sl', index)) + "_" + str(student.get('Roll', '0'))
-                    photo_url = str(student.get('Photo_URL', ''))
+                # Get full row data for the selected students
+                selected_indices = edited_df[edited_df["Select"] == True].index
+                selected_students = filtered_df.loc[selected_indices].copy()
+                
+                if not selected_students.empty:
+                    st.divider()
                     
-                    drive_id = extract_drive_id(photo_url)
-                    if drive_id:
-                        img_bytes = fetch_secure_image_bytes(drive_id)
-                        if img_bytes:
-                            photo_dict[sid] = img_bytes
+                    # --- 3. A4 PAPER CALCULATOR ---
+                    num_students = len(selected_students)
+                    pages_needed = math.ceil(num_students / 9)
+                    
+                    st.info(f"🖨️ **Print Summary:** You have selected **{num_students}** students. You will need **{pages_needed}** A4 paper(s) loaded into the printer (9 cards per page).")
+                    
+                    if st.button("Generate Secure PDF", type="primary"):
+                        photo_dict = {}
+                        
+                        # Show a progress bar while downloading images securely
+                        progress_text = "Fetching Secure Photos from Google Drive..."
+                        my_bar = st.progress(0, text=progress_text)
+                        
+                        for idx, (index, student) in enumerate(selected_students.iterrows()):
+                            sid = str(student.get('Sl', index)) + "_" + str(student.get('Roll', '0'))
+                            photo_url = str(student.get('Photo_URL', ''))
                             
-                    my_bar.progress((idx + 1) / total_students, text=f"Fetched photo {idx + 1} of {total_students}")
-                
-                my_bar.empty()
-                
-                with st.spinner("Compiling PDF Document..."):
-                    pdf_bytes = generate_pdf(selected_students.to_dict('records'), photo_dict)
-                    
-                st.balloons()
-                st.download_button("📥 Download ID Cards (PDF)", pdf_bytes, f"BPS_ID_Cards_{datetime.now().strftime('%Y%m%d')}.pdf", "application/pdf")
+                            drive_id = extract_drive_id(photo_url)
+                            if drive_id:
+                                img_bytes = fetch_secure_image_bytes(drive_id)
+                                if img_bytes:
+                                    photo_dict[sid] = img_bytes
+                                    
+                            my_bar.progress((idx + 1) / num_students, text=f"Fetched photo {idx + 1} of {num_students}")
+                        
+                        my_bar.empty()
+                        
+                        with st.spinner("Compiling PDF Document..."):
+                            pdf_bytes = generate_pdf(selected_students.to_dict('records'), photo_dict)
+                            
+                        st.balloons()
+                        st.download_button("📥 Download ID Cards (PDF)", pdf_bytes, f"BPS_ID_Cards_{datetime.now().strftime('%Y%m%d')}.pdf", "application/pdf")
+            else:
+                st.info("No students found for the selected classes.")
     else:
-        st.warning("Could not load student data. Please check your Google Sheet Secrets.")
+        st.warning("Could not load student data or clearance log. Please check your Google Sheet connection.")
 
 # ==========================================
 # TAB 2: MDM SCANNER 

@@ -996,15 +996,12 @@ try:
         selected_timeline_date = st.date_input("Select Date to Review", value=now.date(), key="timeline_date_sel")
         selected_date_str = selected_timeline_date.strftime('%Y-%m-%d')
         
-        # Filter log for selected date, ignoring currently RUNNING tasks
         day_logs = log_df[(log_df['Date'] == selected_date_str) & (log_df['End_Time'] != 'RUNNING')].copy()
         
         if not day_logs.empty:
-            # Convert string times to datetime objects for mathematical comparison
             day_logs['Start_DT'] = pd.to_datetime(day_logs['Date'] + ' ' + day_logs['Start_Time'], errors='coerce')
             day_logs['End_DT'] = pd.to_datetime(day_logs['Date'] + ' ' + day_logs['End_Time'], errors='coerce')
             
-            # Sort chronologically by start time
             day_logs = day_logs.sort_values('Start_DT').dropna(subset=['Start_DT', 'End_DT'])
             
             timeline_events = []
@@ -1014,10 +1011,9 @@ try:
                 current_start = row['Start_DT']
                 current_end = row['End_DT']
                 
-                # Check for a gap between the last end time and current start time
                 if last_end_time and current_start > last_end_time:
                     gap_duration = (current_start - last_end_time).total_seconds() / 60
-                    if gap_duration > 1: # Only show gaps longer than 1 minute
+                    if gap_duration > 1: 
                         timeline_events.append({
                             'type': 'gap',
                             'start': last_end_time.strftime('%I:%M %p'),
@@ -1028,7 +1024,6 @@ try:
                             'notes': ''
                         })
                 
-                # Calculate actual task duration
                 dur_mins = (current_end - current_start).total_seconds() / 60
                 timeline_events.append({
                     'type': 'task',
@@ -1040,12 +1035,9 @@ try:
                     'notes': str(row['Notes'])
                 })
                 
-                # Update the last_end_time for the next loop iteration. 
-                # (Use max to handle overlapping tasks without breaking the gap logic)
                 if last_end_time is None or current_end > last_end_time:
                     last_end_time = current_end
             
-            # Render the timeline events with custom HTML blocks
             for event in timeline_events:
                 if event['type'] == 'gap':
                     st.markdown(f"""
@@ -1055,7 +1047,6 @@ try:
                     </div>
                     """, unsafe_allow_html=True)
                 else:
-                    # Assign colors based on category
                     cat = event['activity']
                     if cat in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"]: border_color = "#ff4b4b" 
                     elif cat in ["WORK", "REPORT", "TASK"]: border_color = "#0068c9" 
@@ -1073,6 +1064,43 @@ try:
                         <div style='color: #333;'>{sub_text}{note_text}</div>
                     </div>
                     """, unsafe_allow_html=True)
+                    
+            # --- NEW: DAILY SUMMARY ---
+            st.markdown("---")
+            st.markdown("<h4 style='text-align: center; color: #555;'>📊 Daily Summary</h4>", unsafe_allow_html=True)
+            
+            total_tracked = sum(e['duration'] for e in timeline_events if e['type'] == 'task')
+            total_gap = sum(e['duration'] for e in timeline_events if e['type'] == 'gap')
+            
+            col_s1, col_s2, col_s3 = st.columns(3)
+            with col_s1:
+                th, tm = divmod(total_tracked, 60)
+                st.metric(label="Total Tracked Time", value=f"{int(th)}h {int(tm)}m")
+            with col_s2:
+                gh, gm = divmod(total_gap, 60)
+                st.metric(label="Total Unlogged/Break", value=f"{int(gh)}h {int(gm)}m")
+            with col_s3:
+                efficiency = (total_tracked / (total_tracked + total_gap)) * 100 if (total_tracked + total_gap) > 0 else 0
+                st.metric(label="Tracking Efficiency", value=f"{int(efficiency)}%")
+                
+            category_totals = {}
+            for e in timeline_events:
+                if e['type'] == 'task':
+                    cat = e['activity']
+                    category_totals[cat] = category_totals.get(cat, 0) + e['duration']
+                    
+            if category_totals:
+                st.markdown("<h5 style='color: #555; margin-top: 15px;'>Time by Category</h5>", unsafe_allow_html=True)
+                cat_df = pd.DataFrame(list(category_totals.items()), columns=['Category', 'Minutes'])
+                cat_df = cat_df.sort_values(by='Minutes', ascending=False)
+                
+                cat_cols = st.columns(min(len(cat_df), 4))
+                for idx, row in cat_df.iterrows():
+                    ch, cm = divmod(row['Minutes'], 60)
+                    col_idx = idx % 4 if len(cat_df) >= 4 else idx
+                    with cat_cols[col_idx]:
+                        st.markdown(f"<div style='background-color:#f0f2f6; padding:10px; border-radius:8px; text-align:center; margin-bottom:10px;'><b style='color:#333;'>{row['Category']}</b><br><span style='color:#0068c9;'>{int(ch)}h {int(cm)}m</span></div>", unsafe_allow_html=True)
+                        
         else:
             st.info(f"No completed activities logged for {selected_date_str}.")
 

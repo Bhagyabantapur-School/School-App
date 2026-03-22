@@ -192,7 +192,7 @@ try:
     today_str = now.strftime('%Y-%m-%d')
     current_time = now.time()
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["⏱️ Live View", "📅 Schedule Editor", "💧 Hydration", "📊 Projects", "🔗 App Hub"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["⏱️ Live View", "📅 Schedule", "💧 Hydration", "📊 Projects", "⏳ Timeline", "🔗 Hub"])
 
     # ==========================================
     # TAB 1: LIVE DASHBOARD
@@ -595,7 +595,6 @@ try:
                 if not avail_projs.empty:
                     st.markdown("<div style='margin-top: 15px; margin-bottom: 5px; color: #0068c9;'><b>🚀 Start a Project Task:</b></div>", unsafe_allow_html=True)
                     
-                    # --- NEW: Cascading Project & Task Selection ---
                     col_proj, col_task, col_btn = st.columns([2, 2, 1])
                     
                     with col_proj:
@@ -625,7 +624,6 @@ try:
                         )
                         if st.button("▶️ Start", key="start_proj", use_container_width=True):
                             selected_p_task_full = f"{selected_task} ({selected_project})"
-                            
                             r_idx = int(proj_df[(proj_df['Task Name'] == selected_task) & (proj_df['Project Name'] == selected_project)]['row_index'].values[0])
                             psheet = get_sheet("project_tasks")
                             curr_stat = proj_df[(proj_df['Task Name'] == selected_task) & (proj_df['Project Name'] == selected_project)]['Status'].values[0].strip().title()
@@ -989,9 +987,99 @@ try:
                     else: st.error("Task Name and Project Name are required.")
 
     # ==========================================
-    # TAB 5: APP HUB
+    # TAB 5: TIMELINE (DAILY AUDIT)
     # ==========================================
     with tab5:
+        st.markdown("<h3 style='text-align: center; color: #555;'>⏳ Daily Activity Timeline</h3>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #888;'>Audit your day to find unlogged time and gaps.</p>", unsafe_allow_html=True)
+        
+        selected_timeline_date = st.date_input("Select Date to Review", value=now.date(), key="timeline_date_sel")
+        selected_date_str = selected_timeline_date.strftime('%Y-%m-%d')
+        
+        # Filter log for selected date, ignoring currently RUNNING tasks
+        day_logs = log_df[(log_df['Date'] == selected_date_str) & (log_df['End_Time'] != 'RUNNING')].copy()
+        
+        if not day_logs.empty:
+            # Convert string times to datetime objects for mathematical comparison
+            day_logs['Start_DT'] = pd.to_datetime(day_logs['Date'] + ' ' + day_logs['Start_Time'], errors='coerce')
+            day_logs['End_DT'] = pd.to_datetime(day_logs['Date'] + ' ' + day_logs['End_Time'], errors='coerce')
+            
+            # Sort chronologically by start time
+            day_logs = day_logs.sort_values('Start_DT').dropna(subset=['Start_DT', 'End_DT'])
+            
+            timeline_events = []
+            last_end_time = None
+            
+            for _, row in day_logs.iterrows():
+                current_start = row['Start_DT']
+                current_end = row['End_DT']
+                
+                # Check for a gap between the last end time and current start time
+                if last_end_time and current_start > last_end_time:
+                    gap_duration = (current_start - last_end_time).total_seconds() / 60
+                    if gap_duration > 1: # Only show gaps longer than 1 minute
+                        timeline_events.append({
+                            'type': 'gap',
+                            'start': last_end_time.strftime('%I:%M %p'),
+                            'end': current_start.strftime('%I:%M %p'),
+                            'duration': int(gap_duration),
+                            'activity': 'Unlogged Time / Break',
+                            'sub': '',
+                            'notes': ''
+                        })
+                
+                # Calculate actual task duration
+                dur_mins = (current_end - current_start).total_seconds() / 60
+                timeline_events.append({
+                    'type': 'task',
+                    'start': current_start.strftime('%I:%M %p'),
+                    'end': current_end.strftime('%I:%M %p'),
+                    'duration': int(dur_mins),
+                    'activity': str(row['Activity']).upper(),
+                    'sub': str(row['Sub_Activities']).title(),
+                    'notes': str(row['Notes'])
+                })
+                
+                # Update the last_end_time for the next loop iteration. 
+                # (Use max to handle overlapping tasks without breaking the gap logic)
+                if last_end_time is None or current_end > last_end_time:
+                    last_end_time = current_end
+            
+            # Render the timeline events with custom HTML blocks
+            for event in timeline_events:
+                if event['type'] == 'gap':
+                    st.markdown(f"""
+                    <div style='background-color: #fafafa; border: 2px dashed #cccccc; padding: 10px; border-radius: 8px; margin-bottom: 10px; text-align: center; color: #888;'>
+                        <b>{event['start']} - {event['end']}</b> (Gap: {event['duration']} mins)<br>
+                        <em>{event['activity']}</em>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    # Assign colors based on category
+                    cat = event['activity']
+                    if cat in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"]: border_color = "#ff4b4b" 
+                    elif cat in ["WORK", "REPORT", "TASK"]: border_color = "#0068c9" 
+                    elif cat == "HEALTH": border_color = "#2e7b32" 
+                    elif cat in ["SLEEP", "PRE", "TEA", "OUT"]: border_color = "#ff9f36" 
+                    else: border_color = "#555555"
+                    
+                    sub_text = f"<br><b>{event['sub']}</b>" if event['sub'] else ""
+                    note_text = f"<br><span style='font-size: 13px; color: #666;'>{event['notes']}</span>" if event['notes'] else ""
+                    
+                    st.markdown(f"""
+                    <div style='background-color: white; border-left: 6px solid {border_color}; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'>
+                        <div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({event['duration']} mins)</div>
+                        <div style='color: {border_color}; font-weight: bold; font-size: 16px;'>{event['activity']}</div>
+                        <div style='color: #333;'>{sub_text}{note_text}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+        else:
+            st.info(f"No completed activities logged for {selected_date_str}.")
+
+    # ==========================================
+    # TAB 6: APP HUB
+    # ==========================================
+    with tab6:
         st.markdown("<h3 style='text-align: center; color: #555; margin-bottom: 20px;'>🔗 Quick Links</h3>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #888; margin-bottom: 30px;'>Access your other modules directly from here.</p>", unsafe_allow_html=True)
         

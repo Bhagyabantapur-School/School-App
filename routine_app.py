@@ -484,7 +484,7 @@ try:
         if sub_list or active_count > 0 or not pending_projs.empty:
             st.markdown("---")
             
-            # --- NEW: Notification Badge for Active Tasks ---
+            # Notification Badge for Active Tasks
             if active_count > 0:
                 st.markdown(f"<h4 style='text-align: center; color: #333;'>Tap to Track Activity <span style='background-color: #ff4b4b; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; vertical-align: middle;'>{active_count} Running</span></h4>", unsafe_allow_html=True)
             else:
@@ -604,7 +604,23 @@ try:
                     with col_sel:
                         selected_p_task = st.selectbox("Select Project Task", proj_options.tolist(), label_visibility="collapsed")
                     with col_btn:
-                        if st.button("▶️ Start", key="start_proj", type="primary", use_container_width=True):
+                        st.markdown(
+                            """
+                            <div id="proj_start_anchor"></div>
+                            <style>
+                            div[data-testid="column"]:nth-of-type(2) div.element-container:has(#proj_start_anchor) + div.element-container button {
+                                background-color: #2e7b32 !important; 
+                                color: white !important;
+                                border: none !important;
+                            }
+                            div[data-testid="column"]:nth-of-type(2) div.element-container:has(#proj_start_anchor) + div.element-container button:hover {
+                                background-color: #1b5e20 !important; 
+                            }
+                            </style>
+                            """,
+                            unsafe_allow_html=True
+                        )
+                        if st.button("▶️ Start", key="start_proj", use_container_width=True):
                             raw_t_name = selected_p_task.split(" (")[0]
                             r_idx = int(proj_df[proj_df['Task Name'] == raw_t_name]['row_index'].values[0])
                             psheet = get_sheet("project_tasks")
@@ -899,12 +915,20 @@ try:
                     lambda x: (x['Status'].str.strip().str.title() == 'Completed').sum() / len(x)
                 ).reset_index(name='Progress')
                 
-                cols = st.columns(len(project_stats))
+                # --- REBUILT FOR FULL PROJECT NAME VISIBILITY ---
+                cols = st.columns(3)
                 for i, row in project_stats.iterrows():
-                    with cols[i]:
+                    with cols[i % 3]:
                         percent_complete = int(row['Progress'] * 100)
-                        st.metric(label=row['Project Name'], value=f"{percent_complete}%")
+                        # Custom HTML card prevents truncation and allows natural text wrapping
+                        st.markdown(f"""
+                        <div style='background-color: #f0f2f6; padding: 15px; border-radius: 10px; margin-bottom: 5px; height: 110px;'>
+                            <p style='margin: 0; font-size: 16px; font-weight: 600; color: #333; line-height: 1.2; word-wrap: break-word;'>{row['Project Name']}</p>
+                            <h2 style='margin: 0; color: #0068c9; padding-top: 5px;'>{percent_complete}%</h2>
+                        </div>
+                        """, unsafe_allow_html=True)
                         st.progress(row['Progress'])
+                        st.markdown("<br>", unsafe_allow_html=True)
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 
@@ -914,7 +938,8 @@ try:
                     plot_df['Status'] = plot_df['Status'].str.strip().str.title()
                     plot_df = plot_df.sort_values('Start Date')
                     fig_gantt = px.timeline(plot_df, x_start="Start Date", x_end="End Date", y="Task Name", color="Status", color_discrete_map=status_colors, hover_data=["Project Name"])
-                    fig_gantt.update_yaxes(autorange="reversed")
+                    
+                    fig_gantt.update_yaxes(autorange="reversed", tickmode='linear')
                     fig_gantt.update_layout(margin=dict(l=0, r=0, t=30, b=0), xaxis_title="", yaxis_title="", showlegend=False)
                     st.plotly_chart(fig_gantt, use_container_width=True)
                     

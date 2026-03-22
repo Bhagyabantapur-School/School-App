@@ -94,7 +94,7 @@ def fetch_class_photo_status():
                 else:
                     continue
                 
-                # Read all raw rows to catch Checkboxes (which appear as TRUE/FALSE without headers)
+                # Read all raw rows to catch Checkboxes
                 values = ws.get_all_values()
                 for row in values:
                     if not row or len(row) < 2: continue
@@ -502,8 +502,32 @@ with tabs[2]:
         st.write("---")
         cols_to_show = ['Photo Taken', 'Photo_URL_Check', 'Thumb_URL_Check', 'Name', 'Class', 'Roll', 'Form_OK', 'Verified', 'Generated', 'Distributed']
         
+        # PREPARE THE STYLED DATAFRAME FOR COLOR ALTERNATION
+        display_df = filtered_view[cols_to_show + ['Already_Photo', 'Already_Dist']].copy()
+        
+        if not display_df.empty:
+            unique_classes = display_df['Class'].unique()
+            # 6 soft pastel RGBA colors for alternating row background based on Class
+            bg_colors = [
+                'rgba(173, 216, 230, 0.15)', # Light Blue
+                'rgba(144, 238, 144, 0.15)', # Light Green
+                'rgba(255, 253, 150, 0.15)', # Light Yellow
+                'rgba(255, 182, 193, 0.15)', # Light Pink
+                'rgba(221, 160, 221, 0.15)', # Light Plum
+                'rgba(255, 218, 185, 0.15)'  # Light Peach
+            ]
+            class_color_map = {cls: f'background-color: {bg_colors[i % len(bg_colors)]}' for i, cls in enumerate(unique_classes)}
+
+            def apply_class_color(row):
+                return [class_color_map.get(row['Class'], '')] * len(row)
+
+            styled_df = display_df.style.apply(apply_class_color, axis=1)
+        else:
+            styled_df = display_df
+
+        # RENDER THE COLORED DATA EDITOR
         final_ed = st.data_editor(
-            filtered_view[cols_to_show + ['Already_Photo', 'Already_Dist']],
+            styled_df,
             column_order=cols_to_show, 
             column_config={
                 "Photo Taken": st.column_config.CheckboxColumn("Photo Taken"),
@@ -521,6 +545,8 @@ with tabs[2]:
         )
 
         if st.button("💾 Sync Manual Updates to Cloud"):
+            # Since styled_df returns dictionary format in Streamlit session state sometimes, 
+            # we use the raw returned dataframe 'final_ed' to perform the boolean checks.
             new_photos = final_ed[(final_ed['Photo Taken'] == True) & (final_ed['Already_Photo'] == False)]
             new_dist = final_ed[(final_ed['Distributed'] == True) & (final_ed['Already_Dist'] == False)]
             

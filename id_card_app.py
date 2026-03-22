@@ -67,13 +67,6 @@ def extract_drive_id(url):
         return url.split("/d/")[1].split("/")[0]
     return None
 
-def make_drive_image_url(url):
-    if pd.isna(url) or not isinstance(url, str) or "drive.google.com" not in url: return url
-    if "/d/" in url:
-        file_id = url.split("/d/")[1].split("/")[0]
-        return f"https://drive.google.com/uc?id={file_id}"
-    return url
-
 @st.cache_data(ttl=60) 
 def fetch_sheet_data(sheet_name):
     try:
@@ -84,8 +77,47 @@ def fetch_sheet_data(sheet_name):
     except:
         return pd.DataFrame()
 
+@st.cache_data(ttl=60)
+def fetch_class_photo_status():
+    """Scans all individual Class sheets (e.g., 'CLASS 5 A - PHOTOS') to auto-detect if a photo is taken."""
+    sh_local = init_gsheets()
+    taken_keys = set()
+    try:
+        for ws in sh_local.worksheets():
+            title = ws.title.upper()
+            if "- PHOTO" in title:
+                # Extract Class (e.g., "CLASS 5 A - PHOTOS" -> "CLASS 5")
+                title_clean = title.split("- PHOTO")[0].strip()
+                parts = title_clean.split()
+                if len(parts) >= 2 and parts[0] == "CLASS":
+                    class_name = f"CLASS {parts[1]}"
+                else:
+                    continue
+                
+                # Read all raw rows to catch Checkboxes (which appear as TRUE/FALSE without headers)
+                values = ws.get_all_values()
+                for row in values:
+                    if not row or len(row) < 2: continue
+                    roll = str(row[0]).strip()
+                    if not roll.isdigit(): continue # Skip header row
+                    
+                    is_taken = False
+                    for cell in row[1:]:
+                        val_up = str(cell).strip().upper()
+                        # If a checkbox is ticked (TRUE), marked YES, or a Drive link is pasted
+                        if val_up in ['TRUE', 'YES', 'TAKEN', 'Y'] or 'DRIVE.GOOGLE' in val_up:
+                            is_taken = True
+                            break
+                        
+                    if is_taken:
+                        taken_keys.add(f"{class_name}_{roll}")
+    except:
+        pass
+    return list(taken_keys)
+
 def clear_sheet_cache():
     fetch_sheet_data.clear()
+    fetch_class_photo_status.clear()
 
 def append_sheet_df(sheet_name, df):
     if df.empty: return
@@ -103,12 +135,10 @@ def append_sheet_df(sheet_name, df):
         st.error(f"⚠️ Cloud sync error: {e}")
 
 def batch_log_action(sheet_name, df, action):
-    """Dynamically logs bulk actions like 'Generated', 'Distributed', or 'Taken'."""
     if df.empty: return
     try:
         log_ws = sh.worksheet(sheet_name)
     except WorksheetNotFound:
-        # Create sheet if it doesn't exist
         log_ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=5)
         log_ws.append_row(["Date", "Class", "Roll", "Name", "Action"])
     
@@ -270,7 +300,6 @@ with tabs[0]:
         df_log['Roll'] = df_log['Roll'].astype(str)
         merged = pd.merge(df_master, df_log, on=['Class', 'Section', 'Roll'], how='inner', suffixes=('', '_log'))
         
-        # Get generated keys to show status
         gen_keys = []
         if not df_id_log.empty:
             df_id_log['Key'] = df_id_log['Class'].astype(str) + "_" + df_id_log['Roll'].astype(str)
@@ -307,14 +336,11 @@ with tabs[0]:
                 st.divider()
                 st.info(f"🖨️ **Print Summary:** You selected **{num_students}** students. Requires **{pages_needed}** A4 page(s).")
                 
-                # Generation Button
                 if st.button("Generate Secure PDF", type="primary"):
                     st.session_state['generated_pdf_data'] = None 
                     photo_dict = {}
-                    
                     my_bar = st.progress(0, text="Starting secure fetch...")
                     
-                    # Phase 1: Downloading Photos
                     for idx, (index, student) in enumerate(selected_students.iterrows()):
                         sid = str(student.get('Sl', index)) + "_" + str(student.get('Roll', '0'))
                         photo_url = str(student.get('Photo_URL', ''))
@@ -327,17 +353,12 @@ with tabs[0]:
                                 
                         my_bar.progress((idx + 1) / num_students * 0.5, text=f"Fetching photo {idx + 1} of {num_students}...")
                     
-                    # Phase 2: Building PDF
                     pdf_bytes = generate_pdf(selected_students.to_dict('records'), photo_dict, progress_bar=my_bar)
-                    
-                    # Log generation to Cloud
                     batch_log_action("id_card_log", selected_students, "Generated")
                         
-                    # Save to memory and trigger balloons!
                     st.session_state['generated_pdf_data'] = pdf_bytes
                     st.balloons()
                 
-                # Persistent Download Button
                 if st.session_state['generated_pdf_data'] is not None:
                     st.success("✅ Your PDF is ready! Click below to save it.")
                     st.download_button(
@@ -346,7 +367,6 @@ with tabs[0]:
                         file_name=f"BPS_ID_Cards_{datetime.now().strftime('%Y%m%d')}.pdf", 
                         mime="application/pdf"
                     )
-
         else:
             st.info("No students found with a linked Photo URL and a cleared form.")
 
@@ -365,7 +385,6 @@ with tabs[1]:
             student_name = data.get('Name', 'Unknown')
             student_roll = data.get('Roll', 'Unknown')
             
-            # Use master data to find class
             m_df = fetch_sheet_data("students_master")
             s_match = m_df[(m_df['Name'] == student_name) & (m_df['Roll'].astype(str) == str(student_roll))]
             student_class = s_match.iloc[0]['Class'] if not s_match.empty else "Unknown"
@@ -426,11 +445,9 @@ with tabs[2]:
         df_m['Roll'] = df_m['Roll'].astype(str)
         df_l['Roll'] = df_l['Roll'].astype(str)
         
-        # Merge Master and Form Logs
         explorer_db = pd.merge(df_m, df_l, on=['Class', 'Section', 'Roll'], how='left', suffixes=('', '_log'))
         explorer_db['Key'] = explorer_db['Class'].astype(str) + "_" + explorer_db['Roll'].astype(str)
         
-        # 1. Parse Status Logs
         photo_keys, gen_keys, dist_keys = [], [], []
         
         if not df_photo.empty:
@@ -442,26 +459,28 @@ with tabs[2]:
             gen_keys = df_id_log[df_id_log['Action'] == 'Generated']['Key'].unique().tolist()
             dist_keys = df_id_log[df_id_log['Action'] == 'Distributed']['Key'].unique().tolist()
 
-        # 2. Assign Statuses
-        if 'Thumb_URL' in explorer_db.columns:
-            explorer_db['Display_Thumb'] = explorer_db['Thumb_URL'].apply(make_drive_image_url)
-        else:
-            explorer_db['Display_Thumb'] = None
+        # Combine with Auto-Scanned Keys from specific Class Photo sheets
+        class_photo_keys = fetch_class_photo_status()
+        photo_keys = list(set(photo_keys + class_photo_keys))
 
-        explorer_db['Photo_Link'] = explorer_db['Photo_URL'].apply(lambda x: True if pd.notna(x) and "drive" in str(x) else False)
+        # Checkbox mapping for URL links presence
+        explorer_db['Photo_URL_Check'] = explorer_db['Photo_URL'].apply(lambda x: True if pd.notna(x) and str(x).strip() != "" else False)
+        
+        if 'Thumb_URL' in explorer_db.columns:
+            explorer_db['Thumb_URL_Check'] = explorer_db['Thumb_URL'].apply(lambda x: True if pd.notna(x) and str(x).strip() != "" else False)
+        else:
+            explorer_db['Thumb_URL_Check'] = False
+
         explorer_db['Form_OK'] = explorer_db['Return Status'].apply(lambda x: True if str(x) == "Complete" else False)
         explorer_db['Verified'] = explorer_db['Data Corrected'].apply(lambda x: True if str(x) == "Yes" else False)
         
-        # Live Database Statuses
         explorer_db['Photo Taken'] = explorer_db['Key'].isin(photo_keys)
         explorer_db['Generated'] = explorer_db['Key'].isin(gen_keys)
         explorer_db['Distributed'] = explorer_db['Key'].isin(dist_keys)
         
-        # Hidden Tracker to prevent double-syncs
         explorer_db['Already_Photo'] = explorer_db['Photo Taken']
         explorer_db['Already_Dist'] = explorer_db['Distributed']
 
-        # 3. Smart Filters
         cat_filter = st.selectbox("Filter Tracking View:", [
             "All Students", 
             "Missing Photo Link", 
@@ -472,36 +491,35 @@ with tabs[2]:
         
         filtered_view = explorer_db.copy()
         if cat_filter == "Missing Photo Link":
-            filtered_view = filtered_view[filtered_view['Photo_Link'] == False]
+            filtered_view = filtered_view[filtered_view['Photo_URL_Check'] == False]
         elif cat_filter == "Form/Data Pending":
             filtered_view = filtered_view[(filtered_view['Form_OK'] == False) | (filtered_view['Verified'] == False)]
         elif cat_filter == "Ready to Print":
-            filtered_view = filtered_view[(filtered_view['Photo_Link'] == True) & (filtered_view['Form_OK'] == True) & (filtered_view['Verified'] == True) & (filtered_view['Generated'] == False)]
+            filtered_view = filtered_view[(filtered_view['Photo_URL_Check'] == True) & (filtered_view['Form_OK'] == True) & (filtered_view['Verified'] == True) & (filtered_view['Generated'] == False)]
         elif cat_filter == "Printed (Needs Distribution)":
             filtered_view = filtered_view[(filtered_view['Generated'] == True) & (filtered_view['Distributed'] == False)]
 
-        # 4. The Data Grid
         st.write("---")
-        cols_to_show = ['Photo Taken', 'Display_Thumb', 'Name', 'Class', 'Roll', 'Form_OK', 'Verified', 'Generated', 'Distributed']
+        cols_to_show = ['Photo Taken', 'Photo_URL_Check', 'Thumb_URL_Check', 'Name', 'Class', 'Roll', 'Form_OK', 'Verified', 'Generated', 'Distributed']
         
         final_ed = st.data_editor(
             filtered_view[cols_to_show + ['Already_Photo', 'Already_Dist']],
-            column_order=cols_to_show, # Hides the 'Already_' tracking columns from the user
+            column_order=cols_to_show, 
             column_config={
                 "Photo Taken": st.column_config.CheckboxColumn("Photo Taken"),
-                "Display_Thumb": st.column_config.ImageColumn("Thumbnail", width="small"),
+                "Photo_URL_Check": st.column_config.CheckboxColumn("Photo_URL", disabled=True),
+                "Thumb_URL_Check": st.column_config.CheckboxColumn("Thumb_URL", disabled=True),
                 "Form_OK": st.column_config.CheckboxColumn("Form OK?", disabled=True),
                 "Verified": st.column_config.CheckboxColumn("Verified?", disabled=True),
                 "Generated": st.column_config.CheckboxColumn("Generated?", disabled=True),
                 "Distributed": st.column_config.CheckboxColumn("Distributed?"),
             },
-            disabled=['Display_Thumb', 'Name', 'Class', 'Roll', 'Form_OK', 'Verified', 'Generated'],
+            disabled=['Photo_URL_Check', 'Thumb_URL_Check', 'Name', 'Class', 'Roll', 'Form_OK', 'Verified', 'Generated'],
             hide_index=True,
             use_container_width=True,
             key="db_explorer_grid"
         )
 
-        # 5. Sync System
         if st.button("💾 Sync Manual Updates to Cloud"):
             new_photos = final_ed[(final_ed['Photo Taken'] == True) & (final_ed['Already_Photo'] == False)]
             new_dist = final_ed[(final_ed['Distributed'] == True) & (final_ed['Already_Dist'] == False)]

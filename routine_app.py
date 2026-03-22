@@ -16,7 +16,8 @@ if 'active_main_task' not in st.session_state:
     st.session_state.active_sub_task = None
     st.session_state.active_start_time = None
 
-st_autorefresh(interval=60000, key="routine_refresh")
+# Updated to 2 minutes to protect Google Sheets API quota
+st_autorefresh(interval=120000, key="routine_refresh")
 
 st.markdown("""
     <style>
@@ -70,7 +71,8 @@ def get_sheet(tab_name):
     client = init_connection()
     return client.open("MY ROUTINE 2026").worksheet(tab_name)
 
-@st.cache_data(ttl=60) 
+# Updated all caches to 5 minutes (300 seconds) to prevent quota errors
+@st.cache_data(ttl=300) 
 def get_routine_data():
     sheet = get_sheet("routine_master")
     data = sheet.get_all_values()
@@ -82,7 +84,7 @@ def get_routine_data():
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
     return df
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def get_activity_log():
     sheet = get_sheet("activity_log")
     data = sheet.get_all_values()
@@ -95,7 +97,7 @@ def get_activity_log():
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
     return df
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def get_future_tasks():
     client = init_connection()
     ss = client.open("MY ROUTINE 2026")
@@ -114,7 +116,7 @@ def get_future_tasks():
     df['row_index'] = df.index + 2 
     return df
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def get_water_log():
     client = init_connection()
     ss = client.open("MY ROUTINE 2026")
@@ -133,7 +135,7 @@ def get_water_log():
     df['Amount_ml'] = pd.to_numeric(df['Amount_ml'], errors='coerce').fillna(0)
     return df
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def get_project_tasks():
     client = init_connection()
     ss = client.open("MY ROUTINE 2026")
@@ -215,7 +217,6 @@ try:
         scheduled_sub_activities = ""
         scheduled_check_list = ""
 
-        # Use effective_day instead of current_day
         today_schedule = df[df['Day'].str.strip().str.title() == effective_day.title()].to_dict('records')
 
         for i, row in enumerate(today_schedule):
@@ -474,17 +475,23 @@ try:
         # MULTI-TASKING LOGIC (LIVE TIMERS)
         # ==========================================
         running_tasks = log_df[log_df['End_Time'] == 'RUNNING']
+        active_count = len(running_tasks)
         
         pending_projs = pd.DataFrame()
         if not proj_df.empty:
             pending_projs = proj_df[proj_df['Status'].str.strip().str.title() != 'Completed']
         
-        if sub_list or not running_tasks.empty or not pending_projs.empty:
+        if sub_list or active_count > 0 or not pending_projs.empty:
             st.markdown("---")
-            st.markdown("<h4 style='text-align: center; color: #333;'>Tap to Track Activity</h4>", unsafe_allow_html=True)
+            
+            # --- NEW: Notification Badge for Active Tasks ---
+            if active_count > 0:
+                st.markdown(f"<h4 style='text-align: center; color: #333;'>Tap to Track Activity <span style='background-color: #ff4b4b; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; vertical-align: middle;'>{active_count} Running</span></h4>", unsafe_allow_html=True)
+            else:
+                st.markdown("<h4 style='text-align: center; color: #333;'>Tap to Track Activity</h4>", unsafe_allow_html=True)
             
             # --- 1. RENDER ALL RUNNING TASKS ---
-            if not running_tasks.empty:
+            if active_count > 0:
                 for idx, active_row in running_tasks.iterrows():
                     sheet_row = idx + 2 
                     active_main = str(active_row['Activity'])

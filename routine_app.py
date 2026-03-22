@@ -16,7 +16,6 @@ if 'active_main_task' not in st.session_state:
     st.session_state.active_sub_task = None
     st.session_state.active_start_time = None
 
-# Updated to 2 minutes to protect Google Sheets API quota
 st_autorefresh(interval=120000, key="routine_refresh")
 
 st.markdown("""
@@ -71,7 +70,6 @@ def get_sheet(tab_name):
     client = init_connection()
     return client.open("MY ROUTINE 2026").worksheet(tab_name)
 
-# Updated all caches to 5 minutes (300 seconds) to prevent quota errors
 @st.cache_data(ttl=300) 
 def get_routine_data():
     sheet = get_sheet("routine_master")
@@ -484,7 +482,6 @@ try:
         if sub_list or active_count > 0 or not pending_projs.empty:
             st.markdown("---")
             
-            # Notification Badge for Active Tasks
             if active_count > 0:
                 st.markdown(f"<h4 style='text-align: center; color: #333;'>Tap to Track Activity <span style='background-color: #ff4b4b; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; vertical-align: middle;'>{active_count} Running</span></h4>", unsafe_allow_html=True)
             else:
@@ -597,23 +594,29 @@ try:
                 avail_projs = pending_projs[~pending_projs['Task Name'].isin([x.split(" (")[0] for x in running_subs])]
                 if not avail_projs.empty:
                     st.markdown("<div style='margin-top: 15px; margin-bottom: 5px; color: #0068c9;'><b>🚀 Start a Project Task:</b></div>", unsafe_allow_html=True)
-                    col_sel, col_btn = st.columns([3, 1])
                     
-                    proj_options = avail_projs['Task Name'].astype(str) + " (" + avail_projs['Project Name'].astype(str) + ")"
+                    # --- NEW: Cascading Project & Task Selection ---
+                    col_proj, col_task, col_btn = st.columns([2, 2, 1])
                     
-                    with col_sel:
-                        selected_p_task = st.selectbox("Select Project Task", proj_options.tolist(), label_visibility="collapsed")
+                    with col_proj:
+                        unique_projs = sorted(avail_projs['Project Name'].unique().tolist())
+                        selected_project = st.selectbox("Project", unique_projs, label_visibility="collapsed", key="live_proj_sel")
+                    
+                    with col_task:
+                        filtered_tasks = avail_projs[avail_projs['Project Name'] == selected_project]['Task Name'].tolist()
+                        selected_task = st.selectbox("Task", filtered_tasks, label_visibility="collapsed", key="live_task_sel")
+
                     with col_btn:
                         st.markdown(
                             """
                             <div id="proj_start_anchor"></div>
                             <style>
-                            div[data-testid="column"]:nth-of-type(2) div.element-container:has(#proj_start_anchor) + div.element-container button {
+                            div[data-testid="column"]:nth-of-type(3) div.element-container:has(#proj_start_anchor) + div.element-container button {
                                 background-color: #2e7b32 !important; 
                                 color: white !important;
                                 border: none !important;
                             }
-                            div[data-testid="column"]:nth-of-type(2) div.element-container:has(#proj_start_anchor) + div.element-container button:hover {
+                            div[data-testid="column"]:nth-of-type(3) div.element-container:has(#proj_start_anchor) + div.element-container button:hover {
                                 background-color: #1b5e20 !important; 
                             }
                             </style>
@@ -621,10 +624,11 @@ try:
                             unsafe_allow_html=True
                         )
                         if st.button("▶️ Start", key="start_proj", use_container_width=True):
-                            raw_t_name = selected_p_task.split(" (")[0]
-                            r_idx = int(proj_df[proj_df['Task Name'] == raw_t_name]['row_index'].values[0])
+                            selected_p_task_full = f"{selected_task} ({selected_project})"
+                            
+                            r_idx = int(proj_df[(proj_df['Task Name'] == selected_task) & (proj_df['Project Name'] == selected_project)]['row_index'].values[0])
                             psheet = get_sheet("project_tasks")
-                            curr_stat = proj_df[proj_df['Task Name'] == raw_t_name]['Status'].values[0].strip().title()
+                            curr_stat = proj_df[(proj_df['Task Name'] == selected_task) & (proj_df['Project Name'] == selected_project)]['Status'].values[0].strip().title()
                             
                             if curr_stat == "Not Started":
                                 psheet.update_cell(r_idx, 3, "In Progress")
@@ -632,7 +636,7 @@ try:
                             log_sheet = get_sheet("activity_log")
                             log_sheet.append_row([
                                 today_str, now.strftime('%H:%M'), "RUNNING", "RUNNING",    
-                                "WORK", selected_p_task, "", "Project Tracking"
+                                "WORK", selected_p_task_full, "", "Project Tracking"
                             ])
                             st.cache_data.clear()
                             st.rerun()
@@ -915,12 +919,10 @@ try:
                     lambda x: (x['Status'].str.strip().str.title() == 'Completed').sum() / len(x)
                 ).reset_index(name='Progress')
                 
-                # --- REBUILT FOR FULL PROJECT NAME VISIBILITY ---
                 cols = st.columns(3)
                 for i, row in project_stats.iterrows():
                     with cols[i % 3]:
                         percent_complete = int(row['Progress'] * 100)
-                        # Custom HTML card prevents truncation and allows natural text wrapping
                         st.markdown(f"""
                         <div style='background-color: #f0f2f6; padding: 15px; border-radius: 10px; margin-bottom: 5px; height: 110px;'>
                             <p style='margin: 0; font-size: 16px; font-weight: 600; color: #333; line-height: 1.2; word-wrap: break-word;'>{row['Project Name']}</p>
@@ -938,7 +940,6 @@ try:
                     plot_df['Status'] = plot_df['Status'].str.strip().str.title()
                     plot_df = plot_df.sort_values('Start Date')
                     fig_gantt = px.timeline(plot_df, x_start="Start Date", x_end="End Date", y="Task Name", color="Status", color_discrete_map=status_colors, hover_data=["Project Name"])
-                    
                     fig_gantt.update_yaxes(autorange="reversed", tickmode='linear')
                     fig_gantt.update_layout(margin=dict(l=0, r=0, t=30, b=0), xaxis_title="", yaxis_title="", showlegend=False)
                     st.plotly_chart(fig_gantt, use_container_width=True)

@@ -1039,10 +1039,19 @@ try:
                     last_end_time = current_end
             
             for event in timeline_events:
+                # --- NEW: Convert raw minutes to 'Xh Ym' format for display ---
+                eh, em = divmod(event['duration'], 60)
+                if eh > 0 and em > 0:
+                    dur_display = f"{eh}h {em}m"
+                elif eh > 0:
+                    dur_display = f"{eh}h"
+                else:
+                    dur_display = f"{em}m"
+
                 if event['type'] == 'gap':
                     st.markdown(f"""
                     <div style='background-color: #fafafa; border: 2px dashed #cccccc; padding: 10px; border-radius: 8px; margin-bottom: 10px; text-align: center; color: #888;'>
-                        <b>{event['start']} - {event['end']}</b> (Gap: {event['duration']} mins)<br>
+                        <b>{event['start']} - {event['end']}</b> (Gap: {dur_display})<br>
                         <em>{event['activity']}</em>
                     </div>
                     """, unsafe_allow_html=True)
@@ -1059,13 +1068,13 @@ try:
                     
                     st.markdown(f"""
                     <div style='background-color: white; border-left: 6px solid {border_color}; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'>
-                        <div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({event['duration']} mins)</div>
+                        <div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({dur_display})</div>
                         <div style='color: {border_color}; font-weight: bold; font-size: 16px;'>{event['activity']}</div>
                         <div style='color: #333;'>{sub_text}{note_text}</div>
                     </div>
                     """, unsafe_allow_html=True)
                     
-            # --- NEW: DAILY SUMMARY ---
+            # --- DAILY SUMMARY ---
             st.markdown("---")
             st.markdown("<h4 style='text-align: center; color: #555;'>📊 Daily Summary</h4>", unsafe_allow_html=True)
             

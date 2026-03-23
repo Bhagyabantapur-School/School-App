@@ -163,7 +163,7 @@ if not df_teachers.empty:
                 if pd.notna(dt):
                     records.append({
                         'Name': f"{name} ({designation})",
-                        'Category': "Staff & Teachers", # Temporary placeholder for sorting
+                        'Category': "Staff & Teachers", 
                         'Role': 'Teacher',
                         'Month_Num': dt.month,
                         'Month_Name': dt.strftime('%B'),
@@ -189,38 +189,44 @@ if selected_month != "All Months":
 else:
     filtered_df = df_bday.copy()
 
-# Sort by Category and then by Day of Month
-filtered_df = filtered_df.sort_values(by=['Category', 'Month_Num', 'Day'])
+# Sort by Day of Month internally
+filtered_df = filtered_df.sort_values(by=['Month_Num', 'Day'])
+
+# CUSTOM SORTING: Force "CLASS PP & LPP" to the very top
+all_categories = sorted(filtered_df['Category'].unique())
+pp_categories = [cat for cat in all_categories if "CLASS PP & LPP" in cat]
+other_categories = [cat for cat in all_categories if cat not in pp_categories]
+final_category_order = pp_categories + other_categories
+
 
 # 4. PDF Generation Logic (Modern fpdf2 standard)
-def generate_birthday_pdf(dataframe, month_title):
+def generate_birthday_pdf(dataframe, month_title, category_order):
     pdf = FPDF()
     pdf.add_page()
     
     # Add Logo if it exists
     if os.path.exists("logo.png"):
-        # Image at x=12, y=8, width=18mm
         pdf.image("logo.png", x=12, y=8, w=18)
     
     # Header Title
     pdf.set_font("helvetica", "B", 16)
-    # Start Y position aligned nicely with the logo
     pdf.set_y(10)
     pdf.cell(0, 8, f"Bhagyabantapur Primary School", new_x="LMARGIN", new_y="NEXT", align="C")
     
     pdf.set_font("helvetica", "B", 12)
     pdf.cell(0, 8, f"Birthday Roster: {month_title}", new_x="LMARGIN", new_y="NEXT", align="C")
-    pdf.ln(8) # Extra space after header
+    pdf.ln(8) 
     
-    grouped = dataframe.groupby('Category', sort=False)
-    for cat, group in grouped:
+    for cat in category_order:
+        group = dataframe[dataframe['Category'] == cat]
+        if group.empty: continue
         
         # Dynamic Teacher Labeling
         display_cat = cat
         if cat == "Staff & Teachers":
             display_cat = "Teachers" if len(group) > 1 else "Teacher"
             
-        # Category Header (Class/Section or Teacher/Teachers)
+        # Category Header
         pdf.set_font("helvetica", "B", 12)
         pdf.set_text_color(41, 128, 185) # BPS Blueish
         pdf.cell(0, 8, f"[{display_cat}]", new_x="LMARGIN", new_y="NEXT")
@@ -228,21 +234,21 @@ def generate_birthday_pdf(dataframe, month_title):
         pdf.set_font("helvetica", "", 10)
         pdf.set_text_color(0, 0, 0)
         
-        group = group.sort_values(['Month_Num', 'Day'])
-        for _, row in group.iterrows():
-            # Clean string strictly avoiding unicode bullets
-            bday_text = f" Day {row['Day']:02d} {row['Month_Name'][:3]} : {row['Name']} (DOB: {row['DOB_Formatted']})"
+        # Apply serial numbers
+        for i, (_, row) in enumerate(group.iterrows(), 1):
+            bday_text = f" {i:02d}. {row['Name']} (DOB: {row['DOB_Formatted']})"
             pdf.cell(0, 6, bday_text, new_x="LMARGIN", new_y="NEXT")
         pdf.ln(4)
         
     return bytes(pdf.output())
+
 
 # 5. Display List & Export
 if filtered_df.empty:
     st.info(f"No birthdays recorded in {selected_month}.")
 else:
     # Render PDF Download Button
-    pdf_bytes = generate_birthday_pdf(filtered_df, selected_month)
+    pdf_bytes = generate_birthday_pdf(filtered_df, selected_month, final_category_order)
     
     col_dl, col_space = st.columns([1, 2])
     with col_dl:
@@ -255,25 +261,19 @@ else:
     
     st.divider()
     
-    # Render UI Visuals grouped by Class/Section
-    grouped = filtered_df.groupby('Category', sort=False)
-    
-    for cat, group in grouped:
+    # Render UI Visuals following custom layout order
+    for cat in final_category_order:
+        group = filtered_df[filtered_df['Category'] == cat]
+        if group.empty: continue
         
-        # Dynamic Teacher Labeling for UI
         display_cat = cat
         if cat == "Staff & Teachers":
             display_cat = "Teachers" if len(group) > 1 else "Teacher"
             
         st.markdown(f"#### 🏷️ {display_cat}")
         
-        # Internal sorting for UI
-        group = group.sort_values(['Month_Num', 'Day'])
-        
-        for _, row in group.iterrows():
-            c1, c2 = st.columns([1, 4])
-            with c1:
-                st.markdown(f"**{row['Day']} {row['Month_Name'][:3]}**")
-            with c2:
-                st.markdown(f"{row['Name']}  *(DOB: {row['DOB_Formatted']})*")
+        # Removed columns to prevent any horizontal scrolling on small mobile screens
+        for i, (_, row) in enumerate(group.iterrows(), 1):
+            st.markdown(f"**{i:02d}.** {row['Name']} *(DOB: {row['DOB_Formatted']})*")
+            
         st.write("") # Spacer

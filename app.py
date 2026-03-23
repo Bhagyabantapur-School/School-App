@@ -140,7 +140,8 @@ def fetch_sheet_data(sheet_name):
     try:
         ws = sh.worksheet(sheet_name)
         df = pd.DataFrame(ws.get_all_records())
-        df = df.replace({'TRUE': True, 'FALSE': False, 'True': True, 'False': False}).infer_objects(copy=False)
+        # Cleaned replace function to avoid Pandas Downcasting warnings
+        df = df.replace({'TRUE': True, 'FALSE': False, 'True': True, 'False': False})
         return df
     except:
         return pd.DataFrame()
@@ -563,15 +564,16 @@ else:
                 mdm_counts = filtered_mdm.groupby(['Class', 'Section']).size().reset_index(name='MDM Entry') if not filtered_mdm.empty else pd.DataFrame(columns=['Class', 'Section', 'MDM Entry'])
                 att_counts = filtered_att.groupby(['Class', 'Section']).size().reset_index(name='Attendance') if not filtered_att.empty else pd.DataFrame(columns=['Class', 'Section', 'Attendance'])
 
-                summary_df = pd.merge(att_counts, mdm_counts, on=['Class', 'Section'], how='outer').fillna(0).infer_objects(copy=False)
-                summary_df['Attendance'], summary_df['MDM Entry'] = summary_df['Attendance'].astype(int), summary_df['MDM Entry'].astype(int)
+                summary_df = pd.merge(att_counts, mdm_counts, on=['Class', 'Section'], how='outer').fillna(0)
+                summary_df['Attendance'] = pd.to_numeric(summary_df['Attendance'], errors='coerce').fillna(0).astype(int)
+                summary_df['MDM Entry'] = pd.to_numeric(summary_df['MDM Entry'], errors='coerce').fillna(0).astype(int)
                 summary_df.sort_values(by=['Class', 'Section'], inplace=True)
                 
                 if not summary_df.empty:
                     summary_df = pd.concat([summary_df, pd.DataFrame([{'Class': 'TOTAL', 'Section': '', 'Attendance': summary_df['Attendance'].sum(), 'MDM Entry': summary_df['MDM Entry'].sum()}])], ignore_index=True)
 
                 st.markdown(f"##### 🏫 Breakdown for {view_date if not show_all else 'All Time'}")
-                st.dataframe(summary_df, hide_index=True, use_container_width=True)
+                st.dataframe(summary_df, hide_index=True)
                 
                 st.markdown("##### 📄 Detailed List")
                 if not filtered_mdm.empty:
@@ -709,7 +711,7 @@ else:
                 for cls_name in ['CLASS PP', 'CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV', 'CLASS V']:
                     if cls_name not in class_counts.columns: class_counts[cls_name] = 0
                         
-                merged_df = pd.merge(monthly_df, class_counts, on='Date', how='left').fillna(0).infer_objects(copy=False)
+                merged_df = pd.merge(monthly_df, class_counts, on='Date', how='left').fillna(0)
                 merged_df['Total (I-IV)'] = merged_df['CLASS I'] + merged_df['CLASS II'] + merged_df['CLASS III'] + merged_df['CLASS IV']
                 merged_df = merged_df.rename(columns={'CLASS PP': 'PP', 'CLASS I': 'I', 'CLASS II': 'II', 'CLASS III': 'III', 'CLASS IV': 'IV', 'CLASS V': 'V'})
                 
@@ -978,23 +980,24 @@ else:
                             from fpdf import FPDF
                             pdf = FPDF()
                             pdf.add_page()
-                            pdf.set_font("Arial", 'B', 16)
-                            pdf.cell(200, 10, txt=f"Pending Form Returns - {curr_date_str}", ln=True, align='C')
+                            # Use fpdf2 compliant parameters
+                            pdf.set_font("helvetica", "B", 16)
+                            pdf.cell(200, 10, text=f"Pending Form Returns - {curr_date_str}", new_x="LMARGIN", new_y="NEXT", align='C')
                             pdf.ln(10)
                             
                             grouped = display_df.groupby(['Class', 'Section'])
                             for (cls, sec), group in grouped:
-                                pdf.set_font("Arial", 'B', 12)
+                                pdf.set_font("helvetica", "B", 12)
                                 pdf.set_text_color(0, 123, 255)
-                                pdf.cell(200, 10, txt=f"{cls} - Section {sec}", ln=True, align='L')
+                                pdf.cell(200, 10, text=f"{cls} - Section {sec}", new_x="LMARGIN", new_y="NEXT", align='L')
                                 pdf.set_text_color(0, 0, 0)
-                                pdf.set_font("Arial", size=11)
+                                pdf.set_font("helvetica", size=11)
                                 for _, row in group.iterrows():
-                                    # Fix: Replaced the bullet point with a hyphen to support default PDF fonts
-                                    pdf.cell(200, 8, txt=f"  - Roll: {row['Roll']} | {row['Name']}", ln=True, align='L')
+                                    pdf.cell(200, 8, text=f"  - Roll: {row['Roll']} | {row['Name']}", new_x="LMARGIN", new_y="NEXT", align='L')
                                 pdf.ln(5)
                             
-                            pdf_bytes = pdf.output(dest='S').encode('latin-1')
+                            # fpdf2 outputs a raw bytearray by default!
+                            pdf_bytes = bytes(pdf.output())
                             
                             st.download_button(
                                 label="⬇️ Download PDF Report",

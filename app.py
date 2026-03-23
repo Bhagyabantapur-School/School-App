@@ -990,7 +990,8 @@ else:
                                 pdf.set_text_color(0, 0, 0)
                                 pdf.set_font("Arial", size=11)
                                 for _, row in group.iterrows():
-                                    pdf.cell(200, 8, txt=f"  • Roll: {row['Roll']} | {row['Name']}", ln=True, align='L')
+                                    # Fix: Replaced the bullet point with a hyphen to support default PDF fonts
+                                    pdf.cell(200, 8, txt=f"  - Roll: {row['Roll']} | {row['Name']}", ln=True, align='L')
                                 pdf.ln(5)
                             
                             pdf_bytes = pdf.output(dest='S').encode('latin-1')

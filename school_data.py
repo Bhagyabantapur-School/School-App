@@ -217,6 +217,9 @@ def generate_birthday_pdf(dataframe, month_title, category_order):
     pdf.cell(0, 8, f"Birthday Roster: {month_title}", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(8) 
     
+    # Overall Serial Number Counter for PDF
+    overall_sl = 1 
+    
     for cat in category_order:
         group = dataframe[dataframe['Category'] == cat]
         if group.empty: continue
@@ -234,10 +237,11 @@ def generate_birthday_pdf(dataframe, month_title, category_order):
         pdf.set_font("helvetica", "", 10)
         pdf.set_text_color(0, 0, 0)
         
-        # Apply serial numbers
-        for i, (_, row) in enumerate(group.iterrows(), 1):
-            bday_text = f" {i:02d}. {row['Name']} (DOB: {row['DOB_Formatted']})"
+        # Apply continuous serial numbers
+        for _, row in group.iterrows():
+            bday_text = f" {overall_sl:02d}. {row['Name']} (DOB: {row['DOB_Formatted']})"
             pdf.cell(0, 6, bday_text, new_x="LMARGIN", new_y="NEXT")
+            overall_sl += 1 # Increment overall counter
         pdf.ln(4)
         
     return bytes(pdf.output())
@@ -261,6 +265,9 @@ else:
     
     st.divider()
     
+    # Overall Serial Number Counter for UI
+    overall_sl_ui = 1 
+    
     # Render UI Visuals following custom layout order
     for cat in final_category_order:
         group = filtered_df[filtered_df['Category'] == cat]
@@ -273,7 +280,8 @@ else:
         st.markdown(f"#### 🏷️ {display_cat}")
         
         # Removed columns to prevent any horizontal scrolling on small mobile screens
-        for i, (_, row) in enumerate(group.iterrows(), 1):
-            st.markdown(f"**{i:02d}.** {row['Name']} *(DOB: {row['DOB_Formatted']})*")
+        for _, row in group.iterrows():
+            st.markdown(f"**{overall_sl_ui:02d}.** {row['Name']} *(DOB: {row['DOB_Formatted']})*")
+            overall_sl_ui += 1 # Increment overall counter
             
         st.write("") # Spacer

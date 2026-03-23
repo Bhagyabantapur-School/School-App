@@ -354,7 +354,12 @@ else:
 
                         if not students.empty:
                             if 'Section' not in students.columns: students['Section'] = 'A'
-                            roster = students[(students['Class'] == target_class) & (students['Section'] == target_section)].copy()
+                            
+                            # FIX: If assigned to CLASS PP, pull in both CLASS PP and CLASS LPP
+                            if target_class == 'CLASS PP':
+                                roster = students[(students['Class'].isin(['CLASS PP', 'CLASS LPP'])) & (students['Section'] == target_section)].copy()
+                            else:
+                                roster = students[(students['Class'] == target_class) & (students['Section'] == target_section)].copy()
                             
                             if not roster.empty:
                                 if 'scanned_keys' not in st.session_state: st.session_state.scanned_keys = []
@@ -397,7 +402,8 @@ else:
                                     with c1:
                                         st.image(r['Photo'], width=85) 
                                     with c2:
-                                        st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']}</span></div>", unsafe_allow_html=True)
+                                        # Now dynamically displaying r['Class'] to differentiate PP and LPP
+                                        st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} | {r['Class']}</span></div>", unsafe_allow_html=True)
                                     with c3:
                                         is_scanned = r['Scan_Key'] in st.session_state.scanned_keys
                                         if st.checkbox("Ate MDM", value=is_scanned, key=f"mdm_{r['Roll']}_{r['Name']}"):
@@ -408,7 +414,8 @@ else:
                                 
                                 if st.button("Submit MDM Data"):
                                     if selected_mdm:
-                                        new_rows = [{'Date': curr_date_str, 'Teacher': t_name_select, 'Class': target_class, 'Section': target_section, 'Roll': sr['Roll'], 'Name': sr['Name'], 'Time': now.strftime("%H:%M")} for sr in selected_mdm]
+                                        # Map actual sr['Class'] to the database to preserve the PP vs LPP split
+                                        new_rows = [{'Date': curr_date_str, 'Teacher': t_name_select, 'Class': sr['Class'], 'Section': target_section, 'Roll': sr['Roll'], 'Name': sr['Name'], 'Time': now.strftime("%H:%M")} for sr in selected_mdm]
                                         append_sheet_df('mdm_log', pd.DataFrame(new_rows))
                                         st.session_state.scanned_keys = []
                                         st.success(f"Submitted {len(new_rows)} students to Cloud DB!")
@@ -420,7 +427,11 @@ else:
                                 is_att_marked = False
                                 att_count = 0
                                 if not att_df.empty and 'Date' in att_df.columns:
-                                    todays_att = att_df[(att_df['Date'].astype(str) == curr_date_str) & (att_df['Class'] == target_class) & (att_df['Section'] == target_section) & (att_df['Status'] == True)]
+                                    if target_class == 'CLASS PP':
+                                        todays_att = att_df[(att_df['Date'].astype(str) == curr_date_str) & (att_df['Class'].isin(['CLASS PP', 'CLASS LPP'])) & (att_df['Section'] == target_section) & (att_df['Status'] == True)]
+                                    else:
+                                        todays_att = att_df[(att_df['Date'].astype(str) == curr_date_str) & (att_df['Class'] == target_class) & (att_df['Section'] == target_section) & (att_df['Status'] == True)]
+                                    
                                     if not todays_att.empty:
                                         is_att_marked, att_count = True, len(todays_att)
                                 
@@ -507,31 +518,27 @@ else:
                 st.subheader("🎓 Pending Form Returns")
                 
                 mdm_log = fetch_sheet_data('mdm_log')
-                todays_mdm = mdm_log[(mdm_log['Date'].astype(str) == curr_date_str) & (mdm_log['Teacher'] == t_name_select)].copy() if not mdm_log.empty else pd.DataFrame()
+                todays_mdm = mdm_log[(mdm_log['Date'].astype(str) == curr_date_str) & (mdm_log['Teacher'] == t_name_select)] if not mdm_log.empty else pd.DataFrame()
                 
                 if todays_mdm.empty:
                     st.warning("⚠️ Pending form return list will show after MDM Entry is completed.")
                 else:
-                    t_class = todays_mdm.iloc[0]['Class']
-                    t_sec = todays_mdm.iloc[0].get('Section', 'A')
-                    present_rolls = todays_mdm['Roll'].astype(str).tolist()
-                    
+                    # Creating a matching logic to handle multiple classes submitted by the same teacher
                     form_log = fetch_sheet_data('form_distribution_log')
                     if not form_log.empty and 'Return Status' in form_log.columns:
-                        pending_forms = form_log[(form_log['Class'] == t_class) & 
-                                                 (form_log['Section'] == t_sec) & 
-                                                 (form_log['Return Status'].astype(str).str.lower() == 'pending') &
-                                                 (form_log['Roll'].astype(str).isin(present_rolls))].copy()
                         
-                        if not pending_forms.empty:
-                            # FIX: Safely pull Name from MDM log if it doesn't exist in form log!
-                            if 'Name' not in pending_forms.columns:
-                                todays_mdm['Match_Key'] = todays_mdm['Roll'].astype(str)
-                                pending_forms['Match_Key'] = pending_forms['Roll'].astype(str)
-                                pending_forms = pd.merge(pending_forms, todays_mdm[['Match_Key', 'Name']], on='Match_Key', how='left')
+                        todays_mdm['Match_Key'] = todays_mdm['Class'].astype(str) + "_" + todays_mdm['Section'].astype(str) + "_" + todays_mdm['Roll'].astype(str)
+                        form_log['Match_Key'] = form_log['Class'].astype(str) + "_" + form_log['Section'].astype(str) + "_" + form_log['Roll'].astype(str)
+                        
+                        pending_forms = form_log[form_log['Return Status'].astype(str).str.lower() == 'pending'].copy()
+                        pending_present = pending_forms[pending_forms['Match_Key'].isin(todays_mdm['Match_Key'].tolist())].copy()
+                        
+                        if not pending_present.empty:
+                            if 'Name' not in pending_present.columns:
+                                pending_present = pd.merge(pending_present, todays_mdm[['Match_Key', 'Name']], on='Match_Key', how='left')
                                 
-                            st.info(f"📋 Present students with PENDING forms in {t_class} - {t_sec}:")
-                            st.dataframe(pending_forms[['Roll', 'Name']], hide_index=True)
+                            st.info(f"📋 Present students with PENDING forms:")
+                            st.dataframe(pending_present[['Class', 'Roll', 'Name']], hide_index=True)
                         else:
                             st.success("✅ All present students have returned their forms!")
                     else:
@@ -619,10 +626,16 @@ else:
                 
                 if not std.empty:
                     if 'Section' not in std.columns: std['Section'] = 'A'
-                    ros = std[(std['Class'] == t_class) & (std['Section'] == t_sec)].copy()
+                    
+                    # FIX: If assigned to CLASS PP, pull in both CLASS PP and CLASS LPP
+                    if t_class == 'CLASS PP':
+                        ros = std[(std['Class'].isin(['CLASS PP', 'CLASS LPP'])) & (std['Section'] == t_sec)].copy()
+                        mdm_eaters = mdm_log[(mdm_log['Date'].astype(str) == curr_date_str) & (mdm_log['Class'].isin(['CLASS PP', 'CLASS LPP'])) & (mdm_log['Section'] == t_sec)]['Roll'].astype(str).tolist() if not mdm_log.empty else []
+                    else:
+                        ros = std[(std['Class'] == t_class) & (std['Section'] == t_sec)].copy()
+                        mdm_eaters = mdm_log[(mdm_log['Date'].astype(str) == curr_date_str) & (mdm_log['Class'] == t_class) & (mdm_log['Section'] == t_sec)]['Roll'].astype(str).tolist() if not mdm_log.empty else []
                     
                     if not ros.empty:
-                        mdm_eaters = mdm_log[(mdm_log['Date'].astype(str) == curr_date_str) & (mdm_log['Class'] == t_class) & (mdm_log['Section'] == t_sec)]['Roll'].astype(str).tolist() if not mdm_log.empty else []
                         ros['MDM (Ate)'] = ros['Roll'].astype(str).isin(mdm_eaters)
                         
                         if 'Thumb_URL' not in ros.columns: ros['Thumb_URL'] = ""
@@ -643,7 +656,8 @@ else:
                             with c1:
                                 st.image(r['Photo'], width=85) 
                             with c2:
-                                st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']}</span></div>", unsafe_allow_html=True)
+                                # Dynamic Class Display
+                                st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} | {r['Class']}</span></div>", unsafe_allow_html=True)
                             with c3:
                                 is_present = st.checkbox("Present", value=True, key=f"att_{r['Roll']}_{r['Name']}")
                                 if is_present:
@@ -652,7 +666,7 @@ else:
                                 st.checkbox("MDM Entry", value=bool(r['MDM (Ate)']), disabled=True, key=f"mdm_ro_{r['Roll']}_{r['Name']}")
                                 
                                 attendance_data.append({
-                                    'Date': curr_date_str, 'Class': t_class, 'Section': t_sec, 
+                                    'Date': curr_date_str, 'Class': r['Class'], 'Section': t_sec, 
                                     'Roll': r['Roll'], 'Name': r['Name'], 'Status': is_present
                                 })
                             st.divider()
@@ -667,12 +681,18 @@ else:
                         st.markdown('</div>', unsafe_allow_html=True)
 
                         att_check = fetch_sheet_data('student_attendance_master')
-                        is_submitted = not att_check[(att_check['Date'].astype(str) == curr_date_str) & (att_check['Class'] == t_class) & (att_check['Section'] == t_sec)].empty if not att_check.empty else False
+                        if t_class == 'CLASS PP':
+                            is_submitted = not att_check[(att_check['Date'].astype(str) == curr_date_str) & (att_check['Class'].isin(['CLASS PP', 'CLASS LPP'])) & (att_check['Section'] == t_sec)].empty if not att_check.empty else False
+                        else:
+                            is_submitted = not att_check[(att_check['Date'].astype(str) == curr_date_str) & (att_check['Class'] == t_class) & (att_check['Section'] == t_sec)].empty if not att_check.empty else False
                         
                         if is_submitted:
                             st.info(f"🔒 Attendance for {t_class} - {t_sec} is already submitted to Cloud.")
                             if st.button(f"🗑️ Clear Today's Attendance for {t_class} - {t_sec}"):
-                                temp_att = att_check[~((att_check['Date'].astype(str) == curr_date_str) & (att_check['Class'] == t_class) & (att_check['Section'] == t_sec))]
+                                if t_class == 'CLASS PP':
+                                    temp_att = att_check[~((att_check['Date'].astype(str) == curr_date_str) & (att_check['Class'].isin(['CLASS PP', 'CLASS LPP'])) & (att_check['Section'] == t_sec))]
+                                else:
+                                    temp_att = att_check[~((att_check['Date'].astype(str) == curr_date_str) & (att_check['Class'] == t_class) & (att_check['Section'] == t_sec))]
                                 overwrite_sheet_df('student_attendance_master', temp_att)
                                 st.success("Attendance Cleared!")
                                 st.rerun()
@@ -687,7 +707,10 @@ else:
             if not att_log.empty:
                 target_att = att_log[(att_log['Date'].astype(str) == att_view_date) & (att_log['Status'] == True)]
                 if not target_att.empty:
-                    pp, i_iv, v = len(target_att[target_att['Class'] == 'CLASS PP']), len(target_att[target_att['Class'].isin(['CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV'])]), len(target_att[target_att['Class'] == 'CLASS V'])
+                    # FIX: Combine PP and LPP exactly like we combine I-IV
+                    pp = len(target_att[target_att['Class'].isin(['CLASS PP', 'CLASS LPP'])])
+                    i_iv = len(target_att[target_att['Class'].isin(['CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV'])])
+                    v = len(target_att[target_att['Class'] == 'CLASS V'])
                     st.markdown(f"""<table class='report-table'><tr><th>Category</th><th>Present</th></tr><tr><td>Class PP</td><td>{pp}</td></tr><tr><td>Class I - IV</td><td>{i_iv}</td></tr><tr><td>Class V</td><td>{v}</td></tr><tr style='font-weight:bold; background:#f0f2f6;'><td>TOTAL</td><td>{pp+i_iv+v}</td></tr></table>""", unsafe_allow_html=True)
                 else: st.info(f"No attendance for {att_view_date}.")
             
@@ -712,12 +735,16 @@ else:
                 present_att = att_log[att_log['Status'] == True].copy() if not att_log.empty else pd.DataFrame(columns=['Date'])
                 class_counts = present_att.groupby(['Date', 'Class']).size().unstack(fill_value=0).reset_index() if not present_att.empty else pd.DataFrame(columns=['Date'])
                     
-                for cls_name in ['CLASS PP', 'CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV', 'CLASS V']:
+                for cls_name in ['CLASS PP', 'CLASS LPP', 'CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV', 'CLASS V']:
                     if cls_name not in class_counts.columns: class_counts[cls_name] = 0
                         
                 merged_df = pd.merge(monthly_df, class_counts, on='Date', how='left').fillna(0).infer_objects(copy=False)
+                
+                # Groupings
                 merged_df['Total (I-IV)'] = merged_df['CLASS I'] + merged_df['CLASS II'] + merged_df['CLASS III'] + merged_df['CLASS IV']
-                merged_df = merged_df.rename(columns={'CLASS PP': 'PP', 'CLASS I': 'I', 'CLASS II': 'II', 'CLASS III': 'III', 'CLASS IV': 'IV', 'CLASS V': 'V'})
+                merged_df['PP'] = merged_df['CLASS PP'] + merged_df['CLASS LPP']
+                
+                merged_df = merged_df.rename(columns={'CLASS I': 'I', 'CLASS II': 'II', 'CLASS III': 'III', 'CLASS IV': 'IV', 'CLASS V': 'V'})
                 
                 holidays_csv = get_local_csv('holidays.csv')
                 h_dates = holidays_csv['Date'].astype(str).str.strip().tolist() if not holidays_csv.empty else []
@@ -914,14 +941,21 @@ else:
                 std = fetch_sheet_data('students_master')
                 log = fetch_sheet_data('shoe_log')
                 if not std.empty:
-                    ros = std[std['Class'] == s_c].copy()
-                    ros['Received'] = ros['Roll'].astype(str).isin(log[log['Class'] == s_c]['Roll'].astype(str).tolist() if not log.empty else [])
+                    # FIX: Handle CLASS PP and CLASS LPP together in shoes
+                    if s_c == 'CLASS PP':
+                        ros = std[std['Class'].isin(['CLASS PP', 'CLASS LPP'])].copy()
+                        log_rolls = log[log['Class'].isin(['CLASS PP', 'CLASS LPP'])]['Roll'].astype(str).tolist() if not log.empty else []
+                    else:
+                        ros = std[std['Class'] == s_c].copy()
+                        log_rolls = log[log['Class'] == s_c]['Roll'].astype(str).tolist() if not log.empty else []
+                        
+                    ros['Received'] = ros['Roll'].astype(str).isin(log_rolls)
                     ros['Mark'], ros['Remark'] = False, ""
-                    ed = st.data_editor(ros[['Roll', 'Name', 'Received', 'Mark', 'Remark']], disabled=['Roll','Name','Received'], hide_index=True)
+                    ed = st.data_editor(ros[['Roll', 'Name', 'Class', 'Received', 'Mark', 'Remark']], disabled=['Roll','Name', 'Class', 'Received'], hide_index=True)
                     if st.button("Save Updates"):
                         new = ed[ed['Mark'] == True]
                         if not new.empty:
-                            append_sheet_df('shoe_log', pd.DataFrame({'Roll': new['Roll'], 'Name': new['Name'], 'Class': s_c, 'Received': True, 'Date': curr_date_str, 'Remark': new['Remark']}))
+                            append_sheet_df('shoe_log', pd.DataFrame({'Roll': new['Roll'], 'Name': new['Name'], 'Class': new['Class'], 'Received': True, 'Date': curr_date_str, 'Remark': new['Remark']}))
                             st.success("Updated in Cloud!")
 
         # --- TAB 6: STAFF NOTICE ---
@@ -997,11 +1031,9 @@ else:
                                 pdf.set_text_color(0, 0, 0)
                                 pdf.set_font("helvetica", size=11)
                                 for _, row in group.iterrows():
-                                    # Fix: Replaced the bullet point with a hyphen to support default PDF fonts
                                     pdf.cell(200, 8, text=f"  - Roll: {row['Roll']} | {row['Name']}", new_x="LMARGIN", new_y="NEXT", align='L')
                                 pdf.ln(5)
                             
-                            # fpdf2 outputs a raw bytearray by default!
                             pdf_bytes = bytes(pdf.output())
                             
                             st.download_button(

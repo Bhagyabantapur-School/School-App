@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import base64
 import re
+import os
 import gspread
 from gspread.exceptions import WorksheetNotFound, APIError
 from google.oauth2.service_account import Credentials
@@ -162,7 +163,7 @@ if not df_teachers.empty:
                 if pd.notna(dt):
                     records.append({
                         'Name': f"{name} ({designation})",
-                        'Category': "Staff & Teachers",
+                        'Category': "Staff & Teachers", # Temporary placeholder for sorting
                         'Role': 'Teacher',
                         'Month_Num': dt.month,
                         'Month_Name': dt.strftime('%B'),
@@ -195,20 +196,34 @@ filtered_df = filtered_df.sort_values(by=['Category', 'Month_Num', 'Day'])
 def generate_birthday_pdf(dataframe, month_title):
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("helvetica", "B", 16)
     
-    # Title
-    pdf.cell(0, 10, f"Bhagyabantapur Primary School", new_x="LMARGIN", new_y="NEXT", align="C")
+    # Add Logo if it exists
+    if os.path.exists("logo.png"):
+        # Image at x=12, y=8, width=18mm
+        pdf.image("logo.png", x=12, y=8, w=18)
+    
+    # Header Title
+    pdf.set_font("helvetica", "B", 16)
+    # Start Y position aligned nicely with the logo
+    pdf.set_y(10)
+    pdf.cell(0, 8, f"Bhagyabantapur Primary School", new_x="LMARGIN", new_y="NEXT", align="C")
+    
     pdf.set_font("helvetica", "B", 12)
     pdf.cell(0, 8, f"Birthday Roster: {month_title}", new_x="LMARGIN", new_y="NEXT", align="C")
-    pdf.ln(5)
+    pdf.ln(8) # Extra space after header
     
     grouped = dataframe.groupby('Category', sort=False)
     for cat, group in grouped:
-        # Category Header (Class/Section)
+        
+        # Dynamic Teacher Labeling
+        display_cat = cat
+        if cat == "Staff & Teachers":
+            display_cat = "Teachers" if len(group) > 1 else "Teacher"
+            
+        # Category Header (Class/Section or Teacher/Teachers)
         pdf.set_font("helvetica", "B", 12)
         pdf.set_text_color(41, 128, 185) # BPS Blueish
-        pdf.cell(0, 8, f"[{cat}]", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 8, f"[{display_cat}]", new_x="LMARGIN", new_y="NEXT")
         
         pdf.set_font("helvetica", "", 10)
         pdf.set_text_color(0, 0, 0)
@@ -244,7 +259,13 @@ else:
     grouped = filtered_df.groupby('Category', sort=False)
     
     for cat, group in grouped:
-        st.markdown(f"#### 🏷️ {cat}")
+        
+        # Dynamic Teacher Labeling for UI
+        display_cat = cat
+        if cat == "Staff & Teachers":
+            display_cat = "Teachers" if len(group) > 1 else "Teacher"
+            
+        st.markdown(f"#### 🏷️ {display_cat}")
         
         # Internal sorting for UI
         group = group.sort_values(['Month_Num', 'Day'])

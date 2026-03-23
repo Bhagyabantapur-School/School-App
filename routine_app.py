@@ -1002,6 +1002,11 @@ try:
             day_logs['Start_DT'] = pd.to_datetime(day_logs['Date'] + ' ' + day_logs['Start_Time'], errors='coerce')
             day_logs['End_DT'] = pd.to_datetime(day_logs['Date'] + ' ' + day_logs['End_Time'], errors='coerce')
             
+            # --- BUG FIX: Midnight Crossover ---
+            mask = day_logs['End_DT'] < day_logs['Start_DT']
+            day_logs.loc[mask, 'End_DT'] = day_logs.loc[mask, 'End_DT'] + pd.Timedelta(days=1)
+            # -----------------------------------
+            
             day_logs = day_logs.sort_values('Start_DT').dropna(subset=['Start_DT', 'End_DT'])
             
             timeline_events = []
@@ -1039,7 +1044,6 @@ try:
                     last_end_time = current_end
             
             for event in timeline_events:
-                # --- NEW: Convert raw minutes to 'Xh Ym' format for display ---
                 eh, em = divmod(event['duration'], 60)
                 if eh > 0 and em > 0:
                     dur_display = f"{eh}h {em}m"

@@ -1002,10 +1002,8 @@ try:
             day_logs['Start_DT'] = pd.to_datetime(day_logs['Date'] + ' ' + day_logs['Start_Time'], errors='coerce')
             day_logs['End_DT'] = pd.to_datetime(day_logs['Date'] + ' ' + day_logs['End_Time'], errors='coerce')
             
-            # --- BUG FIX: Midnight Crossover ---
             mask = day_logs['End_DT'] < day_logs['Start_DT']
             day_logs.loc[mask, 'End_DT'] = day_logs.loc[mask, 'End_DT'] + pd.Timedelta(days=1)
-            # -----------------------------------
             
             day_logs = day_logs.sort_values('Start_DT').dropna(subset=['Start_DT', 'End_DT'])
             
@@ -1016,18 +1014,30 @@ try:
                 current_start = row['Start_DT']
                 current_end = row['End_DT']
                 
+                # --- NEW: Smart Transition vs Gap Logic ---
                 if last_end_time and current_start > last_end_time:
                     gap_duration = (current_start - last_end_time).total_seconds() / 60
-                    if gap_duration > 1: 
-                        timeline_events.append({
-                            'type': 'gap',
-                            'start': last_end_time.strftime('%I:%M %p'),
-                            'end': current_start.strftime('%I:%M %p'),
-                            'duration': int(gap_duration),
-                            'activity': 'Unlogged Time / Break',
-                            'sub': '',
-                            'notes': ''
-                        })
+                    if gap_duration > 0:
+                        if gap_duration <= 5: # Treat 5 mins or less as a Transition
+                            timeline_events.append({
+                                'type': 'transition',
+                                'start': last_end_time.strftime('%I:%M %p'),
+                                'end': current_start.strftime('%I:%M %p'),
+                                'duration': int(gap_duration),
+                                'activity': 'Transition',
+                                'sub': '',
+                                'notes': ''
+                            })
+                        else: # Treat greater than 5 mins as a true Unlogged Gap
+                            timeline_events.append({
+                                'type': 'gap',
+                                'start': last_end_time.strftime('%I:%M %p'),
+                                'end': current_start.strftime('%I:%M %p'),
+                                'duration': int(gap_duration),
+                                'activity': 'Unlogged Time / Break',
+                                'sub': '',
+                                'notes': ''
+                            })
                 
                 dur_mins = (current_end - current_start).total_seconds() / 60
                 timeline_events.append({
@@ -1052,19 +1062,46 @@ try:
                 else:
                     dur_display = f"{em}m"
 
-                if event['type'] == 'gap':
+                # --- NEW: Rendering the 3 Event Types ---
+                if event['type'] == 'transition':
                     st.markdown(f"""
-                    <div style='background-color: #fafafa; border: 2px dashed #cccccc; padding: 10px; border-radius: 8px; margin-bottom: 10px; text-align: center; color: #888;'>
-                        <b>{event['start']} - {event['end']}</b> (Gap: {dur_display})<br>
-                        <em>{event['activity']}</em>
+                    <div style='background-color: #fff3e0; border: 1px solid #ffb74d; padding: 8px; border-radius: 6px; margin-bottom: 10px; text-align: center; color: #e65100; font-size: 14px;'>
+                        <b>{event['start']} - {event['end']}</b> | ⏳ Transition Time: {dur_display}
                     </div>
                     """, unsafe_allow_html=True)
+                    
+                elif event['type'] == 'gap':
+                    col_g1, col_g2 = st.columns([3, 1])
+                    with col_g1:
+                        st.markdown(f"""
+                        <div style='background-color: #fafafa; border: 2px dashed #cccccc; padding: 10px; border-radius: 8px; margin-bottom: 10px; text-align: center; color: #888;'>
+                            <b>{event['start']} - {event['end']}</b> (Gap: {dur_display})<br>
+                            <em>{event['activity']}</em>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    with col_g2:
+                        st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
+                        if st.button("☕ Log as Break", key=f"gap_{event['start']}_{event['end']}", use_container_width=True):
+                            start_24 = datetime.strptime(event['start'], '%I:%M %p').strftime('%H:%M')
+                            end_24 = datetime.strptime(event['end'], '%I:%M %p').strftime('%H:%M')
+                            h, m = divmod(event['duration'], 60)
+                            dur_str = f"{h}:{m:02d}"
+                            
+                            sheet_log = get_sheet("activity_log")
+                            sheet_log.append_row([
+                                selected_date_str, start_24, end_24, 
+                                dur_str, "FREE TIME", "Planned Break",
+                                "", "Logged from Timeline Gap"
+                            ])
+                            st.cache_data.clear()
+                            st.rerun()
                 else:
                     cat = event['activity']
                     if cat in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"]: border_color = "#ff4b4b" 
                     elif cat in ["WORK", "REPORT", "TASK"]: border_color = "#0068c9" 
                     elif cat == "HEALTH": border_color = "#2e7b32" 
                     elif cat in ["SLEEP", "PRE", "TEA", "OUT"]: border_color = "#ff9f36" 
+                    elif cat == "FREE TIME": border_color = "#29b6f6" 
                     else: border_color = "#555555"
                     
                     sub_text = f"<br><b>{event['sub']}</b>" if event['sub'] else ""
@@ -1091,8 +1128,9 @@ try:
                 st.metric(label="Total Tracked Time", value=f"{int(th)}h {int(tm)}m")
             with col_s2:
                 gh, gm = divmod(total_gap, 60)
-                st.metric(label="Total Unlogged/Break", value=f"{int(gh)}h {int(gm)}m")
+                st.metric(label="Total Unlogged Time", value=f"{int(gh)}h {int(gm)}m")
             with col_s3:
+                # Transition time is completely excluded from the penalty math here!
                 efficiency = (total_tracked / (total_tracked + total_gap)) * 100 if (total_tracked + total_gap) > 0 else 0
                 st.metric(label="Tracking Efficiency", value=f"{int(efficiency)}%")
                 

@@ -184,10 +184,14 @@ st.markdown("### Filter Options")
 months = ["All Months"] + [datetime.date(2000, m, 1).strftime('%B') for m in range(1, 13)]
 selected_month = st.selectbox("Select Month to Display", months)
 
+# Dynamic Year Title Creation
+current_year = datetime.date.today().year
 if selected_month != "All Months":
     filtered_df = df_bday[df_bday['Month_Name'] == selected_month].copy()
+    display_title = f"{selected_month} {current_year}"
 else:
     filtered_df = df_bday.copy()
+    display_title = f"All Months {current_year}"
 
 # Sort by Day of Month internally
 filtered_df = filtered_df.sort_values(by=['Month_Num', 'Day'])
@@ -213,6 +217,7 @@ def generate_birthday_pdf(dataframe, month_title, category_order):
     pdf.set_y(10)
     pdf.cell(0, 8, f"Bhagyabantapur Primary School", new_x="LMARGIN", new_y="NEXT", align="C")
     
+    # Subheader with Dynamic Year
     pdf.set_font("helvetica", "B", 12)
     pdf.cell(0, 8, f"Birthday Roster: {month_title}", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(8) 
@@ -252,18 +257,21 @@ if filtered_df.empty:
     st.info(f"No birthdays recorded in {selected_month}.")
 else:
     # Render PDF Download Button
-    pdf_bytes = generate_birthday_pdf(filtered_df, selected_month, final_category_order)
+    pdf_bytes = generate_birthday_pdf(filtered_df, display_title, final_category_order)
     
     col_dl, col_space = st.columns([1, 2])
     with col_dl:
         st.download_button(
             label="📄 Export to PDF",
             data=pdf_bytes,
-            file_name=f"BPS_Birthdays_{selected_month.replace(' ', '_')}.pdf",
+            file_name=f"BPS_Birthdays_{display_title.replace(' ', '_')}.pdf",
             mime="application/pdf"
         )
     
     st.divider()
+    
+    # Title above the UI list matching the PDF
+    st.markdown(f"### Birthday Roster: {display_title}")
     
     # Overall Serial Number Counter for UI
     overall_sl_ui = 1 

@@ -295,7 +295,7 @@ else:
             n_text = get_notice()
             if n_text.strip(): st.info(f"📢 NOTICE: {n_text}")
             
-            at_tabs = st.tabs(["🍱 MDM Entry", "⏳ Routine", "📃 Leave Status", "📅 Holidays"])
+            at_tabs = st.tabs(["🍱 MDM Entry", "⏳ Routine", "📃 Leave Status", "🎓 Students Notice", "📅 Holidays"])
 
             # --- TAB 1: MDM ENTRY ---
             with at_tabs[0]: 
@@ -503,7 +503,35 @@ else:
                     c3.metric("Commuted", f"{len(my_leaves[my_leaves['Type'] == 'Commuted Leave'])}")
                     st.dataframe(my_leaves[~my_leaves['Type'].isin(['Half Day', 'On Duty'])][['Date', 'Type', 'Substitute']], hide_index=True)
             
-            with at_tabs[3]: # Holidays
+            with at_tabs[3]: # Students Notice
+                st.subheader("🎓 Pending Form Returns")
+                
+                mdm_log = fetch_sheet_data('mdm_log')
+                todays_mdm = mdm_log[(mdm_log['Date'].astype(str) == curr_date_str) & (mdm_log['Teacher'] == t_name_select)] if not mdm_log.empty else pd.DataFrame()
+                
+                if todays_mdm.empty:
+                    st.warning("⚠️ Pending form return list will show after MDM Entry is completed.")
+                else:
+                    t_class = todays_mdm.iloc[0]['Class']
+                    t_sec = todays_mdm.iloc[0].get('Section', 'A')
+                    present_rolls = todays_mdm['Roll'].astype(str).tolist()
+                    
+                    form_log = fetch_sheet_data('form_distribution_log')
+                    if not form_log.empty and 'Return Status' in form_log.columns:
+                        pending_forms = form_log[(form_log['Class'] == t_class) & 
+                                                 (form_log['Section'] == t_sec) & 
+                                                 (form_log['Return Status'].astype(str).str.lower() == 'pending') &
+                                                 (form_log['Roll'].astype(str).isin(present_rolls))]
+                        
+                        if not pending_forms.empty:
+                            st.info(f"📋 Present students with PENDING forms in {t_class} - {t_sec}:")
+                            st.dataframe(pending_forms[['Roll', 'Name']], hide_index=True)
+                        else:
+                            st.success("✅ All present students have returned their forms!")
+                    else:
+                        st.info("No form distribution data found.")
+
+            with at_tabs[4]: # Holidays
                 st.subheader("🗓️ School Holiday List")
                 h_df = get_local_csv('holidays.csv')
                 if not h_df.empty: st.table(h_df)
@@ -513,7 +541,7 @@ else:
     # HEAD TEACHER (ADMIN) DASHBOARD
     # ==========================================
     elif st.session_state.user_role == "admin":
-        tabs = st.tabs(["📊 Summary & MDM", "📝 Attendance Report", "⏳ Live Classes", "👨‍🏫 Leaves", "👟 Shoes", "📢 Notice", "📅 Holidays"])
+        tabs = st.tabs(["📊 Summary & MDM", "📝 Attendance Report", "⏳ Live Classes", "👨‍🏫 Leaves", "👟 Shoes", "📢 Staff Notice", "🎓 Students Notice", "📅 Holidays"])
         
         # --- TAB 1: SUMMARY & MDM REPORT ---
         with tabs[0]: 
@@ -773,7 +801,6 @@ else:
                             for i in range(delta.days + 1):
                                 day_str = (start_date + timedelta(days=i)).strftime("%d-%m-%Y")
                                 
-                                # Check if already recorded
                                 exists = False
                                 if not leave_log.empty and 'Date' in leave_log.columns:
                                     if not leave_log[(leave_log['Date'].astype(str) == day_str) & (leave_log['Teacher'] == abs_t)].empty:
@@ -796,7 +823,6 @@ else:
                                 st.warning("Leave is already recorded for these dates.")
                 
                 else:
-                    # ORIGINAL SINGLE DAY SUBSTITUTION LOGIC
                     sub_date_str = st.date_input("Select Date for Substitutions", datetime.now(), key="sub_date").strftime("%d-%m-%Y")
                     target_day = datetime.strptime(sub_date_str, "%d-%m-%Y").strftime('%A')
                     
@@ -892,15 +918,94 @@ else:
                             append_sheet_df('shoe_log', pd.DataFrame({'Roll': new['Roll'], 'Name': new['Name'], 'Class': s_c, 'Received': True, 'Date': curr_date_str, 'Remark': new['Remark']}))
                             st.success("Updated in Cloud!")
 
-        # --- TAB 6: NOTICE ---
+        # --- TAB 6: STAFF NOTICE ---
         with tabs[5]: 
+            st.subheader("📢 Staff Notice")
             n = st.text_area("Notice", get_notice())
             if st.button("Publish to Cloud"):
                 publish_notice(n)
                 st.success("Published!")
         
-        # --- TAB 7: HOLIDAYS ---
-        with tabs[6]: 
+        # --- TAB 7: STUDENTS NOTICE (PENDING FORMS) ---
+        with tabs[6]:
+            st.subheader("🎓 Pending Form Returns (Present Students Only)")
+            
+            mdm_log = fetch_sheet_data('mdm_log')
+            todays_mdm = mdm_log[mdm_log['Date'].astype(str) == curr_date_str] if not mdm_log.empty else pd.DataFrame()
+            
+            routine = get_local_csv('routine.csv')
+            today_day = now.strftime('%A')
+            missing_mdm_teachers = []
+            
+            if not routine.empty:
+                # Assuming MDM classes are usually marked at 11:15 AM
+                mdm_classes = routine[(routine['Day'] == today_day) & (routine['Start_Time'].astype(str).str.contains("11:15"))]
+                submitted_classes = todays_mdm['Class'].unique() if not todays_mdm.empty else []
+                
+                for _, r_row in mdm_classes.iterrows():
+                    if r_row['Class'] not in submitted_classes:
+                        t_code = r_row['Teacher']
+                        t_name = INV_TEACHER_INITIALS.get(t_code, t_code)
+                        missing_mdm_teachers.append(f"👨‍🏫 {t_name} ({r_row['Class']})")
+            
+            if missing_mdm_teachers:
+                st.error("⚠️ MDM Entry Pending For:")
+                for msg in missing_mdm_teachers:
+                    st.write(msg)
+                st.divider()
+            
+            form_log = fetch_sheet_data('form_distribution_log')
+            if not todays_mdm.empty and not form_log.empty and 'Return Status' in form_log.columns:
+                
+                # Create exact match keys
+                todays_mdm['Match_Key'] = todays_mdm['Class'].astype(str) + "_" + todays_mdm['Section'].astype(str) + "_" + todays_mdm['Roll'].astype(str)
+                form_log['Match_Key'] = form_log['Class'].astype(str) + "_" + form_log['Section'].astype(str) + "_" + form_log['Roll'].astype(str)
+                
+                pending_forms = form_log[form_log['Return Status'].astype(str).str.lower() == 'pending']
+                pending_present = pending_forms[pending_forms['Match_Key'].isin(todays_mdm['Match_Key'].tolist())].copy()
+                
+                if not pending_present.empty:
+                    st.info("📋 Present students with PENDING forms across all submitted classes:")
+                    display_df = pending_present[['Class', 'Section', 'Roll', 'Name']].sort_values(by=['Class', 'Roll'])
+                    st.dataframe(display_df, hide_index=True, use_container_width=True)
+                    
+                    if st.button("📄 Generate PDF Report"):
+                        try:
+                            from fpdf import FPDF
+                            pdf = FPDF()
+                            pdf.add_page()
+                            pdf.set_font("Arial", 'B', 16)
+                            pdf.cell(200, 10, txt=f"Pending Form Returns - {curr_date_str}", ln=True, align='C')
+                            pdf.ln(10)
+                            
+                            grouped = display_df.groupby(['Class', 'Section'])
+                            for (cls, sec), group in grouped:
+                                pdf.set_font("Arial", 'B', 12)
+                                pdf.set_text_color(0, 123, 255)
+                                pdf.cell(200, 10, txt=f"{cls} - Section {sec}", ln=True, align='L')
+                                pdf.set_text_color(0, 0, 0)
+                                pdf.set_font("Arial", size=11)
+                                for _, row in group.iterrows():
+                                    pdf.cell(200, 8, txt=f"  • Roll: {row['Roll']} | {row['Name']}", ln=True, align='L')
+                                pdf.ln(5)
+                            
+                            pdf_bytes = pdf.output(dest='S').encode('latin-1')
+                            
+                            st.download_button(
+                                label="⬇️ Download PDF Report",
+                                data=pdf_bytes,
+                                file_name=f"Pending_Forms_{curr_date_str}.pdf",
+                                mime="application/pdf"
+                            )
+                        except ImportError:
+                            st.error("⚠️ FPDF library not installed. Please run `pip install fpdf` in your terminal to enable PDF downloads.")
+                else:
+                    st.success("✅ No pending forms for currently present students!")
+            else:
+                st.info("Waiting for MDM entries or Form Distribution data.")
+
+        # --- TAB 8: HOLIDAYS ---
+        with tabs[7]: 
             st.subheader("🗓️ School Holiday List")
             h_df = get_local_csv('holidays.csv')
             if not h_df.empty: st.data_editor(h_df, num_rows="dynamic", key="h_edit")

@@ -295,7 +295,7 @@ else:
             n_text = get_notice()
             if n_text.strip(): st.info(f"📢 NOTICE: {n_text}")
             
-            at_tabs = st.tabs(["🍱 MDM Entry", "⏳ Routine", "📃 Leave Status", "🎓 Students Notice", "📅 Holidays"])
+            at_tabs = st.tabs(["🍱 MDM Entry", "⏳ Routine", "📃 Leave Status", "📅 Holidays"])
 
             # --- TAB 1: MDM ENTRY ---
             with at_tabs[0]: 
@@ -355,7 +355,6 @@ else:
                         if not students.empty:
                             if 'Section' not in students.columns: students['Section'] = 'A'
                             
-                            # FIX: If assigned to CLASS PP, pull in both CLASS PP and CLASS LPP
                             if target_class == 'CLASS PP':
                                 roster = students[(students['Class'].isin(['CLASS PP', 'CLASS LPP'])) & (students['Section'] == target_section)].copy()
                             else:
@@ -402,7 +401,6 @@ else:
                                     with c1:
                                         st.image(r['Photo'], width=85) 
                                     with c2:
-                                        # Now dynamically displaying r['Class'] to differentiate PP and LPP
                                         st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} | {r['Class']}</span></div>", unsafe_allow_html=True)
                                     with c3:
                                         is_scanned = r['Scan_Key'] in st.session_state.scanned_keys
@@ -414,7 +412,6 @@ else:
                                 
                                 if st.button("Submit MDM Data"):
                                     if selected_mdm:
-                                        # Map actual sr['Class'] to the database to preserve the PP vs LPP split
                                         new_rows = [{'Date': curr_date_str, 'Teacher': t_name_select, 'Class': sr['Class'], 'Section': target_section, 'Roll': sr['Roll'], 'Name': sr['Name'], 'Time': now.strftime("%H:%M")} for sr in selected_mdm]
                                         append_sheet_df('mdm_log', pd.DataFrame(new_rows))
                                         st.session_state.scanned_keys = []
@@ -513,38 +510,8 @@ else:
                     c2.metric("SL Taken", f"{len(my_leaves[my_leaves['Type'] == 'SL'])}")
                     c3.metric("Commuted", f"{len(my_leaves[my_leaves['Type'] == 'Commuted Leave'])}")
                     st.dataframe(my_leaves[~my_leaves['Type'].isin(['Half Day', 'On Duty'])][['Date', 'Type', 'Substitute']], hide_index=True)
-            
-            with at_tabs[3]: # Students Notice
-                st.subheader("🎓 Pending Form Returns")
-                
-                mdm_log = fetch_sheet_data('mdm_log')
-                todays_mdm = mdm_log[(mdm_log['Date'].astype(str) == curr_date_str) & (mdm_log['Teacher'] == t_name_select)] if not mdm_log.empty else pd.DataFrame()
-                
-                if todays_mdm.empty:
-                    st.warning("⚠️ Pending form return list will show after MDM Entry is completed.")
-                else:
-                    # Creating a matching logic to handle multiple classes submitted by the same teacher
-                    form_log = fetch_sheet_data('form_distribution_log')
-                    if not form_log.empty and 'Return Status' in form_log.columns:
-                        
-                        todays_mdm['Match_Key'] = todays_mdm['Class'].astype(str) + "_" + todays_mdm['Section'].astype(str) + "_" + todays_mdm['Roll'].astype(str)
-                        form_log['Match_Key'] = form_log['Class'].astype(str) + "_" + form_log['Section'].astype(str) + "_" + form_log['Roll'].astype(str)
-                        
-                        pending_forms = form_log[form_log['Return Status'].astype(str).str.lower() == 'pending'].copy()
-                        pending_present = pending_forms[pending_forms['Match_Key'].isin(todays_mdm['Match_Key'].tolist())].copy()
-                        
-                        if not pending_present.empty:
-                            if 'Name' not in pending_present.columns:
-                                pending_present = pd.merge(pending_present, todays_mdm[['Match_Key', 'Name']], on='Match_Key', how='left')
-                                
-                            st.info(f"📋 Present students with PENDING forms:")
-                            st.dataframe(pending_present[['Class', 'Roll', 'Name']], hide_index=True)
-                        else:
-                            st.success("✅ All present students have returned their forms!")
-                    else:
-                        st.info("No form distribution data found.")
 
-            with at_tabs[4]: # Holidays
+            with at_tabs[3]: # Holidays
                 st.subheader("🗓️ School Holiday List")
                 h_df = get_local_csv('holidays.csv')
                 if not h_df.empty: st.table(h_df)
@@ -554,7 +521,7 @@ else:
     # HEAD TEACHER (ADMIN) DASHBOARD
     # ==========================================
     elif st.session_state.user_role == "admin":
-        tabs = st.tabs(["📊 Summary & MDM", "📝 Attendance Report", "⏳ Live Classes", "👨‍🏫 Leaves", "👟 Shoes", "📢 Staff Notice", "🎓 Students Notice", "📅 Holidays"])
+        tabs = st.tabs(["📊 Summary & MDM", "📝 Attendance Report", "⏳ Live Classes", "👨‍🏫 Leaves", "📢 Staff Notice", "📅 Holidays"])
         
         # --- TAB 1: SUMMARY & MDM REPORT ---
         with tabs[0]: 
@@ -627,7 +594,6 @@ else:
                 if not std.empty:
                     if 'Section' not in std.columns: std['Section'] = 'A'
                     
-                    # FIX: If assigned to CLASS PP, pull in both CLASS PP and CLASS LPP
                     if t_class == 'CLASS PP':
                         ros = std[(std['Class'].isin(['CLASS PP', 'CLASS LPP'])) & (std['Section'] == t_sec)].copy()
                         mdm_eaters = mdm_log[(mdm_log['Date'].astype(str) == curr_date_str) & (mdm_log['Class'].isin(['CLASS PP', 'CLASS LPP'])) & (mdm_log['Section'] == t_sec)]['Roll'].astype(str).tolist() if not mdm_log.empty else []
@@ -656,7 +622,6 @@ else:
                             with c1:
                                 st.image(r['Photo'], width=85) 
                             with c2:
-                                # Dynamic Class Display
                                 st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} | {r['Class']}</span></div>", unsafe_allow_html=True)
                             with c3:
                                 is_present = st.checkbox("Present", value=True, key=f"att_{r['Roll']}_{r['Name']}")
@@ -707,7 +672,6 @@ else:
             if not att_log.empty:
                 target_att = att_log[(att_log['Date'].astype(str) == att_view_date) & (att_log['Status'] == True)]
                 if not target_att.empty:
-                    # FIX: Combine PP and LPP exactly like we combine I-IV
                     pp = len(target_att[target_att['Class'].isin(['CLASS PP', 'CLASS LPP'])])
                     i_iv = len(target_att[target_att['Class'].isin(['CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV'])])
                     v = len(target_att[target_att['Class'] == 'CLASS V'])
@@ -740,7 +704,6 @@ else:
                         
                 merged_df = pd.merge(monthly_df, class_counts, on='Date', how='left').fillna(0).infer_objects(copy=False)
                 
-                # Groupings
                 merged_df['Total (I-IV)'] = merged_df['CLASS I'] + merged_df['CLASS II'] + merged_df['CLASS III'] + merged_df['CLASS IV']
                 merged_df['PP'] = merged_df['CLASS PP'] + merged_df['CLASS LPP']
                 
@@ -934,123 +897,16 @@ else:
                 st.dataframe(pd.DataFrame(summary_data), hide_index=True)
                 st.dataframe(valid_leaves if rep_teacher == "All Teachers" else valid_leaves[valid_leaves['Teacher'] == rep_teacher][['Date', 'Teacher', 'Type', 'Substitute']], hide_index=True)
 
-        # --- TAB 5: SHOES ---
+        # --- TAB 5: STAFF NOTICE ---
         with tabs[4]: 
-            s_c = st.selectbox("Class", CLASS_OPTIONS, key='shoe')
-            if s_c != "Select Class...":
-                std = fetch_sheet_data('students_master')
-                log = fetch_sheet_data('shoe_log')
-                if not std.empty:
-                    # FIX: Handle CLASS PP and CLASS LPP together in shoes
-                    if s_c == 'CLASS PP':
-                        ros = std[std['Class'].isin(['CLASS PP', 'CLASS LPP'])].copy()
-                        log_rolls = log[log['Class'].isin(['CLASS PP', 'CLASS LPP'])]['Roll'].astype(str).tolist() if not log.empty else []
-                    else:
-                        ros = std[std['Class'] == s_c].copy()
-                        log_rolls = log[log['Class'] == s_c]['Roll'].astype(str).tolist() if not log.empty else []
-                        
-                    ros['Received'] = ros['Roll'].astype(str).isin(log_rolls)
-                    ros['Mark'], ros['Remark'] = False, ""
-                    ed = st.data_editor(ros[['Roll', 'Name', 'Class', 'Received', 'Mark', 'Remark']], disabled=['Roll','Name', 'Class', 'Received'], hide_index=True)
-                    if st.button("Save Updates"):
-                        new = ed[ed['Mark'] == True]
-                        if not new.empty:
-                            append_sheet_df('shoe_log', pd.DataFrame({'Roll': new['Roll'], 'Name': new['Name'], 'Class': new['Class'], 'Received': True, 'Date': curr_date_str, 'Remark': new['Remark']}))
-                            st.success("Updated in Cloud!")
-
-        # --- TAB 6: STAFF NOTICE ---
-        with tabs[5]: 
             st.subheader("📢 Staff Notice")
             n = st.text_area("Notice", get_notice())
             if st.button("Publish to Cloud"):
                 publish_notice(n)
                 st.success("Published!")
-        
-        # --- TAB 7: STUDENTS NOTICE (PENDING FORMS) ---
-        with tabs[6]:
-            st.subheader("🎓 Pending Form Returns (Present Students Only)")
-            
-            mdm_log = fetch_sheet_data('mdm_log')
-            todays_mdm = mdm_log[mdm_log['Date'].astype(str) == curr_date_str].copy() if not mdm_log.empty else pd.DataFrame()
-            
-            routine = get_local_csv('routine.csv')
-            today_day = now.strftime('%A')
-            missing_mdm_teachers = []
-            
-            if not routine.empty:
-                # Assuming MDM classes are marked around 11:15
-                mdm_classes = routine[(routine['Day'] == today_day) & (routine['Start_Time'].astype(str).str.contains("11:15"))]
-                submitted_classes = todays_mdm['Class'].unique() if not todays_mdm.empty else []
-                
-                for _, r_row in mdm_classes.iterrows():
-                    if r_row['Class'] not in submitted_classes:
-                        t_code = r_row['Teacher']
-                        t_name = INV_TEACHER_INITIALS.get(t_code, t_code)
-                        missing_mdm_teachers.append(f"👨‍🏫 {t_name} ({r_row['Class']})")
-            
-            if missing_mdm_teachers:
-                st.error("⚠️ MDM Entry Pending For:")
-                for msg in missing_mdm_teachers:
-                    st.write(msg)
-                st.divider()
-            
-            form_log = fetch_sheet_data('form_distribution_log')
-            if not todays_mdm.empty and not form_log.empty and 'Return Status' in form_log.columns:
-                
-                # Create exact match keys
-                todays_mdm['Match_Key'] = todays_mdm['Class'].astype(str) + "_" + todays_mdm['Section'].astype(str) + "_" + todays_mdm['Roll'].astype(str)
-                form_log['Match_Key'] = form_log['Class'].astype(str) + "_" + form_log['Section'].astype(str) + "_" + form_log['Roll'].astype(str)
-                
-                pending_forms = form_log[form_log['Return Status'].astype(str).str.lower() == 'pending'].copy()
-                pending_present = pending_forms[pending_forms['Match_Key'].isin(todays_mdm['Match_Key'].tolist())].copy()
-                
-                if not pending_present.empty:
-                    # Safely handle missing Name column by extracting it from today's MDM log
-                    if 'Name' not in pending_present.columns:
-                        pending_present = pd.merge(pending_present, todays_mdm[['Match_Key', 'Name']], on='Match_Key', how='left')
-                        
-                    st.info("📋 Present students with PENDING forms across all submitted classes:")
-                    display_df = pending_present[['Class', 'Section', 'Roll', 'Name']].sort_values(by=['Class', 'Roll'])
-                    st.dataframe(display_df, hide_index=True)
-                    
-                    if st.button("📄 Generate PDF Report"):
-                        try:
-                            from fpdf import FPDF
-                            pdf = FPDF()
-                            pdf.add_page()
-                            # Use fpdf2 compliant parameters
-                            pdf.set_font("helvetica", "B", 16)
-                            pdf.cell(200, 10, text=f"Pending Form Returns - {curr_date_str}", new_x="LMARGIN", new_y="NEXT", align='C')
-                            pdf.ln(10)
-                            
-                            grouped = display_df.groupby(['Class', 'Section'])
-                            for (cls, sec), group in grouped:
-                                pdf.set_font("helvetica", "B", 12)
-                                pdf.set_text_color(0, 123, 255)
-                                pdf.cell(200, 10, text=f"{cls} - Section {sec}", new_x="LMARGIN", new_y="NEXT", align='L')
-                                pdf.set_text_color(0, 0, 0)
-                                pdf.set_font("helvetica", size=11)
-                                for _, row in group.iterrows():
-                                    pdf.cell(200, 8, text=f"  - Roll: {row['Roll']} | {row['Name']}", new_x="LMARGIN", new_y="NEXT", align='L')
-                                pdf.ln(5)
-                            
-                            pdf_bytes = bytes(pdf.output())
-                            
-                            st.download_button(
-                                label="⬇️ Download PDF Report",
-                                data=pdf_bytes,
-                                file_name=f"Pending_Forms_{curr_date_str}.pdf",
-                                mime="application/pdf"
-                            )
-                        except ImportError:
-                            st.error("⚠️ FPDF library not installed. Please run `pip install fpdf` in your terminal to enable PDF downloads.")
-                else:
-                    st.success("✅ No pending forms for currently present students!")
-            else:
-                st.info("Waiting for MDM entries or Form Distribution data.")
 
-        # --- TAB 8: HOLIDAYS ---
-        with tabs[7]: 
+        # --- TAB 6: HOLIDAYS ---
+        with tabs[5]: 
             st.subheader("🗓️ School Holiday List")
             h_df = get_local_csv('holidays.csv')
             if not h_df.empty: st.data_editor(h_df, num_rows="dynamic", key="h_edit")

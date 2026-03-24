@@ -169,7 +169,6 @@ with tab_location:
             with col1:
                 express_move = st.selectbox("Travel Mode", ["BIKE", "WALK", "BIKE + WALK", "TOTO"], key="exp_move")
             with col2:
-                # Ensure "I" is the absolute default
                 people_opts = get_list("People")
                 if not people_opts: 
                     people_opts = ["I", "I, BKP, TKM", "I, TKM"]
@@ -191,7 +190,6 @@ with tab_location:
                     st.session_state.route_active = True
                     st.session_state.current_people = express_people
                     st.session_state.current_move = express_move
-                    # Lock in the current time so it doesn't auto-update when the form reruns
                     st.session_state.retro_time = get_ist_now().time()
                     st.rerun() 
                 except Exception as e:
@@ -205,18 +203,26 @@ with tab_location:
                 ["Karim Da's House (Keys)", "Bhagyabantapur Primary School", "Girishmore Bus Stop", "HOME"]
             )
             
-            forgot_keys = False
+            forgot_keys_fwd = False
+            forgot_keys_ret = False
             forgot_bus = False
             
+            # Forward Journey Missed Stops
             if express_place == "Bhagyabantapur Primary School":
-                forgot_keys = st.checkbox("⚠️ I forgot to log Karim Da's House (Keys) on the way")
-                if forgot_keys:
-                    missed_time = st.time_input("Time you picked up the keys?", value=st.session_state.retro_time, step=60)
+                forgot_keys_fwd = st.checkbox("⚠️ I forgot to log Karim Da's House (Keys) on the way")
+                if forgot_keys_fwd:
+                    missed_time_fwd = st.time_input("Time you picked up the keys?", value=st.session_state.retro_time, step=60, key="fwd_keys")
             
+            # Return Journey Missed Stops (Can select both)
             if express_place == "HOME":
-                forgot_bus = st.checkbox("⚠️ I forgot to log Girishmore Bus Stop on the way back")
+                st.write("**Missed any stops on the way back?**")
+                forgot_keys_ret = st.checkbox("⚠️ I forgot to log Karim Da's House (Keys)")
+                if forgot_keys_ret:
+                    missed_time_keys = st.time_input("Time you dropped the keys?", value=st.session_state.retro_time, step=60, key="ret_keys")
+                    
+                forgot_bus = st.checkbox("⚠️ I forgot to log Girishmore Bus Stop")
                 if forgot_bus:
-                    missed_time_bus = st.time_input("Time you stopped at Girishmore?", value=st.session_state.retro_time, step=60)
+                    missed_time_bus = st.time_input("Time you stopped at Girishmore?", value=st.session_state.retro_time, step=60, key="ret_bus")
             
             if st.button("🛑 Log Arrival", use_container_width=True, type="primary"):
                 try:
@@ -225,23 +231,26 @@ with tab_location:
                     arrival_people = st.session_state.current_people
                     travel_mode = st.session_state.current_move
                     
-                    # 1. Log Missed Keys (Creates 2 Rows: Arrival + New Transit)
-                    if forgot_keys and express_place == "Bhagyabantapur Primary School":
-                        m_time_str = missed_time.strftime("%H:%M")
-                        missed_arr = [today_str, m_time_str, "- Stationary -", "Karim Da's House (Keys)", arrival_people, "Retroactive arrival"]
-                        missed_dep = [today_str, m_time_str, travel_mode, "", arrival_people, "Retroactive transit"]
-                        sh.worksheet("LOCATION_DATA").append_row(missed_arr)
-                        sh.worksheet("LOCATION_DATA").append_row(missed_dep)
+                    # 1. Log Missed Keys (FORWARD JOURNEY to School)
+                    if forgot_keys_fwd and express_place == "Bhagyabantapur Primary School":
+                        m_time_str = missed_time_fwd.strftime("%H:%M")
+                        sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_str, "- Stationary -", "Karim Da's House (Keys)", arrival_people, "Retroactive arrival"])
+                        sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_str, travel_mode, "", arrival_people, "Retroactive transit"])
                     
-                    # 2. Log Missed Bus Stop (Creates 2 Rows: Arrival + New Transit)
-                    if forgot_bus and express_place == "HOME":
-                        m_time_str = missed_time_bus.strftime("%H:%M")
-                        missed_arr = [today_str, m_time_str, "- Stationary -", "Girishmore Bus Stop", arrival_people, "Retroactive arrival"]
-                        sh.worksheet("LOCATION_DATA").append_row(missed_arr)
+                    # 2. Log Missed Stops (RETURN JOURNEY to Home)
+                    if express_place == "HOME":
+                        # A. First stop: Keys
+                        if forgot_keys_ret:
+                            m_time_k = missed_time_keys.strftime("%H:%M")
+                            sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_k, "- Stationary -", "Karim Da's House (Keys)", arrival_people, "Retroactive arrival"])
+                            sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_k, travel_mode, "", arrival_people, "Retroactive transit"])
                         
-                        arrival_people = "I" # Dropped them off
-                        missed_dep = [today_str, m_time_str, travel_mode, "", arrival_people, "Retroactive transit"]
-                        sh.worksheet("LOCATION_DATA").append_row(missed_dep)
+                        # B. Second stop: Bus Stop
+                        if forgot_bus:
+                            m_time_b = missed_time_bus.strftime("%H:%M")
+                            sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_b, "- Stationary -", "Girishmore Bus Stop", arrival_people, "Retroactive arrival"])
+                            arrival_people = "I" # Dropped off companions!
+                            sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_b, travel_mode, "", arrival_people, "Retroactive transit"])
                     
                     # 3. Log Final Arrival
                     arr_row = [
@@ -287,7 +296,6 @@ with tab_location:
         if specific_place == "-- Type New --":
             specific_place = st.text_input("Type New Place Name")
 
-    # Clean Default "I" Logic for manual logs
     manual_people_opts = get_list("People")
     if not manual_people_opts:
         manual_people_opts = ["I"]

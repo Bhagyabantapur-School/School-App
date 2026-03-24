@@ -135,7 +135,8 @@ def get_drive_session():
 
 sh = init_gsheets()
 
-@st.cache_data(ttl=5) 
+# INCREASED TTL TO 10 MINUTES TO PREVENT RATE LIMIT CRASHES DURING CLICKS
+@st.cache_data(ttl=600) 
 def fetch_sheet_data(sheet_name):
     try:
         ws = sh.worksheet(sheet_name)
@@ -147,6 +148,7 @@ def fetch_sheet_data(sheet_name):
 
 def clear_sheet_cache():
     fetch_sheet_data.clear()
+    get_notice.clear()
 
 def append_sheet_df(sheet_name, df):
     if df.empty: return
@@ -184,6 +186,8 @@ def overwrite_sheet_df(sheet_name, df):
     except Exception as e:
         st.error("⚠️ Google Sheets API is busy. Please try submitting again in a moment.")
 
+# CACHED NOTICE TO PREVENT BACKGROUND API DRAINS
+@st.cache_data(ttl=600)
 def get_notice():
     try: return sh.worksheet("notice").acell("A1").value or ""
     except: return ""
@@ -192,6 +196,7 @@ def publish_notice(text):
     try: ws = sh.worksheet("notice")
     except: ws = sh.add_worksheet(title="notice", rows=10, cols=10)
     ws.update_acell("A1", text)
+    clear_sheet_cache()
 
 def get_local_csv(file):
     if os.path.exists(file): 

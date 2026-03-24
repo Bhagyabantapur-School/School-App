@@ -18,6 +18,10 @@ if 'route_active' not in st.session_state:
     st.session_state.route_active = False
 if 'current_people' not in st.session_state:
     st.session_state.current_people = "I"
+if 'current_move' not in st.session_state:
+    st.session_state.current_move = "BIKE"
+if 'retro_time' not in st.session_state:
+    st.session_state.retro_time = get_ist_now().time()
 
 # Connect to Google Sheets
 @st.cache_resource
@@ -89,7 +93,7 @@ st.title("📱 SK Ecosystem")
 tab_money, tab_location, tab_dash, tab_help = st.tabs(["💰 Money", "📍 Location", "📊 Dashboard", "📖 Help"])
 
 # ==========================================
-# TAB 1: MONEY ENTRY FORM (Live & Responsive)
+# TAB 1: MONEY ENTRY FORM
 # ==========================================
 with tab_money:
     st.subheader("Add Financial Record")
@@ -116,7 +120,6 @@ with tab_money:
         if particulars == "-- Type New --":
             particulars = st.text_input("Type New Particulars")
             
-        # Smart TO/FROM Logic
         base_to_from_opts = get_list("TO_FROM")
         to_from_opts = ["-- Type New --"] + base_to_from_opts
         default_index = 0
@@ -161,16 +164,20 @@ with tab_location:
     express_container = st.container(border=True)
     with express_container:
         if not st.session_state.route_active:
-            # STATE: READY TO START
             st.write("Ready to leave?")
             col1, col2 = st.columns(2)
             with col1:
                 express_move = st.selectbox("Travel Mode", ["BIKE", "WALK", "BIKE + WALK", "TOTO"], key="exp_move")
             with col2:
+                # Ensure "I" is the absolute default
                 people_opts = get_list("People")
                 if not people_opts: 
                     people_opts = ["I", "I, BKP, TKM", "I, TKM"]
-                express_people = st.selectbox("Companions", people_opts, key="exp_people")
+                if "I" not in people_opts:
+                    people_opts.insert(0, "I")
+                default_idx = people_opts.index("I")
+                
+                express_people = st.selectbox("Companions", people_opts, index=default_idx, key="exp_people")
                 
             if st.button("🟢 Start Journey", use_container_width=True):
                 try:
@@ -183,12 +190,14 @@ with tab_location:
                     
                     st.session_state.route_active = True
                     st.session_state.current_people = express_people
+                    st.session_state.current_move = express_move
+                    # Lock in the current time so it doesn't auto-update when the form reruns
+                    st.session_state.retro_time = get_ist_now().time()
                     st.rerun() 
                 except Exception as e:
                     st.error(f"Error: {e}")
                         
         else:
-            # STATE: JOURNEY IN PROGRESS
             st.success("🚲 Journey in progress...")
             
             express_place = st.selectbox(
@@ -202,35 +211,37 @@ with tab_location:
             if express_place == "Bhagyabantapur Primary School":
                 forgot_keys = st.checkbox("⚠️ I forgot to log Karim Da's House (Keys) on the way")
                 if forgot_keys:
-                    missed_time = st.time_input("Time you picked up the keys?", get_ist_now().time(), step=60)
+                    missed_time = st.time_input("Time you picked up the keys?", value=st.session_state.retro_time, step=60)
             
             if express_place == "HOME":
                 forgot_bus = st.checkbox("⚠️ I forgot to log Girishmore Bus Stop on the way back")
                 if forgot_bus:
-                    missed_time = st.time_input("Time you stopped at Girishmore?", get_ist_now().time(), step=60)
+                    missed_time_bus = st.time_input("Time you stopped at Girishmore?", value=st.session_state.retro_time, step=60)
             
             if st.button("🛑 Log Arrival", use_container_width=True, type="primary"):
                 try:
                     time_now = get_ist_now()
                     today_str = time_now.strftime("%d.%m.%y")
                     arrival_people = st.session_state.current_people
+                    travel_mode = st.session_state.current_move
                     
-                    # 1. Log Missed Keys
+                    # 1. Log Missed Keys (Creates 2 Rows: Arrival + New Transit)
                     if forgot_keys and express_place == "Bhagyabantapur Primary School":
-                        missed_row = [
-                            today_str, missed_time.strftime("%H:%M"), 
-                            "- Stationary -", "Karim Da's House (Keys)", arrival_people, "Retroactive log"
-                        ]
-                        sh.worksheet("LOCATION_DATA").append_row(missed_row)
+                        m_time_str = missed_time.strftime("%H:%M")
+                        missed_arr = [today_str, m_time_str, "- Stationary -", "Karim Da's House (Keys)", arrival_people, "Retroactive arrival"]
+                        missed_dep = [today_str, m_time_str, travel_mode, "", arrival_people, "Retroactive transit"]
+                        sh.worksheet("LOCATION_DATA").append_row(missed_arr)
+                        sh.worksheet("LOCATION_DATA").append_row(missed_dep)
                     
-                    # 2. Log Missed Bus Stop
+                    # 2. Log Missed Bus Stop (Creates 2 Rows: Arrival + New Transit)
                     if forgot_bus and express_place == "HOME":
-                        missed_row = [
-                            today_str, missed_time.strftime("%H:%M"), 
-                            "- Stationary -", "Girishmore Bus Stop", arrival_people, "Retroactive log"
-                        ]
-                        sh.worksheet("LOCATION_DATA").append_row(missed_row)
-                        arrival_people = "I" # Assume you dropped them off
+                        m_time_str = missed_time_bus.strftime("%H:%M")
+                        missed_arr = [today_str, m_time_str, "- Stationary -", "Girishmore Bus Stop", arrival_people, "Retroactive arrival"]
+                        sh.worksheet("LOCATION_DATA").append_row(missed_arr)
+                        
+                        arrival_people = "I" # Dropped them off
+                        missed_dep = [today_str, m_time_str, travel_mode, "", arrival_people, "Retroactive transit"]
+                        sh.worksheet("LOCATION_DATA").append_row(missed_dep)
                     
                     # 3. Log Final Arrival
                     arr_row = [
@@ -239,15 +250,17 @@ with tab_location:
                     ]
                     sh.worksheet("LOCATION_DATA").append_row(arr_row)
                     
+                    # Reset all trackers
                     st.session_state.route_active = False
                     st.session_state.current_people = "I"
+                    st.session_state.retro_time = get_ist_now().time()
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error: {e}")
 
     st.divider()
 
-    # --- 📝 STANDARD MANUAL LOG (Live & Responsive) ---
+    # --- 📝 STANDARD MANUAL LOG ---
     st.markdown("### 📝 Manual Location Log")
     location_logic = get_location_logic()
 
@@ -274,8 +287,15 @@ with tab_location:
         if specific_place == "-- Type New --":
             specific_place = st.text_input("Type New Place Name")
 
-    people_opts = ["- Alone -"] + get_list("People")
-    people = st.selectbox("People", people_opts)
+    # Clean Default "I" Logic for manual logs
+    manual_people_opts = get_list("People")
+    if not manual_people_opts:
+        manual_people_opts = ["I"]
+    if "I" not in manual_people_opts:
+        manual_people_opts.insert(0, "I")
+    manual_default_idx = manual_people_opts.index("I")
+    
+    people = st.selectbox("People", manual_people_opts, index=manual_default_idx)
     
     loc_remark = st.text_input("Location Remark (Optional)")
     
@@ -286,9 +306,8 @@ with tab_location:
             formatted_date = loc_date.strftime("%d.%m.%y")
             formatted_time = loc_time.strftime("%H:%M")
             final_move = "" if move == "- Stationary -" else move
-            final_people = "" if people == "- Alone -" else people
             
-            row_data = [formatted_date, formatted_time, final_move, specific_place, final_people, loc_remark]
+            row_data = [formatted_date, formatted_time, final_move, specific_place, people, loc_remark]
             sh.worksheet("LOCATION_DATA").append_row(row_data)
             
             if final_move:
@@ -304,7 +323,6 @@ with tab_location:
 with tab_dash:
     st.header("📊 Overview")
     
-    # --- 1. REIMBURSEMENT TRACKER ---
     try:
         money_records = sh.worksheet("MONEY_DATA").get_all_records()
         df_money = pd.DataFrame(money_records)
@@ -348,7 +366,6 @@ with tab_dash:
 
     st.divider()
 
-    # --- 2. LOCATION DURATION LOG ---
     st.subheader("⏱️ Today's Location Log")
     try:
         loc_records = sh.worksheet("LOCATION_DATA").get_all_records()

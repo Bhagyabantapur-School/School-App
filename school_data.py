@@ -98,6 +98,15 @@ st.markdown("""
         flex-wrap: nowrap !important;
         overflow-x: hidden !important;
     }
+    /* Lock the photo column to a fixed width and allow text to fill the rest */
+    [data-testid="column"]:nth-of-type(1) {
+        flex: 0 0 65px !important;
+        width: 65px !important;
+    }
+    [data-testid="column"]:nth-of-type(2) {
+        flex: 1 1 0% !important;
+        width: auto !important;
+    }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -119,16 +128,14 @@ if df_students.empty and df_teachers.empty:
     st.stop()
 
 # Create Tabs for Navigation
-tab_bday, tab_summary = st.tabs(["🎂 Birthday Manager", "📊 Student Summary"])
+tab_bday, tab_summary, tab_search = st.tabs(["🎂 Birthday Manager", "📊 Summary", "🔍 Search"])
 
 # ==========================================
 # TAB 1: BIRTHDAY MANAGER
 # ==========================================
 with tab_bday:
-    # Process Data to Standardized Format
     records = []
 
-    # Process Students Data
     if not df_students.empty:
         for idx, row in df_students.iterrows():
             dob_str = str(row.get('DOB', '')).strip()
@@ -136,7 +143,6 @@ with tab_bday:
             cls = str(row.get('Class', '')).strip().upper()
             sec = str(row.get('Section', '')).strip().upper()
             
-            # Rule: Treat CLASS PP and LPP as a combined unit for Birthdays
             if cls in ["CLASS PP", "CLASS LPP"]:
                 cls = "CLASS PP & LPP"
                 
@@ -156,7 +162,6 @@ with tab_bday:
                 except Exception:
                     pass
 
-    # Process Teachers Data
     if not df_teachers.empty:
         for idx, row in df_teachers.iterrows():
             dob_str = str(row.get('DOB', '')).strip()
@@ -286,25 +291,20 @@ with tab_summary:
     st.divider()
 
     if not df_students.empty:
-        # Standardize class names for counting
         df_students['Clean_Class'] = df_students['Class'].astype(str).str.strip().str.upper()
         class_counts = df_students['Clean_Class'].value_counts().to_dict()
 
-        # The explicit list requested
         target_classes = [
             "CLASS LPP", "CLASS PP", "CLASS I", 
             "CLASS II", "CLASS III", "CLASS IV", "CLASS V"
         ]
 
-        # Build the summary string
         summary_lines = []
         summary_lines.append("Bhagyabantapur Primary School")
         summary_lines.append("Student Summary")
         summary_lines.append("-" * 30)
 
         total_students = 0
-        
-        # Display Metrics in UI
         cols = st.columns(3)
         col_idx = 0
         
@@ -323,10 +323,65 @@ with tab_summary:
         st.divider()
         st.markdown(f"### **Total Students: {total_students}**")
         
-        # Formatted copyable text box
         st.info("💡 **Tip:** Hover over the text box below and click the **Copy icon** in the top right corner to easily copy this data.")
         copy_string = "\n".join(summary_lines)
         st.code(copy_string, language="text")
 
     else:
         st.warning("No student records found to generate a summary.")
+
+# ==========================================
+# TAB 3: STUDENT SEARCH
+# ==========================================
+with tab_search:
+    st.markdown("### 🔍 Search Student Directory")
+    search_query = st.text_input("Enter Mobile Number (Primary or Secondary)", placeholder="e.g. 9876543210").strip()
+    
+    if search_query:
+        if df_students.empty:
+            st.error("Student database is empty.")
+        else:
+            # Clean mobile columns to strings for exact matching
+            df_search = df_students.copy()
+            df_search['Mobile_Clean'] = df_search.get('Mobile', '').astype(str).str.replace('.0', '', regex=False).str.strip()
+            df_search['Sec_Mobile_Clean'] = df_search.get('Secondary Mobile', '').astype(str).str.replace('.0', '', regex=False).str.strip()
+            
+            # Find matches in either primary or secondary mobile
+            matches = df_search[(df_search['Mobile_Clean'] == search_query) | (df_search['Sec_Mobile_Clean'] == search_query)]
+            
+            if matches.empty:
+                st.warning(f"No student found linked to the number: {search_query}")
+            else:
+                st.success(f"Found {len(matches)} matching student(s)!")
+                st.write("")
+                
+                for _, row in matches.iterrows():
+                    # Fetch Photo (Prioritize Photo_URL, fallback to Thumb_URL)
+                    photo_url = str(row.get('Photo_URL', '')).strip()
+                    if photo_url == 'nan' or not photo_url:
+                        photo_url = str(row.get('Thumb_URL', '')).strip()
+                        
+                    img_uri = get_secure_photo_uri(photo_url)
+                    
+                    # UI Layout strictly adhering to Mobile Responsiveness rule
+                    c1, c2 = st.columns(2)
+                    
+                    with c1:
+                        st.markdown(f"""
+                            <img src="{img_uri}" style="width:55px; height:55px; border-radius:50%; object-fit:cover; border:2px solid #2980b9;">
+                        """, unsafe_allow_html=True)
+                    
+                    with c2:
+                        st.markdown(f"**{row.get('Name', 'Unknown')}**")
+                        st.markdown(f"<span style='color:gray; font-size:14px;'>{row.get('Class', '')} | Sec: {row.get('Section', '')} | Roll: {row.get('Roll', '')}</span>", unsafe_allow_html=True)
+                    
+                    # Detailed Information Box
+                    with st.container(border=True):
+                        st.write(f"🧑‍🏫 **Parents:** {row.get('Father', 'N/A')} & {row.get('Mother', 'N/A')}")
+                        st.write(f"🎂 **DOB:** {row.get('DOB', 'N/A')}")
+                        st.write(f"🩸 **Blood Group:** {row.get('BloodGroup', 'N/A')}")
+                        st.write(f"📞 **Primary:** {row.get('Mobile_Clean', 'N/A')} | **Alt:** {row.get('Sec_Mobile_Clean', 'N/A')}")
+                        st.write(f"🆔 **Student Code:** {row.get('Student Code', 'N/A')}")
+                        st.write(f"📅 **Admission Date:** {row.get('Admission Date', 'N/A')}")
+                    
+                    st.divider()

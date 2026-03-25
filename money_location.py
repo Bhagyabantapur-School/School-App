@@ -436,7 +436,24 @@ with tab_location:
 
     # --- ⚡ QUICK ACTIONS ---
     st.markdown("### ⚡ Quick Actions")
-    if st.button("🏠 Arrived HOME Now", use_container_width=True, type="primary"):
+    
+    # Surgical CSS Hook for the Green Button
+    st.markdown('<div class="green-btn-hook"></div>', unsafe_allow_html=True)
+    st.markdown("""
+        <style>
+        div:has(.green-btn-hook) + div + div button {
+            background-color: #28a745 !important;
+            color: white !important;
+            border-color: #28a745 !important;
+        }
+        div:has(.green-btn-hook) + div + div button:hover {
+            background-color: #218838 !important;
+            border-color: #1e7e34 !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
+    if st.button("🏠 Arrived HOME Now", use_container_width=True):
         try:
             time_now = get_ist_now()
             today_str = time_now.strftime("%d.%m.%y")
@@ -452,7 +469,7 @@ with tab_location:
             st.rerun()
         except Exception as e:
             st.error(f"Error logging Home: {e}")
-            
+
     st.divider()
 
     # --- 📝 STANDARD MANUAL LOG ---

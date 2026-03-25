@@ -269,45 +269,83 @@ with tab_shopping:
     st.header("🛒 Smart Shopping List")
     
     st.subheader("➕ Plan a Purchase")
-    with st.form("add_shop_item", clear_on_submit=True):
-        st.write("Plan your purchases here so they auto-fill when you visit the shop!")
+    st.write("Plan your purchases here so they auto-fill when you visit the shop!")
+    
+    # Live responsive form for cascading logic
+    col1, col2 = st.columns(2)
+    with col1:
+        # 1. Entity
+        p_entity = st.selectbox("Entity", get_list("Entities"), key="plan_ent")
         
-        col1, col2 = st.columns(2)
-        with col1:
-            part_opts = get_list("Map_Particular")
-            if not part_opts: part_opts = get_list("Particulars")
+        # 2. Category Cascade
+        if 'Map_Entity' in config_df.columns:
+            p_ent_df = config_df[config_df['Map_Entity'].astype(str).str.strip() == p_entity]
+            p_cat_opts = [c for c in p_ent_df['Map_Category'].dropna().unique() if str(c).strip() != ""]
+            p_category = st.selectbox("Category", p_cat_opts + ["-- Type New --"], key="plan_cat")
+            if p_category == "-- Type New --":
+                p_category = st.text_input("Type New Category", key="plan_cat_new")
+                p_cat_df = pd.DataFrame() 
+            else:
+                p_cat_df = p_ent_df[p_ent_df['Map_Category'].astype(str).str.strip() == p_category]
+        else:
+            p_category = st.selectbox("Category", get_list("Categories") + ["-- Type New --"], key="plan_cat_fb")
+            if p_category == "-- Type New --":
+                p_category = st.text_input("Type New Category", key="plan_cat_new_fb")
+            p_cat_df = pd.DataFrame()
             
-            item = st.selectbox("Select Item (Particular)", part_opts + ["-- Type New --"])
+        # 3. Sub-Category Cascade
+        if not p_cat_df.empty and 'Map_SubCat' in p_cat_df.columns:
+            p_sub_opts = [s for s in p_cat_df['Map_SubCat'].dropna().unique() if str(s).strip() != ""]
+            p_sub_cat = st.selectbox("Sub Category", p_sub_opts + ["-- Type New --"], key="plan_sub")
+            if p_sub_cat == "-- Type New --":
+                p_sub_cat = st.text_input("Type New Sub Category", key="plan_sub_new")
+                p_sub_df = pd.DataFrame()
+            else:
+                p_sub_df = p_cat_df[p_cat_df['Map_SubCat'].astype(str).str.strip() == p_sub_cat]
+        else:
+            p_sub_cat = st.selectbox("Sub Category", get_list("Sub-Categories") + ["-- Type New --"], key="plan_sub_fb")
+            if p_sub_cat == "-- Type New --":
+                p_sub_cat = st.text_input("Type New Sub Category", key="plan_sub_new_fb")
+            p_sub_df = pd.DataFrame()
+            
+        # 4. Item (Particular) Cascade
+        if not p_sub_df.empty and 'Map_Particular' in p_sub_df.columns:
+            p_part_opts = [p for p in p_sub_df['Map_Particular'].dropna().unique() if str(p).strip() != ""]
+            item = st.selectbox("Select Item", p_part_opts + ["-- Type New --"], key="plan_item")
             if item == "-- Type New --":
-                item = st.text_input("Type New Item")
-                
-            # --- SMART SHOP CATEGORY DROPDOWN ---
-            shop_type_opts = []
-            if 'Shop_Type' in config_df.columns:
-                shop_type_opts = [str(s).strip() for s in config_df['Shop_Type'].dropna().unique() if str(s).strip() != ""]
+                item = st.text_input("Type New Item", key="plan_item_new")
+        else:
+            item = st.selectbox("Select Item", get_list("Particulars") + ["-- Type New --"], key="plan_item_fb")
+            if item == "-- Type New --":
+                item = st.text_input("Type New Item", key="plan_item_new_fb")
+        
+    with col2:
+        # Shop Category Auto-Pull
+        shop_type_opts = []
+        if 'Shop_Type' in config_df.columns:
+            shop_type_opts = [str(s).strip() for s in config_df['Shop_Type'].dropna().unique() if str(s).strip() != ""]
+        
+        if not shop_type_opts:
+            shop_type_opts = ["Grocery", "Vegetables", "Stationary", "Hardware", "Medicine"]
             
-            if not shop_type_opts:
-                shop_type_opts = ["Grocery", "Vegetables", "Stationary", "Hardware", "Medicine"]
-                
-            s_type = st.selectbox("Shop Category", shop_type_opts + ["-- Type New --"])
-            if s_type == "-- Type New --":
-                s_type = st.text_input("Type New Shop Category")
+        s_type = st.selectbox("Shop Category", shop_type_opts + ["-- Type New --"], key="plan_stype")
+        if s_type == "-- Type New --":
+            s_type = st.text_input("Type New Shop Category", key="plan_stype_new")
             
-        with col2:
-            est_cost = st.number_input("Estimated Cost (₹)", min_value=0.0, step=10.0)
-            fund = st.selectbox("Fund to use", get_list("Funds"))
-            account = st.selectbox("Account to use", get_list("Accounts"))
-            
-        if st.form_submit_button("Add to Pending List", use_container_width=True):
-            if item:
-                try:
-                    today_str = get_ist_now().strftime("%d-%m-%Y")
-                    # Date_Added, Item, Shop_Type, Est_Cost, Actual_Cost, Status, Date_Bought, Fund, Account
-                    row_data = [today_str, item, s_type, est_cost, "", "Pending", "", fund, account]
-                    sh.worksheet("SHOPPING_LIST").append_row(row_data)
-                    st.success(f"Added {item} to your {s_type} list!")
-                except Exception as e:
-                    st.error(f"Failed to save: {e}")
+        est_cost = st.number_input("Estimated Cost (₹)", min_value=0.0, step=10.0, key="plan_cost")
+        fund = st.selectbox("Fund to use", get_list("Funds"), key="plan_fund")
+        account = st.selectbox("Account to use", get_list("Accounts"), key="plan_acc")
+        
+    if st.button("➕ Add to Pending List", use_container_width=True):
+        if item:
+            try:
+                today_str = get_ist_now().strftime("%d-%m-%Y")
+                # Date_Added, Item, Shop_Type, Est_Cost, Actual_Cost, Status, Date_Bought, Fund, Account
+                row_data = [today_str, item, s_type, est_cost, "", "Pending", "", fund, account]
+                sh.worksheet("SHOPPING_LIST").append_row(row_data)
+                st.success(f"Added {item} to your {s_type} list!")
+            except Exception as e:
+                st.error(f"Failed to save: {e}")
 
     st.divider()
     

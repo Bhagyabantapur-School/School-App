@@ -13,7 +13,6 @@ st.set_page_config(page_title="SK Ecosystem", page_icon="📱", layout="centered
 def get_ist_now():
     return datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
 
-# Initialize session states
 if 'route_active' not in st.session_state:
     st.session_state.route_active = False
 if 'current_people' not in st.session_state:
@@ -99,23 +98,79 @@ current_loc = get_current_location()
 current_shop_type = get_shop_type(current_loc) if current_loc else None
 
 # ==========================================
-# TAB 1: MONEY ENTRY FORM (Upgraded with Fund)
+# TAB 1: MONEY ENTRY FORM (With 1-Click Checkout)
 # ==========================================
 with tab_money:
-    st.subheader("Add Financial Record")
     
-    if current_loc:
-        st.success(f"📍 Detected Location: **{current_loc}**")
-        if current_shop_type:
-            st.info(f"🛒 **Active Shopping Profile:** {current_shop_type}")
+    # --- ⚡ THE 1-CLICK EXPRESS CHECKOUT ENGINE ---
+    if current_loc and current_shop_type:
+        st.success(f"📍 Location: **{current_loc}** | 🛒 Shop Profile: **{current_shop_type}**")
+        
+        try:
+            shop_ws = sh.worksheet("SHOPPING_LIST")
+            shop_records = shop_ws.get_all_records()
+            df_shop = pd.DataFrame(shop_records)
+            
+            if not df_shop.empty and 'Status' in df_shop.columns:
+                pending_items = df_shop[(df_shop['Status'] == 'Pending') & (df_shop['Shop_Type'] == current_shop_type)]
+                
+                if not pending_items.empty:
+                    st.markdown("### ⚡ Express 1-Click Checkout")
+                    
+                    for idx, row in pending_items.iterrows():
+                        sheet_row = idx + 2 # Offset for Pandas index (0) + Header row (1)
+                        
+                        with st.container(border=True):
+                            colA, colB, colC = st.columns([2, 1, 1.5])
+                            with colA:
+                                st.write(f"**{row.get('Item', 'Unknown')}**")
+                                st.caption(f"Fund: {row.get('Fund', '')} | Acc: {row.get('Account', '')}")
+                            with colB:
+                                final_cost = st.number_input("Cost", value=float(row.get('Est_Cost', 0)), key=f"cost_{idx}", label_visibility="collapsed")
+                            with colC:
+                                if st.button("💸 Pay & Clear", key=f"pay_{idx}", use_container_width=True, type="primary"):
+                                    # 1. Look up smart mapping
+                                    part_name = row.get('Item', '')
+                                    match_row = config_df[config_df['Map_Particular'].astype(str).str.strip() == part_name]
+                                    
+                                    ent = match_row['Map_Entity'].values[0] if not match_row.empty else "PERS"
+                                    cat = match_row['Map_Category'].values[0] if not match_row.empty else ""
+                                    subcat = match_row['Map_SubCat'].values[0] if not match_row.empty else ""
+                                    rem = "Auto-cleared from list"
+                                    
+                                    # 2. Write to MONEY_DATA automatically
+                                    today_str = get_ist_now().strftime("%d-%m-%Y")
+                                    money_row = [
+                                        today_str, "", final_cost, 
+                                        row.get('Account', ''), row.get('Fund', ''), 
+                                        ent, cat, subcat, part_name, current_loc, rem
+                                    ]
+                                    sh.worksheet("MONEY_DATA").append_row(money_row)
+                                    
+                                    # 3. Update SHOPPING_LIST to "Bought"
+                                    headers = shop_ws.row_values(1)
+                                    shop_ws.update_cell(sheet_row, headers.index('Status') + 1, 'Bought')
+                                    shop_ws.update_cell(sheet_row, headers.index('Actual_Cost') + 1, final_cost)
+                                    shop_ws.update_cell(sheet_row, headers.index('Date_Bought') + 1, today_str)
+                                    
+                                    st.success(f"Cleared {part_name} from your list!")
+                                    st.rerun()
+                    st.divider()
+        except Exception as e:
+            st.error(f"Express checkout engine error: {e}")
+    else:
+        if current_loc:
+             st.success(f"📍 Location: **{current_loc}** (No active shopping list for this area)")
 
+    # --- 📝 STANDARD MANUAL MONEY FORM ---
+    st.subheader("Add Manual Financial Record")
     entry_date = st.date_input("Date", value=st.session_state.locked_date)
     
     col1, col2 = st.columns(2)
     with col1:
         amount_in = st.number_input("IN (Income/Receive)", min_value=0.0, step=10.0)
         account = st.selectbox("Account (Physical)", get_list("Accounts"))
-        fund = st.selectbox("Fund (Virtual Source)", get_list("Funds")) # NEW FUND SELECTION
+        fund = st.selectbox("Fund (Virtual Source)", get_list("Funds"))
         entity = st.selectbox("Entity", get_list("Entities"))
         
         if 'Map_Entity' in config_df.columns:
@@ -164,11 +219,7 @@ with tab_money:
                 particulars = st.text_input("Type New Particulars")
             part_df = pd.DataFrame()
             
-        if not part_df.empty and 'Map_ToFrom' in part_df.columns:
-            mapped_tofrom = [t for t in part_df['Map_ToFrom'].dropna().unique() if str(t).strip() != ""]
-        else:
-            mapped_tofrom = get_list("TO_FROM")
-            
+        mapped_tofrom = get_list("TO_FROM")
         to_from_opts = ["-- Type New --"] + mapped_tofrom
         default_index = 0
         
@@ -184,17 +235,10 @@ with tab_money:
             to_from = st.text_input("Type New TO / FROM")
             tf_df = pd.DataFrame()
         else:
-            if not part_df.empty and 'Map_ToFrom' in part_df.columns:
-                tf_df = part_df[part_df['Map_ToFrom'].astype(str).str.strip() == to_from]
-            else:
-                tf_df = pd.DataFrame()
+            tf_df = pd.DataFrame()
 
-    if not tf_df.empty and 'Map_Remark' in tf_df.columns:
-        rem_opts = [r for r in tf_df['Map_Remark'].dropna().unique() if str(r).strip() != ""]
-        remark_box = st.selectbox("Remark", ["- None -"] + rem_opts + ["-- Type New --"])
-    else:
-        rem_opts = get_list("Remarks")
-        remark_box = st.selectbox("Remark", ["- None -"] + rem_opts + ["-- Type New --"])
+    rem_opts = get_list("Remarks")
+    remark_box = st.selectbox("Remark", ["- None -"] + rem_opts + ["-- Type New --"])
         
     if remark_box == "-- Type New --":
         remark = st.text_input("Type New Remark")
@@ -203,16 +247,13 @@ with tab_money:
     else:
         remark = remark_box
     
-    submit_money = st.button("💾 Save Money Entry", use_container_width=True)
+    submit_money = st.button("💾 Save Manual Money Entry", use_container_width=True)
     
     if submit_money:
         try:
             formatted_date = entry_date.strftime("%d-%m-%Y")
-            # Upgraded row structure: Includes 'fund'
             row_data = [
-                formatted_date, 
-                amount_in if amount_in > 0 else "", 
-                amount_out if amount_out > 0 else "", 
+                formatted_date, amount_in if amount_in > 0 else "", amount_out if amount_out > 0 else "", 
                 account, fund, entity, category, sub_cat, particulars, to_from, remark
             ]
             sh.worksheet("MONEY_DATA").append_row(row_data)
@@ -222,51 +263,58 @@ with tab_money:
             st.error(f"Failed to save: {e}")
 
 # ==========================================
-# TAB 2: SHOPPING LIST (Location-Aware)
+# TAB 2: SHOPPING LIST (Planning Form)
 # ==========================================
 with tab_shopping:
     st.header("🛒 Smart Shopping List")
     
-    if current_shop_type:
-        st.success(f"📍 You are at a **{current_shop_type}** shop. Showing your list:")
-        try:
-            shop_records = sh.worksheet("SHOPPING_LIST").get_all_records()
-            df_shop = pd.DataFrame(shop_records)
-            
-            if not df_shop.empty:
-                # Filter for Pending items matching the current shop type
-                active_list = df_shop[(df_shop['Status'] == 'Pending') & (df_shop['Shop_Type'] == current_shop_type)]
-                
-                if not active_list.empty:
-                    st.dataframe(active_list[['Item', 'Est_Cost']], use_container_width=True, hide_index=True)
-                    st.info("💡 To cross an item off, log the purchase in the 💰 Money tab, then update the sheet later.")
-                else:
-                    st.write(f"No pending items for {current_shop_type} right now.")
-            else:
-                st.write("Your shopping list is completely empty.")
-        except Exception as e:
-            st.error("Could not load shopping list.")
-    else:
-        st.write("You are not currently at a mapped shop. Here you can add items for later.")
-    
-    st.divider()
-    st.subheader("➕ Add New Item to List")
-    
+    st.subheader("➕ Plan a Purchase")
     with st.form("add_shop_item", clear_on_submit=True):
-        new_item = st.text_input("Item Name")
-        s_type = st.selectbox("Shop Category (e.g., Grocery, Vegetables)", ["Grocery", "Vegetables", "Stationary", "Hardware", "Medicine"])
-        est_cost = st.number_input("Estimated Cost (₹)", min_value=0.0, step=10.0)
+        st.write("Plan your purchases here so they auto-fill when you visit the shop!")
         
+        col1, col2 = st.columns(2)
+        with col1:
+            # Pull directly from your mapped particulars so the app knows what it is!
+            part_opts = get_list("Map_Particular")
+            if not part_opts: part_opts = get_list("Particulars")
+            
+            item = st.selectbox("Select Item (Particular)", part_opts + ["-- Type New --"])
+            if item == "-- Type New --":
+                item = st.text_input("Type New Item")
+                
+            s_type = st.selectbox("Shop Category", ["Grocery", "Vegetables", "Stationary", "Hardware", "Medicine"])
+            
+        with col2:
+            est_cost = st.number_input("Estimated Cost (₹)", min_value=0.0, step=10.0)
+            fund = st.selectbox("Fund to use", get_list("Funds"))
+            account = st.selectbox("Account to use", get_list("Accounts"))
+            
         if st.form_submit_button("Add to Pending List", use_container_width=True):
-            if new_item:
+            if item:
                 try:
                     today_str = get_ist_now().strftime("%d-%m-%Y")
-                    # Date_Added, Item, Shop_Type, Est_Cost, Actual_Cost, Status, Date_Bought
-                    row_data = [today_str, new_item, s_type, est_cost, "", "Pending", ""]
+                    # Date_Added, Item, Shop_Type, Est_Cost, Actual_Cost, Status, Date_Bought, Fund, Account
+                    row_data = [today_str, item, s_type, est_cost, "", "Pending", "", fund, account]
                     sh.worksheet("SHOPPING_LIST").append_row(row_data)
-                    st.success(f"Added {new_item} to your {s_type} list!")
+                    st.success(f"Added {item} to your {s_type} list!")
                 except Exception as e:
                     st.error(f"Failed to save: {e}")
+
+    st.divider()
+    
+    # View Pending Items across all shops
+    st.subheader("📋 All Pending Items")
+    try:
+        shop_records = sh.worksheet("SHOPPING_LIST").get_all_records()
+        df_shop = pd.DataFrame(shop_records)
+        if not df_shop.empty and 'Status' in df_shop.columns:
+            all_pending = df_shop[df_shop['Status'] == 'Pending']
+            if not all_pending.empty:
+                st.dataframe(all_pending[['Item', 'Shop_Type', 'Est_Cost', 'Fund']], use_container_width=True, hide_index=True)
+            else:
+                st.write("You have no pending items!")
+    except Exception as e:
+        st.error("Could not load pending list.")
 
 # ==========================================
 # TAB 3: LOCATION ENTRY FORM
@@ -432,7 +480,6 @@ with tab_dash:
                 fund_summary = df_money.groupby('Fund').agg({'In': 'sum', 'Out': 'sum'}).reset_index()
                 fund_summary['Current Balance'] = fund_summary['In'] - fund_summary['Out']
                 
-                # Plotly Bar Chart for stunning visuals
                 fig_funds = px.bar(fund_summary, x='Fund', y='Current Balance', 
                                    title="Net Balance by Virtual Fund",
                                    color='Current Balance', color_continuous_scale="Viridis",
@@ -447,19 +494,18 @@ with tab_dash:
             st.subheader("🔄 Cross-Fund Borrowing")
             st.write("Tracks money moving between School and Personal accounts.")
             
-            # Logic: If you use a Personal Fund for a School Entity
-            pers_paid_for_sch = df_money[(df_money['Fund'].isin(['Salary', 'Personal Savings'])) & (df_money['Entity'] == 'SCH')]['Out'].sum()
-            sch_repaid_pers = df_money[(df_money['Fund'].isin(['Salary', 'Personal Savings'])) & (df_money['Entity'] == 'SCH')]['In'].sum()
-            school_owes_you = pers_paid_for_sch - sch_repaid_pers
-            
-            # Logic: If you use School Fund for a Personal Entity
-            sch_paid_for_pers = df_money[(df_money['Fund'].isin(['MDM', 'Sarba Sikha'])) & (df_money['Entity'] == 'PERS')]['Out'].sum()
-            pers_repaid_sch = df_money[(df_money['Fund'].isin(['MDM', 'Sarba Sikha'])) & (df_money['Entity'] == 'PERS')]['In'].sum()
-            you_owe_school = sch_paid_for_pers - pers_repaid_sch
-            
-            c1, c2 = st.columns(2)
-            c1.metric("School Owes Salary/Personal", f"₹ {school_owes_you:,.2f}")
-            c2.metric("Salary Owes MDM/School", f"₹ {you_owe_school:,.2f}")
+            if 'Fund' in df_money.columns:
+                pers_paid_for_sch = df_money[(df_money['Fund'].isin(['Salary', 'Personal Savings'])) & (df_money['Entity'] == 'SCH')]['Out'].sum()
+                sch_repaid_pers = df_money[(df_money['Fund'].isin(['Salary', 'Personal Savings'])) & (df_money['Entity'] == 'SCH')]['In'].sum()
+                school_owes_you = pers_paid_for_sch - sch_repaid_pers
+                
+                sch_paid_for_pers = df_money[(df_money['Fund'].isin(['MDM', 'Sarba Sikha'])) & (df_money['Entity'] == 'PERS')]['Out'].sum()
+                pers_repaid_sch = df_money[(df_money['Fund'].isin(['MDM', 'Sarba Sikha'])) & (df_money['Entity'] == 'PERS')]['In'].sum()
+                you_owe_school = sch_paid_for_pers - pers_repaid_sch
+                
+                c1, c2 = st.columns(2)
+                c1.metric("School Owes Salary/Personal", f"₹ {school_owes_you:,.2f}")
+                c2.metric("Salary Owes MDM/School", f"₹ {you_owe_school:,.2f}")
 
             st.divider()
 

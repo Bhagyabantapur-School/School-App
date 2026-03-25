@@ -274,7 +274,6 @@ with tab_shopping:
         
         col1, col2 = st.columns(2)
         with col1:
-            # Pull directly from your mapped particulars so the app knows what it is!
             part_opts = get_list("Map_Particular")
             if not part_opts: part_opts = get_list("Particulars")
             
@@ -282,7 +281,17 @@ with tab_shopping:
             if item == "-- Type New --":
                 item = st.text_input("Type New Item")
                 
-            s_type = st.selectbox("Shop Category", ["Grocery", "Vegetables", "Stationary", "Hardware", "Medicine"])
+            # --- SMART SHOP CATEGORY DROPDOWN ---
+            shop_type_opts = []
+            if 'Shop_Type' in config_df.columns:
+                shop_type_opts = [str(s).strip() for s in config_df['Shop_Type'].dropna().unique() if str(s).strip() != ""]
+            
+            if not shop_type_opts:
+                shop_type_opts = ["Grocery", "Vegetables", "Stationary", "Hardware", "Medicine"]
+                
+            s_type = st.selectbox("Shop Category", shop_type_opts + ["-- Type New --"])
+            if s_type == "-- Type New --":
+                s_type = st.text_input("Type New Shop Category")
             
         with col2:
             est_cost = st.number_input("Estimated Cost (₹)", min_value=0.0, step=10.0)
@@ -302,7 +311,6 @@ with tab_shopping:
 
     st.divider()
     
-    # View Pending Items across all shops
     st.subheader("📋 All Pending Items")
     try:
         shop_records = sh.worksheet("SHOPPING_LIST").get_all_records()
@@ -515,6 +523,37 @@ with tab_dash:
             if not out_only.empty:
                 fig_pie = px.pie(out_only, values='Out', names='Entity', title="Where is the money going?", hole=0.4)
                 st.plotly_chart(fig_pie, use_container_width=True)
+                
+            st.divider()
+            
+            # --- 4. LOCATION DURATION LOG ---
+            st.subheader("⏱️ Today's Location Log")
+            try:
+                loc_records = sh.worksheet("LOCATION_DATA").get_all_records()
+                df_loc = pd.DataFrame(loc_records)
+                
+                if not df_loc.empty:
+                    latest_date = df_loc['Date'].iloc[-1]
+                    df_today = df_loc[df_loc['Date'] == latest_date].copy()
+                    
+                    df_today['Time_Obj'] = pd.to_datetime(df_today['Time'], format='%H:%M', errors='coerce')
+                    time_diffs = df_today['Time_Obj'].shift(-1) - df_today['Time_Obj']
+                    
+                    def format_duration(td):
+                        if pd.isnull(td):
+                            return "Current"
+                        total_seconds = int(td.total_seconds())
+                        hours, remainder = divmod(total_seconds, 3600)
+                        minutes, _ = divmod(remainder, 60)
+                        return f"{hours}:{minutes:02d}"
+
+                    df_today['Duration'] = time_diffs.apply(format_duration)
+                    display_cols = ['Time', 'Duration', 'Move', 'Place', 'People', 'Remark']
+                    st.dataframe(df_today[display_cols], use_container_width=True, hide_index=True)
+                else:
+                    st.info("No location logs found yet.")
+            except Exception as e:
+                st.error(f"Could not load location dashboard: {e}")
                 
         else:
             st.info("No financial data available yet.")

@@ -13,7 +13,7 @@ st.set_page_config(page_title="SK Ecosystem", page_icon="📱", layout="centered
 def get_ist_now():
     return datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
 
-# Initialize session state for the Express Tracker
+# Initialize session state memories
 if 'route_active' not in st.session_state:
     st.session_state.route_active = False
 if 'current_people' not in st.session_state:
@@ -22,6 +22,12 @@ if 'current_move' not in st.session_state:
     st.session_state.current_move = "BIKE"
 if 'retro_time' not in st.session_state:
     st.session_state.retro_time = get_ist_now().time()
+
+# NEW: Lock the initial date/time so they don't jump when you click dropdowns
+if 'locked_date' not in st.session_state:
+    st.session_state.locked_date = get_ist_now().date()
+if 'locked_time' not in st.session_state:
+    st.session_state.locked_time = get_ist_now().time()
 
 # Connect to Google Sheets
 @st.cache_resource
@@ -102,7 +108,8 @@ with tab_money:
     if current_loc:
         st.success(f"📍 Detected Location: **{current_loc}** (Auto-filling TO / FROM)")
 
-    entry_date = st.date_input("Date", get_ist_now().date())
+    # FIX: Uses the locked session state date instead of fetching a new one constantly
+    entry_date = st.date_input("Date", value=st.session_state.locked_date)
     
     col1, col2 = st.columns(2)
     with col1:
@@ -150,6 +157,9 @@ with tab_money:
             ]
             sh.worksheet("MONEY_DATA").append_row(row_data)
             st.success(f"Saved: ₹{amount_in if amount_in > 0 else amount_out} logged to {to_from}!")
+            
+            # Reset locked date for the next entry
+            st.session_state.locked_date = get_ist_now().date() 
         except Exception as e:
             st.error(f"Failed to save: {e}")
 
@@ -213,7 +223,7 @@ with tab_location:
                 if forgot_keys_fwd:
                     missed_time_fwd = st.time_input("Time you picked up the keys?", value=st.session_state.retro_time, step=60, key="fwd_keys")
             
-            # Return Journey Missed Stops (Can select both)
+            # Return Journey Missed Stops
             if express_place == "HOME":
                 st.write("**Missed any stops on the way back?**")
                 forgot_keys_ret = st.checkbox("⚠️ I forgot to log Karim Da's House (Keys)")
@@ -273,8 +283,9 @@ with tab_location:
     st.markdown("### 📝 Manual Location Log")
     location_logic = get_location_logic()
 
-    loc_date = st.date_input("Log Date", get_ist_now().date())
-    loc_time = st.time_input("Start Time", get_ist_now().time(), step=60)
+    # FIX: Uses the locked session state so they don't overwrite your manual edits
+    loc_date = st.date_input("Log Date", value=st.session_state.locked_date)
+    loc_time = st.time_input("Start Time", value=st.session_state.locked_time, step=60)
     
     col1, col2 = st.columns(2)
     with col1:
@@ -322,6 +333,10 @@ with tab_location:
                 st.success(f"Logged Transit: {final_move} at {formatted_time}")
             else:
                 st.success(f"Logged Arrival: {specific_place} at {formatted_time}")
+                
+            # Reset locked values for next entry
+            st.session_state.locked_date = get_ist_now().date()
+            st.session_state.locked_time = get_ist_now().time()
         except Exception as e:
             st.error(f"Error saving to Google Sheets: {e}")
 

@@ -349,8 +349,23 @@ with tab_location:
 
     loc_date = st.date_input("Log Date", value=st.session_state.locked_date)
     
-    # Text Input for time to bypass mobile scrolling wheels
-    loc_time_str = st.text_input("Start Time (Type in 24hr format)", value=st.session_state.locked_time.strftime("%H:%M"))
+    # --- SMART COMBO TIME SELECTOR (1-Minute Intervals) ---
+    current_time_str = st.session_state.locked_time.strftime("%H:%M")
+    
+    # Generate all 1-minute intervals (00:00 to 23:59)
+    interval_times = [f"{str(h).zfill(2)}:{str(m).zfill(2)}" for h in range(24) for m in range(60)]
+    
+    time_options = [f"🕒 Current ({current_time_str})", "⌨️ Type Manually..."] + interval_times
+    
+    selected_time_opt = st.selectbox("Start Time", time_options)
+    
+    if selected_time_opt == "⌨️ Type Manually...":
+        loc_time_str = st.text_input("Type exact time (HH:MM)", value=current_time_str)
+    elif selected_time_opt.startswith("🕒 Current"):
+        loc_time_str = current_time_str
+    else:
+        loc_time_str = selected_time_opt
+    # -----------------------------------------------------
     
     col1, col2 = st.columns(2)
     with col1:
@@ -481,32 +496,4 @@ with tab_dash:
                 minutes, _ = divmod(remainder, 60)
                 return f"{hours}:{minutes:02d}"
 
-            df_today['Duration'] = time_diffs.apply(format_duration)
-            display_cols = ['Time', 'Duration', 'Move', 'Place', 'People', 'Remark']
-            st.dataframe(df_today[display_cols], use_container_width=True, hide_index=True)
-        else:
-            st.info("No location logs found yet.")
-    except Exception as e:
-        st.error(f"Could not load location dashboard: {e}")
-
-# ==========================================
-# TAB 4: INSTRUCTIONS & MANUAL
-# ==========================================
-with tab_help:
-    st.header("📖 User Manual")
-    with st.expander("🛠️ 1. The CONFIG Tab"):
-        st.write("Ensure your Google Sheet 'CONFIG' tab has these exact headers in Row 1:")
-        st.code("Accounts, Entities, Categories, Sub-Categories, Particulars, TO_FROM, Remarks, Moves, Places, People, Area, Specific_Place, Map_Entity, Map_Category, Map_SubCat, Map_Particular, Map_ToFrom, Map_Remark")
-        
-    with st.expander("💰 2. Money Entry Rules"):
-        st.markdown("""
-        **AC = Whose money physically moved? | Entity = Whose expense is it actually?**
-        - **Using personal money for school:** AC = `MB`, Entity = `SCH`. Result: School owes you.
-        - **Using school money for personal:** AC = `MB3 (SCH)`, Entity = `PERS`. Result: You owe school.
-        """)
-
-    with st.expander("📍 3. Location Rules"):
-        st.markdown("""
-        - **Express Route:** Click Start when leaving. Click Stop when you arrive. Use checkboxes if you forgot intermediate stops.
-        - **Manual Log:** Select `- On the way -` for transit. Select an area for specific arrivals. 
-        """)
+            df_today['Duration'] = time_

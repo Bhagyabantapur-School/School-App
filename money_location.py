@@ -62,9 +62,10 @@ def load_shopping_data():
 
 config_df = load_config()
 
+# FIX APPLIED: Forcing str(val) before stripping to prevent AttributeError on floats/ints
 def get_list(column_name):
     if column_name in config_df.columns:
-        return [val.strip() for val in config_df[column_name].dropna().tolist() if str(val).strip() != ""]
+        return [str(val).strip() for val in config_df[column_name].dropna().tolist() if str(val).strip() != ""]
     return []
 
 def get_location_logic():
@@ -136,7 +137,7 @@ with tab_money:
                         with colC:
                             if st.button("💸 Pay & Clear", key=f"pay_{idx}", use_container_width=True, type="primary"):
                                 try:
-                                    part_name = row.get('Item', '')
+                                    part_name = str(row.get('Item', ''))
                                     match_row = config_df[config_df['Map_Particular'].astype(str).str.strip() == part_name]
                                     
                                     ent = match_row['Map_Entity'].values[0] if not match_row.empty else "PERS"
@@ -180,7 +181,7 @@ with tab_money:
         
         if 'Map_Entity' in config_df.columns:
             ent_df = config_df[config_df['Map_Entity'].astype(str).str.strip() == entity]
-            cat_opts = [c for c in ent_df['Map_Category'].dropna().unique() if str(c).strip() != ""]
+            cat_opts = [str(c) for c in ent_df['Map_Category'].dropna().unique() if str(c).strip() != ""]
             category = st.selectbox("Category", cat_opts + ["-- Type New --"])
             if category == "-- Type New --":
                 category = st.text_input("Type New Category")
@@ -197,7 +198,7 @@ with tab_money:
         amount_out = st.number_input("OUT (Expense/Send)", min_value=0.0, step=10.0)
         
         if not cat_df.empty and 'Map_SubCat' in cat_df.columns:
-            sub_opts = [s for s in cat_df['Map_SubCat'].dropna().unique() if str(s).strip() != ""]
+            sub_opts = [str(s) for s in cat_df['Map_SubCat'].dropna().unique() if str(s).strip() != ""]
             sub_cat = st.selectbox("Sub Category", sub_opts + ["-- Type New --"])
             if sub_cat == "-- Type New --":
                 sub_cat = st.text_input("Type New Sub Category")
@@ -211,7 +212,7 @@ with tab_money:
             sub_df = pd.DataFrame()
         
         if not sub_df.empty and 'Map_Particular' in sub_df.columns:
-            part_opts = [p for p in sub_df['Map_Particular'].dropna().unique() if str(p).strip() != ""]
+            part_opts = [str(p) for p in sub_df['Map_Particular'].dropna().unique() if str(p).strip() != ""]
             particulars = st.selectbox("Particulars", part_opts + ["-- Type New --"])
             if particulars == "-- Type New --":
                 particulars = st.text_input("Type New Particulars")
@@ -278,7 +279,7 @@ with tab_shopping:
         
         if 'Map_Entity' in config_df.columns:
             p_ent_df = config_df[config_df['Map_Entity'].astype(str).str.strip() == p_entity]
-            p_cat_opts = [c for c in p_ent_df['Map_Category'].dropna().unique() if str(c).strip() != ""]
+            p_cat_opts = [str(c) for c in p_ent_df['Map_Category'].dropna().unique() if str(c).strip() != ""]
             p_category = st.selectbox("Category", p_cat_opts + ["-- Type New --"], key="plan_cat")
             if p_category == "-- Type New --":
                 p_category = st.text_input("Type New Category", key="plan_cat_new")
@@ -292,7 +293,7 @@ with tab_shopping:
             p_cat_df = pd.DataFrame()
             
         if not p_cat_df.empty and 'Map_SubCat' in p_cat_df.columns:
-            p_sub_opts = [s for s in p_cat_df['Map_SubCat'].dropna().unique() if str(s).strip() != ""]
+            p_sub_opts = [str(s) for s in p_cat_df['Map_SubCat'].dropna().unique() if str(s).strip() != ""]
             p_sub_cat = st.selectbox("Sub Category", p_sub_opts + ["-- Type New --"], key="plan_sub")
             if p_sub_cat == "-- Type New --":
                 p_sub_cat = st.text_input("Type New Sub Category", key="plan_sub_new")
@@ -306,7 +307,7 @@ with tab_shopping:
             p_sub_df = pd.DataFrame()
             
         if not p_sub_df.empty and 'Map_Particular' in p_sub_df.columns:
-            p_part_opts = [p for p in p_sub_df['Map_Particular'].dropna().unique() if str(p).strip() != ""]
+            p_part_opts = [str(p) for p in p_sub_df['Map_Particular'].dropna().unique() if str(p).strip() != ""]
             item = st.selectbox("Select Item", p_part_opts + ["-- Type New --"], key="plan_item")
             if item == "-- Type New --":
                 item = st.text_input("Type New Item", key="plan_item_new")
@@ -564,4 +565,4 @@ with tab_dash:
 # ==========================================
 with tab_help:
     st.header("📖 ERP Manual")
-    st.write("Your system now heavily caches data to prevent Google Sheets API bans!")
+    st.write("Your system now heavily caches data to prevent Google Sheets API bans and handles string conversions smoothly!")

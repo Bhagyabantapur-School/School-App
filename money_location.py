@@ -39,19 +39,32 @@ except Exception as e:
     st.error(f"Could not connect to Google Sheets. Error: {e}")
     st.stop()
 
+# --- SMART CACHING ENGINE (Prevents API Quota Errors) ---
 @st.cache_data(ttl=600)
 def load_config():
-    worksheet = sh.worksheet("CONFIG")
-    data = worksheet.get_all_values()
-    if not data:
-        return pd.DataFrame()
-    return pd.DataFrame(data[1:], columns=data[0])
+    try: return pd.DataFrame(sh.worksheet("CONFIG").get_all_records())
+    except: return pd.DataFrame()
+
+@st.cache_data(ttl=60)
+def load_location_data():
+    try: return pd.DataFrame(sh.worksheet("LOCATION_DATA").get_all_records())
+    except: return pd.DataFrame()
+
+@st.cache_data(ttl=60)
+def load_money_data():
+    try: return pd.DataFrame(sh.worksheet("MONEY_DATA").get_all_records())
+    except: return pd.DataFrame()
+
+@st.cache_data(ttl=60)
+def load_shopping_data():
+    try: return pd.DataFrame(sh.worksheet("SHOPPING_LIST").get_all_records())
+    except: return pd.DataFrame()
 
 config_df = load_config()
 
 def get_list(column_name):
     if column_name in config_df.columns:
-        return [val.strip() for val in config_df[column_name].dropna().tolist() if val.strip() != ""]
+        return [val.strip() for val in config_df[column_name].dropna().tolist() if str(val).strip() != ""]
     return []
 
 def get_location_logic():
@@ -61,21 +74,17 @@ def get_location_logic():
             area = str(row['Area']).strip()
             place = str(row['Specific_Place']).strip()
             if area and place and area.lower() != 'nan' and place.lower() != 'nan':
-                if area not in logic:
-                    logic[area] = []
-                if place not in logic[area]:
-                    logic[area].append(place)
+                if area not in logic: logic[area] = []
+                if place not in logic[area]: logic[area].append(place)
     return logic
 
 def get_current_location():
-    try:
-        loc_records = sh.worksheet("LOCATION_DATA").get_all_records()
-        if loc_records:
-            last_record = loc_records[-1] 
-            if last_record.get('Move') in ["", "- Stationary -"]:
-                return last_record.get('Place')
-    except Exception:
-        return None
+    df_loc = load_location_data()
+    if not df_loc.empty:
+        last_record = df_loc.iloc[-1].to_dict()
+        move_val = str(last_record.get('Move', '')).strip()
+        if move_val in ["", "- Stationary -", "nan"]:
+            return str(last_record.get('Place', ''))
     return None
 
 def get_shop_type(place_name):
@@ -98,7 +107,7 @@ current_loc = get_current_location()
 current_shop_type = get_shop_type(current_loc) if current_loc else None
 
 # ==========================================
-# TAB 1: MONEY ENTRY FORM (With 1-Click Checkout)
+# TAB 1: MONEY ENTRY FORM
 # ==========================================
 with tab_money:
     
@@ -106,30 +115,27 @@ with tab_money:
     if current_loc and current_shop_type:
         st.success(f"📍 Location: **{current_loc}** | 🛒 Shop Profile: **{current_shop_type}**")
         
-        try:
-            shop_ws = sh.worksheet("SHOPPING_LIST")
-            shop_records = shop_ws.get_all_records()
-            df_shop = pd.DataFrame(shop_records)
+        df_shop = load_shopping_data()
+        if not df_shop.empty and 'Status' in df_shop.columns:
+            pending_items = df_shop[(df_shop['Status'] == 'Pending') & (df_shop['Shop_Type'] == current_shop_type)]
             
-            if not df_shop.empty and 'Status' in df_shop.columns:
-                pending_items = df_shop[(df_shop['Status'] == 'Pending') & (df_shop['Shop_Type'] == current_shop_type)]
+            if not pending_items.empty:
+                st.markdown("### ⚡ Express 1-Click Checkout")
+                shop_ws = sh.worksheet("SHOPPING_LIST") # Needed for direct updating
                 
-                if not pending_items.empty:
-                    st.markdown("### ⚡ Express 1-Click Checkout")
+                for idx, row in pending_items.iterrows():
+                    sheet_row = idx + 2 
                     
-                    for idx, row in pending_items.iterrows():
-                        sheet_row = idx + 2 # Offset for Pandas index (0) + Header row (1)
-                        
-                        with st.container(border=True):
-                            colA, colB, colC = st.columns([2, 1, 1.5])
-                            with colA:
-                                st.write(f"**{row.get('Item', 'Unknown')}**")
-                                st.caption(f"Fund: {row.get('Fund', '')} | Acc: {row.get('Account', '')}")
-                            with colB:
-                                final_cost = st.number_input("Cost", value=float(row.get('Est_Cost', 0)), key=f"cost_{idx}", label_visibility="collapsed")
-                            with colC:
-                                if st.button("💸 Pay & Clear", key=f"pay_{idx}", use_container_width=True, type="primary"):
-                                    # 1. Look up smart mapping
+                    with st.container(border=True):
+                        colA, colB, colC = st.columns([2, 1, 1.5])
+                        with colA:
+                            st.write(f"**{row.get('Item', 'Unknown')}**")
+                            st.caption(f"Fund: {row.get('Fund', '')} | Acc: {row.get('Account', '')}")
+                        with colB:
+                            final_cost = st.number_input("Cost", value=float(row.get('Est_Cost', 0) if pd.notna(row.get('Est_Cost')) else 0), key=f"cost_{idx}", label_visibility="collapsed")
+                        with colC:
+                            if st.button("💸 Pay & Clear", key=f"pay_{idx}", use_container_width=True, type="primary"):
+                                try:
                                     part_name = row.get('Item', '')
                                     match_row = config_df[config_df['Map_Particular'].astype(str).str.strip() == part_name]
                                     
@@ -138,26 +144,25 @@ with tab_money:
                                     subcat = match_row['Map_SubCat'].values[0] if not match_row.empty else ""
                                     rem = "Auto-cleared from list"
                                     
-                                    # 2. Write to MONEY_DATA automatically
                                     today_str = get_ist_now().strftime("%d-%m-%Y")
-                                    money_row = [
-                                        today_str, "", final_cost, 
-                                        row.get('Account', ''), row.get('Fund', ''), 
-                                        ent, cat, subcat, part_name, current_loc, rem
-                                    ]
+                                    money_row = [today_str, "", final_cost, row.get('Account', ''), row.get('Fund', ''), ent, cat, subcat, part_name, current_loc, rem]
+                                    
                                     sh.worksheet("MONEY_DATA").append_row(money_row)
                                     
-                                    # 3. Update SHOPPING_LIST to "Bought"
                                     headers = shop_ws.row_values(1)
                                     shop_ws.update_cell(sheet_row, headers.index('Status') + 1, 'Bought')
                                     shop_ws.update_cell(sheet_row, headers.index('Actual_Cost') + 1, final_cost)
                                     shop_ws.update_cell(sheet_row, headers.index('Date_Bought') + 1, today_str)
                                     
+                                    # CLEAR CACHE AFTER SAVE!
+                                    load_money_data.clear()
+                                    load_shopping_data.clear()
+                                    
                                     st.success(f"Cleared {part_name} from your list!")
                                     st.rerun()
-                    st.divider()
-        except Exception as e:
-            st.error(f"Express checkout engine error: {e}")
+                                except Exception as e:
+                                    st.error(f"Error processing item: {e}")
+                st.divider()
     else:
         if current_loc:
              st.success(f"📍 Location: **{current_loc}** (No active shopping list for this area)")
@@ -247,16 +252,14 @@ with tab_money:
     else:
         remark = remark_box
     
-    submit_money = st.button("💾 Save Manual Money Entry", use_container_width=True)
-    
-    if submit_money:
+    if st.button("💾 Save Manual Money Entry", use_container_width=True):
         try:
             formatted_date = entry_date.strftime("%d-%m-%Y")
-            row_data = [
-                formatted_date, amount_in if amount_in > 0 else "", amount_out if amount_out > 0 else "", 
-                account, fund, entity, category, sub_cat, particulars, to_from, remark
-            ]
+            row_data = [formatted_date, amount_in if amount_in > 0 else "", amount_out if amount_out > 0 else "", account, fund, entity, category, sub_cat, particulars, to_from, remark]
             sh.worksheet("MONEY_DATA").append_row(row_data)
+            
+            load_money_data.clear() # CLEAR CACHE ON SAVE
+            
             st.success(f"Saved: ₹{amount_in if amount_in > 0 else amount_out} logged to {to_from}!")
             st.session_state.locked_date = get_ist_now().date() 
         except Exception as e:
@@ -267,17 +270,12 @@ with tab_money:
 # ==========================================
 with tab_shopping:
     st.header("🛒 Smart Shopping List")
-    
     st.subheader("➕ Plan a Purchase")
-    st.write("Plan your purchases here so they auto-fill when you visit the shop!")
     
-    # Live responsive form for cascading logic
     col1, col2 = st.columns(2)
     with col1:
-        # 1. Entity
         p_entity = st.selectbox("Entity", get_list("Entities"), key="plan_ent")
         
-        # 2. Category Cascade
         if 'Map_Entity' in config_df.columns:
             p_ent_df = config_df[config_df['Map_Entity'].astype(str).str.strip() == p_entity]
             p_cat_opts = [c for c in p_ent_df['Map_Category'].dropna().unique() if str(c).strip() != ""]
@@ -293,7 +291,6 @@ with tab_shopping:
                 p_category = st.text_input("Type New Category", key="plan_cat_new_fb")
             p_cat_df = pd.DataFrame()
             
-        # 3. Sub-Category Cascade
         if not p_cat_df.empty and 'Map_SubCat' in p_cat_df.columns:
             p_sub_opts = [s for s in p_cat_df['Map_SubCat'].dropna().unique() if str(s).strip() != ""]
             p_sub_cat = st.selectbox("Sub Category", p_sub_opts + ["-- Type New --"], key="plan_sub")
@@ -308,7 +305,6 @@ with tab_shopping:
                 p_sub_cat = st.text_input("Type New Sub Category", key="plan_sub_new_fb")
             p_sub_df = pd.DataFrame()
             
-        # 4. Item (Particular) Cascade
         if not p_sub_df.empty and 'Map_Particular' in p_sub_df.columns:
             p_part_opts = [p for p in p_sub_df['Map_Particular'].dropna().unique() if str(p).strip() != ""]
             item = st.selectbox("Select Item", p_part_opts + ["-- Type New --"], key="plan_item")
@@ -320,11 +316,9 @@ with tab_shopping:
                 item = st.text_input("Type New Item", key="plan_item_new_fb")
         
     with col2:
-        # Shop Category Auto-Pull
         shop_type_opts = []
         if 'Shop_Type' in config_df.columns:
             shop_type_opts = [str(s).strip() for s in config_df['Shop_Type'].dropna().unique() if str(s).strip() != ""]
-        
         if not shop_type_opts:
             shop_type_opts = ["Grocery", "Vegetables", "Stationary", "Hardware", "Medicine"]
             
@@ -340,27 +334,23 @@ with tab_shopping:
         if item:
             try:
                 today_str = get_ist_now().strftime("%d-%m-%Y")
-                # Date_Added, Item, Shop_Type, Est_Cost, Actual_Cost, Status, Date_Bought, Fund, Account
                 row_data = [today_str, item, s_type, est_cost, "", "Pending", "", fund, account]
                 sh.worksheet("SHOPPING_LIST").append_row(row_data)
+                
+                load_shopping_data.clear() # CLEAR CACHE ON SAVE
                 st.success(f"Added {item} to your {s_type} list!")
             except Exception as e:
                 st.error(f"Failed to save: {e}")
 
     st.divider()
-    
     st.subheader("📋 All Pending Items")
-    try:
-        shop_records = sh.worksheet("SHOPPING_LIST").get_all_records()
-        df_shop = pd.DataFrame(shop_records)
-        if not df_shop.empty and 'Status' in df_shop.columns:
-            all_pending = df_shop[df_shop['Status'] == 'Pending']
-            if not all_pending.empty:
-                st.dataframe(all_pending[['Item', 'Shop_Type', 'Est_Cost', 'Fund']], use_container_width=True, hide_index=True)
-            else:
-                st.write("You have no pending items!")
-    except Exception as e:
-        st.error("Could not load pending list.")
+    df_shop = load_shopping_data()
+    if not df_shop.empty and 'Status' in df_shop.columns:
+        all_pending = df_shop[df_shop['Status'] == 'Pending']
+        if not all_pending.empty:
+            st.dataframe(all_pending[['Item', 'Shop_Type', 'Est_Cost', 'Fund']], use_container_width=True, hide_index=True)
+        else:
+            st.write("You have no pending items!")
 
 # ==========================================
 # TAB 3: LOCATION ENTRY FORM
@@ -376,18 +366,16 @@ with tab_location:
                 express_move = st.selectbox("Travel Mode", ["BIKE", "WALK", "BIKE + WALK", "TOTO"], key="exp_move")
             with col2:
                 people_opts = get_list("People")
-                if not people_opts: 
-                    people_opts = ["I", "I, BKP, TKM", "I, TKM"]
-                if "I" not in people_opts:
-                    people_opts.insert(0, "I")
-                default_idx = people_opts.index("I")
-                express_people = st.selectbox("Companions", people_opts, index=default_idx, key="exp_people")
+                if not people_opts: people_opts = ["I", "I, BKP, TKM", "I, TKM"]
+                if "I" not in people_opts: people_opts.insert(0, "I")
+                express_people = st.selectbox("Companions", people_opts, index=people_opts.index("I"), key="exp_people")
                 
             if st.button("🟢 Start Journey", use_container_width=True):
                 try:
                     time_now = get_ist_now()
-                    row_data = [time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), express_move, "", express_people, "Started Express Route"]
-                    sh.worksheet("LOCATION_DATA").append_row(row_data)
+                    sh.worksheet("LOCATION_DATA").append_row([time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), express_move, "", express_people, "Started Express Route"])
+                    load_location_data.clear() # CLEAR CACHE
+                    
                     st.session_state.route_active = True
                     st.session_state.current_people = express_people
                     st.session_state.current_move = express_move
@@ -410,11 +398,9 @@ with tab_location:
             
             if express_place == "HOME":
                 forgot_keys_ret = st.checkbox("⚠️ I forgot to log Karim Da's House (Keys)")
-                if forgot_keys_ret:
-                    missed_time_keys = st.time_input("Time you dropped the keys?", value=st.session_state.retro_time, step=60, key="ret_keys")
+                if forgot_keys_ret: missed_time_keys = st.time_input("Time you dropped the keys?", value=st.session_state.retro_time, step=60, key="ret_keys")
                 forgot_bus = st.checkbox("⚠️ I forgot to log Girishmore Bus Stop")
-                if forgot_bus:
-                    missed_time_bus = st.time_input("Time you stopped at Girishmore?", value=st.session_state.retro_time, step=60, key="ret_bus")
+                if forgot_bus: missed_time_bus = st.time_input("Time you stopped at Girishmore?", value=st.session_state.retro_time, step=60, key="ret_bus")
             
             if st.button("🛑 Log Arrival", use_container_width=True, type="primary"):
                 try:
@@ -439,8 +425,8 @@ with tab_location:
                             arrival_people = "I"
                             sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_b, travel_mode, "", arrival_people, "Retroactive transit"])
                     
-                    arr_row = [today_str, time_now.strftime("%H:%M"), "- Stationary -", express_place, arrival_people, ""]
-                    sh.worksheet("LOCATION_DATA").append_row(arr_row)
+                    sh.worksheet("LOCATION_DATA").append_row([today_str, time_now.strftime("%H:%M"), "- Stationary -", express_place, arrival_people, ""])
+                    load_location_data.clear() # CLEAR CACHE
                     
                     st.session_state.route_active = False
                     st.session_state.current_people = "I"
@@ -476,13 +462,10 @@ with tab_location:
             specific_place = st.text_input("Type New Place Name")
 
     manual_people_opts = get_list("People")
-    if not manual_people_opts:
-        manual_people_opts = ["I"]
-    if "I" not in manual_people_opts:
-        manual_people_opts.insert(0, "I")
-    manual_default_idx = manual_people_opts.index("I")
+    if not manual_people_opts: manual_people_opts = ["I"]
+    if "I" not in manual_people_opts: manual_people_opts.insert(0, "I")
     
-    people = st.selectbox("People", manual_people_opts, index=manual_default_idx)
+    people = st.selectbox("People", manual_people_opts, index=manual_people_opts.index("I"))
     loc_remark = st.text_input("Location Remark (Optional)")
     
     if st.button("💾 Save Manual Entry", use_container_width=True):
@@ -497,8 +480,8 @@ with tab_location:
             formatted_date = loc_date.strftime("%d.%m.%y")
             final_move = "" if move == "- Stationary -" else move
             
-            row_data = [formatted_date, formatted_time, final_move, specific_place, people, loc_remark]
-            sh.worksheet("LOCATION_DATA").append_row(row_data)
+            sh.worksheet("LOCATION_DATA").append_row([formatted_date, formatted_time, final_move, specific_place, people, loc_remark])
+            load_location_data.clear() # CLEAR CACHE
             
             st.success("Logged successfully!")
             st.session_state.locked_date = get_ist_now().date()
@@ -512,95 +495,73 @@ with tab_location:
 with tab_dash:
     st.header("📊 Financial Intelligence")
     
-    try:
-        money_records = sh.worksheet("MONEY_DATA").get_all_records()
-        df_money = pd.DataFrame(money_records)
+    df_money = load_money_data()
+    if not df_money.empty:
+        df_money['In'] = pd.to_numeric(df_money['In'].replace('', 0), errors='coerce').fillna(0)
+        df_money['Out'] = pd.to_numeric(df_money['Out'].replace('', 0), errors='coerce').fillna(0)
         
-        if not df_money.empty:
-            df_money['In'] = pd.to_numeric(df_money['In'].replace('', 0), errors='coerce').fillna(0)
-            df_money['Out'] = pd.to_numeric(df_money['Out'].replace('', 0), errors='coerce').fillna(0)
+        st.subheader("💰 Virtual Fund Balances")
+        if 'Fund' in df_money.columns:
+            fund_summary = df_money.groupby('Fund').agg({'In': 'sum', 'Out': 'sum'}).reset_index()
+            fund_summary['Current Balance'] = fund_summary['In'] - fund_summary['Out']
             
-            # --- 1. THE FUND VISUALIZER (Plotly) ---
-            st.subheader("💰 Virtual Fund Balances")
-            if 'Fund' in df_money.columns:
-                fund_summary = df_money.groupby('Fund').agg({'In': 'sum', 'Out': 'sum'}).reset_index()
-                fund_summary['Current Balance'] = fund_summary['In'] - fund_summary['Out']
-                
-                fig_funds = px.bar(fund_summary, x='Fund', y='Current Balance', 
-                                   title="Net Balance by Virtual Fund",
-                                   color='Current Balance', color_continuous_scale="Viridis",
-                                   text_auto='.2s')
-                st.plotly_chart(fig_funds, use_container_width=True)
-            else:
-                st.warning("Start logging with the new 'Fund' dropdown to see charts here!")
-            
-            st.divider()
-
-            # --- 2. THE REIMBURSEMENT ENGINE ---
-            st.subheader("🔄 Cross-Fund Borrowing")
-            st.write("Tracks money moving between School and Personal accounts.")
-            
-            if 'Fund' in df_money.columns:
-                pers_paid_for_sch = df_money[(df_money['Fund'].isin(['Salary', 'Personal Savings'])) & (df_money['Entity'] == 'SCH')]['Out'].sum()
-                sch_repaid_pers = df_money[(df_money['Fund'].isin(['Salary', 'Personal Savings'])) & (df_money['Entity'] == 'SCH')]['In'].sum()
-                school_owes_you = pers_paid_for_sch - sch_repaid_pers
-                
-                sch_paid_for_pers = df_money[(df_money['Fund'].isin(['MDM', 'Sarba Sikha'])) & (df_money['Entity'] == 'PERS')]['Out'].sum()
-                pers_repaid_sch = df_money[(df_money['Fund'].isin(['MDM', 'Sarba Sikha'])) & (df_money['Entity'] == 'PERS')]['In'].sum()
-                you_owe_school = sch_paid_for_pers - pers_repaid_sch
-                
-                c1, c2 = st.columns(2)
-                c1.metric("School Owes Salary/Personal", f"₹ {school_owes_you:,.2f}")
-                c2.metric("Salary Owes MDM/School", f"₹ {you_owe_school:,.2f}")
-
-            st.divider()
-
-            # --- 3. EXPENSE BREAKDOWN ---
-            st.subheader("🥧 Expense Breakdown by Entity")
-            out_only = df_money[df_money['Out'] > 0]
-            if not out_only.empty:
-                fig_pie = px.pie(out_only, values='Out', names='Entity', title="Where is the money going?", hole=0.4)
-                st.plotly_chart(fig_pie, use_container_width=True)
-                
-            st.divider()
-            
-            # --- 4. LOCATION DURATION LOG ---
-            st.subheader("⏱️ Today's Location Log")
-            try:
-                loc_records = sh.worksheet("LOCATION_DATA").get_all_records()
-                df_loc = pd.DataFrame(loc_records)
-                
-                if not df_loc.empty:
-                    latest_date = df_loc['Date'].iloc[-1]
-                    df_today = df_loc[df_loc['Date'] == latest_date].copy()
-                    
-                    df_today['Time_Obj'] = pd.to_datetime(df_today['Time'], format='%H:%M', errors='coerce')
-                    time_diffs = df_today['Time_Obj'].shift(-1) - df_today['Time_Obj']
-                    
-                    def format_duration(td):
-                        if pd.isnull(td):
-                            return "Current"
-                        total_seconds = int(td.total_seconds())
-                        hours, remainder = divmod(total_seconds, 3600)
-                        minutes, _ = divmod(remainder, 60)
-                        return f"{hours}:{minutes:02d}"
-
-                    df_today['Duration'] = time_diffs.apply(format_duration)
-                    display_cols = ['Time', 'Duration', 'Move', 'Place', 'People', 'Remark']
-                    st.dataframe(df_today[display_cols], use_container_width=True, hide_index=True)
-                else:
-                    st.info("No location logs found yet.")
-            except Exception as e:
-                st.error(f"Could not load location dashboard: {e}")
-                
+            fig_funds = px.bar(fund_summary, x='Fund', y='Current Balance', title="Net Balance by Virtual Fund", color='Current Balance', color_continuous_scale="Viridis", text_auto='.2s')
+            st.plotly_chart(fig_funds, use_container_width=True)
         else:
-            st.info("No financial data available yet.")
-    except Exception as e:
-        st.error(f"Could not load Dashboard: {e}")
+            st.warning("Start logging with the new 'Fund' dropdown to see charts here!")
+        
+        st.divider()
+
+        st.subheader("🔄 Cross-Fund Borrowing")
+        if 'Fund' in df_money.columns:
+            pers_paid_for_sch = df_money[(df_money['Fund'].isin(['Salary', 'Personal Savings'])) & (df_money['Entity'] == 'SCH')]['Out'].sum()
+            sch_repaid_pers = df_money[(df_money['Fund'].isin(['Salary', 'Personal Savings'])) & (df_money['Entity'] == 'SCH')]['In'].sum()
+            school_owes_you = pers_paid_for_sch - sch_repaid_pers
+            
+            sch_paid_for_pers = df_money[(df_money['Fund'].isin(['MDM', 'Sarba Sikha'])) & (df_money['Entity'] == 'PERS')]['Out'].sum()
+            pers_repaid_sch = df_money[(df_money['Fund'].isin(['MDM', 'Sarba Sikha'])) & (df_money['Entity'] == 'PERS')]['In'].sum()
+            you_owe_school = sch_paid_for_pers - pers_repaid_sch
+            
+            c1, c2 = st.columns(2)
+            c1.metric("School Owes Salary/Personal", f"₹ {school_owes_you:,.2f}")
+            c2.metric("Salary Owes MDM/School", f"₹ {you_owe_school:,.2f}")
+
+        st.divider()
+
+        st.subheader("🥧 Expense Breakdown by Entity")
+        out_only = df_money[df_money['Out'] > 0]
+        if not out_only.empty:
+            fig_pie = px.pie(out_only, values='Out', names='Entity', title="Where is the money going?", hole=0.4)
+            st.plotly_chart(fig_pie, use_container_width=True)
+            
+        st.divider()
+        
+        st.subheader("⏱️ Today's Location Log")
+        df_loc = load_location_data()
+        if not df_loc.empty:
+            latest_date = df_loc['Date'].iloc[-1]
+            df_today = df_loc[df_loc['Date'] == latest_date].copy()
+            df_today['Time_Obj'] = pd.to_datetime(df_today['Time'], format='%H:%M', errors='coerce')
+            time_diffs = df_today['Time_Obj'].shift(-1) - df_today['Time_Obj']
+            
+            def format_duration(td):
+                if pd.isnull(td): return "Current"
+                total_seconds = int(td.total_seconds())
+                hours, remainder = divmod(total_seconds, 3600)
+                minutes, _ = divmod(remainder, 60)
+                return f"{hours}:{minutes:02d}"
+
+            df_today['Duration'] = time_diffs.apply(format_duration)
+            display_cols = ['Time', 'Duration', 'Move', 'Place', 'People', 'Remark']
+            st.dataframe(df_today[display_cols], use_container_width=True, hide_index=True)
+        else:
+            st.info("No location logs found yet.")
+    else:
+        st.info("No financial data available yet.")
 
 # ==========================================
 # TAB 5: INSTRUCTIONS
 # ==========================================
 with tab_help:
     st.header("📖 ERP Manual")
-    st.write("Your system now tracks Physical Accounts, Virtual Funds, and Location-Aware Shopping.")
+    st.write("Your system now heavily caches data to prevent Google Sheets API bans!")

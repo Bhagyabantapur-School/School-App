@@ -13,7 +13,7 @@ st.set_page_config(page_title="SK Ecosystem", page_icon="📱", layout="centered
 def get_ist_now():
     return datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
 
-# Initialize Session States (Short-term memory)
+# Initialize Session States
 if 'route_active' not in st.session_state: st.session_state.route_active = False
 if 'current_people' not in st.session_state: st.session_state.current_people = "I"
 if 'current_move' not in st.session_state: st.session_state.current_move = "BIKE"
@@ -21,7 +21,6 @@ if 'retro_time' not in st.session_state: st.session_state.retro_time = get_ist_n
 if 'locked_date' not in st.session_state: st.session_state.locked_date = get_ist_now().date()
 if 'locked_time' not in st.session_state: st.session_state.locked_time = get_ist_now().time()
 
-# Connect to Google Sheets
 @st.cache_resource
 def init_connection():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -35,7 +34,7 @@ except Exception as e:
     st.error(f"Could not connect to Google Sheets. Error: {e}")
     st.stop()
 
-# --- SMART CACHING ENGINE (Prevents API Quota Errors) ---
+# --- SMART CACHING ENGINE ---
 @st.cache_data(ttl=600)
 def load_config():
     try: return pd.DataFrame(sh.worksheet("CONFIG").get_all_records())
@@ -58,10 +57,10 @@ def load_shopping_data():
 
 config_df = load_config()
 
-# Data Type Armor: Forces values to String before stripping
 def get_list(column_name):
     if column_name in config_df.columns:
-        return [str(val).strip() for val in config_df[column_name].dropna().tolist() if str(val).strip() != ""]
+        raw_list = [str(val).strip() for val in config_df[column_name].dropna().tolist() if str(val).strip() != ""]
+        return list(dict.fromkeys(raw_list))
     return []
 
 def get_location_logic():
@@ -108,21 +107,17 @@ current_shop_type = get_shop_type(current_loc) if current_loc else None
 # ==========================================
 with tab_money:
     
-    # --- ⚡ THE 1-CLICK EXPRESS CHECKOUT ENGINE ---
+    # --- ⚡ EXPRESS CHECKOUT ENGINE ---
     if current_loc and current_shop_type:
         st.success(f"📍 Location: **{current_loc}** | 🛒 Shop Profile: **{current_shop_type}**")
-        
         df_shop = load_shopping_data()
         if not df_shop.empty and 'Status' in df_shop.columns:
             pending_items = df_shop[(df_shop['Status'] == 'Pending') & (df_shop['Shop_Type'] == current_shop_type)]
-            
             if not pending_items.empty:
                 st.markdown("### ⚡ Express 1-Click Checkout")
                 shop_ws = sh.worksheet("SHOPPING_LIST") 
-                
                 for idx, row in pending_items.iterrows():
                     sheet_row = idx + 2 
-                    
                     with st.container(border=True):
                         colA, colB, colC = st.columns([2, 1, 1.5])
                         with colA:
@@ -135,7 +130,6 @@ with tab_money:
                                 try:
                                     part_name = str(row.get('Item', ''))
                                     match_row = config_df[config_df['Map_Particular'].astype(str).str.strip() == part_name]
-                                    
                                     ent = str(match_row['Map_Entity'].values[0]) if not match_row.empty else "PERS"
                                     cat = str(match_row['Map_Category'].values[0]) if not match_row.empty else ""
                                     subcat = str(match_row['Map_SubCat'].values[0]) if not match_row.empty else ""
@@ -143,7 +137,6 @@ with tab_money:
                                     
                                     today_str = get_ist_now().strftime("%d-%m-%Y")
                                     money_row = [today_str, "", final_cost, str(row.get('Account', '')), str(row.get('Fund', '')), ent, cat, subcat, part_name, current_loc, rem]
-                                    
                                     sh.worksheet("MONEY_DATA").append_row(money_row)
                                     
                                     headers = shop_ws.row_values(1)
@@ -153,15 +146,13 @@ with tab_money:
                                     
                                     load_money_data.clear()
                                     load_shopping_data.clear()
-                                    
                                     st.success(f"Cleared {part_name} from your list!")
                                     st.rerun()
                                 except Exception as e:
                                     st.error(f"Error processing item: {e}")
                 st.divider()
     else:
-        if current_loc:
-             st.success(f"📍 Location: **{current_loc}** (No active shopping list for this area)")
+        if current_loc: st.success(f"📍 Location: **{current_loc}** (No active shopping list for this area)")
 
     # --- 📝 STANDARD MANUAL MONEY FORM ---
     st.subheader("Add Manual Financial Record")
@@ -172,11 +163,19 @@ with tab_money:
         amount_in = st.number_input("IN (Income/Receive)", min_value=0.0, step=10.0)
         account = st.selectbox("Account (Physical)", get_list("Accounts"))
         fund = st.selectbox("Fund (Virtual Source)", get_list("Funds"))
-        entity = st.selectbox("Entity", get_list("Entities"))
+        
+        # Pull directly from Map_Entity to avoid duplicates and separate list maintenance
+        mapped_entities = []
+        if 'Map_Entity' in config_df.columns:
+            mapped_entities = list(dict.fromkeys([str(e).strip() for e in config_df['Map_Entity'].dropna() if str(e).strip() != ""]))
+        ent_opts = mapped_entities if mapped_entities else get_list("Entities")
+        
+        entity = st.selectbox("Entity", ent_opts)
         
         if 'Map_Entity' in config_df.columns:
             ent_df = config_df[config_df['Map_Entity'].astype(str).str.strip() == entity]
-            cat_opts = [str(c).strip() for c in ent_df['Map_Category'].dropna().unique() if str(c).strip() != ""]
+            # UPGRADED: Clean first, THEN remove duplicates
+            cat_opts = list(dict.fromkeys([str(c).strip() for c in ent_df['Map_Category'].dropna() if str(c).strip() != ""]))
             category = st.selectbox("Category", cat_opts + ["-- Type New --"])
             if category == "-- Type New --":
                 category = st.text_input("Type New Category")
@@ -193,7 +192,8 @@ with tab_money:
         amount_out = st.number_input("OUT (Expense/Send)", min_value=0.0, step=10.0)
         
         if not cat_df.empty and 'Map_SubCat' in cat_df.columns:
-            sub_opts = [str(s).strip() for s in cat_df['Map_SubCat'].dropna().unique() if str(s).strip() != ""]
+            # UPGRADED: Clean first, THEN remove duplicates
+            sub_opts = list(dict.fromkeys([str(s).strip() for s in cat_df['Map_SubCat'].dropna() if str(s).strip() != ""]))
             sub_cat = st.selectbox("Sub Category", sub_opts + ["-- Type New --"])
             if sub_cat == "-- Type New --":
                 sub_cat = st.text_input("Type New Sub Category")
@@ -207,7 +207,8 @@ with tab_money:
             sub_df = pd.DataFrame()
         
         if not sub_df.empty and 'Map_Particular' in sub_df.columns:
-            part_opts = [str(p).strip() for p in sub_df['Map_Particular'].dropna().unique() if str(p).strip() != ""]
+            # UPGRADED: Clean first, THEN remove duplicates
+            part_opts = list(dict.fromkeys([str(p).strip() for p in sub_df['Map_Particular'].dropna() if str(p).strip() != ""]))
             particulars = st.selectbox("Particulars", part_opts + ["-- Type New --"])
             if particulars == "-- Type New --":
                 particulars = st.text_input("Type New Particulars")
@@ -223,7 +224,6 @@ with tab_money:
         mapped_tofrom = get_list("TO_FROM")
         to_from_opts = ["-- Type New --"] + mapped_tofrom
         default_index = 0
-        
         if current_loc:
             if current_loc not in to_from_opts:
                 to_from_opts.insert(1, current_loc)
@@ -232,29 +232,20 @@ with tab_money:
                 default_index = to_from_opts.index(current_loc)
         
         to_from = st.selectbox("TO / FROM", to_from_opts, index=default_index)
-        if to_from == "-- Type New --":
-            to_from = st.text_input("Type New TO / FROM")
-            tf_df = pd.DataFrame()
-        else:
-            tf_df = pd.DataFrame()
+        if to_from == "-- Type New --": to_from = st.text_input("Type New TO / FROM")
 
     rem_opts = get_list("Remarks")
     remark_box = st.selectbox("Remark", ["- None -"] + rem_opts + ["-- Type New --"])
-        
-    if remark_box == "-- Type New --":
-        remark = st.text_input("Type New Remark")
-    elif remark_box == "- None -":
-        remark = ""
-    else:
-        remark = remark_box
+    if remark_box == "-- Type New --": remark = st.text_input("Type New Remark")
+    elif remark_box == "- None -": remark = ""
+    else: remark = remark_box
     
     if st.button("💾 Save Manual Money Entry", use_container_width=True):
         try:
             formatted_date = entry_date.strftime("%d-%m-%Y")
             row_data = [formatted_date, amount_in if amount_in > 0 else "", amount_out if amount_out > 0 else "", account, fund, entity, category, sub_cat, particulars, to_from, remark]
             sh.worksheet("MONEY_DATA").append_row(row_data)
-            
-            load_money_data.clear() # CLEAR CACHE
+            load_money_data.clear() 
             st.success(f"Saved: ₹{amount_in if amount_in > 0 else amount_out} logged to {to_from}!")
             st.session_state.locked_date = get_ist_now().date() 
         except Exception as e:
@@ -269,11 +260,18 @@ with tab_shopping:
     
     col1, col2 = st.columns(2)
     with col1:
-        p_entity = st.selectbox("Entity", get_list("Entities"), key="plan_ent")
+        # Pull directly from Map_Entity
+        mapped_entities = []
+        if 'Map_Entity' in config_df.columns:
+            mapped_entities = list(dict.fromkeys([str(e).strip() for e in config_df['Map_Entity'].dropna() if str(e).strip() != ""]))
+        p_ent_opts = mapped_entities if mapped_entities else get_list("Entities")
+        
+        p_entity = st.selectbox("Entity", p_ent_opts, key="plan_ent")
         
         if 'Map_Entity' in config_df.columns:
             p_ent_df = config_df[config_df['Map_Entity'].astype(str).str.strip() == p_entity]
-            p_cat_opts = [str(c).strip() for c in p_ent_df['Map_Category'].dropna().unique() if str(c).strip() != ""]
+            # UPGRADED
+            p_cat_opts = list(dict.fromkeys([str(c).strip() for c in p_ent_df['Map_Category'].dropna() if str(c).strip() != ""]))
             p_category = st.selectbox("Category", p_cat_opts + ["-- Type New --"], key="plan_cat")
             if p_category == "-- Type New --":
                 p_category = st.text_input("Type New Category", key="plan_cat_new")
@@ -282,12 +280,12 @@ with tab_shopping:
                 p_cat_df = p_ent_df[p_ent_df['Map_Category'].astype(str).str.strip() == p_category]
         else:
             p_category = st.selectbox("Category", get_list("Categories") + ["-- Type New --"], key="plan_cat_fb")
-            if p_category == "-- Type New --":
-                p_category = st.text_input("Type New Category", key="plan_cat_new_fb")
+            if p_category == "-- Type New --": p_category = st.text_input("Type New Category", key="plan_cat_new_fb")
             p_cat_df = pd.DataFrame()
             
         if not p_cat_df.empty and 'Map_SubCat' in p_cat_df.columns:
-            p_sub_opts = [str(s).strip() for s in p_cat_df['Map_SubCat'].dropna().unique() if str(s).strip() != ""]
+            # UPGRADED
+            p_sub_opts = list(dict.fromkeys([str(s).strip() for s in p_cat_df['Map_SubCat'].dropna() if str(s).strip() != ""]))
             p_sub_cat = st.selectbox("Sub Category", p_sub_opts + ["-- Type New --"], key="plan_sub")
             if p_sub_cat == "-- Type New --":
                 p_sub_cat = st.text_input("Type New Sub Category", key="plan_sub_new")
@@ -296,13 +294,12 @@ with tab_shopping:
                 p_sub_df = p_cat_df[p_cat_df['Map_SubCat'].astype(str).str.strip() == p_sub_cat]
         else:
             p_sub_cat = st.selectbox("Sub Category", get_list("Sub-Categories") + ["-- Type New --"], key="plan_sub_fb")
-            if p_sub_cat == "-- Type New --":
-                p_sub_cat = st.text_input("Type New Sub Category", key="plan_sub_new_fb")
+            if p_sub_cat == "-- Type New --": p_sub_cat = st.text_input("Type New Sub Category", key="plan_sub_new_fb")
             p_sub_df = pd.DataFrame()
             
-        # --- 🚀 THE MULTI-SELECT UPGRADE ---
         if not p_sub_df.empty and 'Map_Particular' in p_sub_df.columns:
-            p_part_opts = [str(p).strip() for p in p_sub_df['Map_Particular'].dropna().unique() if str(p).strip() != ""]
+            # UPGRADED
+            p_part_opts = list(dict.fromkeys([str(p).strip() for p in p_sub_df['Map_Particular'].dropna() if str(p).strip() != ""]))
         else:
             p_part_opts = get_list("Particulars")
             
@@ -312,35 +309,24 @@ with tab_shopping:
     with col2:
         shop_type_opts = []
         if 'Shop_Type' in config_df.columns:
-            shop_type_opts = [str(s).strip() for s in config_df['Shop_Type'].dropna().unique() if str(s).strip() != ""]
-        if not shop_type_opts:
-            shop_type_opts = ["Grocery", "Vegetables", "Stationary", "Hardware", "Medicine"]
+            shop_type_opts = list(dict.fromkeys([str(s).strip() for s in config_df['Shop_Type'].dropna() if str(s).strip() != ""]))
+        if not shop_type_opts: shop_type_opts = ["Grocery", "Vegetables", "Stationary", "Hardware", "Medicine"]
             
         s_type = st.selectbox("Shop Category", shop_type_opts + ["-- Type New --"], key="plan_stype")
-        if s_type == "-- Type New --":
-            s_type = st.text_input("Type New Shop Category", key="plan_stype_new")
+        if s_type == "-- Type New --": s_type = st.text_input("Type New Shop Category", key="plan_stype_new")
             
         est_cost = st.number_input("Estimated Cost per item (₹)", min_value=0.0, step=10.0, key="plan_cost")
         fund = st.selectbox("Fund to use", get_list("Funds"), key="plan_fund")
         account = st.selectbox("Account to use", get_list("Accounts"), key="plan_acc")
         
     if st.button("➕ Add All to Pending List", use_container_width=True):
-        # Combine dropdown selections and custom typed items
         all_items = selected_items + [i.strip() for i in custom_items_str.split(',') if i.strip()]
-        
         if all_items:
             try:
                 today_str = get_ist_now().strftime("%d-%m-%Y")
-                rows_to_add = []
-                
-                # Create a batch of rows for every item selected
-                for itm in all_items:
-                    rows_to_add.append([today_str, itm, s_type, est_cost, "", "Pending", "", fund, account])
-                
-                # Append them all to Google Sheets in one single blazing-fast API call
+                rows_to_add = [[today_str, itm, s_type, est_cost, "", "Pending", "", fund, account] for itm in all_items]
                 sh.worksheet("SHOPPING_LIST").append_rows(rows_to_add)
-                
-                load_shopping_data.clear() # CLEAR CACHE
+                load_shopping_data.clear() 
                 st.success(f"Added {len(all_items)} items to your {s_type} list!")
             except Exception as e:
                 st.error(f"Failed to save: {e}")
@@ -354,23 +340,18 @@ with tab_shopping:
         all_pending = df_shop[df_shop['Status'] == 'Pending']
         if not all_pending.empty:
             st.dataframe(all_pending[['Item', 'Shop_Type', 'Est_Cost', 'Fund']], use_container_width=True, hide_index=True)
-        else:
-            st.write("You have no pending items!")
+        else: st.write("You have no pending items!")
 
 # ==========================================
 # TAB 3: LOCATION ENTRY FORM
 # ==========================================
 with tab_location:
-    
-    # --- 🚀 EXPRESS SCHOOL ROUTE ---
     st.markdown("### 🏫 Express School Route")
-    
     express_container = st.container(border=True)
     with express_container:
         if not st.session_state.route_active:
             col1, col2 = st.columns(2)
-            with col1:
-                express_move = st.selectbox("Travel Mode", ["BIKE", "WALK", "BIKE + WALK", "TOTO"], key="exp_move")
+            with col1: express_move = st.selectbox("Travel Mode", ["BIKE", "WALK", "BIKE + WALK", "TOTO"], key="exp_move")
             with col2:
                 people_opts = get_list("People")
                 if not people_opts: people_opts = ["I", "I, BKP, TKM", "I, TKM"]
@@ -381,28 +362,21 @@ with tab_location:
                 try:
                     time_now = get_ist_now()
                     sh.worksheet("LOCATION_DATA").append_row([time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), express_move, "", express_people, "Started Express Route"])
-                    load_location_data.clear() # CLEAR CACHE
-                    
+                    load_location_data.clear()
                     st.session_state.route_active = True
                     st.session_state.current_people = express_people
                     st.session_state.current_move = express_move
                     st.session_state.retro_time = get_ist_now().time()
                     st.rerun() 
-                except Exception as e:
-                    st.error(f"Error: {e}")
+                except Exception as e: st.error(f"Error: {e}")
         else:
             st.success("🚲 Journey in progress...")
             express_place = st.selectbox("Where did you arrive?", ["Karim Da's House (Keys)", "Bhagyabantapur Primary School", "Girishmore Bus Stop", "HOME"])
             
-            forgot_keys_fwd = False
-            forgot_keys_ret = False
-            forgot_bus = False
-            
+            forgot_keys_fwd, forgot_keys_ret, forgot_bus = False, False, False
             if express_place == "Bhagyabantapur Primary School":
                 forgot_keys_fwd = st.checkbox("⚠️ I forgot to log Karim Da's House (Keys) on the way")
-                if forgot_keys_fwd:
-                    missed_time_fwd = st.time_input("Time you picked up the keys?", value=st.session_state.retro_time, step=60, key="fwd_keys")
-            
+                if forgot_keys_fwd: missed_time_fwd = st.time_input("Time you picked up the keys?", value=st.session_state.retro_time, step=60, key="fwd_keys")
             if express_place == "HOME":
                 forgot_keys_ret = st.checkbox("⚠️ I forgot to log Karim Da's House (Keys)")
                 if forgot_keys_ret: missed_time_keys = st.time_input("Time you dropped the keys?", value=st.session_state.retro_time, step=60, key="ret_keys")
@@ -420,7 +394,6 @@ with tab_location:
                         m_time_str = missed_time_fwd.strftime("%H:%M")
                         sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_str, "- Stationary -", "Karim Da's House (Keys)", arrival_people, "Retroactive arrival"])
                         sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_str, travel_mode, "", arrival_people, "Retroactive transit"])
-                    
                     if express_place == "HOME":
                         if forgot_keys_ret:
                             m_time_k = missed_time_keys.strftime("%H:%M")
@@ -433,33 +406,22 @@ with tab_location:
                             sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_b, travel_mode, "", arrival_people, "Retroactive transit"])
                     
                     sh.worksheet("LOCATION_DATA").append_row([today_str, time_now.strftime("%H:%M"), "- Stationary -", express_place, arrival_people, ""])
-                    load_location_data.clear() # CLEAR CACHE
-                    
+                    load_location_data.clear()
                     st.session_state.route_active = False
                     st.session_state.current_people = "I"
                     st.session_state.retro_time = get_ist_now().time()
                     st.rerun()
-                except Exception as e:
-                    st.error(f"Error: {e}")
+                except Exception as e: st.error(f"Error: {e}")
 
     st.divider()
 
     # --- ⚡ QUICK ACTIONS ---
     st.markdown("### ⚡ Quick Actions")
-    
-    # Surgical CSS Hook for the Green Button
     st.markdown('<div class="green-btn-hook"></div>', unsafe_allow_html=True)
     st.markdown("""
         <style>
-        div:has(.green-btn-hook) + div + div button {
-            background-color: #28a745 !important;
-            color: white !important;
-            border-color: #28a745 !important;
-        }
-        div:has(.green-btn-hook) + div + div button:hover {
-            background-color: #218838 !important;
-            border-color: #1e7e34 !important;
-        }
+        div:has(.green-btn-hook) + div + div button { background-color: #28a745 !important; color: white !important; border-color: #28a745 !important; }
+        div:has(.green-btn-hook) + div + div button:hover { background-color: #218838 !important; border-color: #1e7e34 !important; }
         </style>
     """, unsafe_allow_html=True)
     
@@ -468,31 +430,24 @@ with tab_location:
             time_now = get_ist_now()
             today_str = time_now.strftime("%d.%m.%y")
             time_str = time_now.strftime("%H:%M")
-            
             sh.worksheet("LOCATION_DATA").append_row([today_str, time_str, "- Stationary -", "HOME", "I", "Quick Home Log"])
-            
             st.session_state.route_active = False
             st.session_state.current_people = "I"
-            
-            load_location_data.clear() # CLEAR CACHE
+            load_location_data.clear()
             st.success(f"Welcome Home! Logged at {time_str}")
             st.rerun()
-        except Exception as e:
-            st.error(f"Error logging Home: {e}")
+        except Exception as e: st.error(f"Error logging Home: {e}")
 
     st.divider()
 
     # --- 📝 STANDARD MANUAL LOG ---
     st.markdown("### 📝 Manual Location Log")
     location_logic = get_location_logic()
-
     loc_date = st.date_input("Log Date", value=st.session_state.locked_date)
     loc_time_str = st.text_input("Start Time (Type in 24hr format)", value=st.session_state.locked_time.strftime("%H:%M"))
     
     col1, col2 = st.columns(2)
-    with col1:
-        move_opts = ["- Stationary -"] + get_list("Moves")
-        move = st.selectbox("Move Type", move_opts)
+    with col1: move = st.selectbox("Move Type", ["- Stationary -"] + get_list("Moves"))
     with col2:
         area_options = ["- Select Area -", "- On the way -"] + list(location_logic.keys())
         area = st.selectbox("Select Route / Area", area_options)
@@ -500,18 +455,15 @@ with tab_location:
     if area == "- On the way -":
         specific_place = ""
         st.info("🚲 Transit log.")
-    elif area == "- Select Area -":
-        specific_place = ""
+    elif area == "- Select Area -": specific_place = ""
     else:
         specific_place_options = location_logic.get(area, []) + ["-- Type New --"]
         specific_place = st.selectbox("Specific Place", specific_place_options)
-        if specific_place == "-- Type New --":
-            specific_place = st.text_input("Type New Place Name")
+        if specific_place == "-- Type New --": specific_place = st.text_input("Type New Place Name")
 
     manual_people_opts = get_list("People")
     if not manual_people_opts: manual_people_opts = ["I"]
     if "I" not in manual_people_opts: manual_people_opts.insert(0, "I")
-    
     people = st.selectbox("People", manual_people_opts, index=manual_people_opts.index("I"))
     loc_remark = st.text_input("Location Remark (Optional)")
     
@@ -523,25 +475,20 @@ with tab_location:
             except ValueError:
                 st.error("⚠️ Invalid time! Use HH:MM format.")
                 st.stop()
-                
             formatted_date = loc_date.strftime("%d.%m.%y")
             final_move = "" if move == "- Stationary -" else move
-            
             sh.worksheet("LOCATION_DATA").append_row([formatted_date, formatted_time, final_move, specific_place, people, loc_remark])
-            load_location_data.clear() # CLEAR CACHE
-            
+            load_location_data.clear()
             st.success("Logged successfully!")
             st.session_state.locked_date = get_ist_now().date()
             st.session_state.locked_time = get_ist_now().time()
-        except Exception as e:
-            st.error(f"Error saving to Google Sheets: {e}")
+        except Exception as e: st.error(f"Error saving to Google Sheets: {e}")
 
 # ==========================================
 # TAB 4: ADVANCED ERP DASHBOARD
 # ==========================================
 with tab_dash:
     st.header("📊 Financial Intelligence")
-    
     df_money = load_money_data()
     if not df_money.empty:
         df_money['In'] = pd.to_numeric(df_money['In'].replace('', 0), errors='coerce').fillna(0)
@@ -551,11 +498,9 @@ with tab_dash:
         if 'Fund' in df_money.columns:
             fund_summary = df_money.groupby('Fund').agg({'In': 'sum', 'Out': 'sum'}).reset_index()
             fund_summary['Current Balance'] = fund_summary['In'] - fund_summary['Out']
-            
             fig_funds = px.bar(fund_summary, x='Fund', y='Current Balance', title="Net Balance by Virtual Fund", color='Current Balance', color_continuous_scale="Viridis", text_auto='.2s')
             st.plotly_chart(fig_funds, use_container_width=True)
-        else:
-            st.warning("Start logging with the new 'Fund' dropdown to see charts here!")
+        else: st.warning("Start logging with the new 'Fund' dropdown to see charts here!")
         
         st.divider()
 
@@ -564,11 +509,9 @@ with tab_dash:
             pers_paid_for_sch = df_money[(df_money['Fund'].isin(['Salary', 'Personal Savings'])) & (df_money['Entity'] == 'SCH')]['Out'].sum()
             sch_repaid_pers = df_money[(df_money['Fund'].isin(['Salary', 'Personal Savings'])) & (df_money['Entity'] == 'SCH')]['In'].sum()
             school_owes_you = pers_paid_for_sch - sch_repaid_pers
-            
             sch_paid_for_pers = df_money[(df_money['Fund'].isin(['MDM', 'Sarba Sikha'])) & (df_money['Entity'] == 'PERS')]['Out'].sum()
             pers_repaid_sch = df_money[(df_money['Fund'].isin(['MDM', 'Sarba Sikha'])) & (df_money['Entity'] == 'PERS')]['In'].sum()
             you_owe_school = sch_paid_for_pers - pers_repaid_sch
-            
             c1, c2 = st.columns(2)
             c1.metric("School Owes Salary/Personal", f"₹ {school_owes_you:,.2f}")
             c2.metric("Salary Owes MDM/School", f"₹ {you_owe_school:,.2f}")
@@ -590,25 +533,21 @@ with tab_dash:
             df_today = df_loc[df_loc['Date'] == latest_date].copy()
             df_today['Time_Obj'] = pd.to_datetime(df_today['Time'], format='%H:%M', errors='coerce')
             time_diffs = df_today['Time_Obj'].shift(-1) - df_today['Time_Obj']
-            
             def format_duration(td):
                 if pd.isnull(td): return "Current"
                 total_seconds = int(td.total_seconds())
                 hours, remainder = divmod(total_seconds, 3600)
                 minutes, _ = divmod(remainder, 60)
                 return f"{hours}:{minutes:02d}"
-
             df_today['Duration'] = time_diffs.apply(format_duration)
             display_cols = ['Time', 'Duration', 'Move', 'Place', 'People', 'Remark']
             st.dataframe(df_today[display_cols], use_container_width=True, hide_index=True)
-        else:
-            st.info("No location logs found yet.")
-    else:
-        st.info("No financial data available yet.")
+        else: st.info("No location logs found yet.")
+    else: st.info("No financial data available yet.")
 
 # ==========================================
 # TAB 5: INSTRUCTIONS
 # ==========================================
 with tab_help:
     st.header("📖 ERP Manual")
-    st.write("Your system now heavily caches data to prevent Google Sheets API bans and handles string conversions smoothly!")
+    st.write("Your system perfectly maps Sub-Categories to Categories and cleans invisible spaces automatically!")

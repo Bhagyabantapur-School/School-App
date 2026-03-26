@@ -577,14 +577,19 @@ with tabs[2]:
         # 3. Populate live counts
         with metrics_container:
             st.markdown("##### 📊 Live Column Counts")
-            c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
+            
+            # Calculate "Ready to Generate" dynamically from the editor's current state
+            ready_mask = (final_ed['Photo_URL'] == True) & (final_ed['Form_OK'] == True) & (final_ed['Verified'] == True) & (final_ed['Generated'] == False)
+            
+            c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
             c1.metric("📸 Photo Taken", int(final_ed['Photo Taken'].sum()))
             c2.metric("🔗 Photo Link", int(final_ed['Photo_URL'].sum()))
             c3.metric("🖼️ Thumb Link", int(final_ed['Thumb_URL'].sum()))
             c4.metric("📝 Form OK", int(final_ed['Form_OK'].sum()))
             c5.metric("✅ Verified", int(final_ed['Verified'].sum()))
-            c6.metric("🖨️ Generated", int(final_ed['Generated'].sum()))
-            c7.metric("🎁 Distributed", int(final_ed['Distributed'].sum()))
+            c6.metric("🚀 Ready to Gen", int(ready_mask.sum()))
+            c7.metric("🖨️ Generated", int(final_ed['Generated'].sum()))
+            c8.metric("🎁 Distributed", int(final_ed['Distributed'].sum()))
             st.write("") 
 
         if st.button("💾 Sync Manual Updates to Cloud"):

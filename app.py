@@ -89,7 +89,7 @@ def inject_security_css(user_name):
         .sub-row {{ background-color: #fff3cd !important; border-left: 5px solid #ffc107 !important; }}
         
         /* 📱 FLOATING LIVE COUNTER CSS */
-        .floating-counter {
+        .floating-counter {{
             position: fixed;
             top: 15px;
             right: 15px;
@@ -104,16 +104,16 @@ def inject_security_css(user_name):
             border: 2px solid #ffffff;
             pointer-events: none;
             transition: all 0.3s ease;
-        }
+        }}
         
         /* 📱 AGGRESSIVE MOBILE LAYOUT LOCK */
         @media (max-width: 768px) {{
-            .floating-counter {
+            .floating-counter {{
                 top: 10px;
                 right: 10px;
                 font-size: 14px;
                 padding: 8px 16px;
-            }
+            }}
             .roster-container [data-testid="stHorizontalBlock"] {{
                 display: flex !important;
                 flex-direction: row !important;

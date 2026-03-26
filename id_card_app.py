@@ -5,7 +5,7 @@ import os
 import math
 from fpdf import FPDF
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 # --- IMPORTS FOR GOOGLE SHEETS & DRIVE API ---
 import gspread
@@ -20,20 +20,16 @@ except ImportError:
     st.error("Please add 'streamlit-qrcode-scanner' to your requirements.txt")
     st.stop()
 
-# --- 1. CONFIGURATION & TIMEZONE ---
+# --- 1. CONFIGURATION ---
 st.set_page_config(page_title="BPS Digital - ID Generator", page_icon="🏫", layout="wide")
 
-# Set Timezone to Indian Standard Time (IST)
-IST = timezone(timedelta(hours=5, minutes=30))
-
+# Initialize Session States
 if 'attendance_log' not in st.session_state:
     st.session_state['attendance_log'] = pd.DataFrame(columns=['Time', 'Name', 'Roll', 'Class', 'Status', 'MDM'])
-
-# Store generated PDFs so download buttons stay visible
 if 'generated_pdf_data' not in st.session_state:
     st.session_state['generated_pdf_data'] = None
-if 'queue_pdf_data' not in st.session_state:
-    st.session_state['queue_pdf_data'] = None
+if 'pending_pdf_data' not in st.session_state:
+    st.session_state['pending_pdf_data'] = None
 
 # --- 2. GOOGLE CREDENTIALS & DRIVE CONNECTIONS ---
 @st.cache_resource
@@ -72,13 +68,6 @@ def extract_drive_id(url):
         return url.split("/d/")[1].split("/")[0]
     return None
 
-def make_drive_image_url(url):
-    if pd.isna(url) or not isinstance(url, str) or "drive.google.com" not in url: return url
-    if "/d/" in url:
-        file_id = url.split("/d/")[1].split("/")[0]
-        return f"https://drive.google.com/uc?id={file_id}"
-    return url
-
 @st.cache_data(ttl=60) 
 def fetch_sheet_data(sheet_name):
     try:
@@ -91,7 +80,6 @@ def fetch_sheet_data(sheet_name):
 
 @st.cache_data(ttl=60)
 def fetch_class_photo_status():
-    """Scans all individual Class sheets to auto-detect if a photo is taken."""
     sh_local = init_gsheets()
     taken_keys = set()
     try:
@@ -152,8 +140,7 @@ def batch_log_action(sheet_name, df, action):
         log_ws.append_row(["Date", "Class", "Roll", "Name", "Action"])
     
     rows = []
-    now_ist = datetime.now(IST)
-    now_str = now_ist.strftime("%d-%m-%Y %H:%M:%S")
+    now_str = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
     for _, r in df.iterrows():
         name_val = str(r.get('Name', r.get('Name_x', 'Unknown')))
         rows.append([now_str, str(r.get('Class', '')), str(r.get('Roll', '')), name_val, action])
@@ -175,8 +162,9 @@ def parse_qr_data(qr_string):
         return None
 
 # --- 4. PDF GENERATORS ---
+
 def generate_pdf(students_list, photo_dict, progress_bar=None):
-    """Generates the Landscape ID Cards"""
+    """Generates the Landscape Student ID Cards"""
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.set_auto_page_break(auto=True, margin=10)
     pdf.add_page()
@@ -198,13 +186,16 @@ def generate_pdf(students_list, photo_dict, progress_bar=None):
         x = x_start + (col * (card_w + gap))
         y = y_start + (row * (card_h + gap))
         
+        # Background
         if bg_img:
             try: pdf.image(bg_img, x=x, y=y, w=card_w, h=card_h)
             except: pass 
 
+        # Border & Blue Header
         pdf.set_draw_color(0, 0, 0); pdf.set_line_width(0.3); pdf.rect(x, y, card_w, card_h)
         pdf.set_fill_color(0, 51, 153); pdf.rect(x, y, card_w, 11, 'F')
         
+        # Logo
         if os.path.exists('logo.png'): 
             pdf.image('logo.png', x=x+68.5, y=y+1, w=16, h=16)
             
@@ -213,6 +204,7 @@ def generate_pdf(students_list, photo_dict, progress_bar=None):
         pdf.set_font("Arial", '', 6)
         pdf.set_xy(x+2, y+6.5); pdf.cell(66, 3, "Mob: 7908390822  |  ID CARD - SESSION 2026", 0, 1, 'C')
         
+        # Photo
         photo_x, photo_y, photo_w, photo_h = x+3, y+14, 18, 22
         student_id = str(student.get('Sl', 0)) + "_" + str(student.get('Roll', '0'))
         
@@ -228,6 +220,7 @@ def generate_pdf(students_list, photo_dict, progress_bar=None):
             pdf.set_text_color(150); pdf.set_font("Arial", '', 5)
             pdf.set_xy(photo_x, y+20); pdf.cell(photo_w, 5, "NO PHOTO", 0, 0, 'C')
         
+        # Details
         pdf.set_text_color(0); detail_x, curr_y, line_h = x+24, y+14, 4
         pdf.set_font("Arial", 'B', 9); pdf.set_xy(detail_x, curr_y)
         pdf.cell(44, line_h, f"{student.get('Name', '')}".upper()[:25], 0, 1); curr_y += 4.5
@@ -244,20 +237,24 @@ def generate_pdf(students_list, photo_dict, progress_bar=None):
         pdf.set_xy(detail_x, curr_y); pdf.set_font("Arial", 'B', 7)
         pdf.cell(44, line_h, f"Mob: {student.get('Mobile', '')}", 0, 1)
 
+        # QR Code
         qr_data = f"Name:{student.get('Name', '')}|Roll:{student.get('Roll', '')}|Mob:{student.get('Mobile', '')}"
         qr = qrcode.make(qr_data); qr_path = tempfile.mktemp(suffix=".png"); qr.save(qr_path)
         pdf.image(qr_path, x=x+4.5, y=y+37, w=15, h=15)
         
+        # Footer Image
         if os.path.exists('image_2.png'):
             try: pdf.image('image_2.png', x=x, y=y+44, w=card_w, h=10)
             except: pass
 
+        # Watermark
         wm_x, wm_y = x + 55, y + 42
         pdf.set_draw_color(220, 240, 255); pdf.set_line_width(0.4)
         pdf.line(wm_x, wm_y, wm_x, wm_y + 6); pdf.line(wm_x, wm_y, wm_x + 2, wm_y); pdf.line(wm_x, wm_y + 6, wm_x + 2, wm_y + 6)
         pdf.line(wm_x + 27, wm_y, wm_x + 27, wm_y + 6); pdf.line(wm_x + 25, wm_y, wm_x + 27, wm_y); pdf.line(wm_x + 25, wm_y + 6, wm_x + 27, wm_y + 6)
         pdf.set_text_color(210, 235, 255); pdf.set_font("Arial", 'B', 6); pdf.set_xy(wm_x, wm_y + 1); pdf.cell(27, 4, "BPS DIGITAL", 0, 0, 'C')
 
+        # Signature
         if os.path.exists('signature.png'): 
             try: pdf.image('signature.png', x=x+58, y=y+40, w=22, h=8)
             except: pass
@@ -265,66 +262,65 @@ def generate_pdf(students_list, photo_dict, progress_bar=None):
         pdf.set_text_color(0); pdf.set_font("Arial", 'I', 6); pdf.set_xy(x, y+49); pdf.cell(card_w-5, 3, "Sukhamay Kisku", 0, 1, 'R')
         pdf.set_font("Arial", '', 5); pdf.set_xy(x, y+51); pdf.cell(card_w-5, 2, "Head Teacher", 0, 0, 'R')
         
+        # 10 Cards Per Page Logic
         col += 1
         if col >= 2: col, row = 0, row + 1
         if row >= 5: pdf.add_page(); col, row = 0, 0
             
+    # Final Output Fix
     if progress_bar: progress_bar.progress(1.0, text="✅ PDF Rendering Complete!")
     pdf_output = pdf.output(dest='S')
     if isinstance(pdf_output, str):
         return pdf_output.encode('latin-1')
-    else:
-        return bytes(pdf_output)
+    return bytes(pdf_output)
 
-def generate_photo_queue_pdf(df_queue, date_str):
-    """Generates the printable list for teachers of who needs a photo today."""
-    pdf = FPDF(orientation='P', unit='mm', format='A4')
+def generate_pending_photos_pdf(df_pending):
+    """Generates an A4 list of students who are present today but need photos."""
+    pdf = FPDF()
     pdf.add_page()
     
-    # Title & Header
+    # Header
     pdf.set_font("Arial", 'B', 16)
-    pdf.cell(0, 10, "BHAGYABANTAPUR PRIMARY SCHOOL", ln=1, align='C')
+    pdf.cell(0, 10, "Bhagyabantapur Primary School", ln=True, align='C')
     
     pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 10, f"DAILY PHOTO SESSION QUEUE - {date_str}", ln=1, align='C')
+    current_date = datetime.now().strftime("%d-%m-%Y")
+    pdf.cell(0, 8, f"Pending Photos for Present Students - {current_date}", ln=True, align='C')
     
     pdf.set_font("Arial", 'I', 10)
     pdf.set_text_color(100, 100, 100)
-    pdf.cell(0, 10, "MESSAGE FOR TEACHERS: Please send the following PRESENT students for photo taking.", ln=1, align='C')
+    pdf.cell(0, 8, "Message to Teachers: Please send the following students for photo taking today.", ln=True, align='C')
     pdf.ln(5)
     
-    # Group by Class and Section for clean formatting
-    df_queue['Roll_Num'] = pd.to_numeric(df_queue['Roll'], errors='coerce').fillna(0)
-    df_sorted = df_queue.sort_values(by=['Class', 'Section', 'Roll_Num'])
-    grouped = df_sorted.groupby(['Class', 'Section'])
+    # Body grouped by class and section
+    pdf.set_text_color(0, 0, 0)
     
-    for (cls, sec), group in grouped:
-        pdf.set_text_color(0, 0, 0)
-        pdf.set_font("Arial", 'B', 12)
-        pdf.set_fill_color(220, 230, 255)
-        pdf.cell(0, 10, f"  CLASS: {cls}  |  SECTION: {sec}", ln=1, fill=True)
-        
-        # Table Headers
-        pdf.set_font("Arial", 'B', 10)
-        pdf.cell(30, 8, "Roll No", border=1, align='C')
-        pdf.cell(0, 8, "Student Name", border=1, ln=1)
-        
-        # Table Rows
-        pdf.set_font("Arial", '', 10)
-        for _, row in group.iterrows():
-            pdf.cell(30, 8, str(row['Roll']), border=1, align='C')
-            pdf.cell(0, 8, " " + str(row['Name']), border=1, ln=1)
+    if df_pending.empty:
+        pdf.set_font("Arial", '', 12)
+        pdf.cell(0, 10, "No pending photos for present students today. Great job!", ln=True, align='C')
+    else:
+        # Group data
+        grouped = df_pending.groupby(['Class', 'Section'])
+        for (cls_name, sec_name), group in grouped:
+            pdf.set_font("Arial", 'B', 11)
+            pdf.set_fill_color(230, 230, 230)
+            pdf.cell(0, 8, f" {cls_name} - Section {sec_name} ", border=1, ln=True, fill=True)
             
-        pdf.ln(5)
-        
+            pdf.set_font("Arial", '', 10)
+            for _, row in group.iterrows():
+                roll_text = f"Roll: {row.get('Roll', 'N/A')}"
+                name_text = f"{row.get('Name', 'Unknown')}"
+                pdf.cell(30, 7, roll_text, border='B')
+                pdf.cell(0, 7, name_text, border='B', ln=True)
+            pdf.ln(5)
+            
     pdf_output = pdf.output(dest='S')
     if isinstance(pdf_output, str):
         return pdf_output.encode('latin-1')
-    else:
-        return bytes(pdf_output)
+    return bytes(pdf_output)
 
 # --- 5. MAIN APP LAYOUT ---
-tabs = st.tabs(["🖨️ ID Generator", "📸 Scanner", "📂 Database Explorer", "📷 Photo Queue"])
+tabs = st.tabs(["🖨️ ID Generator", "📸 Scanner", "📂 Database Explorer", "📋 Pending Photos Today"])
 
 # ==========================================
 # TAB 1: ID GENERATOR
@@ -411,7 +407,7 @@ with tabs[0]:
                     st.download_button(
                         label="📥 Download ID Cards (PDF)", 
                         data=st.session_state['generated_pdf_data'], 
-                        file_name=f"BPS_ID_Cards_{datetime.now(IST).strftime('%Y%m%d')}.pdf", 
+                        file_name=f"BPS_ID_Cards_{datetime.now().strftime('%Y%m%d')}.pdf", 
                         mime="application/pdf"
                     )
         else:
@@ -444,9 +440,8 @@ with tabs[1]:
             if not existing.empty:
                 st.warning(f"⚠️ {student_name} is already marked present today!")
             else:
-                now_ist = datetime.now(IST)
-                curr_date_str = now_ist.strftime("%d-%m-%Y")
-                curr_time_str = now_ist.strftime("%H:%M")
+                curr_date_str = datetime.now().strftime("%d-%m-%Y")
+                curr_time_str = datetime.now().strftime("%H:%M")
                 
                 new_entry = pd.DataFrame([{
                     'Time': curr_time_str, 'Name': student_name, 'Roll': student_roll, 
@@ -510,12 +505,12 @@ with tabs[2]:
         class_photo_keys = fetch_class_photo_status()
         photo_keys = list(set(photo_keys + class_photo_keys))
 
-        explorer_db['Photo_URL_Check'] = explorer_db['Photo_URL'].apply(lambda x: True if pd.notna(x) and str(x).strip() != "" else False)
-        
+        # Boolean Checkboxes for URLs
+        explorer_db['Photo_URL'] = explorer_db['Photo_URL'].apply(lambda x: True if pd.notna(x) and str(x).strip() != "" else False)
         if 'Thumb_URL' in explorer_db.columns:
-            explorer_db['Thumb_URL_Check'] = explorer_db['Thumb_URL'].apply(lambda x: True if pd.notna(x) and str(x).strip() != "" else False)
+            explorer_db['Thumb_URL'] = explorer_db['Thumb_URL'].apply(lambda x: True if pd.notna(x) and str(x).strip() != "" else False)
         else:
-            explorer_db['Thumb_URL_Check'] = False
+            explorer_db['Thumb_URL'] = False
 
         explorer_db['Form_OK'] = explorer_db['Return Status'].apply(lambda x: True if str(x) == "Complete" else False)
         explorer_db['Verified'] = explorer_db['Data Corrected'].apply(lambda x: True if str(x) == "Yes" else False)
@@ -537,52 +532,60 @@ with tabs[2]:
         
         filtered_view = explorer_db.copy()
         if cat_filter == "Missing Photo Link":
-            filtered_view = filtered_view[filtered_view['Photo_URL_Check'] == False]
+            filtered_view = filtered_view[filtered_view['Photo_URL'] == False]
         elif cat_filter == "Form/Data Pending":
             filtered_view = filtered_view[(filtered_view['Form_OK'] == False) | (filtered_view['Verified'] == False)]
         elif cat_filter == "Ready to Print":
-            filtered_view = filtered_view[(filtered_view['Photo_URL_Check'] == True) & (filtered_view['Form_OK'] == True) & (filtered_view['Verified'] == True) & (filtered_view['Generated'] == False)]
+            filtered_view = filtered_view[(filtered_view['Photo_URL'] == True) & (filtered_view['Form_OK'] == True) & (filtered_view['Verified'] == True) & (filtered_view['Generated'] == False)]
         elif cat_filter == "Printed (Needs Distribution)":
             filtered_view = filtered_view[(filtered_view['Generated'] == True) & (filtered_view['Distributed'] == False)]
 
         st.write("---")
-        cols_to_show = ['Photo Taken', 'Photo_URL_Check', 'Thumb_URL_Check', 'Name', 'Class', 'Roll', 'Form_OK', 'Verified', 'Generated', 'Distributed']
         
-        display_df = filtered_view[cols_to_show + ['Already_Photo', 'Already_Dist']].copy()
-        
-        if not display_df.empty:
-            unique_classes = display_df['Class'].unique()
-            bg_colors = [
-                'rgba(173, 216, 230, 0.15)', 'rgba(144, 238, 144, 0.15)', 
-                'rgba(255, 253, 150, 0.15)', 'rgba(255, 182, 193, 0.15)', 
-                'rgba(221, 160, 221, 0.15)', 'rgba(255, 218, 185, 0.15)'
-            ]
-            class_color_map = {cls: f'background-color: {bg_colors[i % len(bg_colors)]}' for i, cls in enumerate(unique_classes)}
+        # 1. Counts Placeholder
+        metrics_container = st.container()
 
-            def apply_class_color(row):
-                return [class_color_map.get(row['Class'], '')] * len(row)
+        # 2. Style rows based on class for alternation
+        def row_style(row):
+            classes = filtered_view['Class'].unique()
+            color_map = {c: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, c in enumerate(classes)}
+            bg = color_map.get(row['Class'], '#ffffff')
+            return [f'background-color: {bg}' for _ in row]
 
-            styled_df = display_df.style.apply(apply_class_color, axis=1)
-        else:
-            styled_df = display_df
+        cols_to_show = ['Photo Taken', 'Photo_URL', 'Thumb_URL', 'Name', 'Class', 'Roll', 'Form_OK', 'Verified', 'Generated', 'Distributed']
+        styled_df = filtered_view[cols_to_show + ['Already_Photo', 'Already_Dist']].style.apply(row_style, axis=1)
 
+        # Draw Editor
         final_ed = st.data_editor(
             styled_df,
             column_order=cols_to_show, 
             column_config={
                 "Photo Taken": st.column_config.CheckboxColumn("Photo Taken"),
-                "Photo_URL_Check": st.column_config.CheckboxColumn("Photo_URL", disabled=True),
-                "Thumb_URL_Check": st.column_config.CheckboxColumn("Thumb_URL", disabled=True),
+                "Photo_URL": st.column_config.CheckboxColumn("Photo Link", disabled=True),
+                "Thumb_URL": st.column_config.CheckboxColumn("Thumb Link", disabled=True),
                 "Form_OK": st.column_config.CheckboxColumn("Form OK?", disabled=True),
                 "Verified": st.column_config.CheckboxColumn("Verified?", disabled=True),
                 "Generated": st.column_config.CheckboxColumn("Generated?", disabled=True),
                 "Distributed": st.column_config.CheckboxColumn("Distributed?"),
             },
-            disabled=['Photo_URL_Check', 'Thumb_URL_Check', 'Name', 'Class', 'Roll', 'Form_OK', 'Verified', 'Generated'],
+            disabled=['Photo_URL', 'Thumb_URL', 'Name', 'Class', 'Roll', 'Form_OK', 'Verified', 'Generated'],
             hide_index=True,
             use_container_width=True,
             key="db_explorer_grid"
         )
+
+        # 3. Populate live counts
+        with metrics_container:
+            st.markdown("##### 📊 Live Column Counts")
+            c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
+            c1.metric("📸 Photo Taken", int(final_ed['Photo Taken'].sum()))
+            c2.metric("🔗 Photo Link", int(final_ed['Photo_URL'].sum()))
+            c3.metric("🖼️ Thumb Link", int(final_ed['Thumb_URL'].sum()))
+            c4.metric("📝 Form OK", int(final_ed['Form_OK'].sum()))
+            c5.metric("✅ Verified", int(final_ed['Verified'].sum()))
+            c6.metric("🖨️ Generated", int(final_ed['Generated'].sum()))
+            c7.metric("🎁 Distributed", int(final_ed['Distributed'].sum()))
+            st.write("") 
 
         if st.button("💾 Sync Manual Updates to Cloud"):
             new_photos = final_ed[(final_ed['Photo Taken'] == True) & (final_ed['Already_Photo'] == False)]
@@ -604,73 +607,57 @@ with tabs[2]:
                 st.info("No new boxes were checked to sync.")
 
 # ==========================================
-# TAB 4: PHOTO QUEUE
+# TAB 4: PENDING PHOTOS TODAY
 # ==========================================
 with tabs[3]:
-    st.subheader("📷 Daily Photo Session Queue")
-    st.write("Cross-references today's Attendance to find physically present students who still need a photo taken.")
+    st.subheader("📋 Students Present Today Missing Photos")
+    st.write("Generates a PDF list of students who are in school today but haven't had their photos taken yet.")
     
-    # 1. Obtain strict IST Today's Date Object for accurate matching
-    now_ist = datetime.now(IST)
-    today_date_obj = now_ist.date()
-    curr_date_str = now_ist.strftime("%d-%m-%Y")
-    
+    today_str = datetime.now().strftime("%d-%m-%Y")
     df_mdm = fetch_sheet_data("mdm_log")
     
-    if df_mdm.empty:
-        st.info("No MDM data found in the database. Scan students first.")
-    else:
-        # 2. Safely parse the 'Date' column from the sheet into actual Date objects
-        # This prevents failure if the sheet dates are saved as YYYY-MM-DD instead of DD-MM-YYYY
-        df_mdm['ParsedDate'] = pd.to_datetime(df_mdm['Date'], errors='coerce', dayfirst=True).dt.date
+    if not df_mdm.empty:
+        # Filter MDM Log for today
+        df_mdm['Date'] = df_mdm['Date'].astype(str)
+        today_present = df_mdm[df_mdm['Date'] == today_str].copy()
         
-        # 3. Filter strictly for TODAY
-        df_mdm_today = df_mdm[df_mdm['ParsedDate'] == today_date_obj].copy()
-        
-        if df_mdm_today.empty:
-            st.info(f"No students have been scanned for attendance today ({curr_date_str}).")
-        else:
-            df_m_queue = fetch_sheet_data("students_master")
+        if not today_present.empty:
+            today_present['Key'] = today_present['Class'].astype(str) + "_" + today_present['Roll'].astype(str)
             
-            if not df_m_queue.empty:
-                df_mdm_today['Key'] = df_mdm_today['Class'].astype(str) + "_" + df_mdm_today['Roll'].astype(str)
-                df_m_queue['Key'] = df_m_queue['Class'].astype(str) + "_" + df_m_queue['Roll'].astype(str)
+            # Fetch all taken photos keys (from DB Explorer logic)
+            df_photo_local = fetch_sheet_data("photo_log")
+            photo_keys_local = []
+            if not df_photo_local.empty:
+                df_photo_local['Key'] = df_photo_local['Class'].astype(str) + "_" + df_photo_local['Roll'].astype(str)
+                photo_keys_local = df_photo_local[df_photo_local['Action'] == 'Taken']['Key'].unique().tolist()
+            
+            auto_keys_local = fetch_class_photo_status()
+            all_taken_keys = list(set(photo_keys_local + auto_keys_local))
+            
+            # Filter out students whose photos are already taken
+            pending_students = today_present[~today_present['Key'].isin(all_taken_keys)].copy()
+            
+            if not pending_students.empty:
+                # Clean up display columns
+                display_cols = ['Class', 'Section', 'Roll', 'Name', 'Time']
+                st.dataframe(pending_students[display_cols], hide_index=True, use_container_width=True)
                 
-                # Fetch completed photo lists
-                q_photo_keys = fetch_class_photo_status()
-                df_q_photo = fetch_sheet_data("photo_log")
-                if not df_q_photo.empty:
-                    df_q_photo['Key'] = df_q_photo['Class'].astype(str) + "_" + df_q_photo['Roll'].astype(str)
-                    q_photo_keys.extend(df_q_photo[df_q_photo['Action'] == 'Taken']['Key'].unique().tolist())
+                st.write("---")
+                if st.button("🖨️ Generate PDF for Teachers", type="primary"):
+                    pdf_bytes = generate_pending_photos_pdf(pending_students)
+                    st.session_state['pending_pdf_data'] = pdf_bytes
+                    st.success("✅ Pending List PDF ready!")
                 
-                # Students who already have a URL link in master sheet
-                valid_urls = df_m_queue[df_m_queue['Photo_URL'].notna() & (df_m_queue['Photo_URL'].astype(str).str.strip() != "")]['Key'].tolist()
-                
-                # Student is MISSING photo if NOT in photo_keys AND NOT in valid_urls
-                missing_photos = df_mdm_today[~df_mdm_today['Key'].isin(q_photo_keys) & ~df_mdm_today['Key'].isin(valid_urls)].copy()
-                
-                if missing_photos.empty:
-                    st.success("🎉 All students marked present today already have their photos taken or linked!")
-                else:
-                    st.warning(f"Found **{len(missing_photos)}** students present today who need photos.")
-                    
-                    st.dataframe(
-                        missing_photos[['Class', 'Section', 'Roll', 'Name']], 
-                        hide_index=True, 
-                        use_container_width=True
+                if st.session_state['pending_pdf_data'] is not None:
+                    st.download_button(
+                        label="📥 Download Pending List (PDF)", 
+                        data=st.session_state['pending_pdf_data'], 
+                        file_name=f"BPS_Pending_Photos_{datetime.now().strftime('%Y%m%d')}.pdf", 
+                        mime="application/pdf"
                     )
-                    
-                    st.divider()
-                    
-                    if st.button("📄 Generate Teacher's Photo List (PDF)", type="primary"):
-                        with st.spinner("Building Document..."):
-                            queue_pdf = generate_photo_queue_pdf(missing_photos, curr_date_str)
-                            st.session_state['queue_pdf_data'] = queue_pdf
-                            
-                    if st.session_state['queue_pdf_data'] is not None:
-                        st.download_button(
-                            label="📥 Download Photo Queue (PDF)", 
-                            data=st.session_state['queue_pdf_data'], 
-                            file_name=f"BPS_Photo_Queue_{curr_date_str}.pdf", 
-                            mime="application/pdf"
-                        )
+            else:
+                st.success("🎉 All present students today have had their photos taken!")
+        else:
+            st.info(f"No MDM/Attendance logs found for today ({today_str}).")
+    else:
+        st.warning("No MDM data found in the database. Scan students first.")

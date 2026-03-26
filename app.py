@@ -8,8 +8,6 @@ from google.auth.transport.requests import AuthorizedSession
 
 st.set_page_config(page_title="BPS Digital", page_icon="🏫", layout="centered")
 
-if os.path.exists("logo.png"): st.sidebar.image("logo.png", use_container_width=True)
-
 def inject_beep_script():
     components.html("""
         <script>
@@ -40,6 +38,7 @@ def inject_security_css(user_name):
         body {{ user-select: none; -webkit-user-select: none; }}
         .watermark {{ position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 9999; background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"><text x="50" y="150" fill="rgba(200, 200, 200, 0.25)" font-size="20" transform="rotate(-45 150 150)" font-family="Arial, sans-serif">{wm}</text></svg>'); background-repeat: repeat; }}
         #MainMenu, footer, header {{visibility: hidden;}}
+        [data-testid="stSidebar"] {{display: none;}}
         .block-container {{ padding-top: 1rem; max-width: 650px; overflow-x: hidden; }}
         .summary-card {{ background-color: #fff; border: 2px solid #007bff; border-radius: 15px; padding: 20px; margin-bottom: 20px; box-shadow: 0px 4px 10px rgba(0,0,0,0.05); }}
         .stButton>button {{ width: 100%; border-radius: 12px; height: 3.5em; background-color: #007bff; color: white; font-weight: bold; border: none; }}
@@ -148,6 +147,13 @@ def parse_time_safe(t_str):
 
 if not st.session_state.authenticated:
     inject_security_css("BPS DIGITAL") 
+    
+    # --- LOGO PLACED ON MAIN SCREEN (CENTERED) ---
+    if os.path.exists("logo.png"):
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.image("logo.png", use_container_width=True)
+
     pn = get_notice()
     if pn.strip(): st.info(f"📢 NOTICE: {pn}")
 
@@ -166,6 +172,7 @@ if not st.session_state.authenticated:
         if not hd.empty: st.table(hd)
         else: st.info("No data.")
 
+    # --- WHAT'S NEW SECTION ---
     with st.expander("✨ What's New in BPS Digital?"):
         st.markdown("""
         **Recent Updates & Upgrades:**

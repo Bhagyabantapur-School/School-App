@@ -549,14 +549,20 @@ with tabs[2]:
         
         photo_keys, gen_keys, dist_keys = [], [], []
         
+        # --- Handle Checked vs Unchecked Logic ---
         if not df_photo.empty:
             df_photo['Key'] = df_photo['Class'].astype(str) + "_" + df_photo['Roll'].astype(str)
-            photo_keys = df_photo[df_photo['Action'] == 'Taken']['Key'].unique().tolist()
+            latest_photo = df_photo.drop_duplicates(subset=['Key'], keep='last')
+            photo_keys = latest_photo[latest_photo['Action'] == 'Taken']['Key'].tolist()
             
         if not df_id_log.empty:
             df_id_log['Key'] = df_id_log['Class'].astype(str) + "_" + df_id_log['Roll'].astype(str)
             gen_keys = df_id_log[df_id_log['Action'] == 'Generated']['Key'].unique().tolist()
-            dist_keys = df_id_log[df_id_log['Action'] == 'Distributed']['Key'].unique().tolist()
+            
+            dist_df = df_id_log[df_id_log['Action'].isin(['Distributed', 'Undistributed'])]
+            if not dist_df.empty:
+                latest_dist = dist_df.drop_duplicates(subset=['Key'], keep='last')
+                dist_keys = latest_dist[latest_dist['Action'] == 'Distributed']['Key'].tolist()
 
         class_photo_keys = fetch_class_photo_status()
         photo_keys = list(set(photo_keys + class_photo_keys))
@@ -634,7 +640,6 @@ with tabs[2]:
         with metrics_container:
             st.markdown("##### 📊 Live Column Counts")
             
-            # Calculate "Ready to Generate" dynamically from the editor's current state
             ready_mask = (final_ed['Photo_URL'] == True) & (final_ed['Form_OK'] == True) & (final_ed['Verified'] == True) & (final_ed['Generated'] == False)
             
             c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
@@ -649,23 +654,38 @@ with tabs[2]:
             st.write("") 
 
         if st.button("💾 Sync Manual Updates to Cloud"):
+            
+            # Identify checks added
             new_photos = final_ed[(final_ed['Photo Taken'] == True) & (final_ed['Already_Photo'] == False)]
             new_dist = final_ed[(final_ed['Distributed'] == True) & (final_ed['Already_Dist'] == False)]
+            
+            # Identify checks removed
+            removed_photos = final_ed[(final_ed['Photo Taken'] == False) & (final_ed['Already_Photo'] == True)]
+            removed_dist = final_ed[(final_ed['Distributed'] == False) & (final_ed['Already_Dist'] == True)]
             
             updated = False
             with st.spinner("Writing updates to BPS_Database..."):
                 if not new_photos.empty:
                     batch_log_action("photo_log", new_photos, "Taken")
                     updated = True
+                if not removed_photos.empty:
+                    batch_log_action("photo_log", removed_photos, "Untaken")
+                    updated = True
+                    
                 if not new_dist.empty:
                     batch_log_action("id_card_log", new_dist, "Distributed")
+                    updated = True
+                if not removed_dist.empty:
+                    batch_log_action("id_card_log", removed_dist, "Undistributed")
                     updated = True
                     
             if updated:
                 st.success("✅ Successfully synced updates to Cloud!")
+                if not removed_photos.empty:
+                    st.warning("⚠️ **Note:** If a 'Photo Taken' checkmark instantly reappears, it means that student is still marked directly inside their specific Class Google Sheet (e.g., 'CLASS 1 - PHOTOS'). You must delete the checkmark directly in that sheet to remove it permanently.")
                 st.rerun()
             else:
-                st.info("No new boxes were checked to sync.")
+                st.info("No changes were detected to sync.")
 
 # ==========================================
 # TAB 4: PENDING PHOTOS TODAY
@@ -685,12 +705,13 @@ with tabs[3]:
         if not today_present.empty:
             today_present['Key'] = today_present['Class'].astype(str) + "_" + today_present['Roll'].astype(str)
             
-            # Fetch all taken photos keys (from DB Explorer logic)
+            # Fetch all taken photos keys
             df_photo_local = fetch_sheet_data("photo_log")
             photo_keys_local = []
             if not df_photo_local.empty:
                 df_photo_local['Key'] = df_photo_local['Class'].astype(str) + "_" + df_photo_local['Roll'].astype(str)
-                photo_keys_local = df_photo_local[df_photo_local['Action'] == 'Taken']['Key'].unique().tolist()
+                latest_photo_local = df_photo_local.drop_duplicates(subset=['Key'], keep='last')
+                photo_keys_local = latest_photo_local[latest_photo_local['Action'] == 'Taken']['Key'].tolist()
             
             auto_keys_local = fetch_class_photo_status()
             all_taken_keys = list(set(photo_keys_local + auto_keys_local))

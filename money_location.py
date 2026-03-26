@@ -265,7 +265,7 @@ with tab_money:
 # ==========================================
 with tab_shopping:
     st.header("🛒 Smart Shopping List")
-    st.subheader("➕ Plan a Purchase")
+    st.subheader("➕ Plan Multiple Purchases")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -300,15 +300,14 @@ with tab_shopping:
                 p_sub_cat = st.text_input("Type New Sub Category", key="plan_sub_new_fb")
             p_sub_df = pd.DataFrame()
             
+        # --- 🚀 THE MULTI-SELECT UPGRADE ---
         if not p_sub_df.empty and 'Map_Particular' in p_sub_df.columns:
             p_part_opts = [str(p).strip() for p in p_sub_df['Map_Particular'].dropna().unique() if str(p).strip() != ""]
-            item = st.selectbox("Select Item", p_part_opts + ["-- Type New --"], key="plan_item")
-            if item == "-- Type New --":
-                item = st.text_input("Type New Item", key="plan_item_new")
         else:
-            item = st.selectbox("Select Item", get_list("Particulars") + ["-- Type New --"], key="plan_item_fb")
-            if item == "-- Type New --":
-                item = st.text_input("Type New Item", key="plan_item_new_fb")
+            p_part_opts = get_list("Particulars")
+            
+        selected_items = st.multiselect("Select Existing Items", p_part_opts, key="plan_item_multi")
+        custom_items_str = st.text_input("Add New Items (Separate with commas, e.g. Apples, Milk)", key="plan_item_new_multi")
         
     with col2:
         shop_type_opts = []
@@ -321,21 +320,32 @@ with tab_shopping:
         if s_type == "-- Type New --":
             s_type = st.text_input("Type New Shop Category", key="plan_stype_new")
             
-        est_cost = st.number_input("Estimated Cost (₹)", min_value=0.0, step=10.0, key="plan_cost")
+        est_cost = st.number_input("Estimated Cost per item (₹)", min_value=0.0, step=10.0, key="plan_cost")
         fund = st.selectbox("Fund to use", get_list("Funds"), key="plan_fund")
         account = st.selectbox("Account to use", get_list("Accounts"), key="plan_acc")
         
-    if st.button("➕ Add to Pending List", use_container_width=True):
-        if item:
+    if st.button("➕ Add All to Pending List", use_container_width=True):
+        # Combine dropdown selections and custom typed items
+        all_items = selected_items + [i.strip() for i in custom_items_str.split(',') if i.strip()]
+        
+        if all_items:
             try:
                 today_str = get_ist_now().strftime("%d-%m-%Y")
-                row_data = [today_str, item, s_type, est_cost, "", "Pending", "", fund, account]
-                sh.worksheet("SHOPPING_LIST").append_row(row_data)
+                rows_to_add = []
+                
+                # Create a batch of rows for every item selected
+                for itm in all_items:
+                    rows_to_add.append([today_str, itm, s_type, est_cost, "", "Pending", "", fund, account])
+                
+                # Append them all to Google Sheets in one single blazing-fast API call
+                sh.worksheet("SHOPPING_LIST").append_rows(rows_to_add)
                 
                 load_shopping_data.clear() # CLEAR CACHE
-                st.success(f"Added {item} to your {s_type} list!")
+                st.success(f"Added {len(all_items)} items to your {s_type} list!")
             except Exception as e:
                 st.error(f"Failed to save: {e}")
+        else:
+            st.warning("⚠️ Please select or type at least one item to add.")
 
     st.divider()
     st.subheader("📋 All Pending Items")

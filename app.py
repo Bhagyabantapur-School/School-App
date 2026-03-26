@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import os
 import calendar
@@ -14,6 +15,48 @@ from google.auth.transport.requests import AuthorizedSession
 
 # --- 1. CONFIGURATION & STYLING ---
 st.set_page_config(page_title="BPS Digital", page_icon="🏫", layout="centered")
+
+# Injecting an invisible Javascript Audio Synthesizer for instant UI feedback
+def inject_beep_script():
+    components.html(
+        """
+        <script>
+            const doc = window.parent.document;
+            // Prevent adding multiple listeners on Streamlit re-runs
+            if (!doc.getElementById("beep-listener-setup")) {
+                doc.body.insertAdjacentHTML('beforeend', '<div id="beep-listener-setup" style="display:none;"></div>');
+                
+                doc.body.addEventListener('change', function(e) {
+                    // Only trigger if a checkbox is clicked
+                    if (e.target && e.target.type === 'checkbox') {
+                        const AudioContext = window.parent.AudioContext || window.parent.webkitAudioContext;
+                        if (AudioContext) {
+                            const ctx = new AudioContext();
+                            const osc = ctx.createOscillator();
+                            const gainNode = ctx.createGain();
+                            
+                            // Configure the "Beep" (Sine wave, 880Hz, 10% volume, 0.1 seconds long)
+                            osc.type = 'sine';
+                            osc.frequency.setValueAtTime(880, ctx.currentTime); 
+                            gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+                            gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+                            
+                            osc.connect(gainNode);
+                            gainNode.connect(ctx.destination);
+                            osc.start();
+                            osc.stop(ctx.currentTime + 0.1);
+                        }
+                    }
+                });
+            }
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+# Call the script immediately to activate the beeps
+inject_beep_script()
 
 def inject_security_css(user_name):
     watermark_text = f"{user_name} - CONFIDENTIAL"
@@ -45,8 +88,32 @@ def inject_security_css(user_name):
         .sub-card {{ background-color: #e3f2fd; padding: 10px; border-radius: 8px; margin-bottom: 5px; border-left: 4px solid #2196f3; }}
         .sub-row {{ background-color: #fff3cd !important; border-left: 5px solid #ffc107 !important; }}
         
+        /* 📱 FLOATING LIVE COUNTER CSS */
+        .floating-counter {
+            position: fixed;
+            top: 15px;
+            right: 15px;
+            background: linear-gradient(135deg, #007bff, #0056b3);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 30px;
+            z-index: 999999;
+            font-size: 16px;
+            font-weight: 900;
+            box-shadow: 0px 4px 12px rgba(0,0,0,0.3);
+            border: 2px solid #ffffff;
+            pointer-events: none;
+            transition: all 0.3s ease;
+        }
+        
         /* 📱 AGGRESSIVE MOBILE LAYOUT LOCK */
         @media (max-width: 768px) {{
+            .floating-counter {
+                top: 10px;
+                right: 10px;
+                font-size: 14px;
+                padding: 8px 16px;
+            }
             .roster-container [data-testid="stHorizontalBlock"] {{
                 display: flex !important;
                 flex-direction: row !important;
@@ -135,7 +202,6 @@ def get_drive_session():
 
 sh = init_gsheets()
 
-# INCREASED TTL TO 10 MINUTES TO PREVENT RATE LIMIT CRASHES DURING CLICKS
 @st.cache_data(ttl=600) 
 def fetch_sheet_data(sheet_name):
     try:
@@ -186,7 +252,6 @@ def overwrite_sheet_df(sheet_name, df):
     except Exception as e:
         st.error("⚠️ Google Sheets API is busy. Please try submitting again in a moment.")
 
-# CACHED NOTICE TO PREVENT BACKGROUND API DRAINS
 @st.cache_data(ttl=600)
 def get_notice():
     try: return sh.worksheet("notice").acell("A1").value or ""
@@ -398,6 +463,7 @@ else:
                                 # --- MDM CARD LIST UI ---
                                 st.markdown("### Roster Selection")
                                 
+                                counter_placeholder = st.empty()
                                 st.markdown('<div class="roster-container">', unsafe_allow_html=True)
                                 selected_mdm = []
                                 
@@ -413,7 +479,8 @@ else:
                                             selected_mdm.append(r)
                                     st.divider()
                                 
-                                st.markdown(f"### ✅ Total Selected: {len(selected_mdm)}")
+                                counter_placeholder.markdown(f"<div class='floating-counter'>✅ Selected: {len(selected_mdm)}</div>", unsafe_allow_html=True)
+                                st.markdown(f"<h3 style='text-align:center;'>✅ Total Selected: {len(selected_mdm)}</h3>", unsafe_allow_html=True)
                                 
                                 if st.button("Submit MDM Data"):
                                     if selected_mdm:
@@ -618,6 +685,7 @@ else:
                         # --- HORIZONTAL ATTENDANCE CARD UI ---
                         st.markdown("### Class Roster")
                         
+                        counter_placeholder = st.empty()
                         st.markdown('<div class="roster-container">', unsafe_allow_html=True)
                         attendance_data = []
                         present_count = 0
@@ -641,7 +709,8 @@ else:
                                 })
                             st.divider()
                         
-                        st.markdown(f"### ✅ Total Present: {present_count}")
+                        counter_placeholder.markdown(f"<div class='floating-counter'>✅ Present: {present_count}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<h3 style='text-align:center;'>✅ Total Present: {present_count}</h3>", unsafe_allow_html=True)
                             
                         if st.button(f"Save Attendance for {t_class} - {t_sec}"):
                             df = pd.DataFrame(attendance_data)

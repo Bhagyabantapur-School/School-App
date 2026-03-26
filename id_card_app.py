@@ -359,57 +359,72 @@ with tabs[0]:
             return has_photo and is_returned and (is_verified if has_corr else True)
 
         merged['Ready'] = merged.apply(is_ready_to_print, axis=1)
-        print_ready = merged[merged['Ready'] == True].copy()
+        print_ready_all = merged[merged['Ready'] == True].copy()
 
-        if not print_ready.empty:
-            print_ready.insert(0, "Select", False)
+        if not print_ready_all.empty:
             
-            edited_df = st.data_editor(
-                print_ready[['Select', 'Roll', 'Name', 'Class', 'Generated']],
-                hide_index=True, use_container_width=True, key="gen_editor",
-                disabled=['Roll', 'Name', 'Class', 'Generated']
-            )
+            # Toggle to sync counts with Tab 3
+            hide_generated = st.checkbox("Hide students who already have generated IDs", value=True)
             
-            selected_students = print_ready.loc[edited_df[edited_df["Select"] == True].index].copy()
+            if hide_generated:
+                print_ready = print_ready_all[print_ready_all['Generated'] == False].copy()
+            else:
+                print_ready = print_ready_all.copy()
 
-            if not selected_students.empty:
-                num_students = len(selected_students)
-                pages_needed = math.ceil(num_students / 10)
+            if not print_ready.empty:
+                print_ready.insert(0, "Select", False)
                 
-                st.divider()
-                st.info(f"🖨️ **Print Summary:** You selected **{num_students}** students. Requires **{pages_needed}** A4 page(s).")
+                st.write(f"Showing **{len(print_ready)}** students ready for printing.")
                 
-                if st.button("Generate Secure PDF", type="primary"):
-                    st.session_state['generated_pdf_data'] = None 
-                    photo_dict = {}
-                    my_bar = st.progress(0, text="Starting secure fetch...")
+                edited_df = st.data_editor(
+                    print_ready[['Select', 'Roll', 'Name', 'Class', 'Generated']],
+                    hide_index=True, use_container_width=True, key="gen_editor",
+                    disabled=['Roll', 'Name', 'Class', 'Generated']
+                )
+                
+                selected_students = print_ready.loc[edited_df[edited_df["Select"] == True].index].copy()
+
+                if not selected_students.empty:
+                    num_students = len(selected_students)
+                    pages_needed = math.ceil(num_students / 10)
                     
-                    for idx, (index, student) in enumerate(selected_students.iterrows()):
-                        sid = str(student.get('Sl', index)) + "_" + str(student.get('Roll', '0'))
-                        photo_url = str(student.get('Photo_URL', ''))
-                        
-                        drive_id = extract_drive_id(photo_url)
-                        if drive_id:
-                            img_bytes = fetch_secure_image_bytes(drive_id)
-                            if img_bytes:
-                                photo_dict[sid] = img_bytes
-                                
-                        my_bar.progress((idx + 1) / num_students * 0.5, text=f"Fetching photo {idx + 1} of {num_students}...")
+                    st.divider()
+                    st.info(f"🖨️ **Print Summary:** You selected **{num_students}** students. Requires **{pages_needed}** A4 page(s).")
                     
-                    pdf_bytes = generate_pdf(selected_students.to_dict('records'), photo_dict, progress_bar=my_bar)
-                    batch_log_action("id_card_log", selected_students, "Generated")
+                    if st.button("Generate Secure PDF", type="primary"):
+                        st.session_state['generated_pdf_data'] = None 
+                        photo_dict = {}
+                        my_bar = st.progress(0, text="Starting secure fetch...")
                         
-                    st.session_state['generated_pdf_data'] = pdf_bytes
-                    st.balloons()
-                
-                if st.session_state['generated_pdf_data'] is not None:
-                    st.success("✅ Your PDF is ready! Click below to save it.")
-                    st.download_button(
-                        label="📥 Download ID Cards (PDF)", 
-                        data=st.session_state['generated_pdf_data'], 
-                        file_name=f"BPS_ID_Cards_{datetime.now().strftime('%Y%m%d')}.pdf", 
-                        mime="application/pdf"
-                    )
+                        for idx, (index, student) in enumerate(selected_students.iterrows()):
+                            sid = str(student.get('Sl', index)) + "_" + str(student.get('Roll', '0'))
+                            photo_url = str(student.get('Photo_URL', ''))
+                            
+                            drive_id = extract_drive_id(photo_url)
+                            if drive_id:
+                                img_bytes = fetch_secure_image_bytes(drive_id)
+                                if img_bytes:
+                                    photo_dict[sid] = img_bytes
+                                    
+                            my_bar.progress((idx + 1) / num_students * 0.5, text=f"Fetching photo {idx + 1} of {num_students}...")
+                        
+                        pdf_bytes = generate_pdf(selected_students.to_dict('records'), photo_dict, progress_bar=my_bar)
+                        batch_log_action("id_card_log", selected_students, "Generated")
+                            
+                        st.session_state['generated_pdf_data'] = pdf_bytes
+                        st.balloons()
+                        st.rerun()
+                    
+                    if st.session_state['generated_pdf_data'] is not None:
+                        st.success("✅ Your PDF is ready! Click below to save it.")
+                        st.download_button(
+                            label="📥 Download ID Cards (PDF)", 
+                            data=st.session_state['generated_pdf_data'], 
+                            file_name=f"BPS_ID_Cards_{datetime.now().strftime('%Y%m%d')}.pdf", 
+                            mime="application/pdf"
+                        )
+            else:
+                st.success("All ready students have already had their IDs generated! Uncheck the box above to reprint.")
         else:
             st.info("No students found with a linked Photo URL and a cleared form.")
 

@@ -149,6 +149,28 @@ def batch_log_action(sheet_name, df, action):
         log_ws.append_rows(rows)
         clear_sheet_cache()
 
+def reset_generated_status():
+    """Removes all 'Generated' logs from the id_card_log Google Sheet"""
+    try:
+        ws = sh.worksheet("id_card_log")
+        data = ws.get_all_values()
+        if len(data) > 1:
+            headers = data[0]
+            df = pd.DataFrame(data[1:], columns=headers)
+            # Filter out the "Generated" records, keep everything else (like "Distributed")
+            df_kept = df[df['Action'] != 'Generated']
+            
+            # Clear the sheet and write back only the kept records
+            ws.clear()
+            ws.append_row(headers)
+            if not df_kept.empty:
+                ws.append_rows(df_kept.astype(str).values.tolist())
+        clear_sheet_cache()
+    except WorksheetNotFound:
+        pass
+    except Exception as e:
+        st.error(f"Error resetting database: {e}")
+
 def parse_qr_data(qr_string):
     try:
         data = {}
@@ -320,6 +342,19 @@ def generate_pending_photos_pdf(df_pending):
     return bytes(pdf_output)
 
 # --- 5. MAIN APP LAYOUT ---
+
+# Header with Refresh Button
+col_title, col_refresh = st.columns([5, 1])
+with col_title:
+    st.markdown("<h2 style='margin-top:0px;'>🏫 BPS Digital System</h2>", unsafe_allow_html=True)
+with col_refresh:
+    st.write("") # Adjust vertical alignment slightly
+    if st.button("🔄 Refresh Cloud Data", use_container_width=True):
+        clear_sheet_cache()
+        st.rerun()
+
+st.divider()
+
 tabs = st.tabs(["🖨️ ID Generator", "📸 Scanner", "📂 Database Explorer", "📋 Pending Photos Today"])
 
 # ==========================================
@@ -330,9 +365,7 @@ with tabs[0]:
     with h_col1:
         if os.path.exists('logo.png'): st.image('logo.png', width=70)
     with h_col2:
-        st.markdown("<h2 style='margin-top:10px;'>BPS Student ID Card Generator</h2>", unsafe_allow_html=True)
-    
-    st.divider()
+        st.markdown("<h3 style='margin-top:10px;'>BPS Student ID Card Generator</h3>", unsafe_allow_html=True)
 
     df_master = fetch_sheet_data("students_master")
     df_log = fetch_sheet_data("form_distribution_log")
@@ -363,8 +396,16 @@ with tabs[0]:
 
         if not print_ready_all.empty:
             
-            # Toggle to sync counts with Tab 3
-            hide_generated = st.checkbox("Hide students who already have generated IDs", value=True)
+            # --- Toggles and Buttons for View/Reset ---
+            col_t1, col_t2 = st.columns([3, 1])
+            with col_t1:
+                hide_generated = st.checkbox("Hide students who already have generated IDs", value=True)
+            with col_t2:
+                if st.button("⚠️ Reset All 'Generated' Statuses", use_container_width=True):
+                    with st.spinner("Resetting database..."):
+                        reset_generated_status()
+                    st.success("Success! List reset.")
+                    st.rerun()
             
             if hide_generated:
                 print_ready = print_ready_all[print_ready_all['Generated'] == False].copy()

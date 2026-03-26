@@ -3,12 +3,15 @@ import gspread
 import pandas as pd
 from datetime import datetime
 
-# 1. MUST BE THE FIRST STREAMLIT COMMAND
+# 1. THIS MUST BE THE VERY FIRST ST COMMAND. 
+# Do not put any st.write, st.title, or st.secrets above this line.
 st.set_page_config(page_title="BPS Returns Sync", icon="📈", layout="centered")
 
 # --- DATABASE LOGIC ---
 def get_gspread_client():
     """Connects to Google Sheets using Streamlit Secrets."""
+    # It is safe to use st.secrets INSIDE a function, 
+    # as long as the function isn't called before st.set_page_config.
     return gspread.service_account_from_dict(st.secrets["gcp_service_account"])
 
 def run_attendance_sync():
@@ -37,20 +40,21 @@ def run_attendance_sync():
         report = present_df.groupby(['Date', 'Class']).size().unstack(fill_value=0).reset_index()
 
         # 5. Date & Day Formatting (DD.MM.YY and MON, TUE...)
+        # We handle the string 'DD-MM-YYYY' from your master sheet
         report['dt_obj'] = pd.to_datetime(report['Date'], format='%d-%m-%Y')
-        report = report.sort_values('dt_obj') # Keep chronological order
+        report = report.sort_values('dt_obj') 
         
         report['Formatted_Date'] = report['dt_obj'].dt.strftime('%d.%m.%y')
         report['Formatted_Day'] = report['dt_obj'].dt.strftime('%a').str.upper()
 
-        # 6. Ensure all Class columns exist to prevent errors
+        # 6. Ensure all Class columns exist
         target_classes = ['CLASS PP', 'CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV', 'CLASS V']
         for cls in target_classes:
             if cls not in report.columns:
                 report[cls] = 0
 
-        # 7. Apply BPS Returns Logic
-        report['PP_Final'] = report['CLASS PP'] # Only CLASS PP, ignore LPP
+        # 7. Apply BPS Returns Logic (PP only, sums for others)
+        report['PP_Final'] = report['CLASS PP'] 
         report['I-IV_Sum'] = report['CLASS I'] + report['CLASS II'] + report['CLASS III'] + report['CLASS IV']
         report['I-V_Sum'] = report['I-IV_Sum'] + report['CLASS V']
         report['GT_Sum'] = report['PP_Final'] + report['I-V_Sum']
@@ -85,22 +89,17 @@ def run_attendance_sync():
         st.success("✅ Success! BPS_RETURNS (ROUGH01) has been updated.")
         st.balloons()
         
-        # Show a preview in the app
         st.write("### Preview of Synced Data")
         st.dataframe(final_df, use_container_width=True)
 
     except gspread.exceptions.SpreadsheetNotFound:
-        st.error("Could not find 'BPS_RETURNS'. Make sure you created it and shared it with the service account email.")
+        st.error("Could not find 'BPS_RETURNS'. Did you share it with the service account email?")
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
 
 # --- STREAMLIT UI ---
 st.title("📊 BPS Returns Generator")
-st.info("This app pulls attendance from BPS_Database and formats it for the BPS_RETURNS sheet.")
 
 if st.button("🚀 Process & Sync Monthly Returns"):
-    with st.spinner("Connecting to Google Sheets and calculating totals..."):
+    with st.spinner("Calculating totals..."):
         run_attendance_sync()
-
-st.divider()
-st.caption("Developed for Bhagyabantapur Primary School Management System")

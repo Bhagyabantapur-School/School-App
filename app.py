@@ -159,7 +159,7 @@ def render_header():
             <img src="data:image/png;base64,{img_b64}" style="max-width: 80px; max-height: 80px; object-fit: contain;">
             <div style="text-align: right;">
                 <h2 class="header-school-name" style="margin: 0; color: #007bff; font-weight: 900; font-size: 24px; line-height: 1.1;">BHAGYABANTAPUR</h2>
-                <h2 class="header-school-name" style="margin: 0; color: #333; font-weight: 900; font-size: 20px; line-height: 1.1;">PRIMARY SCHOOL</h2>
+                <h2 class="header-school-name" style="margin: 0; color: #007bff; font-weight: 900; font-size: 20px; line-height: 1.1;">PRIMARY SCHOOL</h2>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -394,7 +394,7 @@ else:
                 else: st.info("No holiday data available.")
 
     elif st.session_state.user_role == "admin":
-        tabs = st.tabs(["📊 Summary", "📝 Attend", "⏳ Live", "👨‍🏫 Leave", "📅 Hols"])
+        tabs = st.tabs(["📊 Summary", "📝 Attend", "⏳ Live", "👨‍🏫 Leave", "📢 Staff Notice", "📅 Hols"])
         
         with tabs[0]: 
             st.subheader(f"MDM Status: {curr_date_str}")
@@ -576,7 +576,12 @@ else:
                             if st.button("Mark Leave"): append_sheet_df('teacher_leave', pd.DataFrame([{"Date": sds, "Teacher": abt, "Type": lt, "Substitute": "None", "Detailed_Sub_Log": "None"}])); st.rerun()
 
         with tabs[4]: 
+            st.subheader("📢 Staff Notice")
+            n = st.text_area("Notice", get_notice())
+            if st.button("Publish to Cloud"): publish_notice(n); st.success("Published!")
+
+        with tabs[5]: 
             st.subheader("🗓️ School Holiday List")
             hd = get_local_csv('holidays.csv')
-            if not hd.empty: st.data_editor(h_df, num_rows="dynamic", key="h_edit")
+            if not hd.empty: st.data_editor(hd, num_rows="dynamic", key="h_edit")
             else: st.info("No data.")

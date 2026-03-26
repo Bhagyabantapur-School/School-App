@@ -58,6 +58,8 @@ def inject_security_css(user_name):
             .roster-container [data-testid="column"]:nth-child(3) {{ flex: 0 0 95px !important; max-width: 95px !important; width: 95px !important; }}
             .roster-container .stCheckbox p {{ font-size: 13px !important; padding-left: 1.2rem !important; margin-bottom: 0px !important; line-height: 1.2 !important; }}
             .roster-container .stCheckbox {{ min-height: 1.2rem; }}
+            /* Scale header for very small screens */
+            .header-school-name {{ font-size: 18px !important; }}
         }}
     </style><script>document.addEventListener('contextmenu', e => e.preventDefault());</script><div class="watermark"></div>""", unsafe_allow_html=True)
 
@@ -145,14 +147,36 @@ def parse_time_safe(t_str):
         except: continue
     return None
 
+# ==========================================
+# UNIVERSAL APP HEADER (ALWAYS VISIBLE)
+# ==========================================
+def render_header():
+    if os.path.exists("logo.png"):
+        with open("logo.png", "rb") as f:
+            img_b64 = base64.b64encode(f.read()).decode()
+        st.markdown(f"""
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e0e0e0; padding-bottom: 15px; margin-bottom: 20px;">
+            <img src="data:image/png;base64,{img_b64}" style="max-width: 80px; max-height: 80px; object-fit: contain;">
+            <div style="text-align: right;">
+                <h2 class="header-school-name" style="margin: 0; color: #007bff; font-weight: 900; font-size: 24px; line-height: 1.1;">BHAGYABANTAPUR</h2>
+                <h2 class="header-school-name" style="margin: 0; color: #333; font-weight: 900; font-size: 20px; line-height: 1.1;">PRIMARY SCHOOL</h2>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+        <div style="border-bottom: 2px solid #e0e0e0; padding-bottom: 15px; margin-bottom: 20px; text-align: center;">
+            <h2 style="margin: 0; color: #007bff; font-weight: 900; font-size: 24px;">BHAGYABANTAPUR PRIMARY SCHOOL</h2>
+        </div>
+        """, unsafe_allow_html=True)
+
+render_header()
+
+# ==========================================
+# LOGIN SCREEN
+# ==========================================
 if not st.session_state.authenticated:
     inject_security_css("BPS DIGITAL") 
-    
-    # --- LOGO PLACED ON MAIN SCREEN (CENTERED) ---
-    if os.path.exists("logo.png"):
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.image("logo.png", use_container_width=True)
 
     pn = get_notice()
     if pn.strip(): st.info(f"📢 NOTICE: {pn}")
@@ -188,6 +212,9 @@ else:
     st.success(f"👋 Welcome, {st.session_state.user_name}")
     if st.button("Log Out"): st.session_state.authenticated = False; st.rerun()
 
+    # ==========================================
+    # ASSISTANT TEACHER DASHBOARD
+    # ==========================================
     if st.session_state.user_role == "teacher":
         t_name_select = st.session_state.user_name
         hd = get_local_csv('holidays.csv')
@@ -551,5 +578,5 @@ else:
         with tabs[4]: 
             st.subheader("🗓️ School Holiday List")
             hd = get_local_csv('holidays.csv')
-            if not hd.empty: st.table(hd)
+            if not hd.empty: st.data_editor(h_df, num_rows="dynamic", key="h_edit")
             else: st.info("No data.")

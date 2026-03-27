@@ -267,7 +267,6 @@ else:
                                 if qv:
                                     should_rerun = False
                                     try:
-                                        # Smart Scanner logic handling both Old and New QR formats
                                         if "," in qv:
                                             parts = qv.split(",")
                                             sn, sr, smob = parts[0].strip(), parts[1].strip(), parts[2].strip()
@@ -299,7 +298,6 @@ else:
                                 st.markdown('<div class="roster-container">', unsafe_allow_html=True)
                                 sel_mdm = []
                                 
-                                # Helper to draw sections cleanly
                                 def draw_class_roster(df_subset, class_name):
                                     if df_subset.empty: return
                                     if tc == 'CLASS PP': st.markdown(f"<h4 style='color:#007bff; border-bottom:1px solid #ddd; padding-bottom:5px;'>{class_name}</h4>", unsafe_allow_html=True)
@@ -312,7 +310,6 @@ else:
                                             if st.checkbox("Ate MDM", value=isc, key=f"mdm_{r['Class']}_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
                                         st.divider()
 
-                                # Safely separate PP and LPP onto one page
                                 if tc == 'CLASS PP':
                                     draw_class_roster(ros[ros['Class'] == 'CLASS PP'], "CLASS PP")
                                     draw_class_roster(ros[ros['Class'] == 'CLASS LPP'], "CLASS LPP")
@@ -326,7 +323,6 @@ else:
                                     if sel_mdm:
                                         nr = [{'Date': curr_date_str, 'Teacher': t_name_select, 'Class': x['Class'], 'Section': ts, 'Roll': x['Roll'], 'Name': x['Name'], 'Time': now.strftime("%H:%M")} for x in sel_mdm]
                                     else:
-                                        # Record a 'Zero' submission to the cloud safely
                                         nr = [{'Date': curr_date_str, 'Teacher': t_name_select, 'Class': tc, 'Section': ts, 'Roll': '0', 'Name': 'NONE_PRESENT', 'Time': now.strftime("%H:%M")}]
                                     
                                     append_sheet_df('mdm_log', pd.DataFrame(nr))
@@ -422,31 +418,25 @@ else:
             ml = fetch_sheet_data('mdm_log')
             al = fetch_sheet_data('student_attendance_master') 
             
-            # --- NEW: Admin Metric Dashboard (Pending vs 0) ---
             ml_today = ml[(ml['Date'].astype(str) == curr_date_str) & (ml['Name'] != 'NONE_PRESENT')] if not ml.empty else pd.DataFrame()
             ml_today_raw = ml[ml['Date'].astype(str) == curr_date_str] if not ml.empty else pd.DataFrame()
             
-            # Check if teacher at least clicked submit today
             has_submitted = not ml_today_raw.empty 
+            total_all = 0
             
             col1, col2, col3 = st.columns(3)
             if has_submitted:
                 pp_c = len(ml_today[ml_today['Class'] == 'CLASS PP'])
                 lpp_c = len(ml_today[ml_today['Class'] == 'CLASS LPP'])
-                total_all = len(ml_today) # You can adjust this if you strictly only want PP sum here
-                
+                total_all = len(ml_today)
                 col1.metric("Class PP", f"{pp_c}")
                 col2.metric("Class LPP", f"{lpp_c}")
                 col3.metric("Total MDM", f"{total_all}")
-                
-                if total_all == 0:
-                    st.warning("⚠️ Warning: MDM was officially submitted today, but ZERO students were marked present.")
             else:
                 col1.metric("Class PP", "-- Pending --")
                 col2.metric("Class LPP", "-- Pending --")
                 col3.metric("Total MDM", "-- Pending --")
                 st.info("Waiting for teachers to submit today's MDM logs.")
-            # ----------------------------------------------------
 
             c1, c2 = st.columns([2, 1])
             vd = c1.date_input("Select Date", datetime.now()).strftime("%d-%m-%Y")
@@ -455,17 +445,30 @@ else:
             fa = al[al['Status'] == True] if sa else al[(al['Date'].astype(str) == vd) & (al['Status'] == True)].copy() if not al.empty else pd.DataFrame()
             cf = "All"
             
-            # Filter out the '0' dummy rows for the breakdown tables
             if not fm.empty: fm = fm[fm['Name'] != 'NONE_PRESENT']
+
+            st.markdown(f"##### 🏫 Breakdown for {vd if not sa else 'All Time'}")
+            
+            # --- 0 Logic Warning directly within the Breakdown ---
+            is_viewing_today = (vd == curr_date_str)
+            if is_viewing_today and has_submitted and total_all == 0:
+                st.warning("⚠️ Warning: MDM was officially submitted today, but ZERO students were marked present.")
 
             if not fm.empty or not fa.empty:
                 mc = fm.groupby(['Class', 'Section']).size().reset_index(name='MDM Entry') if not fm.empty else pd.DataFrame(columns=['Class', 'Section', 'MDM Entry'])
                 ac = fa.groupby(['Class', 'Section']).size().reset_index(name='Attendance') if not fa.empty else pd.DataFrame(columns=['Class', 'Section', 'Attendance'])
                 sd = pd.merge(ac, mc, on=['Class', 'Section'], how='outer').fillna(0).infer_objects(copy=False)
                 sd['Attendance'], sd['MDM Entry'] = sd['Attendance'].astype(int), sd['MDM Entry'].astype(int)
+                
+                # --- Custom Sorting to force PP and LPP to the very top ---
+                class_order = ["CLASS PP", "CLASS LPP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V"]
+                cat_type = pd.CategoricalDtype(categories=class_order, ordered=True)
+                sd['Class'] = sd['Class'].astype(cat_type)
                 sd.sort_values(by=['Class', 'Section'], inplace=True)
+                sd['Class'] = sd['Class'].astype(str)
+                
                 if not sd.empty: sd = pd.concat([sd, pd.DataFrame([{'Class': 'TOTAL', 'Section': '', 'Attendance': sd['Attendance'].sum(), 'MDM Entry': sd['MDM Entry'].sum()}])], ignore_index=True)
-                st.markdown(f"##### 🏫 Breakdown for {vd if not sa else 'All Time'}")
+                
                 st.dataframe(sd, hide_index=True, use_container_width=True)
                 st.markdown("##### 📄 Detailed List")
                 if not fm.empty:
@@ -473,7 +476,9 @@ else:
                     cf = st.selectbox("Filter Class", ["All"] + sorted(fm['Class_Sec'].unique()))
                     ddf = fm[fm['Class_Sec'] == cf] if cf != "All" else fm
                     st.dataframe(ddf[['Date', 'Class', 'Section', 'Roll', 'Name']], hide_index=True)
-            else: st.info("No data available for this date.")
+            elif not (is_viewing_today and has_submitted and total_all == 0): 
+                st.info("No data available for this date.")
+                
             st.divider()
             if st.button(f"🗑️ Clear Data ({cf})"):
                 tm = fetch_sheet_data('mdm_log')
@@ -495,8 +500,13 @@ else:
                     else: ros = sm[(sm['Class'] == tc) & (sm['Section'] == ts)].copy()
                     
                     if not ros.empty:
-                        me = ml[(ml['Date'].astype(str) == curr_date_str) & (ml['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else ml['Class'] == tc) & (ml['Section'] == ts)]['Roll'].astype(str).tolist() if not ml.empty else []
-                        ros['MDM (Ate)'] = ros['Roll'].astype(str).isin(me)
+                        # --- Bug Fix: Match by both Class AND Roll to prevent phantom marks ---
+                        if not ml.empty:
+                            todays_ml = ml[ml['Date'].astype(str) == curr_date_str]
+                            marked_set = set(todays_ml['Class'].astype(str) + "_" + todays_ml['Roll'].astype(str))
+                            ros['MDM (Ate)'] = (ros['Class'].astype(str) + "_" + ros['Roll'].astype(str)).isin(marked_set)
+                        else:
+                            ros['MDM (Ate)'] = False
                         
                         st.write("📸 **Scan Missed ID Cards:**")
                         qv = qrcode_scanner(key='adm_mdm_qr')
@@ -519,7 +529,7 @@ else:
 
                                 if not match_df.empty:
                                     ar, an, ac = match_df.iloc[0]['Roll'], match_df.iloc[0]['Name'], match_df.iloc[0]['Class']
-                                    if str(ar) in me:
+                                    if match_df.iloc[0]['MDM (Ate)']:
                                         st.warning(f"⚠️ {an} is already marked for MDM today!")
                                     else:
                                         sk = f"{ac}_{ar}_{an}"
@@ -592,8 +602,14 @@ else:
                     else: ros = sm[(sm['Class'] == tc) & (sm['Section'] == ts)].copy()
                     
                     if not ros.empty:
-                        me = ml[(ml['Date'].astype(str) == curr_date_str) & (ml['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else ml['Class'] == tc) & (ml['Section'] == ts)]['Roll'].astype(str).tolist() if not ml.empty else []
-                        ros['MDM (Ate)'] = ros['Roll'].astype(str).isin(me)
+                        # --- Bug Fix: Match by both Class AND Roll for Attendance visual cue ---
+                        if not ml.empty:
+                            todays_ml = ml[ml['Date'].astype(str) == curr_date_str]
+                            marked_set = set(todays_ml['Class'].astype(str) + "_" + todays_ml['Roll'].astype(str))
+                            ros['MDM (Ate)'] = (ros['Class'].astype(str) + "_" + ros['Roll'].astype(str)).isin(marked_set)
+                        else:
+                            ros['MDM (Ate)'] = False
+
                         if 'Thumb_URL' not in ros.columns: ros['Thumb_URL'] = ""
                         with st.spinner("Loading profiles..."):
                             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe: ros['Photo'] = list(exe.map(get_secure_photo_uri, ros['Thumb_URL'].tolist()))

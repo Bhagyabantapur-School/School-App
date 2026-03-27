@@ -4,6 +4,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from google.auth.transport.requests import AuthorizedSession
 import datetime
+import pytz
 
 # --- 1. PAGE CONFIGURATION ---
 st.set_page_config(page_title="BPS Student Profile", page_icon="🎓", layout="wide")
@@ -30,7 +31,6 @@ def get_gspread_client():
 def load_database_data():
     client = get_gspread_client()
     
-    # 1. Open the Main Student Database (Read Only for this app)
     db_main = client.open("BPS_Database") 
     
     try:
@@ -42,12 +42,10 @@ def load_database_data():
         st.error(f"Could not find worksheet in BPS_Database: {e}.")
         st.stop()
         
-    # 2. Open the Dedicated Log File
     try:
         db_log = client.open("Students Profile")
-        log_ws = db_log.sheet1 # Automatically targets the first tab
+        log_ws = db_log.sheet1 
         
-        # Check if it's a brand new, empty sheet and initialize headers if needed
         if len(log_ws.row_values(1)) == 0:
             log_ws.append_row(["Date", "Class", "Section", "Roll", "Name", "Log Type", "Details"])
             df_logs = pd.DataFrame(columns=["Date", "Class", "Section", "Roll", "Name", "Log Type", "Details"])
@@ -55,7 +53,7 @@ def load_database_data():
             df_logs = pd.DataFrame(log_ws.get_all_records())
             
     except Exception as e:
-        st.error(f"Could not connect to 'Students Profile'. Check if the name is exact and shared with the service email. Error: {e}")
+        st.error(f"Could not connect to 'Students Profile'. Error: {e}")
         df_logs = pd.DataFrame(columns=["Date", "Class", "Section", "Roll", "Name", "Log Type", "Details"])
         
     return df_master, df_mdm, df_attendance, df_forms, df_logs
@@ -106,6 +104,42 @@ def display_student_photo(url):
 # --- 5. MAIN APP LOGIC ---
 st.title("🎓 BPS Student Profile Dashboard")
 
+# --- SIDEBAR: ADMIN SYNC & LOG ---
+st.sidebar.header("⚙️ System Tools")
+if st.sidebar.button("🔄 Sync Data & Log Update", use_container_width=True):
+    # 1. Clear the Streamlit cache to force a fresh data pull
+    st.cache_data.clear()
+    
+    # 2. Write the exact time to the System_Update_Log tab
+    try:
+        client = get_gspread_client()
+        db_main = client.open("BPS_Database")
+        
+        # Check if log tab exists, if not, create it
+        try:
+            update_ws = db_main.worksheet("System_Update_Log")
+        except gspread.exceptions.WorksheetNotFound:
+            update_ws = db_main.add_worksheet(title="System_Update_Log", rows="1000", cols="4")
+            update_ws.append_row(["Update Date", "Day", "Time (IST)", "Action Triggered"])
+            
+        # Get Current Indian Standard Time
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.datetime.now(ist)
+        
+        # Formatting to match requested DD.MM.YY and Day string
+        log_date = now.strftime("%d.%m.%y")
+        log_day = now.strftime("%a").upper() # Outputs MON, TUE, etc.
+        log_time = now.strftime("%I:%M:%S %p")
+        
+        update_ws.append_row([log_date, log_day, log_time, "Manual Cache Clear & Data Sync"])
+        
+        st.sidebar.success(f"✅ System Synced at {log_time}")
+    except Exception as e:
+        st.sidebar.error(f"Sync successful, but failed to log: {e}")
+
+st.sidebar.divider()
+
+# Attempt to load data
 try:
     df_master, df_mdm, df_attendance, df_forms, df_logs = load_database_data()
 except Exception as e:
@@ -271,16 +305,18 @@ if selected_class:
                             "💬 General Note"
                         ])
                         
-                        today_str = datetime.datetime.now().strftime("%d.%m.%y")
+                        # Generate current date in required DD.MM.YY format
+                        ist = pytz.timezone('Asia/Kolkata')
+                        today_str = datetime.datetime.now(ist).strftime("%d.%m.%y")
+                        
                         log_date = st.text_input("Date (DD.MM.YY)", today_str)
-                        log_notes = st.text_area("Details / Notes", placeholder="Enter the details of the conversation or illness here...")
+                        log_notes = st.text_area("Details / Notes", placeholder="Enter the details...")
                         
                         submitted = st.form_submit_button("Save to 'Students Profile'")
                         
                         if submitted:
                             client = get_gspread_client()
                             
-                            # Write directly to the new dedicated log file
                             db_log = client.open("Students Profile")
                             ws = db_log.sheet1
                             
@@ -297,5 +333,5 @@ if selected_class:
                                 log_notes
                             ])
                             
-                            st.success("✅ Log saved successfully to 'Students Profile'!")
+                            st.success("✅ Log saved successfully!")
                             st.rerun()

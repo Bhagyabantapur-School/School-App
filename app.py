@@ -58,7 +58,6 @@ def inject_security_css(user_name):
             .roster-container [data-testid="column"]:nth-child(3) {{ flex: 0 0 95px !important; max-width: 95px !important; width: 95px !important; }}
             .roster-container .stCheckbox p {{ font-size: 13px !important; padding-left: 1.2rem !important; margin-bottom: 0px !important; line-height: 1.2 !important; }}
             .roster-container .stCheckbox {{ min-height: 1.2rem; }}
-            /* Scale header for very small screens */
             .header-school-name {{ font-size: 18px !important; }}
         }}
     </style><script>document.addEventListener('contextmenu', e => e.preventDefault());</script><div class="watermark"></div>""", unsafe_allow_html=True)
@@ -147,9 +146,6 @@ def parse_time_safe(t_str):
         except: continue
     return None
 
-# ==========================================
-# UNIVERSAL APP HEADER (ALWAYS VISIBLE)
-# ==========================================
 def render_header():
     if os.path.exists("logo.png"):
         with open("logo.png", "rb") as f:
@@ -172,9 +168,6 @@ def render_header():
 
 render_header()
 
-# ==========================================
-# LOGIN SCREEN
-# ==========================================
 if not st.session_state.authenticated:
     inject_security_css("BPS DIGITAL") 
 
@@ -196,12 +189,12 @@ if not st.session_state.authenticated:
         if not hd.empty: st.table(hd)
         else: st.info("No data.")
 
-    # --- WHAT'S NEW SECTION ---
     with st.expander("✨ What's New in BPS Digital?"):
         st.markdown("""
         **Recent Updates & Upgrades:**
         * **📱 Enhanced Mobile View:** Horizontal side-by-side profile cards.
         * **🔊 Audio Feedback:** Instant "beep" when checking boxes.
+        * **📸 Instant Scanning:** Checkboxes now visually tick the exact millisecond a QR code is read.
         * **📌 Live Floating Counter:** A sticky badge tracks your counts.
         * **🏫 Class Bundling:** CLASS PP and LPP merged for faster entry.
         * **🗓️ Commuted Leaves:** Added Commuted Leave tracking with Multi-Day selection.
@@ -212,9 +205,6 @@ else:
     st.success(f"👋 Welcome, {st.session_state.user_name}")
     if st.button("Log Out"): st.session_state.authenticated = False; st.rerun()
 
-    # ==========================================
-    # ASSISTANT TEACHER DASHBOARD
-    # ==========================================
     if st.session_state.user_role == "teacher":
         t_name_select = st.session_state.user_name
         hd = get_local_csv('holidays.csv')
@@ -279,10 +269,17 @@ else:
                                         qd = {p.split(':')[0].strip(): p.split(':')[1].strip() for p in qv.split('|') if ':' in p}
                                         sr, sn = str(qd.get('Roll', '')), str(qd.get('Name', ''))
                                         if sr and sn:
-                                            ivs = not ros[(ros['Roll'].astype(str) == sr) & (ros['Name'].astype(str) == sn)].empty
-                                            if ivs:
-                                                sk = f"{sr}_{sn}"
-                                                if sk not in st.session_state.scanned_keys: st.session_state.scanned_keys.append(sk); st.success(f"✅ Scanned: {sn}")
+                                            # Match exactly against dataframe to prevent type mismatches
+                                            match_df = ros[(ros['Roll'].astype(str).str.strip() == sr) & (ros['Name'].astype(str).str.strip() == sn)]
+                                            if not match_df.empty:
+                                                ar, an = match_df.iloc[0]['Roll'], match_df.iloc[0]['Name']
+                                                sk = f"{ar}_{an}"
+                                                if sk not in st.session_state.scanned_keys: 
+                                                    st.session_state.scanned_keys.append(sk)
+                                                    # FORCE THE CHECKBOX TO TICK AND RERUN INSTANTLY
+                                                    st.session_state[f"mdm_{ar}_{an}"] = True 
+                                                    st.toast(f"✅ Scanned: {an}")
+                                                    st.rerun()
                                             else: st.error(f"❌ MISMATCH: {sn} is NOT in {tc} {ts}!")
                                     except: st.warning("⚠️ Invalid ID Card.")
 
@@ -300,8 +297,9 @@ else:
                                     with c1: st.image(r['Photo'], width=85) 
                                     with c2: st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} | {r['Class']}</span></div>", unsafe_allow_html=True)
                                     with c3:
-                                        isc = r['Scan_Key'] in st.session_state.scanned_keys
-                                        if st.checkbox("Ate MDM", value=isc, key=f"mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                                        # Removed value= parameter to allow session_state to control the tick mark
+                                        if st.checkbox("Ate MDM", key=f"mdm_{r['Roll']}_{r['Name']}"): 
+                                            sel_mdm.append(r)
                                     st.divider()
                                 
                                 cp.markdown(f"<div class='floating-counter'>✅ Selected: {len(sel_mdm)}</div>", unsafe_allow_html=True)

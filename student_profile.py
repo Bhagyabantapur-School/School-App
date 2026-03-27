@@ -46,11 +46,21 @@ def load_database_data():
         db_log = client.open("Students Profile")
         log_ws = db_log.sheet1 
         
-        if len(log_ws.row_values(1)) == 0:
-            log_ws.append_row(["Date", "Class", "Section", "Roll", "Name", "Log Type", "Details"])
-            df_logs = pd.DataFrame(columns=["Date", "Class", "Section", "Roll", "Name", "Log Type", "Details"])
+        headers = log_ws.row_values(1)
+        expected_cols = ["Date", "Class", "Section", "Roll", "Name", "Log Type", "Details"]
+        
+        if len(headers) == 0:
+            # If sheet is completely blank, add headers
+            log_ws.append_row(expected_cols)
+            df_logs = pd.DataFrame(columns=expected_cols)
         else:
-            df_logs = pd.DataFrame(log_ws.get_all_records())
+            # If headers exist, fetch records
+            records = log_ws.get_all_records()
+            if len(records) == 0:
+                # FIX: If there are headers but NO data rows, force columns to exist
+                df_logs = pd.DataFrame(columns=headers)
+            else:
+                df_logs = pd.DataFrame(records)
             
     except Exception as e:
         st.error(f"Could not connect to 'Students Profile'. Error: {e}")
@@ -178,7 +188,6 @@ if selected_class:
                     
                     # Direct Call Buttons Logic
                     if has_mobile and has_sec_mobile:
-                        # If both exist, show two buttons side-by-side
                         btn_col1, btn_col2 = st.columns(2)
                         with btn_col1:
                             st.link_button(f"📞 Primary: {raw_mobile}", f"tel:+91{raw_mobile}", use_container_width=True)
@@ -266,12 +275,16 @@ if selected_class:
                 # --- ACTIVITY & COMMUNICATION LOG ---
                 st.write("### 📝 Activity & Communication Log")
                 
-                student_logs = df_logs[
-                    (df_logs['Class'] == selected_class) & 
-                    (df_logs['Section'] == selected_section) & 
-                    (df_logs['Name'] == selected_name) &
-                    (df_logs['Roll'].astype(str) == str(selected_roll))
-                ]
+                # Verify columns exist before filtering to prevent KeyErrors
+                if 'Class' in df_logs.columns and 'Section' in df_logs.columns and 'Name' in df_logs.columns and 'Roll' in df_logs.columns:
+                    student_logs = df_logs[
+                        (df_logs['Class'] == selected_class) & 
+                        (df_logs['Section'] == selected_section) & 
+                        (df_logs['Name'] == selected_name) &
+                        (df_logs['Roll'].astype(str) == str(selected_roll))
+                    ]
+                else:
+                    student_logs = pd.DataFrame() # Empty if columns are completely missing
                 
                 if not student_logs.empty:
                     st.dataframe(student_logs[['Date', 'Log Type', 'Details']], hide_index=True, use_container_width=True)
@@ -315,5 +328,7 @@ if selected_class:
                                 log_notes
                             ])
                             
+                            # Clear the cache so the new entry shows up instantly
+                            st.cache_data.clear()
                             st.success("✅ Log saved successfully!")
                             st.rerun()

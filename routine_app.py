@@ -326,19 +326,19 @@ try:
             if st.button("🥃 250 ml", use_container_width=True):
                 wsheet = get_sheet("water_log")
                 wsheet.append_row([today_str, now.strftime('%H:%M'), 250])
-                st.cache_data.clear()
+                get_water_log.clear() # SURGICAL CACHE CLEAR
                 st.rerun()
         with col_w2:
             if st.button("🚰 500 ml", use_container_width=True):
                 wsheet = get_sheet("water_log")
                 wsheet.append_row([today_str, now.strftime('%H:%M'), 500])
-                st.cache_data.clear()
+                get_water_log.clear() # SURGICAL CACHE CLEAR
                 st.rerun()
         with col_w3:
             if st.button("🥛 1000 ml", use_container_width=True):
                 wsheet = get_sheet("water_log")
                 wsheet.append_row([today_str, now.strftime('%H:%M'), 1000])
-                st.cache_data.clear()
+                get_water_log.clear() # SURGICAL CACHE CLEAR
                 st.rerun()
 
         # --- SMART SCHEDULE INJECTION & COUNTDOWN ---
@@ -415,7 +415,8 @@ try:
                                 today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
                                 "0:00", str(r['Activity']).upper(), "", f"{r['Task_Name']} [RESCHEDULED]", f"Moved to {new_date.strftime('%Y-%m-%d')} {new_time}"
                             ])
-                            st.cache_data.clear()
+                            get_future_tasks.clear() # SURGICAL CACHE CLEAR
+                            get_activity_log.clear() # SURGICAL CACHE CLEAR
                             st.success("Task Rescheduled!")
                             time.sleep(1)
                             st.rerun()
@@ -434,7 +435,8 @@ try:
                                         today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
                                         "0:00", str(r['Activity']).upper(), "", f"{r['Task_Name']} [CANCELED]", f"Cancel Reason: {cancel_reason}"
                                     ])
-                                    st.cache_data.clear()
+                                    get_future_tasks.clear() # SURGICAL CACHE CLEAR
+                                    get_activity_log.clear() # SURGICAL CACHE CLEAR
                                     st.rerun()
                 st.markdown("<hr style='margin-top:5px; margin-bottom:15px;'>", unsafe_allow_html=True)
 
@@ -459,6 +461,8 @@ try:
                         today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
                         "0:00", current_activity, "", task, "Checked off"
                     ])
+                    get_activity_log.clear() # SURGICAL CACHE CLEAR
+                    
                     if "[Due:" in task:
                         raw_task = task.split(" [Due:")[0].strip()
                         matches = future_df[(future_df['Task_Name'].str.strip() == raw_task) & (future_df['Type'] == 'Checklist')]
@@ -466,7 +470,8 @@ try:
                             r_idx = int(matches.iloc[0]['row_index'])
                             fsheet = get_sheet("future_tasks")
                             fsheet.update_cell(r_idx, 7, "Completed") 
-                    st.cache_data.clear()
+                            get_future_tasks.clear() # SURGICAL CACHE CLEAR
+                            
                     st.rerun()
 
         # ==========================================
@@ -547,6 +552,7 @@ try:
                                     r_idx = int(matches.iloc[0]['row_index'])
                                     fsheet = get_sheet("future_tasks")
                                     fsheet.update_cell(r_idx, 7, "Completed") 
+                                    get_future_tasks.clear() # SURGICAL CACHE CLEAR
                                     
                             if is_project and new_proj_status:
                                 p_matches = proj_df[proj_df['Task Name'] == raw_task_name]
@@ -554,8 +560,9 @@ try:
                                     p_idx = int(p_matches.iloc[0]['row_index'])
                                     psheet = get_sheet("project_tasks")
                                     psheet.update_cell(p_idx, 3, new_proj_status)
+                                    get_project_tasks.clear() # SURGICAL CACHE CLEAR
                                     
-                            st.cache_data.clear()
+                            get_activity_log.clear() # SURGICAL CACHE CLEAR
                             st.success(f"Saved: {display_name}")
                             time.sleep(1)
                             st.rerun()
@@ -564,7 +571,7 @@ try:
                         if st.button("❌ CANCEL", key=f"cancel_{sheet_row}", use_container_width=True):
                             log_sheet = get_sheet("activity_log")
                             log_sheet.delete_rows(sheet_row)
-                            st.cache_data.clear()
+                            get_activity_log.clear() # SURGICAL CACHE CLEAR
                             st.warning(f"Cancelled: {display_name}")
                             time.sleep(1)
                             st.rerun()
@@ -586,7 +593,7 @@ try:
                                 today_str, now.strftime('%H:%M'), "RUNNING", "RUNNING",    
                                 current_activity, task, "", "Auto-logged via Timer"
                             ])
-                            st.cache_data.clear()
+                            get_activity_log.clear() # SURGICAL CACHE CLEAR
                             st.rerun()
             
             # --- 3. RENDER PROJECT TRACKER (Not Currently Running) ---
@@ -630,13 +637,14 @@ try:
                             
                             if curr_stat == "Not Started":
                                 psheet.update_cell(r_idx, 3, "In Progress")
+                                get_project_tasks.clear() # SURGICAL CACHE CLEAR
                                 
                             log_sheet = get_sheet("activity_log")
                             log_sheet.append_row([
                                 today_str, now.strftime('%H:%M'), "RUNNING", "RUNNING",    
                                 "WORK", selected_p_task_full, "", "Project Tracking"
                             ])
-                            st.cache_data.clear()
+                            get_activity_log.clear() # SURGICAL CACHE CLEAR
                             st.rerun()
 
             # --- 4. RENDER MEETING/VISITOR TRACKER ---
@@ -674,7 +682,7 @@ try:
                         today_str, now.strftime('%H:%M'), "RUNNING", "RUNNING",    
                         "PEOPLE", sub_act_str.upper(), "", notes_str
                     ])
-                    st.cache_data.clear()
+                    get_activity_log.clear() # SURGICAL CACHE CLEAR
                     st.rerun()
 
         st.markdown("---")
@@ -727,7 +735,7 @@ try:
                             "Pending",
                             ""
                         ])
-                        st.cache_data.clear()
+                        get_future_tasks.clear() # SURGICAL CACHE CLEAR
                         st.success("Task Scheduled! It will appear 24 hours before due time.")
                         time.sleep(1.5)
                         st.rerun()
@@ -762,7 +770,7 @@ try:
                             f"{h}:{m//60:02d}", log_activity.upper().strip(), log_sub_activity.upper().strip(),
                             log_chk.strip(), log_notes
                         ])
-                        st.cache_data.clear()
+                        get_activity_log.clear() # SURGICAL CACHE CLEAR
                         st.success("Activity logged!")
                         time.sleep(1)
                         st.rerun()
@@ -839,7 +847,7 @@ try:
                     data_to_upload = [final_df.columns.values.tolist()] + final_df.values.tolist()
                     routine_sheet.update(values=data_to_upload, range_name="A1")
                     
-                    st.cache_data.clear()
+                    get_routine_data.clear() # SURGICAL CACHE CLEAR
                     st.success("Schedule successfully updated!")
                     time.sleep(1)
                     st.rerun()
@@ -980,7 +988,7 @@ try:
                     if p_task and final_p_name:
                         psheet = get_sheet("project_tasks")
                         psheet.append_row([p_task.strip(), final_p_name, p_status, p_start.strftime('%Y-%m-%d'), p_end.strftime('%Y-%m-%d')])
-                        st.cache_data.clear()
+                        get_project_tasks.clear() # SURGICAL CACHE CLEAR
                         st.success("Task added!")
                         time.sleep(1)
                         st.rerun()
@@ -1014,11 +1022,10 @@ try:
                 current_start = row['Start_DT']
                 current_end = row['End_DT']
                 
-                # --- NEW: Smart Transition vs Gap Logic ---
                 if last_end_time and current_start > last_end_time:
                     gap_duration = (current_start - last_end_time).total_seconds() / 60
                     if gap_duration > 0:
-                        if gap_duration <= 5: # Treat 5 mins or less as a Transition
+                        if gap_duration <= 5: 
                             timeline_events.append({
                                 'type': 'transition',
                                 'start': last_end_time.strftime('%I:%M %p'),
@@ -1028,7 +1035,7 @@ try:
                                 'sub': '',
                                 'notes': ''
                             })
-                        else: # Treat greater than 5 mins as a true Unlogged Gap
+                        else: 
                             timeline_events.append({
                                 'type': 'gap',
                                 'start': last_end_time.strftime('%I:%M %p'),
@@ -1062,7 +1069,6 @@ try:
                 else:
                     dur_display = f"{em}m"
 
-                # --- NEW: Rendering the 3 Event Types ---
                 if event['type'] == 'transition':
                     st.markdown(f"""
                     <div style='background-color: #fff3e0; border: 1px solid #ffb74d; padding: 8px; border-radius: 6px; margin-bottom: 10px; text-align: center; color: #e65100; font-size: 14px;'>
@@ -1093,7 +1099,7 @@ try:
                                 dur_str, "FREE TIME", "Planned Break",
                                 "", "Logged from Timeline Gap"
                             ])
-                            st.cache_data.clear()
+                            get_activity_log.clear() # SURGICAL CACHE CLEAR
                             st.rerun()
                 else:
                     cat = event['activity']
@@ -1105,67 +1111,4 @@ try:
                     else: border_color = "#555555"
                     
                     sub_text = f"<br><b>{event['sub']}</b>" if event['sub'] else ""
-                    note_text = f"<br><span style='font-size: 13px; color: #666;'>{event['notes']}</span>" if event['notes'] else ""
-                    
-                    st.markdown(f"""
-                    <div style='background-color: white; border-left: 6px solid {border_color}; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'>
-                        <div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({dur_display})</div>
-                        <div style='color: {border_color}; font-weight: bold; font-size: 16px;'>{event['activity']}</div>
-                        <div style='color: #333;'>{sub_text}{note_text}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-            # --- DAILY SUMMARY ---
-            st.markdown("---")
-            st.markdown("<h4 style='text-align: center; color: #555;'>📊 Daily Summary</h4>", unsafe_allow_html=True)
-            
-            total_tracked = sum(e['duration'] for e in timeline_events if e['type'] == 'task')
-            total_gap = sum(e['duration'] for e in timeline_events if e['type'] == 'gap')
-            
-            col_s1, col_s2, col_s3 = st.columns(3)
-            with col_s1:
-                th, tm = divmod(total_tracked, 60)
-                st.metric(label="Total Tracked Time", value=f"{int(th)}h {int(tm)}m")
-            with col_s2:
-                gh, gm = divmod(total_gap, 60)
-                st.metric(label="Total Unlogged Time", value=f"{int(gh)}h {int(gm)}m")
-            with col_s3:
-                # Transition time is completely excluded from the penalty math here!
-                efficiency = (total_tracked / (total_tracked + total_gap)) * 100 if (total_tracked + total_gap) > 0 else 0
-                st.metric(label="Tracking Efficiency", value=f"{int(efficiency)}%")
-                
-            category_totals = {}
-            for e in timeline_events:
-                if e['type'] == 'task':
-                    cat = e['activity']
-                    category_totals[cat] = category_totals.get(cat, 0) + e['duration']
-                    
-            if category_totals:
-                st.markdown("<h5 style='color: #555; margin-top: 15px;'>Time by Category</h5>", unsafe_allow_html=True)
-                cat_df = pd.DataFrame(list(category_totals.items()), columns=['Category', 'Minutes'])
-                cat_df = cat_df.sort_values(by='Minutes', ascending=False)
-                
-                cat_cols = st.columns(min(len(cat_df), 4))
-                for idx, row in cat_df.iterrows():
-                    ch, cm = divmod(row['Minutes'], 60)
-                    col_idx = idx % 4 if len(cat_df) >= 4 else idx
-                    with cat_cols[col_idx]:
-                        st.markdown(f"<div style='background-color:#f0f2f6; padding:10px; border-radius:8px; text-align:center; margin-bottom:10px;'><b style='color:#333;'>{row['Category']}</b><br><span style='color:#0068c9;'>{int(ch)}h {int(cm)}m</span></div>", unsafe_allow_html=True)
-                        
-        else:
-            st.info(f"No completed activities logged for {selected_date_str}.")
-
-    # ==========================================
-    # TAB 6: APP HUB
-    # ==========================================
-    with tab6:
-        st.markdown("<h3 style='text-align: center; color: #555; margin-bottom: 20px;'>🔗 Quick Links</h3>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #888; margin-bottom: 30px;'>Access your other modules directly from here.</p>", unsafe_allow_html=True)
-        
-        st.link_button("🏫 Admission Hub", "https://your-admission-hub-url.streamlit.app", use_container_width=True)
-        st.link_button("📱 Main Dashboard (app.py)", "https://your-main-app-url.streamlit.app", use_container_width=True)
-        st.link_button("📋 Form Manager", "https://your-form-manager-url.streamlit.app", use_container_width=True)
-        st.link_button("🪪 ID Card Generator", "https://your-id-card-url.streamlit.app", use_container_width=True)
-
-except Exception as e:
-    st.error(f"System Error: {e}")
+                    note_text = f"<br><span style='font-size: 13px; color: #666;'>{event['notes']}</span>

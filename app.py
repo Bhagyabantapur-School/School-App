@@ -73,6 +73,8 @@ if 'authenticated' not in st.session_state: st.session_state.authenticated = Fal
 if 'user_role' not in st.session_state: st.session_state.user_role = None
 if 'user_name' not in st.session_state: st.session_state.user_name = None
 if 'scan_msg' not in st.session_state: st.session_state.scan_msg = None
+if 'admin_scanned_keys' not in st.session_state: st.session_state.admin_scanned_keys = []
+if 'admin_scan_msg' not in st.session_state: st.session_state.admin_scan_msg = None
 
 @st.cache_resource
 def get_google_credentials(): return Credentials.from_service_account_info(dict(st.secrets["gcp_service_account"]), scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive.readonly"])
@@ -193,12 +195,11 @@ if not st.session_state.authenticated:
     with st.expander("✨ What's New in BPS Digital?"):
         st.markdown("""
         **Recent Updates & Upgrades:**
+        * **🏫 Admin MDM Portal:** Head Teacher can now scan late/missed students directly.
         * **📱 Enhanced Mobile View:** Horizontal side-by-side profile cards.
         * **🔊 Audio Feedback:** Instant "beep" when checking boxes.
-        * **📸 Instant Scanning:** Checkboxes now visually tick the exact millisecond a QR code is read.
+        * **📸 Instant Scanning:** Checkboxes visibly tick the exact millisecond a QR code is read.
         * **📌 Live Floating Counter:** A sticky badge tracks your counts.
-        * **🏫 Class Bundling:** CLASS PP and LPP merged for faster entry.
-        * **🗓️ Commuted Leaves:** Added Commuted Leave tracking with Multi-Day selection.
         * **⚡ Anti-Crash Engine:** Upgraded Cloud connectivity.
         """)
 else:
@@ -224,7 +225,9 @@ else:
                     if not ml[(ml['Date'].astype(str).str.strip() == curr_date_str) & (ml['Teacher'].astype(str).str.strip() == t_name_select)].empty:
                         already_sub = True
 
-                if already_sub: st.success("✅ MDM Submitted for today.")
+                if already_sub: 
+                    st.success("✅ MDM Submitted for today.")
+                    st.info("💡 **Note:** If any student was missed during this submission, please send them to Head Sir to complete their MDM Entry.")
                 else:
                     st.subheader("Student MDM Entry")
                     rout = get_local_csv('routine.csv')
@@ -267,7 +270,6 @@ else:
                                 st.write("📸 **Scan ID Cards (or tick manually below):**")
                                 qv = qrcode_scanner(key='at_qr')
                                 
-                                # Moved the success message BELOW the scanner
                                 if st.session_state.scan_msg:
                                     st.success(st.session_state.scan_msg)
                                     st.session_state.scan_msg = None
@@ -399,7 +401,7 @@ else:
                 else: st.info("No holiday data available.")
 
     elif st.session_state.user_role == "admin":
-        tabs = st.tabs(["📊 Summary", "📝 Attend", "⏳ Live", "👨‍🏫 Leave", "📢 Staff Notice", "📅 Hols"])
+        tabs = st.tabs(["📊 Summary", "🍱 MDM Entry", "📝 Attend", "⏳ Live", "👨‍🏫 Leave", "📢 Staff Notice", "📅 Hols"])
         
         with tabs[0]: 
             st.subheader(f"MDM Status: {curr_date_str}")
@@ -436,6 +438,84 @@ else:
                     overwrite_sheet_df('mdm_log', tm); st.success("Cleared!"); st.rerun()
 
         with tabs[1]:
+            st.subheader("Admin MDM Entry (Late/Missed)")
+            sc_mdm = st.selectbox("Mark MDM for Class", ATTENDANCE_OPTIONS, key='adm_mdm_sel')
+            if sc_mdm != "Select Class...":
+                tc, ts = sc_mdm.rsplit(' ', 1)
+                sm = fetch_sheet_data('students_master')
+                ml = fetch_sheet_data('mdm_log')
+                if not sm.empty:
+                    if 'Section' not in sm.columns: sm['Section'] = 'A'
+                    if tc == 'CLASS PP': ros = sm[(sm['Class'].isin(['CLASS PP', 'CLASS LPP'])) & (sm['Section'] == ts)].copy()
+                    else: ros = sm[(sm['Class'] == tc) & (sm['Section'] == ts)].copy()
+                    
+                    if not ros.empty:
+                        me = ml[(ml['Date'].astype(str) == curr_date_str) & (ml['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else ml['Class'] == tc) & (ml['Section'] == ts)]['Roll'].astype(str).tolist() if not ml.empty else []
+                        ros['MDM (Ate)'] = ros['Roll'].astype(str).isin(me)
+                        
+                        st.write("📸 **Scan Missed ID Cards (or tick manually below):**")
+                        qv = qrcode_scanner(key='adm_mdm_qr')
+                        
+                        if st.session_state.admin_scan_msg:
+                            st.success(st.session_state.admin_scan_msg)
+                            st.session_state.admin_scan_msg = None
+                            
+                        if qv:
+                            should_rerun = False
+                            try:
+                                qd = {p.split(':')[0].strip(): p.split(':')[1].strip() for p in qv.split('|') if ':' in p}
+                                sr, sn = str(qd.get('Roll', '')), str(qd.get('Name', ''))
+                                if sr and sn:
+                                    match_df = ros[(ros['Roll'].astype(str).str.strip() == sr) & (ros['Name'].astype(str).str.strip() == sn)]
+                                    if not match_df.empty:
+                                        ar, an = match_df.iloc[0]['Roll'], match_df.iloc[0]['Name']
+                                        if str(ar) in me:
+                                            st.warning(f"⚠️ {an} is already marked for MDM today!")
+                                        else:
+                                            sk = f"{ar}_{an}"
+                                            if sk not in st.session_state.admin_scanned_keys: 
+                                                st.session_state.admin_scanned_keys.append(sk)
+                                                st.session_state[f"adm_mdm_{ar}_{an}"] = True 
+                                                st.session_state.admin_scan_msg = f"✅ Scanned Successfully: {an}"
+                                                should_rerun = True
+                                    else: st.error(f"❌ MISMATCH: {sn} is NOT in {tc} {ts}!")
+                            except Exception: st.warning("⚠️ Invalid ID Card.")
+                            if should_rerun: st.rerun()
+
+                        ros['Scan_Key'] = ros['Roll'].astype(str) + "_" + ros['Name'].astype(str)
+                        if 'Thumb_URL' not in ros.columns: ros['Thumb_URL'] = ""
+                        with st.spinner("Loading profiles..."):
+                            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe: ros['Photo'] = list(exe.map(get_secure_photo_uri, ros['Thumb_URL'].tolist()))
+
+                        st.markdown("### Roster Selection")
+                        cp = st.empty()
+                        st.markdown('<div class="roster-container">', unsafe_allow_html=True)
+                        sel_mdm, alc = [], 0
+                        for _, r in ros.iterrows():
+                            c1, c2, c3 = st.columns([1, 4, 2])
+                            with c1: st.image(r['Photo'], width=85) 
+                            with c2: st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} | {r['Class']}</span></div>", unsafe_allow_html=True)
+                            with c3:
+                                if r['MDM (Ate)']:
+                                    st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
+                                    alc += 1
+                                else:
+                                    isc = r['Scan_Key'] in st.session_state.admin_scanned_keys
+                                    if st.checkbox("Ate MDM", value=isc, key=f"adm_mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                            st.divider()
+                        
+                        cp.markdown(f"<div class='floating-counter'>✅ Selected: {len(sel_mdm)} | Done: {alc}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<h3 style='text-align:center;'>✅ New Selected: {len(sel_mdm)}</h3>", unsafe_allow_html=True)
+                        if st.button("Submit Admin MDM Data"):
+                            if sel_mdm:
+                                nr = [{'Date': curr_date_str, 'Teacher': f"{st.session_state.user_name} (Admin)", 'Class': x['Class'], 'Section': ts, 'Roll': x['Roll'], 'Name': x['Name'], 'Time': now.strftime("%H:%M")} for x in sel_mdm]
+                                append_sheet_df('mdm_log', pd.DataFrame(nr))
+                                st.session_state.admin_scanned_keys = []; st.success(f"Added {len(nr)} late entries to Cloud DB!"); st.rerun()
+                            else: st.warning("No new students selected.")
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    else: st.warning("No students found.")
+
+        with tabs[2]:
             st.subheader("Student Attendance")
             sc = st.selectbox("Mark Attendance", ATTENDANCE_OPTIONS, key='ht_att')
             if sc != "Select Class...":
@@ -494,7 +574,7 @@ else:
                     st.markdown(f"<table class='report-table'><tr><th>Class PP</th><th>I-IV</th><th>Class V</th><th>TOTAL</th></tr><tr><td>{p}</td><td>{i4}</td><td>{v}</td><td><b>{p+i4+v}</b></td></tr></table>", unsafe_allow_html=True)
                 else: st.info(f"No attendance for {avd}.")
 
-        with tabs[2]: 
+        with tabs[3]: 
             st.subheader(f"🏫 Routine Status")
             rout = get_local_csv('routine.csv')
             tdy = now.strftime('%A')
@@ -522,7 +602,7 @@ else:
                 else: st.info("☕ No classes ongoing.")
                 st.dataframe(tr[['Start_Time', 'End_Time', 'Class', 'Subject', 'Teacher']], hide_index=True)
 
-        with tabs[3]: 
+        with tabs[4]: 
             st.subheader("Substitution Manager")
             abt = st.selectbox("Absent Teacher", ["Select..."] + TEACHER_LIST)
             if abt != "Select...":
@@ -580,12 +660,12 @@ else:
                             st.info("No classes scheduled.")
                             if st.button("Mark Leave"): append_sheet_df('teacher_leave', pd.DataFrame([{"Date": sds, "Teacher": abt, "Type": lt, "Substitute": "None", "Detailed_Sub_Log": "None"}])); st.rerun()
 
-        with tabs[4]: 
+        with tabs[5]: 
             st.subheader("📢 Staff Notice")
             n = st.text_area("Notice", get_notice())
             if st.button("Publish to Cloud"): publish_notice(n); st.success("Published!")
 
-        with tabs[5]: 
+        with tabs[6]: 
             st.subheader("🗓️ School Holiday List")
             hd = get_local_csv('holidays.csv')
             if not hd.empty: st.data_editor(hd, num_rows="dynamic", key="h_edit")

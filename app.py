@@ -265,23 +265,23 @@ else:
                                 st.write("📸 **Scan ID Cards (or tick manually below):**")
                                 qv = qrcode_scanner(key='at_qr')
                                 if qv:
+                                    should_rerun = False
                                     try:
                                         qd = {p.split(':')[0].strip(): p.split(':')[1].strip() for p in qv.split('|') if ':' in p}
                                         sr, sn = str(qd.get('Roll', '')), str(qd.get('Name', ''))
                                         if sr and sn:
-                                            # Match exactly against dataframe to prevent type mismatches
                                             match_df = ros[(ros['Roll'].astype(str).str.strip() == sr) & (ros['Name'].astype(str).str.strip() == sn)]
                                             if not match_df.empty:
                                                 ar, an = match_df.iloc[0]['Roll'], match_df.iloc[0]['Name']
                                                 sk = f"{ar}_{an}"
                                                 if sk not in st.session_state.scanned_keys: 
                                                     st.session_state.scanned_keys.append(sk)
-                                                    # FORCE THE CHECKBOX TO TICK AND RERUN INSTANTLY
                                                     st.session_state[f"mdm_{ar}_{an}"] = True 
                                                     st.toast(f"✅ Scanned: {an}")
-                                                    st.rerun()
+                                                    should_rerun = True
                                             else: st.error(f"❌ MISMATCH: {sn} is NOT in {tc} {ts}!")
-                                    except: st.warning("⚠️ Invalid ID Card.")
+                                    except Exception: st.warning("⚠️ Invalid ID Card.")
+                                    if should_rerun: st.rerun()
 
                                 ros['Scan_Key'] = ros['Roll'].astype(str) + "_" + ros['Name'].astype(str)
                                 if 'Thumb_URL' not in ros.columns: ros['Thumb_URL'] = ""
@@ -297,9 +297,8 @@ else:
                                     with c1: st.image(r['Photo'], width=85) 
                                     with c2: st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} | {r['Class']}</span></div>", unsafe_allow_html=True)
                                     with c3:
-                                        # Removed value= parameter to allow session_state to control the tick mark
-                                        if st.checkbox("Ate MDM", key=f"mdm_{r['Roll']}_{r['Name']}"): 
-                                            sel_mdm.append(r)
+                                        isc = r['Scan_Key'] in st.session_state.scanned_keys
+                                        if st.checkbox("Ate MDM", value=isc, key=f"mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
                                     st.divider()
                                 
                                 cp.markdown(f"<div class='floating-counter'>✅ Selected: {len(sel_mdm)}</div>", unsafe_allow_html=True)

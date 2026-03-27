@@ -154,8 +154,16 @@ if selected_class:
                 else:
                     display_code = "N/A"
                 
-                raw_mobile = str(student.get('Mobile', '')).split('.')[0]
+                # Format Primary Mobile
+                raw_mobile = str(student.get('Mobile', '')).split('.')[0].strip()
                 has_mobile = raw_mobile.isdigit() and len(raw_mobile) >= 10
+                
+                # Format Secondary Mobile
+                raw_sec_mobile = str(student.get('Secondary Mobile', '')).split('.')[0].strip()
+                if raw_sec_mobile.lower() in ['nan', 'none', '']:
+                    has_sec_mobile = False
+                else:
+                    has_sec_mobile = raw_sec_mobile.isdigit() and len(raw_sec_mobile) >= 10
                 
                 head_col1, head_col2 = st.columns([1, 4]) 
 
@@ -168,8 +176,18 @@ if selected_class:
                     st.write(f"**Class:** {student['Class']} '{student['Section']}' | **Roll No:** {student['Roll']} | **Student Code:** {display_code}")
                     st.caption(f"**Parents:** {student.get('Father', 'N/A')} & {student.get('Mother', 'N/A')}")
                     
-                    if has_mobile:
+                    # Direct Call Buttons Logic
+                    if has_mobile and has_sec_mobile:
+                        # If both exist, show two buttons side-by-side
+                        btn_col1, btn_col2 = st.columns(2)
+                        with btn_col1:
+                            st.link_button(f"📞 Primary: {raw_mobile}", f"tel:+91{raw_mobile}", use_container_width=True)
+                        with btn_col2:
+                            st.link_button(f"📞 Secondary: {raw_sec_mobile}", f"tel:+91{raw_sec_mobile}", use_container_width=True)
+                    elif has_mobile:
                         st.link_button(f"📞 Call Guardian ({raw_mobile})", f"tel:+91{raw_mobile}")
+                    elif has_sec_mobile:
+                        st.link_button(f"📞 Call Guardian ({raw_sec_mobile})", f"tel:+91{raw_sec_mobile}")
                     else:
                         st.error("📞 No valid mobile number on record.")
                 

@@ -11,7 +11,6 @@ st.set_page_config(page_title="BPS Student Profile", page_icon="🎓", layout="w
 # --- 2. SECURE CREDENTIALS & CONNECTIONS ---
 @st.cache_resource
 def get_google_credentials():
-    """Loads credentials once to be used by both Sheets and Drive API."""
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive.readonly"
@@ -30,30 +29,40 @@ def get_gspread_client():
 @st.cache_data(ttl=600)
 def load_database_data():
     client = get_gspread_client()
-    db = client.open("BPS_Database") 
+    
+    # 1. Open the Main Student Database (Read Only for this app)
+    db_main = client.open("BPS_Database") 
     
     try:
-        df_master = pd.DataFrame(db.worksheet("students_master").get_all_records())
-        df_mdm = pd.DataFrame(db.worksheet("mdm_log").get_all_records())
-        df_attendance = pd.DataFrame(db.worksheet("student_attendance_master").get_all_records())
-        df_forms = pd.DataFrame(db.worksheet("form_distribution_log").get_all_records())
-        
-        # Try to load the activity log, create empty dataframe if the tab doesn't exist yet
-        try:
-            df_logs = pd.DataFrame(db.worksheet("activity_log").get_all_records())
-        except gspread.exceptions.WorksheetNotFound:
-            df_logs = pd.DataFrame(columns=["Date", "Class", "Section", "Roll", "Name", "Log Type", "Details"])
-            
+        df_master = pd.DataFrame(db_main.worksheet("students_master").get_all_records())
+        df_mdm = pd.DataFrame(db_main.worksheet("mdm_log").get_all_records())
+        df_attendance = pd.DataFrame(db_main.worksheet("student_attendance_master").get_all_records())
+        df_forms = pd.DataFrame(db_main.worksheet("form_distribution_log").get_all_records())
     except gspread.exceptions.WorksheetNotFound as e:
-        st.error(f"Could not find worksheet: {e}. Please check your tab names.")
+        st.error(f"Could not find worksheet in BPS_Database: {e}.")
         st.stop()
+        
+    # 2. Open the Dedicated Log File
+    try:
+        db_log = client.open("Students Profile")
+        log_ws = db_log.sheet1 # Automatically targets the first tab
+        
+        # Check if it's a brand new, empty sheet and initialize headers if needed
+        if len(log_ws.row_values(1)) == 0:
+            log_ws.append_row(["Date", "Class", "Section", "Roll", "Name", "Log Type", "Details"])
+            df_logs = pd.DataFrame(columns=["Date", "Class", "Section", "Roll", "Name", "Log Type", "Details"])
+        else:
+            df_logs = pd.DataFrame(log_ws.get_all_records())
+            
+    except Exception as e:
+        st.error(f"Could not connect to 'Students Profile'. Check if the name is exact and shared with the service email. Error: {e}")
+        df_logs = pd.DataFrame(columns=["Date", "Class", "Section", "Roll", "Name", "Log Type", "Details"])
         
     return df_master, df_mdm, df_attendance, df_forms, df_logs
 
 # --- 4. SECURE IMAGE FETCHER ---
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_secure_image_bytes(file_id):
-    """Securely downloads the image using the authorized service account."""
     try:
         creds = get_google_credentials()
         authed_session = AuthorizedSession(creds)
@@ -68,7 +77,6 @@ def fetch_secure_image_bytes(file_id):
         return None
 
 def display_student_photo(url):
-    """Extracts the ID and passes it to the secure fetcher."""
     fallback_image = "https://www.w3schools.com/howto/img_avatar.png"
     
     if pd.isna(url) or url == "" or not isinstance(url, str):
@@ -140,7 +148,6 @@ if selected_class:
                 # --- PROFILE HEADER ---
                 st.divider()
                 
-                # Format Student Code
                 raw_code = str(student.get('Student Code', 'N/A'))
                 if raw_code.lower() not in ['n/a', 'nan', 'none', '']:
                     raw_code = raw_code.replace("'", "").split('.')[0]
@@ -148,7 +155,6 @@ if selected_class:
                 else:
                     display_code = "N/A"
                 
-                # Format Mobile Number for the Call Button
                 raw_mobile = str(student.get('Mobile', '')).split('.')[0]
                 has_mobile = raw_mobile.isdigit() and len(raw_mobile) >= 10
                 
@@ -163,7 +169,6 @@ if selected_class:
                     st.write(f"**Class:** {student['Class']} '{student['Section']}' | **Roll No:** {student['Roll']} | **Student Code:** {display_code}")
                     st.caption(f"**Parents:** {student.get('Father', 'N/A')} & {student.get('Mother', 'N/A')}")
                     
-                    # Direct Call Button
                     if has_mobile:
                         st.link_button(f"📞 Call Guardian ({raw_mobile})", f"tel:+91{raw_mobile}")
                     else:
@@ -244,7 +249,6 @@ if selected_class:
                 # --- ACTIVITY & COMMUNICATION LOG ---
                 st.write("### 📝 Activity & Communication Log")
                 
-                # Show Previous Logs
                 student_logs = df_logs[
                     (df_logs['Class'] == selected_class) & 
                     (df_logs['Section'] == selected_section) & 
@@ -257,7 +261,6 @@ if selected_class:
                 else:
                     st.caption("No previous activities logged for this student.")
 
-                # Form to Add New Log
                 with st.expander("➕ Add New Log Entry"):
                     with st.form("log_form", clear_on_submit=True):
                         log_type = st.selectbox("Log Type", [
@@ -268,25 +271,22 @@ if selected_class:
                             "💬 General Note"
                         ])
                         
-                        # Set default date format DD.MM.YY 
                         today_str = datetime.datetime.now().strftime("%d.%m.%y")
                         log_date = st.text_input("Date (DD.MM.YY)", today_str)
                         log_notes = st.text_area("Details / Notes", placeholder="Enter the details of the conversation or illness here...")
                         
-                        submitted = st.form_submit_button("Save to Database")
+                        submitted = st.form_submit_button("Save to 'Students Profile'")
                         
                         if submitted:
                             client = get_gspread_client()
-                            db = client.open("BPS_Database")
                             
-                            # Auto-create the worksheet if it doesn't exist
-                            try:
-                                ws = db.worksheet("activity_log")
-                            except gspread.exceptions.WorksheetNotFound:
-                                ws = db.add_worksheet(title="activity_log", rows="1000", cols="7")
+                            # Write directly to the new dedicated log file
+                            db_log = client.open("Students Profile")
+                            ws = db_log.sheet1
+                            
+                            if len(ws.row_values(1)) == 0:
                                 ws.append_row(["Date", "Class", "Section", "Roll", "Name", "Log Type", "Details"])
                             
-                            # Append the new log
                             ws.append_row([
                                 log_date, 
                                 selected_class, 
@@ -297,5 +297,5 @@ if selected_class:
                                 log_notes
                             ])
                             
-                            st.success("✅ Log saved successfully!")
-                            st.rerun() # Refresh the app to show the new log immediately
+                            st.success("✅ Log saved successfully to 'Students Profile'!")
+                            st.rerun()

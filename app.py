@@ -91,7 +91,17 @@ sh = init_gsheets()
 
 @st.cache_data(ttl=600) 
 def fetch_sheet_data(sheet_name):
-    try: return pd.DataFrame(sh.worksheet(sheet_name).get_all_records()).replace({'TRUE': True, 'FALSE': False, 'True': True, 'False': False}).infer_objects(copy=False)
+    try: 
+        df = pd.DataFrame(sh.worksheet(sheet_name).get_all_records()).replace({'TRUE': True, 'FALSE': False, 'True': True, 'False': False}).infer_objects(copy=False)
+        # BUG FIX: Instantly normalizes old DD-MM-YYYY dates into DD.MM.YY format to prevent missing data
+        if 'Date' in df.columns:
+            def fix_date(d):
+                d = str(d).strip()
+                if len(d) == 10 and d[2] in ['-', '.'] and d[5] in ['-', '.']:
+                    return d[:6] + d[8:] 
+                return d
+            df['Date'] = df['Date'].apply(fix_date).str.replace('-', '.')
+        return df
     except: return pd.DataFrame()
 
 def clear_sheet_cache(): fetch_sheet_data.clear(); get_notice.clear()
@@ -141,7 +151,6 @@ def get_secure_photo_uri(url):
 
 utc_now = datetime.now(timezone.utc)
 now = utc_now + timedelta(hours=5, minutes=30)
-# Updated Date Handling Format to DD.MM.YY
 curr_date_str, curr_time = now.strftime("%d.%m.%y"), now.time()
 
 def parse_time_safe(t_str):
@@ -282,7 +291,6 @@ else:
                                             sk = f"{ac}_{ar}_{an}"
                                             if sk not in st.session_state.scanned_keys: 
                                                 st.session_state.scanned_keys.append(sk)
-                                                # The scanner logic updates the session state to True
                                                 st.session_state[f"mdm_{ac}_{ar}_{an}"] = True 
                                                 st.session_state.scan_msg = f"✅ Scanned Successfully: {an} ({ac})"
                                                 should_rerun = True
@@ -309,10 +317,8 @@ else:
                                         with c2: st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} | {r['Class']}</span></div>", unsafe_allow_html=True)
                                         with c3:
                                             widget_key = f"mdm_{r['Class']}_{r['Roll']}_{r['Name']}"
-                                            # BUG FIX: Pure session state initialization, absolutely no 'value=' parameter
                                             if widget_key not in st.session_state:
                                                 st.session_state[widget_key] = False
-                                                
                                             if st.checkbox("Ate MDM", key=widget_key): sel_mdm.append(r)
                                         st.divider()
 
@@ -365,7 +371,7 @@ else:
                     else: st.info("No specific substitutes assigned yet.")
                 else:
                     mc = TEACHER_INITIALS.get(t_name_select, t_name_select)
-                    tdy = now.strftime('%A').upper()[:3] # Formats to MON, TUE etc.
+                    tdy = now.strftime('%A').upper()[:3] 
                     ms = rout[(rout['Teacher'] == mc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()
                     if not ms.empty: ms['Is_Sub'] = False
                     sd = []
@@ -428,12 +434,14 @@ else:
             vd = c1.date_input("Select Date", datetime.now()).strftime("%d.%m.%y")
             sa = c2.checkbox("Show All")
             
+            # Logic accurately matches the formatted dates now
             fm_raw = ml if sa else ml[ml['Date'].astype(str) == vd].copy() if not ml.empty else pd.DataFrame()
             fa = al[al['Status'] == True] if sa else al[(al['Date'].astype(str) == vd) & (al['Status'] == True)].copy() if not al.empty else pd.DataFrame()
             cf = "All"
             
             fm = fm_raw[fm_raw['Name'] != 'NONE_PRESENT'] if not fm_raw.empty else pd.DataFrame()
-            has_submitted = not fm_raw.empty
+            has_submitted = not fm_raw.empty # This is True even if they submitted 0 students
+            is_viewing_today = (vd == curr_date_str)
 
             st.markdown(f"##### 🏫 Breakdown for {vd if not sa else 'All Time'}")
             
@@ -451,15 +459,24 @@ else:
                     st.warning("⚠️ Warning: MDM was officially submitted for this date, but ZERO students were marked present.")
             else:
                 cm1, cm2, cm3 = st.columns(3)
-                cm1.metric("Class PP A", "-- Pending --")
-                cm2.metric("Class LPP A", "-- Pending --")
-                cm3.metric("Total MDM", "-- Pending --")
-                st.info("Waiting for teachers to submit MDM logs for this date.")
+                cm1.metric("Class PP A", "-- Pending --" if is_viewing_today else "0")
+                cm2.metric("Class LPP A", "-- Pending --" if is_viewing_today else "0")
+                cm3.metric("Total MDM", "-- Pending --" if is_viewing_today else "0")
+                if is_viewing_today:
+                    st.info("Waiting for teachers to submit MDM logs for today.")
+                else:
+                    st.info("No MDM submissions recorded for this date.")
 
-            if not fm.empty or not fa.empty:
+            # BUG FIX: Force the table to render even if fm is empty, AS LONG AS they clicked submit
+            if has_submitted or not fa.empty:
                 mc = fm.groupby(['Class', 'Section']).size().reset_index(name='MDM Entry') if not fm.empty else pd.DataFrame(columns=['Class', 'Section', 'MDM Entry'])
                 ac = fa.groupby(['Class', 'Section']).size().reset_index(name='Attendance') if not fa.empty else pd.DataFrame(columns=['Class', 'Section', 'Attendance'])
                 sd = pd.merge(ac, mc, on=['Class', 'Section'], how='outer').fillna(0).infer_objects(copy=False)
+                
+                # If they submitted zero, inject empty rows so the table actually appears with 0s
+                if sd.empty:
+                    sd = pd.DataFrame([{'Class': 'CLASS PP', 'Section': 'A', 'Attendance': 0, 'MDM Entry': 0}, {'Class': 'CLASS LPP', 'Section': 'A', 'Attendance': 0, 'MDM Entry': 0}])
+                    
                 sd['Attendance'], sd['MDM Entry'] = sd['Attendance'].astype(int), sd['MDM Entry'].astype(int)
                 
                 class_order = ["CLASS PP", "CLASS LPP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V"]
@@ -478,8 +495,8 @@ else:
                     cf = st.selectbox("Filter Class", ["All"] + sorted(fm['Class_Sec'].unique()))
                     ddf = fm[fm['Class_Sec'] == cf] if cf != "All" else fm
                     st.dataframe(ddf[['Date', 'Class', 'Section', 'Roll', 'Name']], hide_index=True)
-            elif not (has_submitted and len(fm) == 0): 
-                st.info("No data available for this date.")
+                else:
+                    st.success("✅ Attendance/MDM was officially submitted, but 0 students are present.")
                 
             st.divider()
             if st.button(f"🗑️ Clear Data ({cf})"):
@@ -567,7 +584,6 @@ else:
                                         local_alc += 1
                                     else:
                                         widget_key = f"adm_mdm_{r['Class']}_{r['Roll']}_{r['Name']}"
-                                        # BUG FIX: Pure session state initialization, absolutely no 'value=' parameter
                                         if widget_key not in st.session_state:
                                             st.session_state[widget_key] = False
                                             
@@ -627,7 +643,6 @@ else:
                             with c2: st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} | {r['Class']}</span></div>", unsafe_allow_html=True)
                             with c3:
                                 att_key = f"att_{r['Class']}_{r['Roll']}_{r['Name']}"
-                                # BUG FIX: Pure session state initialization for attendance
                                 if att_key not in st.session_state:
                                     st.session_state[att_key] = True
                                 
@@ -635,7 +650,6 @@ else:
                                 if ip: pc += 1
                                 
                                 mdm_ro_key = f"mdm_ro_{r['Class']}_{r['Roll']}_{r['Name']}"
-                                # BUG FIX: Pure session state initialization for the disabled MDM indicator
                                 if mdm_ro_key not in st.session_state:
                                     st.session_state[mdm_ro_key] = bool(r['MDM (Ate)'])
                                 st.checkbox("MDM Entry", disabled=True, key=mdm_ro_key)

@@ -3,6 +3,7 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from google.auth.transport.requests import AuthorizedSession
+import datetime
 
 # --- 1. PAGE CONFIGURATION ---
 st.set_page_config(page_title="BPS Student Profile", page_icon="🎓", layout="wide")
@@ -36,11 +37,18 @@ def load_database_data():
         df_mdm = pd.DataFrame(db.worksheet("mdm_log").get_all_records())
         df_attendance = pd.DataFrame(db.worksheet("student_attendance_master").get_all_records())
         df_forms = pd.DataFrame(db.worksheet("form_distribution_log").get_all_records())
+        
+        # Try to load the activity log, create empty dataframe if the tab doesn't exist yet
+        try:
+            df_logs = pd.DataFrame(db.worksheet("activity_log").get_all_records())
+        except gspread.exceptions.WorksheetNotFound:
+            df_logs = pd.DataFrame(columns=["Date", "Class", "Section", "Roll", "Name", "Log Type", "Details"])
+            
     except gspread.exceptions.WorksheetNotFound as e:
         st.error(f"Could not find worksheet: {e}. Please check your tab names.")
         st.stop()
         
-    return df_master, df_mdm, df_attendance, df_forms
+    return df_master, df_mdm, df_attendance, df_forms, df_logs
 
 # --- 4. SECURE IMAGE FETCHER ---
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -91,7 +99,7 @@ def display_student_photo(url):
 st.title("🎓 BPS Student Profile Dashboard")
 
 try:
-    df_master, df_mdm, df_attendance, df_forms = load_database_data()
+    df_master, df_mdm, df_attendance, df_forms, df_logs = load_database_data()
 except Exception as e:
     st.warning("Please configure your Google Sheets connection and secrets to view live data.")
     st.stop()
@@ -110,17 +118,13 @@ if selected_class:
     if selected_section:
         filtered_by_section = filtered_by_class[filtered_by_class['Section'] == selected_section].copy()
         
-        # --- ROLL NUMBER SORTING LOGIC ---
-        # 1. Convert Roll to numeric values so 2 comes before 10
+        # Sort by Roll Number
         filtered_by_section['Roll_Numeric'] = pd.to_numeric(filtered_by_section['Roll'], errors='coerce')
-        
-        # 2. Sort the entire table by this new numeric roll column
         filtered_by_section = filtered_by_section.sort_values(by='Roll_Numeric')
         
-        # 3. Create the unique display name using Name + Roll Number
+        # Display Name
         filtered_by_section['Display_Name'] = filtered_by_section['Name'].astype(str) + " (Roll: " + filtered_by_section['Roll'].astype(str) + ")"
         
-        # 4. Create the list directly from the sorted table (Do NOT use alphabetical sorted() here)
         student_list = filtered_by_section['Display_Name'].unique().tolist()
         selected_display_name = st.sidebar.selectbox("3. Select Student", student_list)
 
@@ -130,19 +134,23 @@ if selected_class:
             if not student_record.empty:
                 student = student_record.iloc[0]
                 
-                # Extract the actual name and roll to use for filtering the logs
                 selected_name = student['Name']
                 selected_roll = student['Roll']
                 
                 # --- PROFILE HEADER ---
                 st.divider()
                 
+                # Format Student Code
                 raw_code = str(student.get('Student Code', 'N/A'))
                 if raw_code.lower() not in ['n/a', 'nan', 'none', '']:
                     raw_code = raw_code.replace("'", "").split('.')[0]
                     display_code = raw_code.zfill(14) 
                 else:
                     display_code = "N/A"
+                
+                # Format Mobile Number for the Call Button
+                raw_mobile = str(student.get('Mobile', '')).split('.')[0]
+                has_mobile = raw_mobile.isdigit() and len(raw_mobile) >= 10
                 
                 head_col1, head_col2 = st.columns([1, 4]) 
 
@@ -153,14 +161,19 @@ if selected_class:
                 with head_col2:
                     st.subheader(f"Profile: {student['Name']}")
                     st.write(f"**Class:** {student['Class']} '{student['Section']}' | **Roll No:** {student['Roll']} | **Student Code:** {display_code}")
-                    st.caption(f"**Parents:** {student.get('Father', 'N/A')} & {student.get('Mother', 'N/A')} | **Mobile:** {student.get('Mobile', 'N/A')}")
+                    st.caption(f"**Parents:** {student.get('Father', 'N/A')} & {student.get('Mother', 'N/A')}")
+                    
+                    # Direct Call Button
+                    if has_mobile:
+                        st.link_button(f"📞 Call Guardian ({raw_mobile})", f"tel:+91{raw_mobile}")
+                    else:
+                        st.error("📞 No valid mobile number on record.")
                 
                 st.divider()
                 
                 # --- MAIN DATA MODULES ---
                 col1, col2, col3 = st.columns(3)
                 
-                # MODULE 1: OVERALL ATTENDANCE
                 with col1:
                     st.write("### 📅 Master Attendance")
                     student_att = df_attendance[
@@ -180,9 +193,8 @@ if selected_class:
                         st.progress(min(att_percentage / 100, 1.0))
                         st.caption(f"Current Attendance Rate: {att_percentage:.1f}%")
                     else:
-                        st.info("No master attendance records found.")
+                        st.info("No records found.")
 
-                # MODULE 2: MDM LOG
                 with col2:
                     st.write("### 🍛 MDM Participation")
                     student_mdm = df_mdm[
@@ -202,7 +214,6 @@ if selected_class:
                     else:
                         st.info("No MDM entries found.")
 
-                # MODULE 3: ADMINISTRATIVE / FORMS
                 with col3:
                     st.write("### 📋 Admin & Forms")
                     student_forms = df_forms[
@@ -214,20 +225,77 @@ if selected_class:
                     
                     if not student_forms.empty:
                         form_data = student_forms.iloc[0]
-                        
                         status = form_data.get('Return Status', 'Unknown')
                         if status == 'Complete':
-                            st.success(f"**Form Status:** {status}")
+                            st.success(f"**Form:** {status}")
                         else:
-                            st.warning(f"**Form Status:** {status}")
+                            st.warning(f"**Form:** {status}")
                             
                         wa_status = form_data.get('WhatsApp Added', 'No')
-                        wa_group = form_data.get('WhatsApp Group', 'None')
                         if wa_status != 'No':
-                            st.info(f"📱 **WhatsApp:** {wa_status} ({wa_group})")
+                            st.info(f"📱 **WhatsApp:** {wa_status}")
                         else:
                             st.error("📱 **WhatsApp:** Not Added")
-                            
-                        st.caption(f"Last updated on Banglar Shiksha: {form_data.get('Banglar Shiksha Updated', 'No')}")
                     else:
-                        st.info("No form distribution records found.")
+                        st.info("No form records found.")
+
+                st.divider()
+
+                # --- ACTIVITY & COMMUNICATION LOG ---
+                st.write("### 📝 Activity & Communication Log")
+                
+                # Show Previous Logs
+                student_logs = df_logs[
+                    (df_logs['Class'] == selected_class) & 
+                    (df_logs['Section'] == selected_section) & 
+                    (df_logs['Name'] == selected_name) &
+                    (df_logs['Roll'].astype(str) == str(selected_roll))
+                ]
+                
+                if not student_logs.empty:
+                    st.dataframe(student_logs[['Date', 'Log Type', 'Details']], hide_index=True, use_container_width=True)
+                else:
+                    st.caption("No previous activities logged for this student.")
+
+                # Form to Add New Log
+                with st.expander("➕ Add New Log Entry"):
+                    with st.form("log_form", clear_on_submit=True):
+                        log_type = st.selectbox("Log Type", [
+                            "📞 Phone Call Log", 
+                            "📱 WhatsApp Group Update", 
+                            "🤒 Student Illness", 
+                            "⚠️ Discipline/Behavior",
+                            "💬 General Note"
+                        ])
+                        
+                        # Set default date format DD.MM.YY 
+                        today_str = datetime.datetime.now().strftime("%d.%m.%y")
+                        log_date = st.text_input("Date (DD.MM.YY)", today_str)
+                        log_notes = st.text_area("Details / Notes", placeholder="Enter the details of the conversation or illness here...")
+                        
+                        submitted = st.form_submit_button("Save to Database")
+                        
+                        if submitted:
+                            client = get_gspread_client()
+                            db = client.open("BPS_Database")
+                            
+                            # Auto-create the worksheet if it doesn't exist
+                            try:
+                                ws = db.worksheet("activity_log")
+                            except gspread.exceptions.WorksheetNotFound:
+                                ws = db.add_worksheet(title="activity_log", rows="1000", cols="7")
+                                ws.append_row(["Date", "Class", "Section", "Roll", "Name", "Log Type", "Details"])
+                            
+                            # Append the new log
+                            ws.append_row([
+                                log_date, 
+                                selected_class, 
+                                selected_section, 
+                                selected_roll, 
+                                selected_name, 
+                                log_type, 
+                                log_notes
+                            ])
+                            
+                            st.success("✅ Log saved successfully!")
+                            st.rerun() # Refresh the app to show the new log immediately

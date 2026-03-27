@@ -141,7 +141,8 @@ def get_secure_photo_uri(url):
 
 utc_now = datetime.now(timezone.utc)
 now = utc_now + timedelta(hours=5, minutes=30)
-curr_date_str, curr_time = now.strftime("%d-%m-%Y"), now.time()
+# Updated Date Handling Format to DD.MM.YY
+curr_date_str, curr_time = now.strftime("%d.%m.%y"), now.time()
 
 def parse_time_safe(t_str):
     for fmt in ('%H:%M', '%I:%M %p', '%H:%M:%S'):
@@ -281,6 +282,7 @@ else:
                                             sk = f"{ac}_{ar}_{an}"
                                             if sk not in st.session_state.scanned_keys: 
                                                 st.session_state.scanned_keys.append(sk)
+                                                # The scanner logic updates the session state to True
                                                 st.session_state[f"mdm_{ac}_{ar}_{an}"] = True 
                                                 st.session_state.scan_msg = f"✅ Scanned Successfully: {an} ({ac})"
                                                 should_rerun = True
@@ -306,8 +308,12 @@ else:
                                         with c1: st.image(r['Photo'], width=85) 
                                         with c2: st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} | {r['Class']}</span></div>", unsafe_allow_html=True)
                                         with c3:
-                                            isc = r['Scan_Key'] in st.session_state.scanned_keys
-                                            if st.checkbox("Ate MDM", value=isc, key=f"mdm_{r['Class']}_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                                            widget_key = f"mdm_{r['Class']}_{r['Roll']}_{r['Name']}"
+                                            # BUG FIX: Pure session state initialization, absolutely no 'value=' parameter
+                                            if widget_key not in st.session_state:
+                                                st.session_state[widget_key] = False
+                                                
+                                            if st.checkbox("Ate MDM", key=widget_key): sel_mdm.append(r)
                                         st.divider()
 
                                 if tc == 'CLASS PP':
@@ -359,7 +365,7 @@ else:
                     else: st.info("No specific substitutes assigned yet.")
                 else:
                     mc = TEACHER_INITIALS.get(t_name_select, t_name_select)
-                    tdy = now.strftime('%A')
+                    tdy = now.strftime('%A').upper()[:3] # Formats to MON, TUE etc.
                     ms = rout[(rout['Teacher'] == mc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()
                     if not ms.empty: ms['Is_Sub'] = False
                     sd = []
@@ -414,45 +420,41 @@ else:
         tabs = st.tabs(["📊 Summary", "🍱 MDM Entry", "📝 Attend", "⏳ Live", "👨‍🏫 Leave", "📢 Staff Notice", "📅 Hols"])
         
         with tabs[0]: 
-            st.subheader(f"MDM Status: {curr_date_str}")
+            st.subheader("MDM & Attendance Summary")
             ml = fetch_sheet_data('mdm_log')
             al = fetch_sheet_data('student_attendance_master') 
-            
-            ml_today = ml[(ml['Date'].astype(str) == curr_date_str) & (ml['Name'] != 'NONE_PRESENT')] if not ml.empty else pd.DataFrame()
-            ml_today_raw = ml[ml['Date'].astype(str) == curr_date_str] if not ml.empty else pd.DataFrame()
-            
-            has_submitted = not ml_today_raw.empty 
-            total_all = 0
-            
-            col1, col2, col3 = st.columns(3)
-            if has_submitted:
-                pp_c = len(ml_today[ml_today['Class'] == 'CLASS PP'])
-                lpp_c = len(ml_today[ml_today['Class'] == 'CLASS LPP'])
-                total_all = len(ml_today)
-                col1.metric("Class PP", f"{pp_c}")
-                col2.metric("Class LPP", f"{lpp_c}")
-                col3.metric("Total MDM", f"{total_all}")
-            else:
-                col1.metric("Class PP", "-- Pending --")
-                col2.metric("Class LPP", "-- Pending --")
-                col3.metric("Total MDM", "-- Pending --")
-                st.info("Waiting for teachers to submit today's MDM logs.")
 
             c1, c2 = st.columns([2, 1])
-            vd = c1.date_input("Select Date", datetime.now()).strftime("%d-%m-%Y")
+            vd = c1.date_input("Select Date", datetime.now()).strftime("%d.%m.%y")
             sa = c2.checkbox("Show All")
-            fm = ml if sa else ml[ml['Date'].astype(str) == vd].copy() if not ml.empty else pd.DataFrame()
+            
+            fm_raw = ml if sa else ml[ml['Date'].astype(str) == vd].copy() if not ml.empty else pd.DataFrame()
             fa = al[al['Status'] == True] if sa else al[(al['Date'].astype(str) == vd) & (al['Status'] == True)].copy() if not al.empty else pd.DataFrame()
             cf = "All"
             
-            if not fm.empty: fm = fm[fm['Name'] != 'NONE_PRESENT']
+            fm = fm_raw[fm_raw['Name'] != 'NONE_PRESENT'] if not fm_raw.empty else pd.DataFrame()
+            has_submitted = not fm_raw.empty
 
             st.markdown(f"##### 🏫 Breakdown for {vd if not sa else 'All Time'}")
             
-            # --- 0 Logic Warning directly within the Breakdown ---
-            is_viewing_today = (vd == curr_date_str)
-            if is_viewing_today and has_submitted and total_all == 0:
-                st.warning("⚠️ Warning: MDM was officially submitted today, but ZERO students were marked present.")
+            if has_submitted:
+                pp_c = len(fm[fm['Class'] == 'CLASS PP'])
+                lpp_c = len(fm[fm['Class'] == 'CLASS LPP'])
+                total_all = len(fm)
+                
+                cm1, cm2, cm3 = st.columns(3)
+                cm1.metric("Class PP A", f"{pp_c}")
+                cm2.metric("Class LPP A", f"{lpp_c}")
+                cm3.metric("Total MDM", f"{total_all}")
+
+                if total_all == 0:
+                    st.warning("⚠️ Warning: MDM was officially submitted for this date, but ZERO students were marked present.")
+            else:
+                cm1, cm2, cm3 = st.columns(3)
+                cm1.metric("Class PP A", "-- Pending --")
+                cm2.metric("Class LPP A", "-- Pending --")
+                cm3.metric("Total MDM", "-- Pending --")
+                st.info("Waiting for teachers to submit MDM logs for this date.")
 
             if not fm.empty or not fa.empty:
                 mc = fm.groupby(['Class', 'Section']).size().reset_index(name='MDM Entry') if not fm.empty else pd.DataFrame(columns=['Class', 'Section', 'MDM Entry'])
@@ -460,7 +462,6 @@ else:
                 sd = pd.merge(ac, mc, on=['Class', 'Section'], how='outer').fillna(0).infer_objects(copy=False)
                 sd['Attendance'], sd['MDM Entry'] = sd['Attendance'].astype(int), sd['MDM Entry'].astype(int)
                 
-                # --- Custom Sorting to force PP and LPP to the very top ---
                 class_order = ["CLASS PP", "CLASS LPP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V"]
                 cat_type = pd.CategoricalDtype(categories=class_order, ordered=True)
                 sd['Class'] = sd['Class'].astype(cat_type)
@@ -470,13 +471,14 @@ else:
                 if not sd.empty: sd = pd.concat([sd, pd.DataFrame([{'Class': 'TOTAL', 'Section': '', 'Attendance': sd['Attendance'].sum(), 'MDM Entry': sd['MDM Entry'].sum()}])], ignore_index=True)
                 
                 st.dataframe(sd, hide_index=True, use_container_width=True)
+                
                 st.markdown("##### 📄 Detailed List")
                 if not fm.empty:
                     fm['Class_Sec'] = fm['Class'].astype(str) + " " + fm['Section'].astype(str)
                     cf = st.selectbox("Filter Class", ["All"] + sorted(fm['Class_Sec'].unique()))
                     ddf = fm[fm['Class_Sec'] == cf] if cf != "All" else fm
                     st.dataframe(ddf[['Date', 'Class', 'Section', 'Roll', 'Name']], hide_index=True)
-            elif not (is_viewing_today and has_submitted and total_all == 0): 
+            elif not (has_submitted and len(fm) == 0): 
                 st.info("No data available for this date.")
                 
             st.divider()
@@ -500,7 +502,6 @@ else:
                     else: ros = sm[(sm['Class'] == tc) & (sm['Section'] == ts)].copy()
                     
                     if not ros.empty:
-                        # --- Bug Fix: Match by both Class AND Roll to prevent phantom marks ---
                         if not ml.empty:
                             todays_ml = ml[ml['Date'].astype(str) == curr_date_str]
                             marked_set = set(todays_ml['Class'].astype(str) + "_" + todays_ml['Roll'].astype(str))
@@ -565,8 +566,12 @@ else:
                                         st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                         local_alc += 1
                                     else:
-                                        isc = r['Scan_Key'] in st.session_state.admin_scanned_keys
-                                        if st.checkbox("Ate MDM", value=isc, key=f"adm_mdm_{r['Class']}_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                                        widget_key = f"adm_mdm_{r['Class']}_{r['Roll']}_{r['Name']}"
+                                        # BUG FIX: Pure session state initialization, absolutely no 'value=' parameter
+                                        if widget_key not in st.session_state:
+                                            st.session_state[widget_key] = False
+                                            
+                                        if st.checkbox("Ate MDM", key=widget_key): sel_mdm.append(r)
                                 st.divider()
                             return local_alc
 
@@ -602,7 +607,6 @@ else:
                     else: ros = sm[(sm['Class'] == tc) & (sm['Section'] == ts)].copy()
                     
                     if not ros.empty:
-                        # --- Bug Fix: Match by both Class AND Roll for Attendance visual cue ---
                         if not ml.empty:
                             todays_ml = ml[ml['Date'].astype(str) == curr_date_str]
                             marked_set = set(todays_ml['Class'].astype(str) + "_" + todays_ml['Roll'].astype(str))
@@ -622,9 +626,20 @@ else:
                             with c1: st.image(r['Photo'], width=85) 
                             with c2: st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} | {r['Class']}</span></div>", unsafe_allow_html=True)
                             with c3:
-                                ip = st.checkbox("Present", value=True, key=f"att_{r['Roll']}_{r['Name']}")
+                                att_key = f"att_{r['Class']}_{r['Roll']}_{r['Name']}"
+                                # BUG FIX: Pure session state initialization for attendance
+                                if att_key not in st.session_state:
+                                    st.session_state[att_key] = True
+                                
+                                ip = st.checkbox("Present", key=att_key)
                                 if ip: pc += 1
-                                st.checkbox("MDM Entry", value=bool(r['MDM (Ate)']), disabled=True, key=f"mdm_ro_{r['Roll']}_{r['Name']}")
+                                
+                                mdm_ro_key = f"mdm_ro_{r['Class']}_{r['Roll']}_{r['Name']}"
+                                # BUG FIX: Pure session state initialization for the disabled MDM indicator
+                                if mdm_ro_key not in st.session_state:
+                                    st.session_state[mdm_ro_key] = bool(r['MDM (Ate)'])
+                                st.checkbox("MDM Entry", disabled=True, key=mdm_ro_key)
+                                
                                 ad.append({'Date': curr_date_str, 'Class': r['Class'], 'Section': ts, 'Roll': r['Roll'], 'Name': r['Name'], 'Status': ip})
                             st.divider()
                         cp.markdown(f"<div class='floating-counter'>✅ Present: {pc}</div>", unsafe_allow_html=True)
@@ -644,7 +659,7 @@ else:
             st.divider()
             st.subheader("📊 Daily Report")
             al = fetch_sheet_data('student_attendance_master')
-            avd = st.date_input("Report Date", datetime.now(), key="att_d").strftime("%d-%m-%Y")
+            avd = st.date_input("Report Date", datetime.now(), key="att_d").strftime("%d.%m.%y")
             if not al.empty:
                 ta = al[(al['Date'].astype(str) == avd) & (al['Status'] == True)]
                 if not ta.empty:
@@ -657,7 +672,7 @@ else:
         with tabs[3]: 
             st.subheader(f"🏫 Routine Status")
             rout = get_local_csv('routine.csv')
-            tdy = now.strftime('%A')
+            tdy = now.strftime('%A').upper()[:3]
             if not rout.empty:
                 tr = rout[rout['Day'] == tdy].copy()
                 ll = fetch_sheet_data('teacher_leave')
@@ -698,14 +713,14 @@ else:
                             ll = fetch_sheet_data('teacher_leave')
                             nl = []
                             for i in range((ed - sd).days + 1):
-                                ds = (sd + timedelta(days=i)).strftime("%d-%m-%Y")
+                                ds = (sd + timedelta(days=i)).strftime("%d.%m.%y")
                                 if ll.empty or ll[(ll['Date'].astype(str) == ds) & (ll['Teacher'] == abt)].empty:
                                     nl.append({"Date": ds, "Teacher": abt, "Type": lt, "Substitute": "None", "Detailed_Sub_Log": "None"})
                             if nl: append_sheet_df('teacher_leave', pd.DataFrame(nl)); st.success("✅ Saved!"); st.rerun()
                             else: st.warning("Already recorded.")
                 else:
-                    sds = st.date_input("Date", datetime.now()).strftime("%d-%m-%Y")
-                    tdy = datetime.strptime(sds, "%d-%m-%Y").strftime('%A')
+                    sds = st.date_input("Date", datetime.now()).strftime("%d.%m.%y")
+                    tdy = datetime.strptime(sds, "%d.%m.%y").strftime('%A').upper()[:3]
                     rout = get_local_csv('routine.csv')
                     tc = TEACHER_INITIALS.get(abt, abt)
                     ms = rout[(rout['Teacher'] == tc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()

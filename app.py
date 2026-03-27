@@ -264,13 +264,14 @@ else:
                             if not ros.empty:
                                 if 'scanned_keys' not in st.session_state: st.session_state.scanned_keys = []
                                 
-                                # This prints the sticky note message if we just reloaded from a successful scan!
+                                st.write("📸 **Scan ID Cards (or tick manually below):**")
+                                qv = qrcode_scanner(key='at_qr')
+                                
+                                # Moved the success message BELOW the scanner
                                 if st.session_state.scan_msg:
                                     st.success(st.session_state.scan_msg)
                                     st.session_state.scan_msg = None
 
-                                st.write("📸 **Scan ID Cards (or tick manually below):**")
-                                qv = qrcode_scanner(key='at_qr')
                                 if qv:
                                     should_rerun = False
                                     try:
@@ -284,7 +285,6 @@ else:
                                                 if sk not in st.session_state.scanned_keys: 
                                                     st.session_state.scanned_keys.append(sk)
                                                     st.session_state[f"mdm_{ar}_{an}"] = True 
-                                                    # Write the message on the sticky note before reloading
                                                     st.session_state.scan_msg = f"✅ Scanned Successfully: {an}"
                                                     should_rerun = True
                                             else: st.error(f"❌ MISMATCH: {sn} is NOT in {tc} {ts}!")

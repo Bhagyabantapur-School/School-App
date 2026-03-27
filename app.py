@@ -343,7 +343,6 @@ else:
                             else: st.warning("No students found.")
                     else: st.warning("⚠️ No class at 11:15 AM. MDM Entry disabled.")
 
-            # ... [Routine, Leave, Holidays tabs remain exactly identical to your recovered code] ...
             with at_tabs[1]:
                 st.subheader("Live Class Status")
                 ll = fetch_sheet_data('teacher_leave')
@@ -541,11 +540,11 @@ else:
                         st.markdown("### Roster Selection")
                         cp = st.empty()
                         st.markdown('<div class="roster-container">', unsafe_allow_html=True)
-                        sel_mdm, alc = [], 0
+                        sel_mdm = []
                         
                         def draw_admin_roster(df_subset, class_name):
-                            nonlocal alc
-                            if df_subset.empty: return
+                            local_alc = 0
+                            if df_subset.empty: return local_alc
                             if tc == 'CLASS PP': st.markdown(f"<h4 style='color:#007bff; border-bottom:1px solid #ddd; padding-bottom:5px;'>{class_name}</h4>", unsafe_allow_html=True)
                             for _, r in df_subset.iterrows():
                                 c1, c2, c3 = st.columns([1, 4, 2])
@@ -554,20 +553,23 @@ else:
                                 with c3:
                                     if r['MDM (Ate)']:
                                         st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
-                                        alc += 1
+                                        local_alc += 1
                                     else:
                                         isc = r['Scan_Key'] in st.session_state.admin_scanned_keys
                                         if st.checkbox("Ate MDM", value=isc, key=f"adm_mdm_{r['Class']}_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
                                 st.divider()
+                            return local_alc
 
+                        alc = 0
                         if tc == 'CLASS PP':
-                            draw_admin_roster(ros[ros['Class'] == 'CLASS PP'], "CLASS PP")
-                            draw_admin_roster(ros[ros['Class'] == 'CLASS LPP'], "CLASS LPP")
+                            alc += draw_admin_roster(ros[ros['Class'] == 'CLASS PP'], "CLASS PP")
+                            alc += draw_admin_roster(ros[ros['Class'] == 'CLASS LPP'], "CLASS LPP")
                         else:
-                            draw_admin_roster(ros, tc)
+                            alc += draw_admin_roster(ros, tc)
                         
                         cp.markdown(f"<div class='floating-counter'>✅ Selected: {len(sel_mdm)} | Done: {alc}</div>", unsafe_allow_html=True)
                         st.markdown(f"<h3 style='text-align:center;'>✅ New Selected: {len(sel_mdm)}</h3>", unsafe_allow_html=True)
+                        
                         if st.button("Submit Admin MDM Data"):
                             if sel_mdm:
                                 nr = [{'Date': curr_date_str, 'Teacher': f"{st.session_state.user_name} (Admin)", 'Class': x['Class'], 'Section': ts, 'Roll': x['Roll'], 'Name': x['Name'], 'Time': now.strftime("%H:%M")} for x in sel_mdm]
@@ -577,7 +579,6 @@ else:
                         st.markdown('</div>', unsafe_allow_html=True)
                     else: st.warning("No students found.")
 
-        # ... [Attendance, Live, Leave, Staff Notice, Hols tabs remain exactly identical to your recovered code] ...
         with tabs[2]:
             st.subheader("Student Attendance")
             sc = st.selectbox("Mark Attendance", ATTENDANCE_OPTIONS, key='ht_att')

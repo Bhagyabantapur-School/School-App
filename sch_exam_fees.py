@@ -1,7 +1,7 @@
 import streamlit as st
 import gspread
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import plotly.express as px
 
@@ -33,7 +33,6 @@ def load_data():
     ws_students = bps_sheet.worksheet("students_master")
     ws_teachers = bps_sheet.worksheet("TEACHERS_DETAIL")
     
-    # NEW: Load the MDM (Attendance) Log
     ws_mdm = bps_sheet.worksheet("mdm_log")
     
     df_students = pd.DataFrame(ws_students.get_all_records())
@@ -115,17 +114,21 @@ with tab1:
         filtered_students['Roll_Numeric'] = pd.to_numeric(filtered_students['Roll'], errors='coerce').fillna(999)
         filtered_students = filtered_students.sort_values('Roll_Numeric')
         
-        # --- NEW: Check who is present based on the selected receipt_date ---
-        # Convert MDM dates safely to compare with our receipt_date
+        # --- NEW: Check who was present in the last 10 days ---
         if not df_mdm.empty and 'Date' in df_mdm.columns:
             df_mdm['Parsed_Date'] = pd.to_datetime(df_mdm['Date'], errors='coerce', dayfirst=True).dt.date
-            present_today = df_mdm[df_mdm['Parsed_Date'] == receipt_date]
             
-            # Create a fast lookup set of (Class, Section, Roll) for students present today
+            # Calculate the date 10 days before the selected receipt_date
+            ten_days_ago = receipt_date - timedelta(days=10)
+            
+            # Filter the MDM log for any records within this 10-day window
+            recent_mdm = df_mdm[(df_mdm['Parsed_Date'] >= ten_days_ago) & (df_mdm['Parsed_Date'] <= receipt_date)]
+            
+            # Create a fast lookup set of students present recently
             present_keys = set(zip(
-                present_today['Class'].astype(str), 
-                present_today['Section'].astype(str), 
-                present_today['Roll'].astype(str)
+                recent_mdm['Class'].astype(str), 
+                recent_mdm['Section'].astype(str), 
+                recent_mdm['Roll'].astype(str)
             ))
         else:
             present_keys = set()
@@ -136,7 +139,6 @@ with tab1:
             class_val = str(row['Class']).strip()
             sec_val = str(row['Section']).strip()
             
-            # Add a checkmark if the student is in the MDM log for the selected date
             is_present = (class_val, sec_val, roll_val) in present_keys
             presence_marker = "✅ " if is_present else ""
             
@@ -150,7 +152,7 @@ with tab1:
         filtered_students['Dropdown_Display'] = filtered_students.apply(format_dropdown, axis=1)
         display_options = filtered_students['Dropdown_Display'].tolist()
         
-        st.markdown("##### Select Profile (✅ = Logged Present on Selected Date)")
+        st.markdown("##### Select Profile (✅ = Present in the last 10 days)")
         selected_display = st.selectbox("Choose the correct student:", options=display_options, label_visibility="collapsed")
         
     elif search_mode == "Search by Name" and search_query:

@@ -8,7 +8,7 @@ import plotly.express as px
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="BPS Exam Fees", page_icon="💰", layout="wide")
 
-# Set timezone to IST for accurate logging in West Bengal
+# Set timezone to IST for accurate logging
 IST = pytz.timezone('Asia/Kolkata')
 
 st.title("💰 Bhagyabantapur Primary School - Exam Fees")
@@ -31,17 +31,17 @@ except Exception as e:
 # --- DATA LOADING ---
 @st.cache_data(ttl=600)
 def load_data():
-    """Loads student, teacher, and fee data from Google Sheets."""
-    # Open the BPS Database for Student and Teacher info
-    bps_sheet = gc.open_by_url(st.secrets["sheet_urls"]["bps_database"])
+    """Loads student, teacher, and fee data from Google Sheets by file name."""
+    # Open the BPS Database by name
+    bps_sheet = gc.open("BPS_Database")
     ws_students = bps_sheet.worksheet("students_master")
     ws_teachers = bps_sheet.worksheet("TEACHERS_DETAIL")
     
     df_students = pd.DataFrame(ws_students.get_all_records())
     df_teachers = pd.DataFrame(ws_teachers.get_all_records())
     
-    # Open the Exam Fees log for the Dashboard
-    fees_sheet = gc.open_by_url(st.secrets["sheet_urls"]["sch_exam_fees"])
+    # Open the Exam Fees log by name
+    fees_sheet = gc.open("SCH_Exam_Fees")
     ws_fees = fees_sheet.worksheet("Sheet1") # Ensure your tab is named Sheet1
     df_fees = pd.DataFrame(ws_fees.get_all_records())
     
@@ -51,7 +51,7 @@ try:
     with st.spinner("Connecting to BPS Database..."):
         df_students, df_teachers, df_fees = load_data()
 except Exception as e:
-    st.error(f"Error loading data from Google Sheets. Ensure sheet URLs are correct and shared with the service account. Details: {e}")
+    st.error(f"Error loading data. Ensure the sheets are named exactly 'BPS_Database' and 'SCH_Exam_Fees' and are shared with your service account email. Details: {e}")
     st.stop()
 
 # --- APP LAYOUT (Tabs) ---
@@ -67,17 +67,14 @@ with tab1:
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            # Clean up class list and sort
             classes = [c for c in df_students['Class'].unique() if str(c).strip()]
             selected_class = st.selectbox("Select Class", options=sorted(classes))
             
         with col2:
-            # Filter sections based on selected class
             sections = [s for s in df_students[df_students['Class'] == selected_class]['Section'].unique() if str(s).strip()]
             selected_section = st.selectbox("Select Section", options=sorted(sections))
             
         with col3:
-            # Filter students based on class and section
             filtered_students = df_students[
                 (df_students['Class'] == selected_class) & 
                 (df_students['Section'] == selected_section)
@@ -130,8 +127,8 @@ with tab1:
                         received_by_teacher
                     ]
                     
-                    # Append directly to the sheet using gspread
-                    fees_sheet = gc.open_by_url(st.secrets["sheet_urls"]["sch_exam_fees"])
+                    # Append directly to the sheet using gspread by file name
+                    fees_sheet = gc.open("SCH_Exam_Fees")
                     ws_fees = fees_sheet.worksheet("Sheet1")
                     ws_fees.append_row(new_row)
                     
@@ -150,10 +147,8 @@ with tab2:
     st.subheader("Collection Overview")
     
     if not df_fees.empty and 'Amount' in df_fees.columns:
-        # Convert amount to numeric
         df_fees['Amount'] = pd.to_numeric(df_fees['Amount'], errors='coerce').fillna(0)
         
-        # Top-level metrics
         col_dash1, col_dash2, col_dash3 = st.columns(3)
         with col_dash1:
             st.metric(label="Total Fees Collected", value=f"₹ {df_fees['Amount'].sum():,.2f}")
@@ -164,7 +159,6 @@ with tab2:
 
         st.divider()
         
-        # Chart 1: Collection by Class
         st.markdown("##### Collection by Class")
         class_totals = df_fees.groupby('Class')['Amount'].sum().reset_index()
         fig = px.bar(
@@ -178,9 +172,7 @@ with tab2:
         fig.update_layout(xaxis_title="Class", yaxis_title="Total Amount (₹)", showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
         
-        # Data Table View
         with st.expander("View Recent Transactions"):
-            # Show the last 10 transactions, sorted newest first
             st.dataframe(df_fees.tail(10).iloc[::-1], use_container_width=True)
             
     else:

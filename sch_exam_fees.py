@@ -32,7 +32,6 @@ except Exception as e:
 @st.cache_data(ttl=600)
 def load_data():
     """Loads student, teacher, and fee data from Google Sheets by file name."""
-    # Open the BPS Database by exact name
     bps_sheet = gc.open("BPS_Database")
     ws_students = bps_sheet.worksheet("students_master")
     ws_teachers = bps_sheet.worksheet("TEACHERS_DETAIL")
@@ -40,9 +39,8 @@ def load_data():
     df_students = pd.DataFrame(ws_students.get_all_records())
     df_teachers = pd.DataFrame(ws_teachers.get_all_records())
     
-    # Open the Exam Fees log by exact name
     fees_sheet = gc.open("SCH_Exam_Fees")
-    ws_fees = fees_sheet.worksheet("Sheet1") # Ensure your tab is named Sheet1
+    ws_fees = fees_sheet.worksheet("Sheet1") 
     df_fees = pd.DataFrame(ws_fees.get_all_records())
     
     return df_students, df_teachers, df_fees
@@ -84,18 +82,19 @@ with tab1:
     
     st.divider()
     
-    # 2. PAYMENT DETAILS (Inside the form to prevent accidental submission)
+    # 2. PAYMENT DETAILS (Inside the form)
     with st.form("fee_form", clear_on_submit=True):
-        col4, col5, col6 = st.columns(3)
+        col4, col5 = st.columns(2)
         
         with col4:
+            # NEW: Date Picker defaults to today in IST
+            receipt_date = st.date_input("Receipt Date", value=datetime.now(IST).date())
             amount = st.number_input("Payment Amount (₹)", min_value=0, step=5)
             
         with col5:
             payer_type = st.radio("Received From:", ["Student", "Guardian", "Teacher"])
-        
-        with col6:
-            # Because this is inside a form, we show all teachers but default to "Not Applicable"
+            
+            # Teacher selection logic
             teacher_names = [t for t in df_teachers['Name'].unique() if str(t).strip()]
             teacher_options = ["Not Applicable"] + sorted(teacher_names)
             received_by_teacher = st.selectbox("Which Teacher? (If applicable)", options=teacher_options)
@@ -111,18 +110,18 @@ with tab1:
         else:
             with st.spinner("Logging transaction to Google Sheets..."):
                 try:
-                    current_time_ist = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
-                    student_info = filtered_students[filtered_students['Name'] == selected_student].iloc[0]
+                    # NEW: Combine the selected date with the exact time of submission
+                    current_time = datetime.now(IST).time()
+                    final_datetime_ist = datetime.combine(receipt_date, current_time).strftime("%Y-%m-%d %H:%M:%S")
                     
+                    student_info = filtered_students[filtered_students['Name'] == selected_student].iloc[0]
                     student_code = str(student_info.get('Student Code', 'N/A'))
                     roll_no = str(student_info.get('Roll', 'N/A'))
                     
-                    # Clean up teacher name if it wasn't a teacher who paid
                     final_teacher = received_by_teacher if payer_type == "Teacher" else "N/A"
                     
-                    # Create the row exactly matching SCH_Exam_Fees headers
                     new_row = [
-                        current_time_ist, 
+                        final_datetime_ist, 
                         student_code, 
                         selected_student, 
                         str(selected_class), 
@@ -133,15 +132,13 @@ with tab1:
                         final_teacher
                     ]
                     
-                    # Append directly to the sheet using gspread by file name
                     fees_sheet = gc.open("SCH_Exam_Fees")
                     ws_fees = fees_sheet.worksheet("Sheet1")
                     ws_fees.append_row(new_row)
                     
-                    # Clear the cache so the dashboard updates instantly
                     load_data.clear()
                     
-                    st.success(f"Successfully recorded ₹{amount} for {selected_student}!")
+                    st.success(f"Successfully recorded ₹{amount} for {selected_student} on {receipt_date.strftime('%d-%m-%Y')}!")
                     st.balloons()
                 except Exception as e:
                     st.error(f"An error occurred while saving the data: {e}")
@@ -153,7 +150,6 @@ with tab2:
     st.subheader("Collection Overview")
     
     if not df_fees.empty and 'Amount' in df_fees.columns:
-        # Convert amount to numeric for accurate math
         df_fees['Amount'] = pd.to_numeric(df_fees['Amount'], errors='coerce').fillna(0)
         
         col_dash1, col_dash2, col_dash3 = st.columns(3)
@@ -180,7 +176,6 @@ with tab2:
         st.plotly_chart(fig, use_container_width=True)
         
         with st.expander("View Recent Transactions"):
-            # Display the last 15 transactions in reverse order (newest first)
             st.dataframe(df_fees.tail(15).iloc[::-1], use_container_width=True)
             
     else:

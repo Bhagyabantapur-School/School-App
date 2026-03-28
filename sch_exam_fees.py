@@ -8,7 +8,7 @@ import plotly.express as px
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="BPS Exam Fees", page_icon="💰", layout="wide")
 
-# Set timezone to IST for accurate logging
+# Set timezone to IST for accurate logging in West Bengal
 IST = pytz.timezone('Asia/Kolkata')
 
 st.title("💰 Bhagyabantapur Primary School - Exam Fees")
@@ -32,7 +32,7 @@ except Exception as e:
 @st.cache_data(ttl=600)
 def load_data():
     """Loads student, teacher, and fee data from Google Sheets by file name."""
-    # Open the BPS Database by name
+    # Open the BPS Database by exact name
     bps_sheet = gc.open("BPS_Database")
     ws_students = bps_sheet.worksheet("students_master")
     ws_teachers = bps_sheet.worksheet("TEACHERS_DETAIL")
@@ -40,7 +40,7 @@ def load_data():
     df_students = pd.DataFrame(ws_students.get_all_records())
     df_teachers = pd.DataFrame(ws_teachers.get_all_records())
     
-    # Open the Exam Fees log by name
+    # Open the Exam Fees log by exact name
     fees_sheet = gc.open("SCH_Exam_Fees")
     ws_fees = fees_sheet.worksheet("Sheet1") # Ensure your tab is named Sheet1
     df_fees = pd.DataFrame(ws_fees.get_all_records())
@@ -63,26 +63,29 @@ tab1, tab2 = st.tabs(["📝 Collect Fees", "📊 Fee Dashboard"])
 with tab1:
     st.subheader("Record New Payment")
     
+    # 1. CASCADING DROPDOWNS (Outside the form so they update instantly)
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        classes = [c for c in df_students['Class'].unique() if str(c).strip()]
+        selected_class = st.selectbox("Select Class", options=sorted(classes))
+        
+    with col2:
+        sections = [s for s in df_students[df_students['Class'] == selected_class]['Section'].unique() if str(s).strip()]
+        selected_section = st.selectbox("Select Section", options=sorted(sections))
+        
+    with col3:
+        filtered_students = df_students[
+            (df_students['Class'] == selected_class) & 
+            (df_students['Section'] == selected_section)
+        ]
+        student_names = [n for n in filtered_students['Name'].unique() if str(n).strip()]
+        selected_student = st.selectbox("Select Student", options=sorted(student_names))
+    
+    st.divider()
+    
+    # 2. PAYMENT DETAILS (Inside the form to prevent accidental submission)
     with st.form("fee_form", clear_on_submit=True):
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            classes = [c for c in df_students['Class'].unique() if str(c).strip()]
-            selected_class = st.selectbox("Select Class", options=sorted(classes))
-            
-        with col2:
-            sections = [s for s in df_students[df_students['Class'] == selected_class]['Section'].unique() if str(s).strip()]
-            selected_section = st.selectbox("Select Section", options=sorted(sections))
-            
-        with col3:
-            filtered_students = df_students[
-                (df_students['Class'] == selected_class) & 
-                (df_students['Section'] == selected_section)
-            ]
-            student_names = [n for n in filtered_students['Name'].unique() if str(n).strip()]
-            selected_student = st.selectbox("Select Student", options=sorted(student_names))
-        
-        st.divider()
         col4, col5, col6 = st.columns(3)
         
         with col4:
@@ -92,10 +95,10 @@ with tab1:
             payer_type = st.radio("Received From:", ["Student", "Guardian", "Teacher"])
         
         with col6:
-            received_by_teacher = "N/A"
-            if payer_type == "Teacher":
-                teacher_names = [t for t in df_teachers['Name'].unique() if str(t).strip()]
-                received_by_teacher = st.selectbox("Which Teacher?", options=sorted(teacher_names))
+            # Because this is inside a form, we show all teachers but default to "Not Applicable"
+            teacher_names = [t for t in df_teachers['Name'].unique() if str(t).strip()]
+            teacher_options = ["Not Applicable"] + sorted(teacher_names)
+            received_by_teacher = st.selectbox("Which Teacher? (If applicable)", options=teacher_options)
 
         submit_button = st.form_submit_button("Record Payment", type="primary")
 
@@ -114,6 +117,9 @@ with tab1:
                     student_code = str(student_info.get('Student Code', 'N/A'))
                     roll_no = str(student_info.get('Roll', 'N/A'))
                     
+                    # Clean up teacher name if it wasn't a teacher who paid
+                    final_teacher = received_by_teacher if payer_type == "Teacher" else "N/A"
+                    
                     # Create the row exactly matching SCH_Exam_Fees headers
                     new_row = [
                         current_time_ist, 
@@ -124,7 +130,7 @@ with tab1:
                         roll_no, 
                         amount, 
                         payer_type, 
-                        received_by_teacher
+                        final_teacher
                     ]
                     
                     # Append directly to the sheet using gspread by file name
@@ -147,6 +153,7 @@ with tab2:
     st.subheader("Collection Overview")
     
     if not df_fees.empty and 'Amount' in df_fees.columns:
+        # Convert amount to numeric for accurate math
         df_fees['Amount'] = pd.to_numeric(df_fees['Amount'], errors='coerce').fillna(0)
         
         col_dash1, col_dash2, col_dash3 = st.columns(3)
@@ -173,7 +180,8 @@ with tab2:
         st.plotly_chart(fig, use_container_width=True)
         
         with st.expander("View Recent Transactions"):
-            st.dataframe(df_fees.tail(10).iloc[::-1], use_container_width=True)
+            # Display the last 15 transactions in reverse order (newest first)
+            st.dataframe(df_fees.tail(15).iloc[::-1], use_container_width=True)
             
     else:
         st.info("No fee data available yet. Transactions will appear here once recorded.")

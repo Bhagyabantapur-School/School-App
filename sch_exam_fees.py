@@ -33,20 +33,24 @@ def load_data():
     ws_students = bps_sheet.worksheet("students_master")
     ws_teachers = bps_sheet.worksheet("TEACHERS_DETAIL")
     
+    # NEW: Load the MDM (Attendance) Log
+    ws_mdm = bps_sheet.worksheet("mdm_log")
+    
     df_students = pd.DataFrame(ws_students.get_all_records())
     df_teachers = pd.DataFrame(ws_teachers.get_all_records())
+    df_mdm = pd.DataFrame(ws_mdm.get_all_records())
     
     fees_sheet = gc.open("SCH_Exam_Fees")
     ws_fees = fees_sheet.worksheet("Sheet1") 
     df_fees = pd.DataFrame(ws_fees.get_all_records())
     
-    return df_students, df_teachers, df_fees
+    return df_students, df_teachers, df_fees, df_mdm
 
 try:
     with st.spinner("Connecting to BPS Database..."):
-        df_students, df_teachers, df_fees = load_data()
+        df_students, df_teachers, df_fees, df_mdm = load_data()
 except Exception as e:
-    st.error(f"Error loading data. Ensure the sheets are named exactly 'BPS_Database' and 'SCH_Exam_Fees'. Details: {e}")
+    st.error(f"Error loading data. Ensure the sheets are named correctly and the 'mdm_log' tab exists. Details: {e}")
     st.stop()
 
 # --- APP LAYOUT (Tabs) ---
@@ -59,7 +63,6 @@ with tab1:
     
     # --- STEP 1: BATCH SETTINGS ---
     st.markdown("### Step 1: Fee Details (Batch Setup)")
-    st.info("💡 Set your amount and receiver here once. These settings will stay the same so you can rapidly submit multiple students!")
     
     col_fee1, col_fee2, col_fee3 = st.columns(3)
     
@@ -112,32 +115,81 @@ with tab1:
         filtered_students['Roll_Numeric'] = pd.to_numeric(filtered_students['Roll'], errors='coerce').fillna(999)
         filtered_students = filtered_students.sort_values('Roll_Numeric')
         
+        # --- NEW: Check who is present based on the selected receipt_date ---
+        # Convert MDM dates safely to compare with our receipt_date
+        if not df_mdm.empty and 'Date' in df_mdm.columns:
+            df_mdm['Parsed_Date'] = pd.to_datetime(df_mdm['Date'], errors='coerce', dayfirst=True).dt.date
+            present_today = df_mdm[df_mdm['Parsed_Date'] == receipt_date]
+            
+            # Create a fast lookup set of (Class, Section, Roll) for students present today
+            present_keys = set(zip(
+                present_today['Class'].astype(str), 
+                present_today['Section'].astype(str), 
+                present_today['Roll'].astype(str)
+            ))
+        else:
+            present_keys = set()
+        
         def format_dropdown(row):
             roll_val = str(row['Roll']).strip()
             name_val = str(row['Name']).strip()
             class_val = str(row['Class']).strip()
             sec_val = str(row['Section']).strip()
             
+            # Add a checkmark if the student is in the MDM log for the selected date
+            is_present = (class_val, sec_val, roll_val) in present_keys
+            presence_marker = "✅ " if is_present else ""
+            
             if search_mode == "Search by Name":
-                return f"{name_val} - Class {class_val} '{sec_val}' (Roll {roll_val})"
+                return f"{presence_marker}{name_val} - Class {class_val} '{sec_val}' (Roll {roll_val})"
             else:
                 if roll_val and roll_val.lower() != 'nan':
-                    return f"Roll {roll_val} - {name_val}"
-                return name_val
+                    return f"{presence_marker}Roll {roll_val} - {name_val}"
+                return f"{presence_marker}{name_val}"
                 
         filtered_students['Dropdown_Display'] = filtered_students.apply(format_dropdown, axis=1)
         display_options = filtered_students['Dropdown_Display'].tolist()
         
+        st.markdown("##### Select Profile (✅ = Logged Present on Selected Date)")
         selected_display = st.selectbox("Choose the correct student:", options=display_options, label_visibility="collapsed")
         
     elif search_mode == "Search by Name" and search_query:
         st.warning(f"No students found containing '{search_query}'.")
 
-    st.write("") # Add a little spacing
+    st.write("") 
+
+    # --- DUPLICATE CHECKER & DUE AMOUNT LOGIC ---
+    allow_submission = True
+    
+    if selected_display:
+        student_info = filtered_students[filtered_students['Dropdown_Display'] == selected_display].iloc[0]
+        pure_name = str(student_info['Name'])
+        final_class = str(student_info['Class'])
+        roll_no = str(student_info.get('Roll', 'N/A'))
+        
+        if not df_fees.empty and 'Amount' in df_fees.columns:
+            past_payments = df_fees[
+                (df_fees['Name'].astype(str) == pure_name) & 
+                (df_fees['Class'].astype(str) == final_class) & 
+                (df_fees['Roll'].astype(str) == roll_no)
+            ]
+            
+            if not past_payments.empty:
+                total_paid = pd.to_numeric(past_payments['Amount'], errors='coerce').fillna(0).sum()
+                
+                if total_paid > 0:
+                    st.warning(f"⚠️ **Duplicate Entry Warning:** {pure_name} has already paid a total of **₹{total_paid}**.")
+                    
+                    with st.expander("View their past payments"):
+                        display_cols = [c for c in ['Date', 'Amount', 'Payer_Type', 'Teacher_Involved'] if c in past_payments.columns]
+                        st.dataframe(past_payments[display_cols], hide_index=True, use_container_width=True)
+                    
+                    allow_due = st.checkbox(f"Unlock to record an additional/due payment for {pure_name}")
+                    if not allow_due:
+                        allow_submission = False
 
     # --- DATA SUBMISSION LOGIC ---
-    # Using a standard button instead of a form submit allows rapid sequential entries
-    submit_button = st.button("✅ Record Payment", type="primary", use_container_width=True)
+    submit_button = st.button("✅ Record Payment", type="primary", use_container_width=True, disabled=not allow_submission)
     
     if submit_button:
         if not selected_display:
@@ -150,16 +202,9 @@ with tab1:
                     current_time = datetime.now(IST).time()
                     final_datetime_ist = datetime.combine(receipt_date, current_time).strftime("%Y-%m-%d %H:%M:%S")
                     
-                    student_info = filtered_students[filtered_students['Dropdown_Display'] == selected_display].iloc[0]
-                    
-                    pure_name = str(student_info['Name'])
-                    final_class = str(student_info['Class'])
                     final_section = str(student_info['Section'])
-                    roll_no = str(student_info.get('Roll', 'N/A'))
-                    
                     final_teacher = received_by_teacher if payer_type == "Teacher" else "N/A"
                     
-                    # Updated Headers: Date, Name, Class, Section, Roll, Amount, Payer_Type, Teacher_Involved
                     new_row = [
                         final_datetime_ist, 
                         pure_name, 
@@ -178,6 +223,7 @@ with tab1:
                     load_data.clear()
                     
                     st.success(f"✅ Successfully recorded ₹{amount} for {pure_name} on {receipt_date.strftime('%d-%m-%Y')}!")
+                    st.rerun() 
                 except Exception as e:
                     st.error(f"An error occurred while saving the data: {e}")
 

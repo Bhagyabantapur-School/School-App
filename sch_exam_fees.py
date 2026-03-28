@@ -148,7 +148,9 @@ with tab1:
 # ==========================================
 with tab2:
     st.subheader("Collection Overview")
-    
+    if st.button("🔄 Refresh Data"):
+        load_data.clear()
+        st.rerun()
     if not df_fees.empty and 'Amount' in df_fees.columns:
         df_fees['Amount'] = pd.to_numeric(df_fees['Amount'], errors='coerce').fillna(0)
         

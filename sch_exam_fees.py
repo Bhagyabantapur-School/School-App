@@ -53,13 +53,33 @@ except Exception as e:
 tab1, tab2 = st.tabs(["📝 Collect Fees", "📊 Fee Dashboard"])
 
 # ==========================================
-# TAB 1: FEE COLLECTION FORM
+# TAB 1: FEE COLLECTION FORM (BATCH MODE)
 # ==========================================
 with tab1:
-    st.subheader("Record New Payment")
     
-    # 1. SMART STUDENT LOOKUP
-    st.markdown("##### 👤 Find Student")
+    # --- STEP 1: BATCH SETTINGS ---
+    st.markdown("### Step 1: Fee Details (Batch Setup)")
+    st.info("💡 Set your amount and receiver here once. These settings will stay the same so you can rapidly submit multiple students!")
+    
+    col_fee1, col_fee2, col_fee3 = st.columns(3)
+    
+    with col_fee1:
+        receipt_date = st.date_input("Receipt Date", value=datetime.now(IST).date())
+        amount = st.number_input("Payment Amount (₹)", min_value=0, step=5)
+        
+    with col_fee2:
+        payer_type = st.radio("Received From:", ["Student", "Guardian", "Teacher"])
+        
+    with col_fee3:
+        teacher_names = [t for t in df_teachers['Name'].unique() if str(t).strip()]
+        teacher_options = ["Not Applicable"] + sorted(teacher_names)
+        received_by_teacher = st.selectbox("Which Teacher? (If applicable)", options=teacher_options)
+        
+    st.divider()
+    
+    # --- STEP 2: STUDENT SELECTION ---
+    st.markdown("### Step 2: Select Student & Record")
+    
     search_mode = st.radio("Search Method:", ["Filter by Class & Section", "Search by Name"], horizontal=True, label_visibility="collapsed")
     
     filtered_students = pd.DataFrame()
@@ -68,18 +88,17 @@ with tab1:
     if search_mode == "Search by Name":
         search_query = st.text_input("🔍 Enter part of the student's name (e.g., 'saj')")
         if search_query:
-            # Case-insensitive search across the entire student database
             filtered_students = df_students[df_students['Name'].str.contains(search_query, case=False, na=False)].copy()
         else:
-            st.info("Start typing above to search the whole school...")
+            st.caption("Start typing above to search the whole school...")
             
-    else: # Filter by Class & Section
-        col1, col2 = st.columns(2)
-        with col1:
+    else: 
+        col_s1, col_s2 = st.columns(2)
+        with col_s1:
             classes = [c for c in df_students['Class'].unique() if str(c).strip()]
             selected_class = st.selectbox("Select Class", options=sorted(classes))
             
-        with col2:
+        with col_s2:
             sections = [s for s in df_students[df_students['Class'] == selected_class]['Section'].unique() if str(s).strip()]
             selected_section = st.selectbox("Select Section", options=sorted(sections))
             
@@ -88,7 +107,7 @@ with tab1:
             (df_students['Section'] == selected_section)
         ].copy()
 
-    # 2. DISPLAY RESULTS IN DROPDOWN
+    # DISPLAY RESULTS IN DROPDOWN
     if not filtered_students.empty:
         filtered_students['Roll_Numeric'] = pd.to_numeric(filtered_students['Roll'], errors='coerce').fillna(999)
         filtered_students = filtered_students.sort_values('Roll_Numeric')
@@ -99,7 +118,6 @@ with tab1:
             class_val = str(row['Class']).strip()
             sec_val = str(row['Section']).strip()
             
-            # If using global search, show class details so the teacher knows it's the right kid
             if search_mode == "Search by Name":
                 return f"{name_val} - Class {class_val} '{sec_val}' (Roll {roll_val})"
             else:
@@ -110,32 +128,17 @@ with tab1:
         filtered_students['Dropdown_Display'] = filtered_students.apply(format_dropdown, axis=1)
         display_options = filtered_students['Dropdown_Display'].tolist()
         
-        st.markdown("##### Select Profile")
         selected_display = st.selectbox("Choose the correct student:", options=display_options, label_visibility="collapsed")
         
     elif search_mode == "Search by Name" and search_query:
         st.warning(f"No students found containing '{search_query}'.")
 
-    st.divider()
-    
-    # 3. PAYMENT DETAILS 
-    with st.form("fee_form", clear_on_submit=True):
-        col4, col5 = st.columns(2)
-        
-        with col4:
-            receipt_date = st.date_input("Receipt Date", value=datetime.now(IST).date())
-            amount = st.number_input("Payment Amount (₹)", min_value=0, step=5)
-            
-        with col5:
-            payer_type = st.radio("Received From:", ["Student", "Guardian", "Teacher"])
-            
-            teacher_names = [t for t in df_teachers['Name'].unique() if str(t).strip()]
-            teacher_options = ["Not Applicable"] + sorted(teacher_names)
-            received_by_teacher = st.selectbox("Which Teacher? (If applicable)", options=teacher_options)
-
-        submit_button = st.form_submit_button("Record Payment", type="primary")
+    st.write("") # Add a little spacing
 
     # --- DATA SUBMISSION LOGIC ---
+    # Using a standard button instead of a form submit allows rapid sequential entries
+    submit_button = st.button("✅ Record Payment", type="primary", use_container_width=True)
+    
     if submit_button:
         if not selected_display:
             st.error("Please find and select a valid student first.")
@@ -147,22 +150,18 @@ with tab1:
                     current_time = datetime.now(IST).time()
                     final_datetime_ist = datetime.combine(receipt_date, current_time).strftime("%Y-%m-%d %H:%M:%S")
                     
-                    # Look up the exact student record
                     student_info = filtered_students[filtered_students['Dropdown_Display'] == selected_display].iloc[0]
                     
-                    # Extract clean data directly from the dataframe row
                     pure_name = str(student_info['Name'])
                     final_class = str(student_info['Class'])
                     final_section = str(student_info['Section'])
-                    student_code = str(student_info.get('Student Code', 'N/A'))
                     roll_no = str(student_info.get('Roll', 'N/A'))
                     
                     final_teacher = received_by_teacher if payer_type == "Teacher" else "N/A"
                     
-                    # Headers: Date, Student_Code, Name, Class, Section, Roll, Amount, Payer_Type, Teacher_Involved
+                    # Updated Headers: Date, Name, Class, Section, Roll, Amount, Payer_Type, Teacher_Involved
                     new_row = [
                         final_datetime_ist, 
-                        student_code, 
                         pure_name, 
                         final_class, 
                         final_section, 
@@ -178,8 +177,7 @@ with tab1:
                     
                     load_data.clear()
                     
-                    st.success(f"Successfully recorded ₹{amount} for {pure_name} on {receipt_date.strftime('%d-%m-%Y')}!")
-                    st.balloons()
+                    st.success(f"✅ Successfully recorded ₹{amount} for {pure_name} on {receipt_date.strftime('%d-%m-%Y')}!")
                 except Exception as e:
                     st.error(f"An error occurred while saving the data: {e}")
 

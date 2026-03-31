@@ -370,54 +370,72 @@ with tab_enrolment:
         def count_stu(lvl, gen, cat):
             return len(df_clean[(df_clean['Level'] == lvl) & (df_clean['Gen'] == gen) & (df_clean['Soc_Cat'] == cat)])
 
-        # Constructing HTML string flat without leading spaces to prevent markdown code block trigger
+        # Constructing HTML string flat to prevent markdown code block trigger
         html = '<div style="overflow-x:auto;">'
         html += '<table style="width:100%; border-collapse: collapse; text-align: center; font-family: sans-serif; border: 1px solid #ddd; margin-bottom: 20px;">'
+        
+        # Header Row 1
         html += '<tr style="background-color: #2980b9; color: white;">'
-        html += '<th colspan="2" style="padding: 10px; border: 1px solid #ddd;">Class Level &nbsp;⬇️ &nbsp;|&nbsp; Social Category &nbsp;➡️</th>'
-        html += '<th style="padding: 10px; border: 1px solid #ddd;">SC</th>'
-        html += '<th style="padding: 10px; border: 1px solid #ddd;">ST</th>'
-        html += '<th style="padding: 10px; border: 1px solid #ddd;">OBC</th>'
-        html += '<th style="padding: 10px; border: 1px solid #ddd;">General</th>'
-        html += '<th style="padding: 10px; border: 1px solid #ddd; background-color: #1a5276;">Total</th>'
+        html += '<th rowspan="2" style="padding: 10px; border: 1px solid #ddd; vertical-align: middle;">Social Category</th>'
+        html += '<th colspan="3" style="padding: 10px; border: 1px solid #ddd;">Bal Vatika<br><span style="font-size:12px; color:#e0f7fa;">(Class PP & LPP)</span></th>'
+        html += '<th colspan="3" style="padding: 10px; border: 1px solid #ddd;">Primary<br><span style="font-size:12px; color:#e0f7fa;">(Class I - V)</span></th>'
         html += '</tr>'
         
-        levels_config = [
-            ('Bal Vatika', 'Bal Vatika<br><span style="font-size:12px; color:gray;">(Class PP & LPP)</span>'), 
-            ('Primary', 'Primary<br><span style="font-size:12px; color:gray;">(Class I - V)</span>')
-        ]
+        # Header Row 2
+        html += '<tr style="background-color: #1a5276; color: white;">'
+        html += '<th style="padding: 8px; border: 1px solid #ddd;">Boys</th>'
+        html += '<th style="padding: 8px; border: 1px solid #ddd;">Girls</th>'
+        html += '<th style="padding: 8px; border: 1px solid #ddd;">Total</th>'
+        html += '<th style="padding: 8px; border: 1px solid #ddd;">Boys</th>'
+        html += '<th style="padding: 8px; border: 1px solid #ddd;">Girls</th>'
+        html += '<th style="padding: 8px; border: 1px solid #ddd;">Total</th>'
+        html += '</tr>'
         
-        for lvl_key, lvl_label in levels_config:
-            # Boys Row
-            html += '<tr>'
-            html += f'<td rowspan="3" style="font-weight: bold; vertical-align: middle; background-color: #f4f6f7; border: 1px solid #ddd; padding: 8px;">{lvl_label}</td>'
-            html += '<td style="text-align: left; padding: 8px; border: 1px solid #ddd;">Boys</td>'
-            b_tot = 0
-            for cat in categories:
-                c = count_stu(lvl_key, 'Boys', cat)
-                b_tot += c
-                html += f'<td style="padding: 8px; border: 1px solid #ddd;">{c}</td>'
-            html += f'<td style="padding: 8px; border: 1px solid #ddd; font-weight:bold; background-color: #eaeded;">{b_tot}</td></tr>'
+        # Track grand totals for bottom row
+        totals = {'bv_b': 0, 'bv_g': 0, 'bv_t': 0, 'p_b': 0, 'p_g': 0, 'p_t': 0}
+        
+        for cat in categories:
+            bv_b = count_stu('Bal Vatika', 'Boys', cat)
+            bv_g = count_stu('Bal Vatika', 'Girls', cat)
+            bv_t = bv_b + bv_g
             
-            # Girls Row
-            html += '<tr>'
-            html += '<td style="text-align: left; padding: 8px; border: 1px solid #ddd;">Girls</td>'
-            g_tot = 0
-            for cat in categories:
-                c = count_stu(lvl_key, 'Girls', cat)
-                g_tot += c
-                html += f'<td style="padding: 8px; border: 1px solid #ddd;">{c}</td>'
-            html += f'<td style="padding: 8px; border: 1px solid #ddd; font-weight:bold; background-color: #eaeded;">{g_tot}</td></tr>'
+            p_b = count_stu('Primary', 'Boys', cat)
+            p_g = count_stu('Primary', 'Girls', cat)
+            p_t = p_b + p_g
             
-            # Total Row
-            html += '<tr style="font-weight: bold; background-color: #e8f8f5;">'
-            html += '<td style="text-align: left; padding: 8px; border: 1px solid #ddd;">Total</td>'
-            t_tot = 0
-            for cat in categories:
-                c = count_stu(lvl_key, 'Boys', cat) + count_stu(lvl_key, 'Girls', cat)
-                t_tot += c
-                html += f'<td style="padding: 8px; border: 1px solid #ddd;">{c}</td>'
-            html += f'<td style="padding: 8px; border: 1px solid #ddd; font-weight:bold; background-color: #d1f2eb; color: #0e6251;">{t_tot}</td></tr>'
+            # Add to grand totals
+            totals['bv_b'] += bv_b
+            totals['bv_g'] += bv_g
+            totals['bv_t'] += bv_t
+            totals['p_b'] += p_b
+            totals['p_g'] += p_g
+            totals['p_t'] += p_t
+            
+            html += '<tr>'
+            # Row Header (Social Category)
+            html += f'<td style="font-weight: bold; text-align: left; padding: 8px; border: 1px solid #ddd; background-color: #f4f6f7;">{cat}</td>'
+            
+            # Bal Vatika Columns
+            html += f'<td style="padding: 8px; border: 1px solid #ddd;">{bv_b}</td>'
+            html += f'<td style="padding: 8px; border: 1px solid #ddd;">{bv_g}</td>'
+            html += f'<td style="padding: 8px; border: 1px solid #ddd; font-weight:bold; background-color: #eaeded;">{bv_t}</td>'
+            
+            # Primary Columns
+            html += f'<td style="padding: 8px; border: 1px solid #ddd;">{p_b}</td>'
+            html += f'<td style="padding: 8px; border: 1px solid #ddd;">{p_g}</td>'
+            html += f'<td style="padding: 8px; border: 1px solid #ddd; font-weight:bold; background-color: #eaeded;">{p_t}</td>'
+            html += '</tr>'
+            
+        # Bottom Total Row
+        html += '<tr style="font-weight: bold; background-color: #d1f2eb; color: #0e6251;">'
+        html += '<td style="text-align: left; padding: 8px; border: 1px solid #ddd;">Total</td>'
+        html += f'<td style="padding: 8px; border: 1px solid #ddd;">{totals["bv_b"]}</td>'
+        html += f'<td style="padding: 8px; border: 1px solid #ddd;">{totals["bv_g"]}</td>'
+        html += f'<td style="padding: 8px; border: 1px solid #ddd; background-color: #a3e4d7;">{totals["bv_t"]}</td>'
+        html += f'<td style="padding: 8px; border: 1px solid #ddd;">{totals["p_b"]}</td>'
+        html += f'<td style="padding: 8px; border: 1px solid #ddd;">{totals["p_g"]}</td>'
+        html += f'<td style="padding: 8px; border: 1px solid #ddd; background-color: #a3e4d7;">{totals["p_t"]}</td>'
+        html += '</tr>'
 
         html += '</table></div>'
         

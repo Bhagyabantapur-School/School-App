@@ -331,28 +331,125 @@ with tab_summary:
         st.warning("No student records found to generate a summary.")
 
 # ==========================================
-# TAB 3: ENROLMENT DATA (Social Category)
+# TAB 3: ENROLMENT DATA & ROLL STRENGTH
 # ==========================================
 with tab_enrolment:
-    st.markdown("<h3 style='text-align: center; color: #2980b9;'>Annual Data Enrolment (Social Category wise)</h3>", unsafe_allow_html=True)
-    st.divider()
+    # ---------------------------------------------------------
+    # NEW FEATURE: Roll Strength (Enrolment Details)
+    # ---------------------------------------------------------
+    st.markdown("<h3 style='text-align: center; color: #2980b9;'>Roll Strength (Enrolment Details)</h3>", unsafe_allow_html=True)
+    st.write("")
 
     if not df_students.empty:
-        # Prepare clean dataframe for accurate cross-tabulation
-        df_clean = df_students.copy()
-        df_clean['Class'] = df_clean.get('Class', '').astype(str).str.strip().str.upper()
-        df_clean['Gender'] = df_clean.get('Gender', '').astype(str).str.strip().str.upper()
-        df_clean['Social Category'] = df_clean.get('Social Category', '').astype(str).str.strip().str.upper()
+        # Strict Rule: Don't count student who have Gender column blank
+        df_valid = df_students.copy()
+        df_valid['Gender'] = df_valid.get('Gender', '').astype(str).str.strip().str.upper()
+        df_valid = df_valid[df_valid['Gender'] != ''] # Exclude blank genders
+
+        # Helper function to generate 4-digit boxed numbers [0][0][0][0]
+        def render_boxed_number(num):
+            num_str = f"{int(num):04d}"
+            boxes = "".join([f'<span style="display: flex; justify-content: center; align-items: center; width: 24px; height: 32px; border: 2px solid #7f8c8d; background-color: #fff; color: #2c3e50; border-radius: 4px; font-weight: bold; font-family: monospace; font-size: 18px;">{digit}</span>' for digit in num_str])
+            return f'<div style="display: flex; justify-content: center; gap: 4px; margin-top: 5px;">{boxes}</div>'
+
+        # --- Data Type 1: Class-wise Dashboard ---
+        st.markdown("#### 📌 Class-wise Dashboard")
+        
+        df_valid['Clean_Class'] = df_valid.get('Class', '').astype(str).str.strip().str.upper()
+        
+        def map_class_dashboard(c):
+            if c in ['CLASS PP', 'CLASS LPP']: return 'Pre Primary'
+            if c == 'CLASS I': return 'Class - I'
+            if c == 'CLASS II': return 'Class - II'
+            if c == 'CLASS III': return 'Class - III'
+            if c == 'CLASS IV': return 'Class - IV'
+            if c == 'CLASS V': return 'Class - V'
+            return None
+            
+        df_valid['Mapped_Class'] = df_valid['Clean_Class'].apply(map_class_dashboard)
+        dash_class_counts = df_valid['Mapped_Class'].value_counts().to_dict()
+        dash_order = ['Pre Primary', 'Class - I', 'Class - II', 'Class - III', 'Class - IV', 'Class - V']
+
+        # Row 1
+        cols_r1 = st.columns(3)
+        for idx, cls_name in enumerate(dash_order[:3]):
+            with cols_r1[idx]:
+                count = dash_class_counts.get(cls_name, 0)
+                st.markdown(f"<div style='text-align:center; padding: 10px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px; background-color: #f4f6f7;'><span style='color:#34495e; font-weight:bold;'>{cls_name}</span><br>{render_boxed_number(count)}</div>", unsafe_allow_html=True)
+        
+        # Row 2
+        cols_r2 = st.columns(3)
+        for idx, cls_name in enumerate(dash_order[3:]):
+            with cols_r2[idx]:
+                count = dash_class_counts.get(cls_name, 0)
+                st.markdown(f"<div style='text-align:center; padding: 10px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px; background-color: #f4f6f7;'><span style='color:#34495e; font-weight:bold;'>{cls_name}</span><br>{render_boxed_number(count)}</div>", unsafe_allow_html=True)
+
+        st.write("")
+
+        # --- Data Type 2: Demographic Matrix ---
+        st.markdown("#### 📌 Demographic Details")
+
+        def get_demo_gender(g):
+            if 'BOY' in g or 'M' in g: return 'Male'
+            if 'GIRL' in g or 'F' in g: return 'Female'
+            return 'Unknown'
+            
+        def get_demo_category(row):
+            soc = str(row.get('Social Category', '')).strip().upper()
+            rel = str(row.get('Religion', '')).strip().upper()
+            
+            # Prioritize standard Social Categories
+            if 'SC' in soc: return 'SC'
+            if 'ST' in soc: return 'ST'
+            if 'OBC' in soc: return 'OBC'
+            
+            # If Religion is Muslim -> Minority
+            if 'MUSLIM' in rel or 'ISLAM' in rel: return 'Minority'
+            
+            # Everything else falls to Others
+            return 'Others'
+
+        df_valid['Demo_Gender'] = df_valid['Gender'].apply(get_demo_gender)
+        df_valid['Demo_Category'] = df_valid.apply(get_demo_category, axis=1)
+
+        demo_cats = ['SC', 'ST', 'OBC', 'Minority', 'Others']
+        demo_genders = ['Male', 'Female']
+
+        def count_demo(g, c):
+            return len(df_valid[(df_valid['Demo_Gender'] == g) & (df_valid['Demo_Category'] == c)])
+
+        html_demo = '<div style="overflow-x:auto;">'
+        html_demo += '<table style="width:100%; border-collapse: collapse; text-align: center; font-family: sans-serif; border: 1px solid #ddd; margin-bottom: 20px;">'
+        
+        html_demo += '<tr style="background-color: #2c3e50; color: white;">'
+        html_demo += '<th style="padding: 12px; border: 1px solid #ddd;">Gender &nbsp;⬇️ &nbsp;|&nbsp; Category &nbsp;➡️</th>'
+        for c in demo_cats:
+            html_demo += f'<th style="padding: 12px; border: 1px solid #ddd;">{c}</th>'
+        html_demo += '</tr>'
+        
+        for g in demo_genders:
+            html_demo += '<tr>'
+            html_demo += f'<td style="font-weight: bold; text-align: left; padding: 12px; border: 1px solid #ddd; background-color: #f4f6f7; vertical-align: middle;">{g}</td>'
+            for c in demo_cats:
+                count = count_demo(g, c)
+                html_demo += f'<td style="padding: 12px; border: 1px solid #ddd; vertical-align: middle;">{render_boxed_number(count)}</td>'
+            html_demo += '</tr>'
+            
+        html_demo += '</table></div>'
+        st.markdown(html_demo, unsafe_allow_html=True)
+
+        st.divider()
+
+        # ---------------------------------------------------------
+        # PREVIOUS FEATURE: Annual Data Enrolment Table
+        # ---------------------------------------------------------
+        st.markdown("<h4 style='text-align: center; color: #7f8c8d;'>Annual Data Enrolment (Social Category wise)</h4>", unsafe_allow_html=True)
+        st.write("")
 
         def get_level(c):
             if c in ['CLASS PP', 'CLASS LPP']: return 'Bal Vatika'
             if c in ['CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV', 'CLASS V']: return 'Primary'
             return 'Other'
-
-        def get_gender(g):
-            if 'BOY' in g or 'M' in g: return 'Boys'
-            if 'GIRL' in g or 'F' in g: return 'Girls'
-            return 'Unknown'
 
         def get_soc(c):
             if 'SC' in c: return 'SC'
@@ -361,49 +458,46 @@ with tab_enrolment:
             if 'GEN' in c: return 'General'
             return 'General' 
 
-        df_clean['Level'] = df_clean['Class'].apply(get_level)
-        df_clean['Gen'] = df_clean['Gender'].apply(get_gender)
-        df_clean['Soc_Cat'] = df_clean['Social Category'].apply(get_soc)
+        df_valid['Level'] = df_valid['Clean_Class'].apply(get_level)
+        df_valid['Soc_Cat'] = df_valid['Social Category'].astype(str).str.strip().str.upper().apply(get_soc)
 
-        categories = ['SC', 'ST', 'OBC', 'General']
+        categories_annual = ['SC', 'ST', 'OBC', 'General']
         
-        def count_stu(lvl, gen, cat):
-            return len(df_clean[(df_clean['Level'] == lvl) & (df_clean['Gen'] == gen) & (df_clean['Soc_Cat'] == cat)])
+        def count_stu_annual(lvl, gen, cat):
+            # Using get_demo_gender to map BOY->Male, GIRL->Female to match the valid dataframe
+            return len(df_valid[(df_valid['Level'] == lvl) & (df_valid['Demo_Gender'] == gen) & (df_valid['Soc_Cat'] == cat)])
 
-        # Constructing HTML string flat to prevent markdown code block trigger
-        html = '<div style="overflow-x:auto;">'
-        html += '<table style="width:100%; border-collapse: collapse; text-align: center; font-family: sans-serif; border: 1px solid #ddd; margin-bottom: 20px;">'
+        html_annual = '<div style="overflow-x:auto;">'
+        html_annual += '<table style="width:100%; border-collapse: collapse; text-align: center; font-family: sans-serif; border: 1px solid #ddd; margin-bottom: 20px;">'
         
         # Header Row 1
-        html += '<tr style="background-color: #2980b9; color: white;">'
-        html += '<th rowspan="2" style="padding: 10px; border: 1px solid #ddd; vertical-align: middle;">Social Category</th>'
-        html += '<th colspan="3" style="padding: 10px; border: 1px solid #ddd;">Bal Vatika<br><span style="font-size:12px; color:#e0f7fa;">(Class PP & LPP)</span></th>'
-        html += '<th colspan="3" style="padding: 10px; border: 1px solid #ddd;">Primary<br><span style="font-size:12px; color:#e0f7fa;">(Class I - V)</span></th>'
-        html += '</tr>'
+        html_annual += '<tr style="background-color: #2980b9; color: white;">'
+        html_annual += '<th rowspan="2" style="padding: 10px; border: 1px solid #ddd; vertical-align: middle;">Social Category</th>'
+        html_annual += '<th colspan="3" style="padding: 10px; border: 1px solid #ddd;">Bal Vatika<br><span style="font-size:12px; color:#e0f7fa;">(Class PP & LPP)</span></th>'
+        html_annual += '<th colspan="3" style="padding: 10px; border: 1px solid #ddd;">Primary<br><span style="font-size:12px; color:#e0f7fa;">(Class I - V)</span></th>'
+        html_annual += '</tr>'
         
         # Header Row 2
-        html += '<tr style="background-color: #1a5276; color: white;">'
-        html += '<th style="padding: 8px; border: 1px solid #ddd;">Boys</th>'
-        html += '<th style="padding: 8px; border: 1px solid #ddd;">Girls</th>'
-        html += '<th style="padding: 8px; border: 1px solid #ddd;">Total</th>'
-        html += '<th style="padding: 8px; border: 1px solid #ddd;">Boys</th>'
-        html += '<th style="padding: 8px; border: 1px solid #ddd;">Girls</th>'
-        html += '<th style="padding: 8px; border: 1px solid #ddd;">Total</th>'
-        html += '</tr>'
+        html_annual += '<tr style="background-color: #1a5276; color: white;">'
+        html_annual += '<th style="padding: 8px; border: 1px solid #ddd;">Boys</th>'
+        html_annual += '<th style="padding: 8px; border: 1px solid #ddd;">Girls</th>'
+        html_annual += '<th style="padding: 8px; border: 1px solid #ddd;">Total</th>'
+        html_annual += '<th style="padding: 8px; border: 1px solid #ddd;">Boys</th>'
+        html_annual += '<th style="padding: 8px; border: 1px solid #ddd;">Girls</th>'
+        html_annual += '<th style="padding: 8px; border: 1px solid #ddd;">Total</th>'
+        html_annual += '</tr>'
         
-        # Track grand totals for bottom row
         totals = {'bv_b': 0, 'bv_g': 0, 'bv_t': 0, 'p_b': 0, 'p_g': 0, 'p_t': 0}
         
-        for cat in categories:
-            bv_b = count_stu('Bal Vatika', 'Boys', cat)
-            bv_g = count_stu('Bal Vatika', 'Girls', cat)
+        for cat in categories_annual:
+            bv_b = count_stu_annual('Bal Vatika', 'Male', cat)
+            bv_g = count_stu_annual('Bal Vatika', 'Female', cat)
             bv_t = bv_b + bv_g
             
-            p_b = count_stu('Primary', 'Boys', cat)
-            p_g = count_stu('Primary', 'Girls', cat)
+            p_b = count_stu_annual('Primary', 'Male', cat)
+            p_g = count_stu_annual('Primary', 'Female', cat)
             p_t = p_b + p_g
             
-            # Add to grand totals
             totals['bv_b'] += bv_b
             totals['bv_g'] += bv_g
             totals['bv_t'] += bv_t
@@ -411,35 +505,30 @@ with tab_enrolment:
             totals['p_g'] += p_g
             totals['p_t'] += p_t
             
-            html += '<tr>'
-            # Row Header (Social Category)
-            html += f'<td style="font-weight: bold; text-align: left; padding: 8px; border: 1px solid #ddd; background-color: #f4f6f7;">{cat}</td>'
-            
-            # Bal Vatika Columns
-            html += f'<td style="padding: 8px; border: 1px solid #ddd;">{bv_b}</td>'
-            html += f'<td style="padding: 8px; border: 1px solid #ddd;">{bv_g}</td>'
-            html += f'<td style="padding: 8px; border: 1px solid #ddd; font-weight:bold; background-color: #eaeded;">{bv_t}</td>'
-            
-            # Primary Columns
-            html += f'<td style="padding: 8px; border: 1px solid #ddd;">{p_b}</td>'
-            html += f'<td style="padding: 8px; border: 1px solid #ddd;">{p_g}</td>'
-            html += f'<td style="padding: 8px; border: 1px solid #ddd; font-weight:bold; background-color: #eaeded;">{p_t}</td>'
-            html += '</tr>'
+            html_annual += '<tr>'
+            html_annual += f'<td style="font-weight: bold; text-align: left; padding: 8px; border: 1px solid #ddd; background-color: #f4f6f7;">{cat}</td>'
+            html_annual += f'<td style="padding: 8px; border: 1px solid #ddd;">{bv_b}</td>'
+            html_annual += f'<td style="padding: 8px; border: 1px solid #ddd;">{bv_g}</td>'
+            html_annual += f'<td style="padding: 8px; border: 1px solid #ddd; font-weight:bold; background-color: #eaeded;">{bv_t}</td>'
+            html_annual += f'<td style="padding: 8px; border: 1px solid #ddd;">{p_b}</td>'
+            html_annual += f'<td style="padding: 8px; border: 1px solid #ddd;">{p_g}</td>'
+            html_annual += f'<td style="padding: 8px; border: 1px solid #ddd; font-weight:bold; background-color: #eaeded;">{p_t}</td>'
+            html_annual += '</tr>'
             
         # Bottom Total Row
-        html += '<tr style="font-weight: bold; background-color: #d1f2eb; color: #0e6251;">'
-        html += '<td style="text-align: left; padding: 8px; border: 1px solid #ddd;">Total</td>'
-        html += f'<td style="padding: 8px; border: 1px solid #ddd;">{totals["bv_b"]}</td>'
-        html += f'<td style="padding: 8px; border: 1px solid #ddd;">{totals["bv_g"]}</td>'
-        html += f'<td style="padding: 8px; border: 1px solid #ddd; background-color: #a3e4d7;">{totals["bv_t"]}</td>'
-        html += f'<td style="padding: 8px; border: 1px solid #ddd;">{totals["p_b"]}</td>'
-        html += f'<td style="padding: 8px; border: 1px solid #ddd;">{totals["p_g"]}</td>'
-        html += f'<td style="padding: 8px; border: 1px solid #ddd; background-color: #a3e4d7;">{totals["p_t"]}</td>'
-        html += '</tr>'
+        html_annual += '<tr style="font-weight: bold; background-color: #d1f2eb; color: #0e6251;">'
+        html_annual += '<td style="text-align: left; padding: 8px; border: 1px solid #ddd;">Total</td>'
+        html_annual += f'<td style="padding: 8px; border: 1px solid #ddd;">{totals["bv_b"]}</td>'
+        html_annual += f'<td style="padding: 8px; border: 1px solid #ddd;">{totals["bv_g"]}</td>'
+        html_annual += f'<td style="padding: 8px; border: 1px solid #ddd; background-color: #a3e4d7;">{totals["bv_t"]}</td>'
+        html_annual += f'<td style="padding: 8px; border: 1px solid #ddd;">{totals["p_b"]}</td>'
+        html_annual += f'<td style="padding: 8px; border: 1px solid #ddd;">{totals["p_g"]}</td>'
+        html_annual += f'<td style="padding: 8px; border: 1px solid #ddd; background-color: #a3e4d7;">{totals["p_t"]}</td>'
+        html_annual += '</tr>'
 
-        html += '</table></div>'
+        html_annual += '</table></div>'
         
-        st.markdown(html, unsafe_allow_html=True)
+        st.markdown(html_annual, unsafe_allow_html=True)
     else:
         st.warning("No student records found to generate enrolment data.")
 

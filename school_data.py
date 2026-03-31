@@ -334,116 +334,25 @@ with tab_summary:
 # TAB 3: ENROLMENT DATA & ROLL STRENGTH
 # ==========================================
 with tab_enrolment:
-    # ---------------------------------------------------------
-    # NEW FEATURE: Roll Strength (Enrolment Details)
-    # ---------------------------------------------------------
-    st.markdown("<h3 style='text-align: center; color: #2980b9;'>Roll Strength (Enrolment Details)</h3>", unsafe_allow_html=True)
-    st.write("")
-
+    
     if not df_students.empty:
-        # Strict Rule: Don't count student who have Gender column blank
+        # Pre-process valid dataframe for both sections (Strict Rule: Exclude blank genders)
         df_valid = df_students.copy()
         df_valid['Gender'] = df_valid.get('Gender', '').astype(str).str.strip().str.upper()
-        df_valid = df_valid[df_valid['Gender'] != ''] # Exclude blank genders
-
-        # Helper function to generate 4-digit boxed numbers [0][0][0][0]
-        def render_boxed_number(num):
-            num_str = f"{int(num):04d}"
-            boxes = "".join([f'<span style="display: flex; justify-content: center; align-items: center; width: 24px; height: 32px; border: 2px solid #7f8c8d; background-color: #fff; color: #2c3e50; border-radius: 4px; font-weight: bold; font-family: monospace; font-size: 18px;">{digit}</span>' for digit in num_str])
-            return f'<div style="display: flex; justify-content: center; gap: 4px; margin-top: 5px;">{boxes}</div>'
-
-        # --- Data Type 1: Class-wise Dashboard ---
-        st.markdown("#### 📌 Class-wise Dashboard")
-        
+        df_valid = df_valid[df_valid['Gender'] != ''] 
         df_valid['Clean_Class'] = df_valid.get('Class', '').astype(str).str.strip().str.upper()
-        
-        def map_class_dashboard(c):
-            if c in ['CLASS PP', 'CLASS LPP']: return 'Pre Primary'
-            if c == 'CLASS I': return 'Class - I'
-            if c == 'CLASS II': return 'Class - II'
-            if c == 'CLASS III': return 'Class - III'
-            if c == 'CLASS IV': return 'Class - IV'
-            if c == 'CLASS V': return 'Class - V'
-            return None
-            
-        df_valid['Mapped_Class'] = df_valid['Clean_Class'].apply(map_class_dashboard)
-        dash_class_counts = df_valid['Mapped_Class'].value_counts().to_dict()
-        dash_order = ['Pre Primary', 'Class - I', 'Class - II', 'Class - III', 'Class - IV', 'Class - V']
-
-        # Row 1
-        cols_r1 = st.columns(3)
-        for idx, cls_name in enumerate(dash_order[:3]):
-            with cols_r1[idx]:
-                count = dash_class_counts.get(cls_name, 0)
-                st.markdown(f"<div style='text-align:center; padding: 10px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px; background-color: #f4f6f7;'><span style='color:#34495e; font-weight:bold;'>{cls_name}</span><br>{render_boxed_number(count)}</div>", unsafe_allow_html=True)
-        
-        # Row 2
-        cols_r2 = st.columns(3)
-        for idx, cls_name in enumerate(dash_order[3:]):
-            with cols_r2[idx]:
-                count = dash_class_counts.get(cls_name, 0)
-                st.markdown(f"<div style='text-align:center; padding: 10px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px; background-color: #f4f6f7;'><span style='color:#34495e; font-weight:bold;'>{cls_name}</span><br>{render_boxed_number(count)}</div>", unsafe_allow_html=True)
-
-        st.write("")
-
-        # --- Data Type 2: Demographic Matrix ---
-        st.markdown("#### 📌 Demographic Details")
 
         def get_demo_gender(g):
             if 'BOY' in g or 'M' in g: return 'Male'
             if 'GIRL' in g or 'F' in g: return 'Female'
             return 'Unknown'
             
-        def get_demo_category(row):
-            soc = str(row.get('Social Category', '')).strip().upper()
-            rel = str(row.get('Religion', '')).strip().upper()
-            
-            # Prioritize standard Social Categories
-            if 'SC' in soc: return 'SC'
-            if 'ST' in soc: return 'ST'
-            if 'OBC' in soc: return 'OBC'
-            
-            # If Religion is Muslim -> Minority
-            if 'MUSLIM' in rel or 'ISLAM' in rel: return 'Minority'
-            
-            # Everything else falls to Others
-            return 'Others'
-
         df_valid['Demo_Gender'] = df_valid['Gender'].apply(get_demo_gender)
-        df_valid['Demo_Category'] = df_valid.apply(get_demo_category, axis=1)
-
-        demo_cats = ['SC', 'ST', 'OBC', 'Minority', 'Others']
-        demo_genders = ['Male', 'Female']
-
-        def count_demo(g, c):
-            return len(df_valid[(df_valid['Demo_Gender'] == g) & (df_valid['Demo_Category'] == c)])
-
-        html_demo = '<div style="overflow-x:auto;">'
-        html_demo += '<table style="width:100%; border-collapse: collapse; text-align: center; font-family: sans-serif; border: 1px solid #ddd; margin-bottom: 20px;">'
-        
-        html_demo += '<tr style="background-color: #2c3e50; color: white;">'
-        html_demo += '<th style="padding: 12px; border: 1px solid #ddd;">Gender &nbsp;⬇️ &nbsp;|&nbsp; Category &nbsp;➡️</th>'
-        for c in demo_cats:
-            html_demo += f'<th style="padding: 12px; border: 1px solid #ddd;">{c}</th>'
-        html_demo += '</tr>'
-        
-        for g in demo_genders:
-            html_demo += '<tr>'
-            html_demo += f'<td style="font-weight: bold; text-align: left; padding: 12px; border: 1px solid #ddd; background-color: #f4f6f7; vertical-align: middle;">{g}</td>'
-            for c in demo_cats:
-                count = count_demo(g, c)
-                html_demo += f'<td style="padding: 12px; border: 1px solid #ddd; vertical-align: middle;">{render_boxed_number(count)}</td>'
-            html_demo += '</tr>'
-            
-        html_demo += '</table></div>'
-        st.markdown(html_demo, unsafe_allow_html=True)
-
-        st.divider()
 
         # ---------------------------------------------------------
-        # PREVIOUS FEATURE: Annual Data Enrolment Table
+        # SECTION 1: Annual Data Enrolment Table
         # ---------------------------------------------------------
-        st.markdown("<h4 style='text-align: center; color: #7f8c8d;'>Annual Data Enrolment (Social Category wise)</h4>", unsafe_allow_html=True)
+        st.markdown("<h3 style='text-align: center; color: #2980b9;'>Annual Data Enrolment (Social Category wise)</h3>", unsafe_allow_html=True)
         st.write("")
 
         def get_level(c):
@@ -464,7 +373,6 @@ with tab_enrolment:
         categories_annual = ['SC', 'ST', 'OBC', 'General']
         
         def count_stu_annual(lvl, gen, cat):
-            # Using get_demo_gender to map BOY->Male, GIRL->Female to match the valid dataframe
             return len(df_valid[(df_valid['Level'] == lvl) & (df_valid['Demo_Gender'] == gen) & (df_valid['Soc_Cat'] == cat)])
 
         html_annual = '<div style="overflow-x:auto;">'
@@ -529,8 +437,102 @@ with tab_enrolment:
         html_annual += '</table></div>'
         
         st.markdown(html_annual, unsafe_allow_html=True)
+
+        st.divider()
+
+        # ---------------------------------------------------------
+        # SECTION 2: Roll Strength (Enrolment Details)
+        # ---------------------------------------------------------
+        st.markdown("<h3 style='text-align: center; color: #2980b9;'>Roll Strength (Enrolment Details)</h3>", unsafe_allow_html=True)
+        st.write("")
+
+        # Helper function to generate 4-digit boxed numbers [0][0][0][0]
+        def render_boxed_number(num):
+            num_str = f"{int(num):04d}"
+            boxes = "".join([f'<span style="display: flex; justify-content: center; align-items: center; width: 24px; height: 32px; border: 2px solid #7f8c8d; background-color: #fff; color: #2c3e50; border-radius: 4px; font-weight: bold; font-family: monospace; font-size: 18px;">{digit}</span>' for digit in num_str])
+            return f'<div style="display: flex; justify-content: center; gap: 4px; margin-top: 5px;">{boxes}</div>'
+
+        # --- Data Type 1: Class-wise Dashboard ---
+        st.markdown("#### 📌 Class-wise Dashboard")
+        
+        def map_class_dashboard(c):
+            if c in ['CLASS PP', 'CLASS LPP']: return 'Pre Primary'
+            if c == 'CLASS I': return 'Class - I'
+            if c == 'CLASS II': return 'Class - II'
+            if c == 'CLASS III': return 'Class - III'
+            if c == 'CLASS IV': return 'Class - IV'
+            if c == 'CLASS V': return 'Class - V'
+            return None
+            
+        df_valid['Mapped_Class'] = df_valid['Clean_Class'].apply(map_class_dashboard)
+        dash_class_counts = df_valid['Mapped_Class'].value_counts().to_dict()
+        dash_order = ['Pre Primary', 'Class - I', 'Class - II', 'Class - III', 'Class - IV', 'Class - V']
+
+        # Row 1
+        cols_r1 = st.columns(3)
+        for idx, cls_name in enumerate(dash_order[:3]):
+            with cols_r1[idx]:
+                count = dash_class_counts.get(cls_name, 0)
+                st.markdown(f"<div style='text-align:center; padding: 10px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px; background-color: #f4f6f7;'><span style='color:#34495e; font-weight:bold;'>{cls_name}</span><br>{render_boxed_number(count)}</div>", unsafe_allow_html=True)
+        
+        # Row 2
+        cols_r2 = st.columns(3)
+        for idx, cls_name in enumerate(dash_order[3:]):
+            with cols_r2[idx]:
+                count = dash_class_counts.get(cls_name, 0)
+                st.markdown(f"<div style='text-align:center; padding: 10px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px; background-color: #f4f6f7;'><span style='color:#34495e; font-weight:bold;'>{cls_name}</span><br>{render_boxed_number(count)}</div>", unsafe_allow_html=True)
+
+        st.write("")
+
+        # --- Data Type 2: Demographic Matrix ---
+        st.markdown("#### 📌 Demographic Details")
+            
+        def get_demo_category(row):
+            soc = str(row.get('Social Category', '')).strip().upper()
+            rel = str(row.get('Religion', '')).strip().upper()
+            
+            # Prioritize standard Social Categories
+            if 'SC' in soc: return 'SC'
+            if 'ST' in soc: return 'ST'
+            if 'OBC' in soc: return 'OBC'
+            
+            # If Religion is Muslim -> Minority
+            if 'MUSLIM' in rel or 'ISLAM' in rel: return 'Minority'
+            
+            # Everything else falls to Others
+            return 'Others'
+
+        df_valid['Demo_Category'] = df_valid.apply(get_demo_category, axis=1)
+
+        demo_cats = ['SC', 'ST', 'OBC', 'Minority', 'Others']
+        demo_genders = ['Male', 'Female']
+
+        def count_demo(g, c):
+            return len(df_valid[(df_valid['Demo_Gender'] == g) & (df_valid['Demo_Category'] == c)])
+
+        html_demo = '<div style="overflow-x:auto;">'
+        html_demo += '<table style="width:100%; border-collapse: collapse; text-align: center; font-family: sans-serif; border: 1px solid #ddd; margin-bottom: 20px;">'
+        
+        html_demo += '<tr style="background-color: #2c3e50; color: white;">'
+        html_demo += '<th style="padding: 12px; border: 1px solid #ddd;">Gender &nbsp;⬇️ &nbsp;|&nbsp; Category &nbsp;➡️</th>'
+        for c in demo_cats:
+            html_demo += f'<th style="padding: 12px; border: 1px solid #ddd;">{c}</th>'
+        html_demo += '</tr>'
+        
+        for g in demo_genders:
+            html_demo += '<tr>'
+            html_demo += f'<td style="font-weight: bold; text-align: left; padding: 12px; border: 1px solid #ddd; background-color: #f4f6f7; vertical-align: middle;">{g}</td>'
+            for c in demo_cats:
+                count = count_demo(g, c)
+                html_demo += f'<td style="padding: 12px; border: 1px solid #ddd; vertical-align: middle;">{render_boxed_number(count)}</td>'
+            html_demo += '</tr>'
+            
+        html_demo += '</table></div>'
+        st.markdown(html_demo, unsafe_allow_html=True)
+
     else:
         st.warning("No student records found to generate enrolment data.")
+
 
 # ==========================================
 # TAB 4: STUDENT SEARCH

@@ -344,9 +344,7 @@ with tab_enrolment:
         df_clean['Gender'] = df_clean.get('Gender', '').astype(str).str.strip().str.upper()
         df_clean['Social Category'] = df_clean.get('Social Category', '').astype(str).str.strip().str.upper()
 
-        # Classifiers
         def get_level(c):
-            # Bundled according to strict BPS system rules
             if c in ['CLASS PP', 'CLASS LPP']: return 'Bal Vatika'
             if c in ['CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV', 'CLASS V']: return 'Primary'
             return 'Other'
@@ -361,7 +359,7 @@ with tab_enrolment:
             if 'ST' in c: return 'ST'
             if 'OBC' in c: return 'OBC'
             if 'GEN' in c: return 'General'
-            return 'General' # Fallback default
+            return 'General' 
 
         df_clean['Level'] = df_clean['Class'].apply(get_level)
         df_clean['Gen'] = df_clean['Gender'].apply(get_gender)
@@ -372,67 +370,58 @@ with tab_enrolment:
         def count_stu(lvl, gen, cat):
             return len(df_clean[(df_clean['Level'] == lvl) & (df_clean['Gen'] == gen) & (df_clean['Soc_Cat'] == cat)])
 
-        # Generate Custom HTML Table for perfect layout and mobile scrolling
-        html_table = f"""
-        <div style="overflow-x:auto;">
-        <table style="width:100%; border-collapse: collapse; text-align: center; font-family: sans-serif; border: 1px solid #ddd; margin-bottom: 20px;">
-          <tr style="background-color: #2980b9; color: white;">
-            <th colspan="2" style="padding: 10px; border: 1px solid #ddd;">Class Level &nbsp;⬇️ &nbsp;|&nbsp; Social Category &nbsp;➡️</th>
-            <th style="padding: 10px; border: 1px solid #ddd;">SC</th>
-            <th style="padding: 10px; border: 1px solid #ddd;">ST</th>
-            <th style="padding: 10px; border: 1px solid #ddd;">OBC</th>
-            <th style="padding: 10px; border: 1px solid #ddd;">General</th>
-            <th style="padding: 10px; border: 1px solid #ddd; background-color: #1a5276;">Total</th>
-          </tr>
-        """
+        # Constructing HTML string flat without leading spaces to prevent markdown code block trigger
+        html = '<div style="overflow-x:auto;">'
+        html += '<table style="width:100%; border-collapse: collapse; text-align: center; font-family: sans-serif; border: 1px solid #ddd; margin-bottom: 20px;">'
+        html += '<tr style="background-color: #2980b9; color: white;">'
+        html += '<th colspan="2" style="padding: 10px; border: 1px solid #ddd;">Class Level &nbsp;⬇️ &nbsp;|&nbsp; Social Category &nbsp;➡️</th>'
+        html += '<th style="padding: 10px; border: 1px solid #ddd;">SC</th>'
+        html += '<th style="padding: 10px; border: 1px solid #ddd;">ST</th>'
+        html += '<th style="padding: 10px; border: 1px solid #ddd;">OBC</th>'
+        html += '<th style="padding: 10px; border: 1px solid #ddd;">General</th>'
+        html += '<th style="padding: 10px; border: 1px solid #ddd; background-color: #1a5276;">Total</th>'
+        html += '</tr>'
         
-        # Configuration for iterating levels
         levels_config = [
             ('Bal Vatika', 'Bal Vatika<br><span style="font-size:12px; color:gray;">(Class PP & LPP)</span>'), 
             ('Primary', 'Primary<br><span style="font-size:12px; color:gray;">(Class I - V)</span>')
         ]
         
         for lvl_key, lvl_label in levels_config:
-            # --- Boys Row ---
-            html_table += f"""
-              <tr>
-                <td rowspan="3" style="font-weight: bold; vertical-align: middle; background-color: #f4f6f7; border: 1px solid #ddd; padding: 8px;">{lvl_label}</td>
-                <td style="text-align: left; padding: 8px; border: 1px solid #ddd;">Boys</td>
-            """
+            # Boys Row
+            html += '<tr>'
+            html += f'<td rowspan="3" style="font-weight: bold; vertical-align: middle; background-color: #f4f6f7; border: 1px solid #ddd; padding: 8px;">{lvl_label}</td>'
+            html += '<td style="text-align: left; padding: 8px; border: 1px solid #ddd;">Boys</td>'
             b_tot = 0
             for cat in categories:
                 c = count_stu(lvl_key, 'Boys', cat)
                 b_tot += c
-                html_table += f'<td style="padding: 8px; border: 1px solid #ddd;">{c}</td>'
-            html_table += f'<td style="padding: 8px; border: 1px solid #ddd; font-weight:bold; background-color: #eaeded;">{b_tot}</td></tr>'
+                html += f'<td style="padding: 8px; border: 1px solid #ddd;">{c}</td>'
+            html += f'<td style="padding: 8px; border: 1px solid #ddd; font-weight:bold; background-color: #eaeded;">{b_tot}</td></tr>'
             
-            # --- Girls Row ---
-            html_table += f"""
-              <tr>
-                <td style="text-align: left; padding: 8px; border: 1px solid #ddd;">Girls</td>
-            """
+            # Girls Row
+            html += '<tr>'
+            html += '<td style="text-align: left; padding: 8px; border: 1px solid #ddd;">Girls</td>'
             g_tot = 0
             for cat in categories:
                 c = count_stu(lvl_key, 'Girls', cat)
                 g_tot += c
-                html_table += f'<td style="padding: 8px; border: 1px solid #ddd;">{c}</td>'
-            html_table += f'<td style="padding: 8px; border: 1px solid #ddd; font-weight:bold; background-color: #eaeded;">{g_tot}</td></tr>'
+                html += f'<td style="padding: 8px; border: 1px solid #ddd;">{c}</td>'
+            html += f'<td style="padding: 8px; border: 1px solid #ddd; font-weight:bold; background-color: #eaeded;">{g_tot}</td></tr>'
             
-            # --- Total Row ---
-            html_table += f"""
-              <tr style="font-weight: bold; background-color: #e8f8f5;">
-                <td style="text-align: left; padding: 8px; border: 1px solid #ddd;">Total</td>
-            """
+            # Total Row
+            html += '<tr style="font-weight: bold; background-color: #e8f8f5;">'
+            html += '<td style="text-align: left; padding: 8px; border: 1px solid #ddd;">Total</td>'
             t_tot = 0
             for cat in categories:
                 c = count_stu(lvl_key, 'Boys', cat) + count_stu(lvl_key, 'Girls', cat)
                 t_tot += c
-                html_table += f'<td style="padding: 8px; border: 1px solid #ddd;">{c}</td>'
-            html_table += f'<td style="padding: 8px; border: 1px solid #ddd; font-weight:bold; background-color: #d1f2eb; color: #0e6251;">{t_tot}</td></tr>'
+                html += f'<td style="padding: 8px; border: 1px solid #ddd;">{c}</td>'
+            html += f'<td style="padding: 8px; border: 1px solid #ddd; font-weight:bold; background-color: #d1f2eb; color: #0e6251;">{t_tot}</td></tr>'
 
-        html_table += "</table></div>"
+        html += '</table></div>'
         
-        st.markdown(html_table, unsafe_allow_html=True)
+        st.markdown(html, unsafe_allow_html=True)
     else:
         st.warning("No student records found to generate enrolment data.")
 

@@ -128,7 +128,7 @@ if df_students.empty and df_teachers.empty:
     st.stop()
 
 # Create Tabs for Navigation
-tab_bday, tab_summary, tab_search = st.tabs(["🎂 Birthday Manager", "📊 Summary", "🔍 Search"])
+tab_bday, tab_summary, tab_enrolment, tab_search = st.tabs(["🎂 Birthdays", "📊 Summary", "📈 Enrolment", "🔍 Search"])
 
 # ==========================================
 # TAB 1: BIRTHDAY MANAGER
@@ -331,7 +331,113 @@ with tab_summary:
         st.warning("No student records found to generate a summary.")
 
 # ==========================================
-# TAB 3: STUDENT SEARCH
+# TAB 3: ENROLMENT DATA (Social Category)
+# ==========================================
+with tab_enrolment:
+    st.markdown("<h3 style='text-align: center; color: #2980b9;'>Annual Data Enrolment (Social Category wise)</h3>", unsafe_allow_html=True)
+    st.divider()
+
+    if not df_students.empty:
+        # Prepare clean dataframe for accurate cross-tabulation
+        df_clean = df_students.copy()
+        df_clean['Class'] = df_clean.get('Class', '').astype(str).str.strip().str.upper()
+        df_clean['Gender'] = df_clean.get('Gender', '').astype(str).str.strip().str.upper()
+        df_clean['Social Category'] = df_clean.get('Social Category', '').astype(str).str.strip().str.upper()
+
+        # Classifiers
+        def get_level(c):
+            # Bundled according to strict BPS system rules
+            if c in ['CLASS PP', 'CLASS LPP']: return 'Bal Vatika'
+            if c in ['CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV', 'CLASS V']: return 'Primary'
+            return 'Other'
+
+        def get_gender(g):
+            if 'BOY' in g or 'M' in g: return 'Boys'
+            if 'GIRL' in g or 'F' in g: return 'Girls'
+            return 'Unknown'
+
+        def get_soc(c):
+            if 'SC' in c: return 'SC'
+            if 'ST' in c: return 'ST'
+            if 'OBC' in c: return 'OBC'
+            if 'GEN' in c: return 'General'
+            return 'General' # Fallback default
+
+        df_clean['Level'] = df_clean['Class'].apply(get_level)
+        df_clean['Gen'] = df_clean['Gender'].apply(get_gender)
+        df_clean['Soc_Cat'] = df_clean['Social Category'].apply(get_soc)
+
+        categories = ['SC', 'ST', 'OBC', 'General']
+        
+        def count_stu(lvl, gen, cat):
+            return len(df_clean[(df_clean['Level'] == lvl) & (df_clean['Gen'] == gen) & (df_clean['Soc_Cat'] == cat)])
+
+        # Generate Custom HTML Table for perfect layout and mobile scrolling
+        html_table = f"""
+        <div style="overflow-x:auto;">
+        <table style="width:100%; border-collapse: collapse; text-align: center; font-family: sans-serif; border: 1px solid #ddd; margin-bottom: 20px;">
+          <tr style="background-color: #2980b9; color: white;">
+            <th colspan="2" style="padding: 10px; border: 1px solid #ddd;">Class Level &nbsp;⬇️ &nbsp;|&nbsp; Social Category &nbsp;➡️</th>
+            <th style="padding: 10px; border: 1px solid #ddd;">SC</th>
+            <th style="padding: 10px; border: 1px solid #ddd;">ST</th>
+            <th style="padding: 10px; border: 1px solid #ddd;">OBC</th>
+            <th style="padding: 10px; border: 1px solid #ddd;">General</th>
+            <th style="padding: 10px; border: 1px solid #ddd; background-color: #1a5276;">Total</th>
+          </tr>
+        """
+        
+        # Configuration for iterating levels
+        levels_config = [
+            ('Bal Vatika', 'Bal Vatika<br><span style="font-size:12px; color:gray;">(Class PP & LPP)</span>'), 
+            ('Primary', 'Primary<br><span style="font-size:12px; color:gray;">(Class I - V)</span>')
+        ]
+        
+        for lvl_key, lvl_label in levels_config:
+            # --- Boys Row ---
+            html_table += f"""
+              <tr>
+                <td rowspan="3" style="font-weight: bold; vertical-align: middle; background-color: #f4f6f7; border: 1px solid #ddd; padding: 8px;">{lvl_label}</td>
+                <td style="text-align: left; padding: 8px; border: 1px solid #ddd;">Boys</td>
+            """
+            b_tot = 0
+            for cat in categories:
+                c = count_stu(lvl_key, 'Boys', cat)
+                b_tot += c
+                html_table += f'<td style="padding: 8px; border: 1px solid #ddd;">{c}</td>'
+            html_table += f'<td style="padding: 8px; border: 1px solid #ddd; font-weight:bold; background-color: #eaeded;">{b_tot}</td></tr>'
+            
+            # --- Girls Row ---
+            html_table += f"""
+              <tr>
+                <td style="text-align: left; padding: 8px; border: 1px solid #ddd;">Girls</td>
+            """
+            g_tot = 0
+            for cat in categories:
+                c = count_stu(lvl_key, 'Girls', cat)
+                g_tot += c
+                html_table += f'<td style="padding: 8px; border: 1px solid #ddd;">{c}</td>'
+            html_table += f'<td style="padding: 8px; border: 1px solid #ddd; font-weight:bold; background-color: #eaeded;">{g_tot}</td></tr>'
+            
+            # --- Total Row ---
+            html_table += f"""
+              <tr style="font-weight: bold; background-color: #e8f8f5;">
+                <td style="text-align: left; padding: 8px; border: 1px solid #ddd;">Total</td>
+            """
+            t_tot = 0
+            for cat in categories:
+                c = count_stu(lvl_key, 'Boys', cat) + count_stu(lvl_key, 'Girls', cat)
+                t_tot += c
+                html_table += f'<td style="padding: 8px; border: 1px solid #ddd;">{c}</td>'
+            html_table += f'<td style="padding: 8px; border: 1px solid #ddd; font-weight:bold; background-color: #d1f2eb; color: #0e6251;">{t_tot}</td></tr>'
+
+        html_table += "</table></div>"
+        
+        st.markdown(html_table, unsafe_allow_html=True)
+    else:
+        st.warning("No student records found to generate enrolment data.")
+
+# ==========================================
+# TAB 4: STUDENT SEARCH
 # ==========================================
 with tab_search:
     st.markdown("### 🔍 Search Student Directory")
@@ -341,12 +447,10 @@ with tab_search:
         if df_students.empty:
             st.error("Student database is empty.")
         else:
-            # Clean mobile columns to strings for exact matching
             df_search = df_students.copy()
             df_search['Mobile_Clean'] = df_search.get('Mobile', '').astype(str).str.replace('.0', '', regex=False).str.strip()
             df_search['Sec_Mobile_Clean'] = df_search.get('Secondary Mobile', '').astype(str).str.replace('.0', '', regex=False).str.strip()
             
-            # Find matches in either primary or secondary mobile
             matches = df_search[(df_search['Mobile_Clean'] == search_query) | (df_search['Sec_Mobile_Clean'] == search_query)]
             
             if matches.empty:
@@ -356,14 +460,12 @@ with tab_search:
                 st.write("")
                 
                 for _, row in matches.iterrows():
-                    # Fetch Photo (Prioritize Photo_URL, fallback to Thumb_URL)
                     photo_url = str(row.get('Photo_URL', '')).strip()
                     if photo_url == 'nan' or not photo_url:
                         photo_url = str(row.get('Thumb_URL', '')).strip()
                         
                     img_uri = get_secure_photo_uri(photo_url)
                     
-                    # UI Layout strictly adhering to Mobile Responsiveness rule
                     c1, c2 = st.columns(2)
                     
                     with c1:
@@ -375,7 +477,6 @@ with tab_search:
                         st.markdown(f"**{row.get('Name', 'Unknown')}**")
                         st.markdown(f"<span style='color:gray; font-size:14px;'>{row.get('Class', '')} | Sec: {row.get('Section', '')} | Roll: {row.get('Roll', '')}</span>", unsafe_allow_html=True)
                     
-                    # Detailed Information Box
                     with st.container(border=True):
                         st.write(f"🧑‍🏫 **Parents:** {row.get('Father', 'N/A')} & {row.get('Mother', 'N/A')}")
                         st.write(f"🎂 **DOB:** {row.get('DOB', 'N/A')}")

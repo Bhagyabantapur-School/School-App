@@ -482,6 +482,13 @@ with tab_enrolment:
                 count = dash_class_counts.get(cls_name, 0)
                 st.markdown(f"<div style='text-align:center; padding: 10px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px; background-color: #f4f6f7;'><span style='color:#34495e; font-weight:bold;'>{cls_name}</span><br>{render_boxed_number(count)}</div>", unsafe_allow_html=True)
 
+        # Row 3 (Total Box)
+        st.write("")
+        total_valid_students = len(df_valid)
+        col_t1, col_t2, col_t3 = st.columns(3)
+        with col_t2:
+            st.markdown(f"<div style='text-align:center; padding: 10px; border: 2px solid #2980b9; border-radius: 8px; margin-bottom: 10px; background-color: #ebf5fb;'><span style='color:#2980b9; font-weight:bold; font-size: 16px;'>TOTAL STRENGTH</span><br>{render_boxed_number(total_valid_students)}</div>", unsafe_allow_html=True)
+
         st.write("")
 
         # --- Data Type 2: Demographic Matrix ---
@@ -513,19 +520,43 @@ with tab_enrolment:
         html_demo = '<div style="overflow-x:auto;">'
         html_demo += '<table style="width:100%; border-collapse: collapse; text-align: center; font-family: sans-serif; border: 1px solid #ddd; margin-bottom: 20px;">'
         
+        # Headers (including Total column)
         html_demo += '<tr style="background-color: #2c3e50; color: white;">'
         html_demo += '<th style="padding: 12px; border: 1px solid #ddd;">Gender &nbsp;⬇️ &nbsp;|&nbsp; Category &nbsp;➡️</th>'
         for c in demo_cats:
             html_demo += f'<th style="padding: 12px; border: 1px solid #ddd;">{c}</th>'
+        html_demo += '<th style="padding: 12px; border: 1px solid #ddd; background-color: #1a5276;">Total</th>'
         html_demo += '</tr>'
         
+        # Rows (Tracking column totals)
+        col_totals = {c: 0 for c in demo_cats}
         for g in demo_genders:
             html_demo += '<tr>'
             html_demo += f'<td style="font-weight: bold; text-align: left; padding: 12px; border: 1px solid #ddd; background-color: #f4f6f7; vertical-align: middle;">{g}</td>'
+            row_total = 0
             for c in demo_cats:
                 count = count_demo(g, c)
+                row_total += count
+                col_totals[c] += count
                 html_demo += f'<td style="padding: 12px; border: 1px solid #ddd; vertical-align: middle;">{render_boxed_number(count)}</td>'
+            
+            # Row Total Column
+            html_demo += f'<td style="padding: 12px; border: 1px solid #ddd; vertical-align: middle; background-color: #eaeded;">{render_boxed_number(row_total)}</td>'
             html_demo += '</tr>'
+            
+        # Bottom Total Row
+        html_demo += '<tr style="background-color: #d1f2eb;">'
+        html_demo += '<td style="font-weight: bold; text-align: left; padding: 12px; border: 1px solid #ddd; color: #0e6251; vertical-align: middle;">Total</td>'
+        
+        grand_total = 0
+        for c in demo_cats:
+            count = col_totals[c]
+            grand_total += count
+            html_demo += f'<td style="padding: 12px; border: 1px solid #ddd; vertical-align: middle;">{render_boxed_number(count)}</td>'
+            
+        # Grand Total Box
+        html_demo += f'<td style="padding: 12px; border: 1px solid #ddd; vertical-align: middle; background-color: #a3e4d7;">{render_boxed_number(grand_total)}</td>'
+        html_demo += '</tr>'
             
         html_demo += '</table></div>'
         st.markdown(html_demo, unsafe_allow_html=True)

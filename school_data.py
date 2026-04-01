@@ -518,8 +518,8 @@ with tab_enrolment:
         def count_demo(g, c):
             return len(df_valid[(df_valid['Demo_Gender'] == g) & (df_valid['Demo_Category'] == c)])
 
-        html_demo = '<div style="overflow-x:auto;">'
-        html_demo += '<table style="width:100%; border-collapse: collapse; text-align: center; font-family: sans-serif; border: 1px solid #ddd; margin-bottom: 20px;">'
+        # Removed scrolling div from Demographic Details
+        html_demo = '<table style="width:100%; border-collapse: collapse; text-align: center; font-family: sans-serif; border: 1px solid #ddd; margin-bottom: 20px;">'
         
         # Headers (including Total column)
         html_demo += '<tr style="background-color: #2c3e50; color: white;">'
@@ -559,7 +559,7 @@ with tab_enrolment:
         html_demo += f'<td style="padding: 12px; border: 1px solid #ddd; vertical-align: middle; background-color: #a3e4d7;">{render_boxed_number(grand_total)}</td>'
         html_demo += '</tr>'
             
-        html_demo += '</table></div>'
+        html_demo += '</table>'
         st.markdown(html_demo, unsafe_allow_html=True)
 
         st.divider()
@@ -620,8 +620,8 @@ with tab_enrolment:
             ('৫ ম', ['CLASS V'])
         ]
 
-        html_bng = '<div style="overflow-x:auto;">'
-        html_bng += '<table style="width:100%; border-collapse: collapse; text-align: center; font-family: sans-serif; border: 1px solid #ddd; margin-bottom: 20px;">'
+        # Removed scrolling div from ছাত্রছাত্রীর বিবরণী
+        html_bng = '<table style="width:100%; border-collapse: collapse; text-align: center; font-family: sans-serif; border: 1px solid #ddd; margin-bottom: 20px;">'
         
         # Headers Row 1
         html_bng += '<tr style="background-color: #2980b9; color: white;">'
@@ -730,7 +730,7 @@ with tab_enrolment:
         html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{gt["min_b"]}</td><td style="padding: 8px; border: 1px solid #ddd;">{gt["min_g"]}</td>'
         
         html_bng += '</tr>'
-        html_bng += '</table></div>'
+        html_bng += '</table>'
         
         st.markdown(html_bng, unsafe_allow_html=True)
 

@@ -570,8 +570,8 @@ with tab_enrolment:
         st.markdown("<h3 style='text-align: center; color: #2980b9;'>ছাত্রছাত্রীর বিবরণী</h3>", unsafe_allow_html=True)
         st.write("")
 
-        def calc_avg_attendance(cls_list):
-            if df_attendance.empty: return 0
+        def get_attendance_stats(cls_list):
+            if df_attendance.empty: return 0, 0, "0%"
             
             df_att_clean = df_attendance.copy()
             df_att_clean['Clean_Class'] = df_att_clean.get('Class', '').astype(str).str.strip().str.upper()
@@ -579,13 +579,12 @@ with tab_enrolment:
             mask = df_att_clean['Clean_Class'].isin(cls_list)
             df_filtered = df_att_clean[mask]
             
-            if df_filtered.empty: return 0
-            
-            working_days = df_filtered['Date'].nunique()
-            if working_days == 0: return 0
+            total_records = len(df_filtered)
+            if total_records == 0: return 0, 0, "0%"
             
             total_present = df_filtered[df_filtered['Status'] == True].shape[0]
-            return round(total_present / working_days)
+            pct = round((total_present / total_records) * 100)
+            return total_present, total_records, f"{pct}%"
 
         def count_bengali(cls_list, gender, cat=None, bpl=False):
             mask = df_valid['Clean_Class'].isin(cls_list) & (df_valid['Demo_Gender'] == gender)
@@ -628,7 +627,7 @@ with tab_enrolment:
         html_bng += '<tr style="background-color: #2980b9; color: white;">'
         html_bng += '<th rowspan="2" style="padding: 10px; border: 1px solid #ddd; vertical-align: middle;">শ্রেণী</th>'
         html_bng += '<th colspan="3" style="padding: 10px; border: 1px solid #ddd;">মোট ছাত্র ছাত্রী</th>'
-        html_bng += '<th rowspan="2" style="padding: 10px; border: 1px solid #ddd; vertical-align: middle;">গড় উপস্থিত</th>'
+        html_bng += '<th rowspan="2" style="padding: 10px; border: 1px solid #ddd; vertical-align: middle;">উপস্থিতির গড় (%)</th>'
         html_bng += '<th colspan="2" style="padding: 10px; border: 1px solid #ddd;">সাধারণ</th>'
         html_bng += '<th colspan="2" style="padding: 10px; border: 1px solid #ddd;">B.P.L</th>'
         html_bng += '<th colspan="2" style="padding: 10px; border: 1px solid #ddd;">তপশিলী জাতি</th>'
@@ -649,7 +648,8 @@ with tab_enrolment:
         
         # Initialize Grand Totals
         gt = {
-            'tot_b': 0, 'tot_g': 0, 'tot_t': 0, 'att': 0,
+            'tot_b': 0, 'tot_g': 0, 'tot_t': 0, 
+            'att_present': 0, 'att_total': 0,
             'gen_b': 0, 'gen_g': 0, 'bpl_b': 0, 'bpl_g': 0,
             'sc_b': 0, 'sc_g': 0, 'obc_b': 0, 'obc_g': 0,
             'min_b': 0, 'min_g': 0
@@ -663,14 +663,16 @@ with tab_enrolment:
             b = count_bengali(r_classes, 'Male')
             g = count_bengali(r_classes, 'Female')
             t = b + g
-            att = calc_avg_attendance(r_classes)
             
-            gt['tot_b'] += b; gt['tot_g'] += g; gt['tot_t'] += t; gt['att'] += att
+            pres_cnt, tot_rec_cnt, att_str = get_attendance_stats(r_classes)
+            
+            gt['tot_b'] += b; gt['tot_g'] += g; gt['tot_t'] += t
+            gt['att_present'] += pres_cnt; gt['att_total'] += tot_rec_cnt
             
             html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{b}</td>'
             html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{g}</td>'
             html_bng += f'<td style="padding: 8px; border: 1px solid #ddd; font-weight:bold; background-color: #eaeded;">{t}</td>'
-            html_bng += f'<td style="padding: 8px; border: 1px solid #ddd; color: #2980b9; font-weight:bold;">{att}</td>'
+            html_bng += f'<td style="padding: 8px; border: 1px solid #ddd; color: #2980b9; font-weight:bold;">{att_str}</td>'
             
             # General
             gen_b = count_bengali(r_classes, 'Male', cat='GENERAL')
@@ -711,7 +713,15 @@ with tab_enrolment:
         html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{gt["tot_b"]}</td>'
         html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{gt["tot_g"]}</td>'
         html_bng += f'<td style="padding: 8px; border: 1px solid #ddd; background-color: #a3e4d7;">{gt["tot_t"]}</td>'
-        html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{gt["att"]}</td>'
+        
+        # Calculate overall attendance percentage
+        if gt['att_total'] > 0:
+            overall_att_pct = round((gt['att_present'] / gt['att_total']) * 100)
+            overall_att_str = f"{overall_att_pct}%"
+        else:
+            overall_att_str = "0%"
+            
+        html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{overall_att_str}</td>'
         
         html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{gt["gen_b"]}</td><td style="padding: 8px; border: 1px solid #ddd;">{gt["gen_g"]}</td>'
         html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{gt["bpl_b"]}</td><td style="padding: 8px; border: 1px solid #ddd;">{gt["bpl_g"]}</td>'

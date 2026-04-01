@@ -116,6 +116,7 @@ with st.spinner("Syncing with BPS Database..."):
     try:
         df_students = fetch_sheet_data("students_master")
         df_teachers = fetch_sheet_data("TEACHERS_DETAIL")
+        df_attendance = fetch_sheet_data("student_attendance_master")
     except APIError:
         st.error("Google Sheets API Quota Exceeded. Please try again later.")
         st.stop()
@@ -560,6 +561,168 @@ with tab_enrolment:
             
         html_demo += '</table></div>'
         st.markdown(html_demo, unsafe_allow_html=True)
+
+        st.divider()
+
+        # ---------------------------------------------------------
+        # SECTION 3: ছাত্রছাত্রীর বিবরণী (Bengali Details Table)
+        # ---------------------------------------------------------
+        st.markdown("<h3 style='text-align: center; color: #2980b9;'>ছাত্রছাত্রীর বিবরণী</h3>", unsafe_allow_html=True)
+        st.write("")
+
+        def calc_avg_attendance(cls_list):
+            if df_attendance.empty: return 0
+            
+            df_att_clean = df_attendance.copy()
+            df_att_clean['Clean_Class'] = df_att_clean.get('Class', '').astype(str).str.strip().str.upper()
+            
+            mask = df_att_clean['Clean_Class'].isin(cls_list)
+            df_filtered = df_att_clean[mask]
+            
+            if df_filtered.empty: return 0
+            
+            working_days = df_filtered['Date'].nunique()
+            if working_days == 0: return 0
+            
+            total_present = df_filtered[df_filtered['Status'] == True].shape[0]
+            return round(total_present / working_days)
+
+        def count_bengali(cls_list, gender, cat=None, bpl=False):
+            mask = df_valid['Clean_Class'].isin(cls_list) & (df_valid['Demo_Gender'] == gender)
+            
+            if bpl:
+                bpl_col = None
+                for c in df_valid.columns:
+                    if 'BPL' in str(c).upper():
+                        bpl_col = c
+                        break
+                if bpl_col:
+                    mask = mask & df_valid[bpl_col].astype(str).str.strip().str.upper().isin(['YES', 'Y', 'TRUE'])
+                else:
+                    return 0
+
+            if cat == 'GENERAL':
+                mask = mask & df_valid['Social Category'].astype(str).str.strip().str.upper().str.contains('GEN')
+            elif cat == 'SC':
+                mask = mask & (df_valid['Social Category'].astype(str).str.strip().str.upper() == 'SC')
+            elif cat == 'OBC':
+                mask = mask & df_valid['Social Category'].astype(str).str.strip().str.upper().str.contains('OBC')
+            elif cat == 'MINORITY':
+                mask = mask & df_valid['Religion'].astype(str).str.strip().str.upper().isin(['MUSLIM', 'ISLAM', 'CHRISTIAN'])
+                
+            return len(df_valid[mask])
+
+        bengali_rows = [
+            ('শিশু শ্রেণি', ['CLASS PP', 'CLASS LPP']),
+            ('১ ম', ['CLASS I']),
+            ('২ য়', ['CLASS II']),
+            ('৩ য়', ['CLASS III']),
+            ('৪ র্থ', ['CLASS IV']),
+            ('৫ ম', ['CLASS V'])
+        ]
+
+        html_bng = '<div style="overflow-x:auto;">'
+        html_bng += '<table style="width:100%; border-collapse: collapse; text-align: center; font-family: sans-serif; border: 1px solid #ddd; margin-bottom: 20px;">'
+        
+        # Headers Row 1
+        html_bng += '<tr style="background-color: #2980b9; color: white;">'
+        html_bng += '<th rowspan="2" style="padding: 10px; border: 1px solid #ddd; vertical-align: middle;">শ্রেণী</th>'
+        html_bng += '<th colspan="3" style="padding: 10px; border: 1px solid #ddd;">মোট ছাত্র ছাত্রী</th>'
+        html_bng += '<th rowspan="2" style="padding: 10px; border: 1px solid #ddd; vertical-align: middle;">গড় উপস্থিত</th>'
+        html_bng += '<th colspan="2" style="padding: 10px; border: 1px solid #ddd;">সাধারণ</th>'
+        html_bng += '<th colspan="2" style="padding: 10px; border: 1px solid #ddd;">B.P.L</th>'
+        html_bng += '<th colspan="2" style="padding: 10px; border: 1px solid #ddd;">তপশিলী জাতি</th>'
+        html_bng += '<th colspan="2" style="padding: 10px; border: 1px solid #ddd;">ও বি সি</th>'
+        html_bng += '<th colspan="2" style="padding: 10px; border: 1px solid #ddd;">সংখ্যা লঘু</th>'
+        html_bng += '</tr>'
+        
+        # Headers Row 2
+        html_bng += '<tr style="background-color: #1a5276; color: white;">'
+        html_bng += '<th style="padding: 8px; border: 1px solid #ddd;">ছাত্র</th>'
+        html_bng += '<th style="padding: 8px; border: 1px solid #ddd;">ছাত্রী</th>'
+        html_bng += '<th style="padding: 8px; border: 1px solid #ddd;">মোট</th>'
+        
+        for _ in range(5):
+            html_bng += '<th style="padding: 8px; border: 1px solid #ddd;">ছাত্র</th>'
+            html_bng += '<th style="padding: 8px; border: 1px solid #ddd;">ছাত্রী</th>'
+        html_bng += '</tr>'
+        
+        # Initialize Grand Totals
+        gt = {
+            'tot_b': 0, 'tot_g': 0, 'tot_t': 0, 'att': 0,
+            'gen_b': 0, 'gen_g': 0, 'bpl_b': 0, 'bpl_g': 0,
+            'sc_b': 0, 'sc_g': 0, 'obc_b': 0, 'obc_g': 0,
+            'min_b': 0, 'min_g': 0
+        }
+        
+        for r_name, r_classes in bengali_rows:
+            html_bng += '<tr>'
+            html_bng += f'<td style="font-weight: bold; text-align: left; padding: 8px; border: 1px solid #ddd; background-color: #f4f6f7;">{r_name}</td>'
+            
+            # Totals
+            b = count_bengali(r_classes, 'Male')
+            g = count_bengali(r_classes, 'Female')
+            t = b + g
+            att = calc_avg_attendance(r_classes)
+            
+            gt['tot_b'] += b; gt['tot_g'] += g; gt['tot_t'] += t; gt['att'] += att
+            
+            html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{b}</td>'
+            html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{g}</td>'
+            html_bng += f'<td style="padding: 8px; border: 1px solid #ddd; font-weight:bold; background-color: #eaeded;">{t}</td>'
+            html_bng += f'<td style="padding: 8px; border: 1px solid #ddd; color: #2980b9; font-weight:bold;">{att}</td>'
+            
+            # General
+            gen_b = count_bengali(r_classes, 'Male', cat='GENERAL')
+            gen_g = count_bengali(r_classes, 'Female', cat='GENERAL')
+            gt['gen_b'] += gen_b; gt['gen_g'] += gen_g
+            html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{gen_b}</td><td style="padding: 8px; border: 1px solid #ddd;">{gen_g}</td>'
+            
+            # BPL
+            bpl_b = count_bengali(r_classes, 'Male', bpl=True)
+            bpl_g = count_bengali(r_classes, 'Female', bpl=True)
+            gt['bpl_b'] += bpl_b; gt['bpl_g'] += bpl_g
+            html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{bpl_b}</td><td style="padding: 8px; border: 1px solid #ddd;">{bpl_g}</td>'
+            
+            # SC
+            sc_b = count_bengali(r_classes, 'Male', cat='SC')
+            sc_g = count_bengali(r_classes, 'Female', cat='SC')
+            gt['sc_b'] += sc_b; gt['sc_g'] += sc_g
+            html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{sc_b}</td><td style="padding: 8px; border: 1px solid #ddd;">{sc_g}</td>'
+            
+            # OBC
+            obc_b = count_bengali(r_classes, 'Male', cat='OBC')
+            obc_g = count_bengali(r_classes, 'Female', cat='OBC')
+            gt['obc_b'] += obc_b; gt['obc_g'] += obc_g
+            html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{obc_b}</td><td style="padding: 8px; border: 1px solid #ddd;">{obc_g}</td>'
+            
+            # Minority
+            min_b = count_bengali(r_classes, 'Male', cat='MINORITY')
+            min_g = count_bengali(r_classes, 'Female', cat='MINORITY')
+            gt['min_b'] += min_b; gt['min_g'] += min_g
+            html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{min_b}</td><td style="padding: 8px; border: 1px solid #ddd;">{min_g}</td>'
+            
+            html_bng += '</tr>'
+            
+        # Final Total Row
+        html_bng += '<tr style="background-color: #d1f2eb; font-weight: bold; color: #0e6251;">'
+        html_bng += '<td style="text-align: left; padding: 8px; border: 1px solid #ddd;">মোট</td>'
+        
+        html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{gt["tot_b"]}</td>'
+        html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{gt["tot_g"]}</td>'
+        html_bng += f'<td style="padding: 8px; border: 1px solid #ddd; background-color: #a3e4d7;">{gt["tot_t"]}</td>'
+        html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{gt["att"]}</td>'
+        
+        html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{gt["gen_b"]}</td><td style="padding: 8px; border: 1px solid #ddd;">{gt["gen_g"]}</td>'
+        html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{gt["bpl_b"]}</td><td style="padding: 8px; border: 1px solid #ddd;">{gt["bpl_g"]}</td>'
+        html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{gt["sc_b"]}</td><td style="padding: 8px; border: 1px solid #ddd;">{gt["sc_g"]}</td>'
+        html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{gt["obc_b"]}</td><td style="padding: 8px; border: 1px solid #ddd;">{gt["obc_g"]}</td>'
+        html_bng += f'<td style="padding: 8px; border: 1px solid #ddd;">{gt["min_b"]}</td><td style="padding: 8px; border: 1px solid #ddd;">{gt["min_g"]}</td>'
+        
+        html_bng += '</tr>'
+        html_bng += '</table></div>'
+        
+        st.markdown(html_bng, unsafe_allow_html=True)
 
     else:
         st.warning("No student records found to generate enrolment data.")

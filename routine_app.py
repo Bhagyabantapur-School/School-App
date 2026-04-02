@@ -192,6 +192,18 @@ try:
     today_str = now.strftime('%Y-%m-%d')
     current_time = now.time()
 
+    # --- NEW: Floating Window Global Badge ---
+    running_tasks = log_df[log_df['End_Time'] == 'RUNNING']
+    active_count = len(running_tasks)
+    
+    if active_count > 0:
+        task_word = "Tasks" if active_count > 1 else "Task"
+        st.markdown(f"""
+            <div style='position: fixed; bottom: 30px; right: 20px; background-color: #ff4b4b; color: white; padding: 12px 24px; border-radius: 30px; box-shadow: 0px 4px 12px rgba(0,0,0,0.3); font-weight: bold; font-size: 16px; z-index: 9999; pointer-events: none;'>
+                ⏳ {active_count} {task_word} Running
+            </div>
+        """, unsafe_allow_html=True)
+
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["⏱️ Live View", "📅 Schedule", "💧 Hydration", "📊 Projects", "⏳ Timeline", "🔗 Hub"])
 
     # ==========================================
@@ -477,9 +489,6 @@ try:
         # ==========================================
         # MULTI-TASKING LOGIC (LIVE TIMERS)
         # ==========================================
-        running_tasks = log_df[log_df['End_Time'] == 'RUNNING']
-        active_count = len(running_tasks)
-        
         pending_projs = pd.DataFrame()
         if not proj_df.empty:
             pending_projs = proj_df[proj_df['Status'].str.strip().str.title() != 'Completed']
@@ -487,10 +496,7 @@ try:
         if sub_list or active_count > 0 or not pending_projs.empty:
             st.markdown("---")
             
-            if active_count > 0:
-                st.markdown(f"<h4 style='text-align: center; color: #333;'>Tap to Track Activity <span style='background-color: #ff4b4b; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; vertical-align: middle;'>{active_count} Running</span></h4>", unsafe_allow_html=True)
-            else:
-                st.markdown("<h4 style='text-align: center; color: #333;'>Tap to Track Activity</h4>", unsafe_allow_html=True)
+            st.markdown("<h4 style='text-align: center; color: #333;'>Tap to Track Activity</h4>", unsafe_allow_html=True)
             
             # --- 1. RENDER ALL RUNNING TASKS ---
             if active_count > 0:

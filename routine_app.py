@@ -199,7 +199,6 @@ try:
     today_str = now.strftime('%Y-%m-%d')
     current_time = now.time()
 
-    # --- UPDATED: Floating Window Global Badge (Compact Stopwatch) ---
     running_tasks = log_df[log_df['End_Time'] == 'RUNNING']
     active_count = len(running_tasks)
     
@@ -216,13 +215,24 @@ try:
     # TAB 1: LIVE DASHBOARD
     # ==========================================
     with tab1:
-        st.markdown(f"<h3 style='text-align: center; color: #888;'>{current_day} | {now.strftime('%I:%M %p')}</h3>", unsafe_allow_html=True)
+        st.markdown(f"<h3 style='text-align: center; color: #888; margin-top: 0px;'>{current_day} | {now.strftime('%I:%M %p')}</h3>", unsafe_allow_html=True)
 
-        col1, col2 = st.columns(2)
+        # --- NEW: Manual Sync Button Added Here ---
+        col1, col2, col3 = st.columns(3)
         with col1:
-            flex_on = st.toggle("🔀 Flex Mode (Override)", key="flex_toggle")
+            flex_on = st.toggle("🔀 Flex", key="flex_toggle")
         with col2:
-            holiday_on = st.toggle("🎉 Holiday Mode", key="holiday_toggle")
+            holiday_on = st.toggle("🎉 Holiday", key="holiday_toggle")
+        with col3:
+            if st.button("🔄 Sync", use_container_width=True):
+                get_routine_data.clear()
+                get_activity_log.clear()
+                get_future_tasks.clear()
+                get_water_log.clear()
+                get_project_tasks.clear()
+                st.toast("✅ Force Synced with Google Sheets!")
+                time.sleep(0.5)
+                st.rerun()
 
         effective_day = "Holiday" if holiday_on else current_day
 
@@ -344,19 +354,19 @@ try:
             if st.button("🥃 250 ml", use_container_width=True):
                 wsheet = get_sheet("water_log")
                 wsheet.append_row([today_str, now.strftime('%H:%M'), 250])
-                get_water_log.clear() # SURGICAL CACHE CLEAR
+                get_water_log.clear() 
                 st.rerun()
         with col_w2:
             if st.button("🚰 500 ml", use_container_width=True):
                 wsheet = get_sheet("water_log")
                 wsheet.append_row([today_str, now.strftime('%H:%M'), 500])
-                get_water_log.clear() # SURGICAL CACHE CLEAR
+                get_water_log.clear() 
                 st.rerun()
         with col_w3:
             if st.button("🥛 1000 ml", use_container_width=True):
                 wsheet = get_sheet("water_log")
                 wsheet.append_row([today_str, now.strftime('%H:%M'), 1000])
-                get_water_log.clear() # SURGICAL CACHE CLEAR
+                get_water_log.clear() 
                 st.rerun()
 
         # --- SMART SCHEDULE INJECTION & COUNTDOWN ---
@@ -433,8 +443,8 @@ try:
                                 today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
                                 "0:00", str(r['Activity']).upper(), "", f"{r['Task_Name']} [RESCHEDULED]", f"Moved to {new_date.strftime('%Y-%m-%d')} {new_time}"
                             ])
-                            get_future_tasks.clear() # SURGICAL CACHE CLEAR
-                            get_activity_log.clear() # SURGICAL CACHE CLEAR
+                            get_future_tasks.clear() 
+                            get_activity_log.clear() 
                             st.success("Task Rescheduled!")
                             time.sleep(1)
                             st.rerun()
@@ -453,8 +463,8 @@ try:
                                         today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
                                         "0:00", str(r['Activity']).upper(), "", f"{r['Task_Name']} [CANCELED]", f"Cancel Reason: {cancel_reason}"
                                     ])
-                                    get_future_tasks.clear() # SURGICAL CACHE CLEAR
-                                    get_activity_log.clear() # SURGICAL CACHE CLEAR
+                                    get_future_tasks.clear() 
+                                    get_activity_log.clear() 
                                     st.rerun()
                 st.markdown("<hr style='margin-top:5px; margin-bottom:15px;'>", unsafe_allow_html=True)
 
@@ -479,7 +489,7 @@ try:
                         today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
                         "0:00", current_activity, "", task, "Checked off"
                     ])
-                    get_activity_log.clear() # SURGICAL CACHE CLEAR
+                    get_activity_log.clear() 
                     
                     if "[Due:" in task:
                         raw_task = task.split(" [Due:")[0].strip()
@@ -488,7 +498,7 @@ try:
                             r_idx = int(matches.iloc[0]['row_index'])
                             fsheet = get_sheet("future_tasks")
                             fsheet.update_cell(r_idx, 7, "Completed") 
-                            get_future_tasks.clear() # SURGICAL CACHE CLEAR
+                            get_future_tasks.clear() 
                             
                     st.rerun()
 
@@ -564,7 +574,7 @@ try:
                                     r_idx = int(matches.iloc[0]['row_index'])
                                     fsheet = get_sheet("future_tasks")
                                     fsheet.update_cell(r_idx, 7, "Completed") 
-                                    get_future_tasks.clear() # SURGICAL CACHE CLEAR
+                                    get_future_tasks.clear() 
                                     
                             if is_project and new_proj_status:
                                 p_matches = proj_df[proj_df['Task Name'] == raw_task_name]
@@ -572,9 +582,9 @@ try:
                                     p_idx = int(p_matches.iloc[0]['row_index'])
                                     psheet = get_sheet("project_tasks")
                                     psheet.update_cell(p_idx, 3, new_proj_status)
-                                    get_project_tasks.clear() # SURGICAL CACHE CLEAR
+                                    get_project_tasks.clear() 
                                     
-                            get_activity_log.clear() # SURGICAL CACHE CLEAR
+                            get_activity_log.clear() 
                             st.success(f"Saved: {display_name}")
                             time.sleep(1)
                             st.rerun()
@@ -583,7 +593,7 @@ try:
                         if st.button("❌ CANCEL", key=f"cancel_{sheet_row}", use_container_width=True):
                             log_sheet = get_sheet("activity_log")
                             log_sheet.delete_rows(sheet_row)
-                            get_activity_log.clear() # SURGICAL CACHE CLEAR
+                            get_activity_log.clear() 
                             st.warning(f"Cancelled: {display_name}")
                             time.sleep(1)
                             st.rerun()
@@ -605,7 +615,7 @@ try:
                                 today_str, now.strftime('%H:%M'), "RUNNING", "RUNNING",    
                                 current_activity, task, "", "Auto-logged via Timer"
                             ])
-                            get_activity_log.clear() # SURGICAL CACHE CLEAR
+                            get_activity_log.clear() 
                             st.rerun()
             
             # --- 3. RENDER PROJECT TRACKER (Not Currently Running) ---
@@ -649,14 +659,14 @@ try:
                             
                             if curr_stat == "Not Started":
                                 psheet.update_cell(r_idx, 3, "In Progress")
-                                get_project_tasks.clear() # SURGICAL CACHE CLEAR
+                                get_project_tasks.clear() 
                                 
                             log_sheet = get_sheet("activity_log")
                             log_sheet.append_row([
                                 today_str, now.strftime('%H:%M'), "RUNNING", "RUNNING",    
                                 "WORK", selected_p_task_full, "", "Project Tracking"
                             ])
-                            get_activity_log.clear() # SURGICAL CACHE CLEAR
+                            get_activity_log.clear() 
                             st.rerun()
 
             # --- 4. RENDER MEETING/VISITOR TRACKER ---
@@ -694,7 +704,7 @@ try:
                         today_str, now.strftime('%H:%M'), "RUNNING", "RUNNING",    
                         "PEOPLE", sub_act_str.upper(), "", notes_str
                     ])
-                    get_activity_log.clear() # SURGICAL CACHE CLEAR
+                    get_activity_log.clear() 
                     st.rerun()
 
         st.markdown("---")
@@ -747,7 +757,7 @@ try:
                             "Pending",
                             ""
                         ])
-                        get_future_tasks.clear() # SURGICAL CACHE CLEAR
+                        get_future_tasks.clear() 
                         st.success("Task Scheduled! It will appear 24 hours before due time.")
                         time.sleep(1.5)
                         st.rerun()
@@ -782,7 +792,7 @@ try:
                             f"{h}:{m//60:02d}", log_activity.upper().strip(), log_sub_activity.upper().strip(),
                             log_chk.strip(), log_notes
                         ])
-                        get_activity_log.clear() # SURGICAL CACHE CLEAR
+                        get_activity_log.clear() 
                         st.success("Activity logged!")
                         time.sleep(1)
                         st.rerun()
@@ -859,7 +869,7 @@ try:
                     data_to_upload = [final_df.columns.values.tolist()] + final_df.values.tolist()
                     routine_sheet.update(values=data_to_upload, range_name="A1")
                     
-                    get_routine_data.clear() # SURGICAL CACHE CLEAR
+                    get_routine_data.clear() 
                     st.success("Schedule successfully updated!")
                     time.sleep(1)
                     st.rerun()
@@ -1000,7 +1010,7 @@ try:
                     if p_task and final_p_name:
                         psheet = get_sheet("project_tasks")
                         psheet.append_row([p_task.strip(), final_p_name, p_status, p_start.strftime('%Y-%m-%d'), p_end.strftime('%Y-%m-%d')])
-                        get_project_tasks.clear() # SURGICAL CACHE CLEAR
+                        get_project_tasks.clear() 
                         st.success("Task added!")
                         time.sleep(1)
                         st.rerun()
@@ -1111,7 +1121,7 @@ try:
                                 dur_str, "FREE TIME", "Planned Break",
                                 "", "Logged from Timeline Gap"
                             ])
-                            get_activity_log.clear() # SURGICAL CACHE CLEAR
+                            get_activity_log.clear() 
                             st.rerun()
                 else:
                     cat = event['activity']

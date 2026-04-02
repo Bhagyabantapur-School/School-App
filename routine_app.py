@@ -51,6 +51,13 @@ st.markdown("""
         padding-top: 5px;
         padding-bottom: 5px;
     }
+    
+    /* CSS for the pulsing dot animation */
+    @keyframes pulse {
+        0% { transform: scale(0.95); opacity: 0.9; }
+        50% { transform: scale(1.05); opacity: 1; }
+        100% { transform: scale(0.95); opacity: 0.9; }
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -192,15 +199,14 @@ try:
     today_str = now.strftime('%Y-%m-%d')
     current_time = now.time()
 
-    # --- NEW: Floating Window Global Badge ---
+    # --- UPDATED: Floating Window Global Badge (Left side, minimal text) ---
     running_tasks = log_df[log_df['End_Time'] == 'RUNNING']
     active_count = len(running_tasks)
     
     if active_count > 0:
-        task_word = "Tasks" if active_count > 1 else "Task"
         st.markdown(f"""
-            <div style='position: fixed; bottom: 30px; right: 20px; background-color: #ff4b4b; color: white; padding: 12px 24px; border-radius: 30px; box-shadow: 0px 4px 12px rgba(0,0,0,0.3); font-weight: bold; font-size: 16px; z-index: 9999; pointer-events: none;'>
-                ⏳ {active_count} {task_word} Running
+            <div style='position: fixed; bottom: 30px; left: 20px; background-color: #ff4b4b; color: white; padding: 10px 18px; border-radius: 25px; box-shadow: 0px 4px 12px rgba(0,0,0,0.3); font-weight: bold; font-size: 18px; z-index: 9999; pointer-events: none; display: flex; align-items: center; justify-content: center;'>
+                <span style='font-size: 12px; margin-right: 6px; animation: pulse 2s infinite;'>🔴</span> {active_count}
             </div>
         """, unsafe_allow_html=True)
 

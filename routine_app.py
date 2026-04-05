@@ -162,6 +162,25 @@ def get_project_tasks():
     df['row_index'] = df.index + 2 
     return df
 
+# --- NEW: Fetch Holidays ---
+@st.cache_data(ttl=300)
+def get_holidays():
+    client = init_connection()
+    ss = client.open("MY ROUTINE 2026")
+    try:
+        sheet = ss.worksheet("holidays")
+    except gspread.exceptions.WorksheetNotFound:
+        sheet = ss.add_worksheet(title="holidays", rows="50", cols="2")
+        sheet.append_row(["Date", "Occasion"])
+    data = sheet.get_all_values()
+    if len(data) <= 1:
+        return pd.DataFrame(columns=["Date", "Occasion"])
+    df = pd.DataFrame(data[1:], columns=data[0])
+    while df.shape[1] < 2: df[df.shape[1]] = ""
+    df = df.iloc[:, :2]
+    df.columns = ["Date", "Occasion"]
+    return df
+
 def parse_duration_to_minutes(dur_str):
     try:
         h, m = map(int, str(dur_str).strip().split(':'))
@@ -193,6 +212,7 @@ try:
     future_df = get_future_tasks()
     water_df = get_water_log()
     proj_df = get_project_tasks()
+    holidays_df = get_holidays()
     
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist_timezone)
@@ -232,11 +252,17 @@ try:
                 get_future_tasks.clear()
                 get_water_log.clear()
                 get_project_tasks.clear()
+                get_holidays.clear()
                 st.toast("✅ Force Synced with Google Sheets!")
                 time.sleep(0.5)
                 st.rerun()
 
-        effective_day = "Holiday" if holiday_on else current_day
+        # --- NEW: Auto-Holiday Detection ---
+        today_holiday_match = holidays_df[holidays_df['Date'] == today_str]
+        is_auto_holiday = not today_holiday_match.empty
+        auto_occasion = today_holiday_match.iloc[0]['Occasion'] if is_auto_holiday else ""
+
+        effective_day = "Holiday" if (holiday_on or is_auto_holiday) else current_day
 
         scheduled_activity = "FREE TIME"
         scheduled_activity_start = None
@@ -308,8 +334,12 @@ try:
 
         st.markdown(f"<h1 style='text-align: center; font-size: 4.5rem; color: {color}; margin-top: 10px; margin-bottom: 5px; line-height: 1.2;'>{current_activity}</h1>", unsafe_allow_html=True)
 
-        if holiday_on:
-            st.markdown("<p style='text-align: center; color: #ff9f36; font-weight: bold;'>🎉 Running Custom Holiday Schedule</p>", unsafe_allow_html=True)
+        # --- NEW: Smart Occasion Banner ---
+        if is_auto_holiday or holiday_on:
+            if is_auto_holiday:
+                st.markdown(f"<p style='text-align: center; color: #ff9f36; font-weight: bold; font-size: 1.1rem; margin-top: -10px;'>🎉 {auto_occasion} (Holiday Schedule Active)</p>", unsafe_allow_html=True)
+            else:
+                st.markdown("<p style='text-align: center; color: #ff9f36; font-weight: bold; margin-top: -10px;'>🎉 Running Custom Holiday Schedule</p>", unsafe_allow_html=True)
 
         if current_activity_start and not flex_on:
             dt_start = datetime.combine(now.date(), current_activity_start)
@@ -421,7 +451,6 @@ try:
         if upcoming_ui_elements_raw:
             upcoming_ui_elements_raw.sort(key=lambda x: x[0])
             
-            # --- UPDATED: Collapsible Expander with Count is now CLOSED by default ---
             upcoming_count = len(upcoming_ui_elements_raw)
             with st.expander(f"⏳ Upcoming Special Tasks ({upcoming_count})", expanded=False):
                 for dt, r, html_text in upcoming_ui_elements_raw:
@@ -472,6 +501,18 @@ try:
                                         get_activity_log.clear() 
                                         st.rerun()
                     st.markdown("<hr style='margin-top:5px; margin-bottom:15px;'>", unsafe_allow_html=True)
+
+        # --- NEW: UPCOMING HOLIDAYS ---
+        holidays_df['Date_dt'] = pd.to_datetime(holidays_df['Date'], errors='coerce')
+        future_holidays = holidays_df[holidays_df['Date_dt'].dt.date > now.date()].sort_values('Date_dt')
+        
+        if not future_holidays.empty:
+            upcoming_hols = future_holidays.head(3)
+            with st.expander(f"🌴 Upcoming Holidays ({len(upcoming_hols)})", expanded=False):
+                for _, h_row in upcoming_hols.iterrows():
+                    days_until = (h_row['Date_dt'].date() - now.date()).days
+                    day_str = "Tomorrow!" if days_until == 1 else f"in {days_until} days"
+                    st.markdown(f"**{h_row['Date_dt'].strftime('%b %d, %Y')}** - {h_row['Occasion']} *( {day_str} )*")
 
         if chk_list:
             st.markdown("---")
@@ -1360,41 +1401,3 @@ try:
 
 except Exception as e:
     st.error(f"System Error: {e}")
-# ==========================================
-    # TEMPORARY ADMIN INJECTION SCRIPT
-    # ==========================================
-    st.markdown("---")
-    st.markdown("<h3 style='text-align: center; color: #2e7b32;'>⚙️ System Admin Menu</h3>", unsafe_allow_html=True)
-    if st.button("🚀 INJECT YOUTUBE SCHEDULE & TASKS", type="primary", use_container_width=True):
-        with st.spinner("Writing to Google Sheets..."):
-            client = init_connection()
-            ss = client.open("MY ROUTINE 2026")
-            
-            # 1. Inject Daily YouTube Workflow into Routine Master
-            rm_sheet = ss.worksheet("routine_master")
-            yt_routine = [
-                ["Monday", "18:30", "19:30", "1:00", "WORK", "PRE-PUBLISHING", "Draft Title, Tags, Desc, Add Amazon Links"],
-                ["Tuesday", "18:00", "18:30", "0:30", "WORK", "PUBLISHING", "Pin Affiliate Comment"],
-                ["Wednesday", "19:00", "19:30", "0:30", "PEOPLE", "ANALYTICS & REPLY", "Reply to Tech Comments"],
-                ["Thursday", "19:00", "19:30", "0:30", "WORK", "PRE-PUBLISHING", "Draft Title, Tags, Desc, Add Amazon Links"],
-                ["Friday", "18:00", "18:30", "0:30", "WORK", "PUBLISHING", "Pin Affiliate Comment"],
-                ["Saturday", "10:00", "10:30", "0:30", "WORK", "COMMUNITY", "Post photo/poll for Friday Gadget"],
-                ["Sunday", "14:00", "16:00", "2:00", "WORK", "EDITING BLOCK", "Edit raw footage, Design thumbnails"]
-            ]
-            rm_sheet.append_rows(yt_routine)
-            
-            # 2. Inject Special Tasks into Future Tasks (Set due for tomorrow)
-            ft_sheet = ss.worksheet("future_tasks")
-            tomorrow_str = (now + timedelta(days=1)).strftime('%Y-%m-%d')
-            special_tasks = [
-                [tomorrow_str, "12:00", "WORK", "Checklist", "Audit top 5 videos for Amazon Affiliate links", "Personal", "Pending", ""],
-                [tomorrow_str, "12:00", "WORK", "Checklist", "Setup Amazon Associates India account", "Personal", "Pending", ""],
-                [tomorrow_str, "12:00", "APP DEV", "Checklist", "Configure routine app dashboard for subscriber growth", "Personal", "Pending", ""]
-            ]
-            ft_sheet.append_rows(special_tasks)
-            
-            # Clear cache so the app updates immediately
-            st.cache_data.clear()
-            st.success("✅ YouTube Schedule & Tasks Injected Successfully! Please delete this button from your code.")
-            time.sleep(2)
-            st.rerun()

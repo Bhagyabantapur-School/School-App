@@ -162,7 +162,6 @@ def get_project_tasks():
     df['row_index'] = df.index + 2 
     return df
 
-# --- NEW: Fetch Holidays ---
 @st.cache_data(ttl=300)
 def get_holidays():
     client = init_connection()
@@ -257,8 +256,11 @@ try:
                 time.sleep(0.5)
                 st.rerun()
 
-        # --- NEW: Auto-Holiday Detection ---
-        today_holiday_match = holidays_df[holidays_df['Date'] == today_str]
+        # --- UPDATED: Date Parsing now strictly uses dayfirst=True for Indian Date Format ---
+        holidays_df['Date_dt'] = pd.to_datetime(holidays_df['Date'], dayfirst=True, errors='coerce')
+        
+        # Check if today is a holiday
+        today_holiday_match = holidays_df[holidays_df['Date_dt'].dt.date == now.date()]
         is_auto_holiday = not today_holiday_match.empty
         auto_occasion = today_holiday_match.iloc[0]['Occasion'] if is_auto_holiday else ""
 
@@ -334,7 +336,6 @@ try:
 
         st.markdown(f"<h1 style='text-align: center; font-size: 4.5rem; color: {color}; margin-top: 10px; margin-bottom: 5px; line-height: 1.2;'>{current_activity}</h1>", unsafe_allow_html=True)
 
-        # --- NEW: Smart Occasion Banner ---
         if is_auto_holiday or holiday_on:
             if is_auto_holiday:
                 st.markdown(f"<p style='text-align: center; color: #ff9f36; font-weight: bold; font-size: 1.1rem; margin-top: -10px;'>🎉 {auto_occasion} (Holiday Schedule Active)</p>", unsafe_allow_html=True)
@@ -502,8 +503,7 @@ try:
                                         st.rerun()
                     st.markdown("<hr style='margin-top:5px; margin-bottom:15px;'>", unsafe_allow_html=True)
 
-        # --- NEW: UPCOMING HOLIDAYS ---
-        holidays_df['Date_dt'] = pd.to_datetime(holidays_df['Date'], errors='coerce')
+        # --- UPCOMING HOLIDAYS ---
         future_holidays = holidays_df[holidays_df['Date_dt'].dt.date > now.date()].sort_values('Date_dt')
         
         if not future_holidays.empty:

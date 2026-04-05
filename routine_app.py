@@ -1360,3 +1360,41 @@ try:
 
 except Exception as e:
     st.error(f"System Error: {e}")
+# ==========================================
+    # TEMPORARY ADMIN INJECTION SCRIPT
+    # ==========================================
+    st.markdown("---")
+    st.markdown("<h3 style='text-align: center; color: #2e7b32;'>⚙️ System Admin Menu</h3>", unsafe_allow_html=True)
+    if st.button("🚀 INJECT YOUTUBE SCHEDULE & TASKS", type="primary", use_container_width=True):
+        with st.spinner("Writing to Google Sheets..."):
+            client = init_connection()
+            ss = client.open("MY ROUTINE 2026")
+            
+            # 1. Inject Daily YouTube Workflow into Routine Master
+            rm_sheet = ss.worksheet("routine_master")
+            yt_routine = [
+                ["Monday", "18:30", "19:30", "1:00", "WORK", "PRE-PUBLISHING", "Draft Title, Tags, Desc, Add Amazon Links"],
+                ["Tuesday", "18:00", "18:30", "0:30", "WORK", "PUBLISHING", "Pin Affiliate Comment"],
+                ["Wednesday", "19:00", "19:30", "0:30", "PEOPLE", "ANALYTICS & REPLY", "Reply to Tech Comments"],
+                ["Thursday", "19:00", "19:30", "0:30", "WORK", "PRE-PUBLISHING", "Draft Title, Tags, Desc, Add Amazon Links"],
+                ["Friday", "18:00", "18:30", "0:30", "WORK", "PUBLISHING", "Pin Affiliate Comment"],
+                ["Saturday", "10:00", "10:30", "0:30", "WORK", "COMMUNITY", "Post photo/poll for Friday Gadget"],
+                ["Sunday", "14:00", "16:00", "2:00", "WORK", "EDITING BLOCK", "Edit raw footage, Design thumbnails"]
+            ]
+            rm_sheet.append_rows(yt_routine)
+            
+            # 2. Inject Special Tasks into Future Tasks (Set due for tomorrow)
+            ft_sheet = ss.worksheet("future_tasks")
+            tomorrow_str = (now + timedelta(days=1)).strftime('%Y-%m-%d')
+            special_tasks = [
+                [tomorrow_str, "12:00", "WORK", "Checklist", "Audit top 5 videos for Amazon Affiliate links", "Personal", "Pending", ""],
+                [tomorrow_str, "12:00", "WORK", "Checklist", "Setup Amazon Associates India account", "Personal", "Pending", ""],
+                [tomorrow_str, "12:00", "APP DEV", "Checklist", "Configure routine app dashboard for subscriber growth", "Personal", "Pending", ""]
+            ]
+            ft_sheet.append_rows(special_tasks)
+            
+            # Clear cache so the app updates immediately
+            st.cache_data.clear()
+            st.success("✅ YouTube Schedule & Tasks Injected Successfully! Please delete this button from your code.")
+            time.sleep(2)
+            st.rerun()

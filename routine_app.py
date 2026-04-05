@@ -217,7 +217,6 @@ try:
     with tab1:
         st.markdown(f"<h3 style='text-align: center; color: #888; margin-top: 0px;'>{current_day} | {now.strftime('%I:%M %p')}</h3>", unsafe_allow_html=True)
 
-        # --- NEW: Manual Sync Button Added Here ---
         col1, col2, col3 = st.columns(3)
         with col1:
             flex_on = st.toggle("🔀 Flex", key="flex_toggle")
@@ -802,8 +801,142 @@ try:
     # TAB 2: SCHEDULE EDITOR
     # ==========================================
     with tab2:
+        st.markdown("<h3 style='text-align: center; color: #555; margin-bottom: 5px;'>📅 Smart Schedule Manager</h3>", unsafe_allow_html=True)
+
         days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Holiday"]
-        target_day = st.selectbox("Select Day to Edit", days_of_week, index=days_of_week.index(effective_day))
+        
+        # --- NEW: ADVANCED BATCH TOOLS & FREE TIME FINDER ---
+        with st.expander("🛠️ Advanced Tools: Batch Add, Replace & Free Time", expanded=False):
+            tool_mode = st.radio("Select Tool:", ["🔍 Find Free Time", "➕ Batch Add Task", "🔄 Find & Replace"], horizontal=True)
+            
+            if tool_mode == "🔍 Find Free Time":
+                st.markdown("#### Find Gaps in Your Routine")
+                free_day = st.selectbox("Select Day to Analyze", days_of_week, key="free_day")
+                day_df_free = df[df['Day'].str.strip().str.title() == free_day.title()].copy()
+                
+                if not day_df_free.empty:
+                    time_blocks = []
+                    for _, r in day_df_free.iterrows():
+                        try:
+                            st_m = int(r['Start_Time'].split(':')[0])*60 + int(r['Start_Time'].split(':')[1])
+                            et_str = r['End_Time']
+                            if et_str.strip() in ['0:00', '00:00']: et_m = 24 * 60
+                            else: et_m = int(et_str.split(':')[0])*60 + int(et_str.split(':')[1])
+                            time_blocks.append((st_m, et_m, r['Activity']))
+                        except: pass
+                    
+                    time_blocks.sort(key=lambda x: x[0])
+                    
+                    free_slots = []
+                    current_min = 0
+                    for block in time_blocks:
+                        if block[0] > current_min: free_slots.append((current_min, block[0]))
+                        current_min = max(current_min, block[1])
+                    
+                    if current_min < 24 * 60: free_slots.append((current_min, 24 * 60))
+                        
+                    if free_slots:
+                        st.success(f"Found {len(free_slots)} free time slots on {free_day}:")
+                        for start, end in free_slots:
+                            s_str = datetime.strptime(f"{start//60:02d}:{start%60:02d}", '%H:%M').strftime('%I:%M %p')
+                            e_str = "12:00 AM" if end == 24*60 else datetime.strptime(f"{end//60:02d}:{end%60:02d}", '%H:%M').strftime('%I:%M %p')
+                            st.markdown(f"- **{s_str} to {e_str}** ({end - start} mins available)")
+                    else: st.info("This day is completely fully scheduled!")
+                else: st.info("No routine set for this day. The whole day is free!")
+
+            elif tool_mode == "➕ Batch Add Task":
+                st.markdown("#### Add Task to Multiple Days")
+                b_days = st.multiselect("Select Days", days_of_week, default=[current_day], key="b_days")
+                
+                col1, col2 = st.columns(2)
+                with col1: b_start = st.time_input("Start Time", value=datetime.strptime('09:00', '%H:%M').time(), key="b_start")
+                with col2: b_end = st.time_input("End Time", value=datetime.strptime('10:00', '%H:%M').time(), key="b_end")
+                
+                b_act = st.text_input("Activity Name (e.g. PYTHON CODING)").upper()
+                b_sub = st.text_input("Sub-Activities (comma separated)")
+                b_chk = st.text_input("Checklist (comma separated)")
+                b_overwrite = st.checkbox("⚠️ Overwrite existing tasks in this time slot?", value=False)
+                
+                if st.button("Apply to Selected Days", type="primary"):
+                    if not b_days or not b_act: st.error("Please provide both Days and an Activity Name.")
+                    else:
+                        ns_min = b_start.hour * 60 + b_start.minute
+                        ne_min = b_end.hour * 60 + b_end.minute
+                        if ne_min == 0: ne_min = 24 * 60
+                        
+                        if ne_min <= ns_min: st.error("End time must be after start time.")
+                        else:
+                            full_df = df.copy()
+                            rows_to_keep = []
+                            for _, r in full_df.iterrows():
+                                d_title = str(r['Day']).strip().title()
+                                if d_title in [d.title() for d in b_days] and b_overwrite:
+                                    try:
+                                        rs_min = int(r['Start_Time'].split(':')[0])*60 + int(r['Start_Time'].split(':')[1])
+                                        et_str = r['End_Time']
+                                        re_min = 24*60 if et_str.strip() in ['0:00', '00:00'] else int(et_str.split(':')[0])*60 + int(et_str.split(':')[1])
+                                        if max(ns_min, rs_min) < min(ne_min, re_min): continue 
+                                    except: pass
+                                rows_to_keep.append(r)
+                            
+                            filtered_df = pd.DataFrame(rows_to_keep, columns=full_df.columns)
+                            dur_str = f"{(ne_min - ns_min)//60}:{(ne_min - ns_min)%60:02d}"
+                            start_s = b_start.strftime('%H:%M')
+                            end_s = b_end.strftime('%H:%M')
+                            
+                            new_rows = [{"Day": d, "Start_Time": start_s, "End_Time": end_s, "Duration": dur_str, "Activity": b_act, "Sub_Activities": b_sub, "check_list": b_chk} for d in b_days]
+                            final_df = pd.concat([filtered_df, pd.DataFrame(new_rows)], ignore_index=True)
+                            
+                            # Sort before uploading
+                            day_map = {d: i for i, d in enumerate(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Holiday"])}
+                            final_df['Day_Idx'] = final_df['Day'].str.title().map(day_map)
+                            def get_st_min(t_str):
+                                try: return int(t_str.split(':')[0])*60 + int(t_str.split(':')[1])
+                                except: return 0
+                            final_df['ST_Min'] = final_df['Start_Time'].apply(get_st_min)
+                            final_df = final_df.sort_values(['Day_Idx', 'ST_Min']).drop(columns=['Day_Idx', 'ST_Min'])
+                            
+                            routine_sheet = get_sheet("routine_master")
+                            routine_sheet.clear()
+                            routine_sheet.update(values=[final_df.columns.values.tolist()] + final_df.values.tolist(), range_name="A1")
+                            
+                            get_routine_data.clear()
+                            st.success(f"Added '{b_act}' to {len(b_days)} days!")
+                            time.sleep(1)
+                            st.rerun()
+
+            elif tool_mode == "🔄 Find & Replace":
+                st.markdown("#### Replace an Activity Across Schedule")
+                r_days = st.multiselect("Select Days to Search", days_of_week, default=days_of_week, key="r_days")
+                unique_acts = sorted([a for a in df['Activity'].unique() if a.strip()])
+                old_act = st.selectbox("Target Activity to Replace", unique_acts)
+                new_act = st.text_input("New Activity Name").upper()
+                
+                if st.button("Replace Activity", type="primary"):
+                    if not r_days or not new_act or not old_act: st.error("Please fill all fields.")
+                    else:
+                        full_df = df.copy()
+                        count = 0
+                        for idx, r in full_df.iterrows():
+                            if str(r['Day']).strip().title() in [d.title() for d in r_days]:
+                                if str(r['Activity']).strip().upper() == old_act.upper():
+                                    full_df.at[idx, 'Activity'] = new_act
+                                    count += 1
+                        
+                        if count > 0:
+                            routine_sheet = get_sheet("routine_master")
+                            routine_sheet.clear()
+                            routine_sheet.update(values=[full_df.columns.values.tolist()] + full_df.values.tolist(), range_name="A1")
+                            
+                            get_routine_data.clear()
+                            st.success(f"Replaced {count} instances of '{old_act}' with '{new_act}'!")
+                            time.sleep(1)
+                            st.rerun()
+                        else: st.info(f"No instances of '{old_act}' found on selected days.")
+
+        st.markdown("---")
+        
+        target_day = st.selectbox("Select Day to Edit Manually", days_of_week, index=days_of_week.index(effective_day))
         
         st.markdown(f"<h3 style='text-align: center; color: #555; margin-bottom: 5px;'>{target_day}'s Full Routine</h3>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #888; font-size: 14px; margin-bottom: 20px;'>Tap any cell to edit. Scroll right to see Sub-Activities and Checklists.</p>", unsafe_allow_html=True)

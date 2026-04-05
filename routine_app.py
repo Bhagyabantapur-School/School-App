@@ -8,6 +8,9 @@ import time
 import plotly.express as px
 from streamlit_autorefresh import st_autorefresh
 
+# --- Master Google Sheets Formula for Duration ---
+GS_FORMULA = '=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm"), ""))'
+
 # 1. Configuration & Session State Init
 st.set_page_config(page_title="Live Routine", page_icon="⏱️", layout="centered")
 
@@ -417,55 +420,57 @@ try:
 
         if upcoming_ui_elements_raw:
             upcoming_ui_elements_raw.sort(key=lambda x: x[0])
-            st.markdown("<br><h4 style='text-align: center; color: #e65100; margin-top:0; margin-bottom:15px;'>⏳ Upcoming Special Tasks</h4>", unsafe_allow_html=True)
-            for dt, r, html_text in upcoming_ui_elements_raw:
-                st.markdown(f"<p style='text-align: center; margin-bottom:5px; font-size:16px; color: #d84315;'>{html_text}</p>", unsafe_allow_html=True)
-                with st.expander(f"✏️ Manage Task", expanded=False):
-                    tab_resched, tab_cancel = st.tabs(["📅 Reschedule", "❌ Cancel"])
-                    with tab_resched:
-                        col_d, col_t = st.columns(2)
-                        try: curr_date = datetime.strptime(str(r['Due_Date']).strip(), '%Y-%m-%d').date()
-                        except: curr_date = now.date()
-                        curr_time_str = str(r['Due_Time']).strip()
-                        time_opts = [f"{str(h).zfill(2)}:{str(m).zfill(2)}" for h in range(24) for m in range(60)]
-                        if curr_time_str not in time_opts: curr_time_str = "12:00"
-                        
-                        with col_d: new_date = st.date_input("New Date", value=curr_date, key=f"nd_{r['row_index']}")
-                        with col_t: new_time = st.selectbox("New Time", options=time_opts, index=time_opts.index(curr_time_str), key=f"nt_{r['row_index']}")
+            
+            upcoming_count = len(upcoming_ui_elements_raw)
+            with st.expander(f"⏳ Upcoming Special Tasks ({upcoming_count})", expanded=True):
+                for dt, r, html_text in upcoming_ui_elements_raw:
+                    st.markdown(f"<p style='text-align: center; margin-bottom:5px; font-size:16px; color: #d84315;'>{html_text}</p>", unsafe_allow_html=True)
+                    with st.expander(f"✏️ Manage Task", expanded=False):
+                        tab_resched, tab_cancel = st.tabs(["📅 Reschedule", "❌ Cancel"])
+                        with tab_resched:
+                            col_d, col_t = st.columns(2)
+                            try: curr_date = datetime.strptime(str(r['Due_Date']).strip(), '%Y-%m-%d').date()
+                            except: curr_date = now.date()
+                            curr_time_str = str(r['Due_Time']).strip()
+                            time_opts = [f"{str(h).zfill(2)}:{str(m).zfill(2)}" for h in range(24) for m in range(60)]
+                            if curr_time_str not in time_opts: curr_time_str = "12:00"
                             
-                        if st.button("Save New Time", key=f"rs_btn_{r['row_index']}", type="primary", use_container_width=True):
-                            fsheet = get_sheet("future_tasks")
-                            fsheet.update_cell(int(r['row_index']), 1, new_date.strftime('%Y-%m-%d'))
-                            fsheet.update_cell(int(r['row_index']), 2, new_time)
-                            sheet_log = get_sheet("activity_log")
-                            sheet_log.append_row([
-                                today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
-                                "0:00", str(r['Activity']).upper(), "", f"{r['Task_Name']} [RESCHEDULED]", f"Moved to {new_date.strftime('%Y-%m-%d')} {new_time}"
-                            ])
-                            get_future_tasks.clear() 
-                            get_activity_log.clear() 
-                            st.success("Task Rescheduled!")
-                            time.sleep(1)
-                            st.rerun()
-                    with tab_cancel:
-                        col_r, col_b = st.columns([3, 1])
-                        with col_r: cancel_reason = st.text_input("Reason", placeholder="Why are you cancelling?", key=f"rsn_{r['row_index']}", label_visibility="collapsed")
-                        with col_b:
-                            if st.button("Confirm", key=f"cnf_{r['row_index']}", type="primary"):
-                                if not cancel_reason.strip(): st.error("Enter reason")
-                                else:
-                                    fsheet = get_sheet("future_tasks")
-                                    fsheet.update_cell(int(r['row_index']), 7, "Canceled")
-                                    fsheet.update_cell(int(r['row_index']), 8, cancel_reason)
-                                    sheet_log = get_sheet("activity_log")
-                                    sheet_log.append_row([
-                                        today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
-                                        "0:00", str(r['Activity']).upper(), "", f"{r['Task_Name']} [CANCELED]", f"Cancel Reason: {cancel_reason}"
-                                    ])
-                                    get_future_tasks.clear() 
-                                    get_activity_log.clear() 
-                                    st.rerun()
-                st.markdown("<hr style='margin-top:5px; margin-bottom:15px;'>", unsafe_allow_html=True)
+                            with col_d: new_date = st.date_input("New Date", value=curr_date, key=f"nd_{r['row_index']}")
+                            with col_t: new_time = st.selectbox("New Time", options=time_opts, index=time_opts.index(curr_time_str), key=f"nt_{r['row_index']}")
+                                
+                            if st.button("Save New Time", key=f"rs_btn_{r['row_index']}", type="primary", use_container_width=True):
+                                fsheet = get_sheet("future_tasks")
+                                fsheet.update_cell(int(r['row_index']), 1, new_date.strftime('%Y-%m-%d'))
+                                fsheet.update_cell(int(r['row_index']), 2, new_time)
+                                sheet_log = get_sheet("activity_log")
+                                sheet_log.append_row([
+                                    today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
+                                    GS_FORMULA, str(r['Activity']).upper(), "", f"{r['Task_Name']} [RESCHEDULED]", f"Moved to {new_date.strftime('%Y-%m-%d')} {new_time}"
+                                ], value_input_option="USER_ENTERED")
+                                get_future_tasks.clear() 
+                                get_activity_log.clear() 
+                                st.success("Task Rescheduled!")
+                                time.sleep(1)
+                                st.rerun()
+                        with tab_cancel:
+                            col_r, col_b = st.columns([3, 1])
+                            with col_r: cancel_reason = st.text_input("Reason", placeholder="Why are you cancelling?", key=f"rsn_{r['row_index']}", label_visibility="collapsed")
+                            with col_b:
+                                if st.button("Confirm", key=f"cnf_{r['row_index']}", type="primary"):
+                                    if not cancel_reason.strip(): st.error("Enter reason")
+                                    else:
+                                        fsheet = get_sheet("future_tasks")
+                                        fsheet.update_cell(int(r['row_index']), 7, "Canceled")
+                                        fsheet.update_cell(int(r['row_index']), 8, cancel_reason)
+                                        sheet_log = get_sheet("activity_log")
+                                        sheet_log.append_row([
+                                            today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
+                                            GS_FORMULA, str(r['Activity']).upper(), "", f"{r['Task_Name']} [CANCELED]", f"Cancel Reason: {cancel_reason}"
+                                        ], value_input_option="USER_ENTERED")
+                                        get_future_tasks.clear() 
+                                        get_activity_log.clear() 
+                                        st.rerun()
+                    st.markdown("<hr style='margin-top:5px; margin-bottom:15px;'>", unsafe_allow_html=True)
 
         if chk_list:
             st.markdown("---")
@@ -486,8 +491,8 @@ try:
                     sheet_log = get_sheet("activity_log")
                     sheet_log.append_row([
                         today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
-                        "0:00", current_activity, "", task, "Checked off"
-                    ])
+                        GS_FORMULA, current_activity, "", task, "Checked off"
+                    ], value_input_option="USER_ENTERED")
                     get_activity_log.clear() 
                     
                     if "[Due:" in task:
@@ -552,15 +557,10 @@ try:
                     with col_stop:
                         if st.button("🛑 SAVE", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
                             end_time_log = now.time()
-                            try:
-                                hours, remainder = divmod(int(elapsed_time.total_seconds()), 3600)
-                                minutes = remainder // 60
-                                duration_str = f"{hours}:{minutes:02d}"
-                            except: duration_str = "0:00"
 
                             log_sheet = get_sheet("activity_log")
                             log_sheet.update_cell(sheet_row, 3, end_time_log.strftime('%H:%M')) 
-                            log_sheet.update_cell(sheet_row, 4, duration_str)                   
+                            log_sheet.update_cell(sheet_row, 4, GS_FORMULA)                   
                             
                             old_notes = str(active_row['Notes'])
                             if old_notes.strip() == "":
@@ -611,9 +611,9 @@ try:
                         if st.button(f"▶️ {task}{last_txt}", key=f"btn_{idx}_{task}", use_container_width=True):
                             log_sheet = get_sheet("activity_log")
                             log_sheet.append_row([
-                                today_str, now.strftime('%H:%M'), "RUNNING", "RUNNING",    
+                                today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
                                 current_activity, task, "", "Auto-logged via Timer"
-                            ])
+                            ], value_input_option="USER_ENTERED")
                             get_activity_log.clear() 
                             st.rerun()
             
@@ -662,15 +662,25 @@ try:
                                 
                             log_sheet = get_sheet("activity_log")
                             log_sheet.append_row([
-                                today_str, now.strftime('%H:%M'), "RUNNING", "RUNNING",    
+                                today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
                                 "WORK", selected_p_task_full, "", "Project Tracking"
-                            ])
+                            ], value_input_option="USER_ENTERED")
                             get_activity_log.clear() 
                             st.rerun()
 
             # --- 4. RENDER MEETING/VISITOR TRACKER ---
-            st.markdown("<div style='margin-top: 15px; margin-bottom: 5px; color: #ff4b4b;'><b>👥 Start a Meeting / Visitor:</b></div>", unsafe_allow_html=True)
-            with st.expander("Enter Details & Start Timer", expanded=False):
+            st.markdown("<div style='margin-top: 15px; margin-bottom: 5px; color: #ff4b4b;'><b>👥 Meeting / Visitor Tracker:</b></div>", unsafe_allow_html=True)
+            
+            if st.button("⚡ Quick Start (Update Details Later)", use_container_width=True):
+                log_sheet = get_sheet("activity_log")
+                log_sheet.append_row([
+                    today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
+                    "PEOPLE", "MEETING / VISITOR", "", "Update details later"
+                ], value_input_option="USER_ENTERED")
+                get_activity_log.clear() 
+                st.rerun()
+
+            with st.expander("📝 Or Enter Details Before Starting", expanded=False):
                 col_mt1, col_mt2 = st.columns(2)
                 with col_mt1: 
                     interaction_type = st.selectbox("Interaction Type", ["Attend Visitor", "Meet People"], key="live_mtg_type")
@@ -693,16 +703,16 @@ try:
                 topic_talk = st.text_input("Topic of Talking", key="live_mtg_topic")
                 purpose_visit = st.text_input("Purpose of Visit", key="live_mtg_purpose")
                 
-                if st.button("▶️ Start Meeting Timer", type="primary", use_container_width=True):
+                if st.button("▶️ Start with Details", type="primary", use_container_width=True):
                     final_name = person_name.strip() if person_name else "Unknown"
                     sub_act_str = f"{interaction_type} - {final_name}"
                     notes_str = f"Topic: {topic_talk} | Purpose: {purpose_visit}"
                     
                     log_sheet = get_sheet("activity_log")
                     log_sheet.append_row([
-                        today_str, now.strftime('%H:%M'), "RUNNING", "RUNNING",    
+                        today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
                         "PEOPLE", sub_act_str.upper(), "", notes_str
-                    ])
+                    ], value_input_option="USER_ENTERED")
                     get_activity_log.clear() 
                     st.rerun()
 
@@ -779,18 +789,12 @@ try:
                 
                 if st.form_submit_button("Save to Activity Log", use_container_width=True):
                     if log_activity:
-                        start_dt = datetime.combine(log_date, log_start)
-                        end_dt = datetime.combine(log_date, log_end)
-                        if end_dt < start_dt: end_dt = end_dt.replace(day=end_dt.day + 1)
-                        duration_td = end_dt - start_dt
-                        h, m = divmod(duration_td.seconds, 3600)
-                        
                         sheet_log = get_sheet("activity_log")
                         sheet_log.append_row([
                             log_date.strftime('%Y-%m-%d'), log_start.strftime('%H:%M'), log_end.strftime('%H:%M'), 
-                            f"{h}:{m//60:02d}", log_activity.upper().strip(), log_sub_activity.upper().strip(),
+                            GS_FORMULA, log_activity.upper().strip(), log_sub_activity.upper().strip(),
                             log_chk.strip(), log_notes
-                        ])
+                        ], value_input_option="USER_ENTERED")
                         get_activity_log.clear() 
                         st.success("Activity logged!")
                         time.sleep(1)
@@ -805,7 +809,7 @@ try:
 
         days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Holiday"]
         
-        # --- NEW: ADVANCED BATCH TOOLS & FREE TIME FINDER ---
+        # --- ADVANCED BATCH TOOLS & FREE TIME FINDER ---
         with st.expander("🛠️ Advanced Tools: Batch Add, Replace & Free Time", expanded=False):
             tool_mode = st.radio("Select Tool:", ["🔍 Find Free Time", "➕ Batch Add Task", "🔄 Find & Replace"], horizontal=True)
             
@@ -887,7 +891,6 @@ try:
                             new_rows = [{"Day": d, "Start_Time": start_s, "End_Time": end_s, "Duration": dur_str, "Activity": b_act, "Sub_Activities": b_sub, "check_list": b_chk} for d in b_days]
                             final_df = pd.concat([filtered_df, pd.DataFrame(new_rows)], ignore_index=True)
                             
-                            # Sort before uploading
                             day_map = {d: i for i, d in enumerate(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Holiday"])}
                             final_df['Day_Idx'] = final_df['Day'].str.title().map(day_map)
                             def get_st_min(t_str):
@@ -906,22 +909,51 @@ try:
                             st.rerun()
 
             elif tool_mode == "🔄 Find & Replace":
-                st.markdown("#### Replace an Activity Across Schedule")
+                st.markdown("#### Replace Items Across Schedule")
                 r_days = st.multiselect("Select Days to Search", days_of_week, default=days_of_week, key="r_days")
-                unique_acts = sorted([a for a in df['Activity'].unique() if a.strip()])
-                old_act = st.selectbox("Target Activity to Replace", unique_acts)
-                new_act = st.text_input("New Activity Name").upper()
                 
-                if st.button("Replace Activity", type="primary"):
-                    if not r_days or not new_act or not old_act: st.error("Please fill all fields.")
+                target_col = st.radio("What do you want to replace?", ["Activity", "Sub-Activity", "Checklist"], horizontal=True)
+                
+                if target_col == "Activity":
+                    unique_vals = sorted(list(set([a.strip().upper() for a in df['Activity'] if a.strip()])))
+                elif target_col == "Sub-Activity":
+                    all_items = []
+                    for val in df['Sub_Activities']:
+                        all_items.extend([s.strip() for s in str(val).split(',') if s.strip()])
+                    unique_vals = sorted(list(set(all_items)))
+                else: 
+                    all_items = []
+                    for val in df['check_list']:
+                        all_items.extend([c.strip() for c in str(val).split(',') if c.strip()])
+                    unique_vals = sorted(list(set(all_items)))
+                
+                old_val = st.selectbox("Target Item to Replace", unique_vals) if unique_vals else None
+                new_val = st.text_input("New Item Name")
+                
+                if st.button("Replace Item", type="primary"):
+                    if not r_days or not new_val or not old_val: 
+                        st.error("Please fill all fields.")
                     else:
                         full_df = df.copy()
                         count = 0
                         for idx, r in full_df.iterrows():
                             if str(r['Day']).strip().title() in [d.title() for d in r_days]:
-                                if str(r['Activity']).strip().upper() == old_act.upper():
-                                    full_df.at[idx, 'Activity'] = new_act
-                                    count += 1
+                                if target_col == "Activity":
+                                    if str(r['Activity']).strip().upper() == old_val.upper():
+                                        full_df.at[idx, 'Activity'] = new_val.upper()
+                                        count += 1
+                                elif target_col == "Sub-Activity":
+                                    items = [s.strip() for s in str(r['Sub_Activities']).split(',') if s.strip()]
+                                    if old_val in items:
+                                        items = [new_val if x == old_val else x for x in items]
+                                        full_df.at[idx, 'Sub_Activities'] = ", ".join(items)
+                                        count += 1
+                                elif target_col == "Checklist":
+                                    items = [c.strip() for c in str(r['check_list']).split(',') if c.strip()]
+                                    if old_val in items:
+                                        items = [new_val if x == old_val else x for x in items]
+                                        full_df.at[idx, 'check_list'] = ", ".join(items)
+                                        count += 1
                         
                         if count > 0:
                             routine_sheet = get_sheet("routine_master")
@@ -929,10 +961,10 @@ try:
                             routine_sheet.update(values=[full_df.columns.values.tolist()] + full_df.values.tolist(), range_name="A1")
                             
                             get_routine_data.clear()
-                            st.success(f"Replaced {count} instances of '{old_act}' with '{new_act}'!")
+                            st.success(f"Replaced {count} instances of '{old_val}' with '{new_val}'!")
                             time.sleep(1)
                             st.rerun()
-                        else: st.info(f"No instances of '{old_act}' found on selected days.")
+                        else: st.info(f"No instances of '{old_val}' found on selected days.")
 
         st.markdown("---")
         
@@ -1245,15 +1277,13 @@ try:
                         if st.button("☕ Log as Break", key=f"gap_{event['start']}_{event['end']}", use_container_width=True):
                             start_24 = datetime.strptime(event['start'], '%I:%M %p').strftime('%H:%M')
                             end_24 = datetime.strptime(event['end'], '%I:%M %p').strftime('%H:%M')
-                            h, m = divmod(event['duration'], 60)
-                            dur_str = f"{h}:{m:02d}"
                             
                             sheet_log = get_sheet("activity_log")
                             sheet_log.append_row([
                                 selected_date_str, start_24, end_24, 
-                                dur_str, "FREE TIME", "Planned Break",
+                                GS_FORMULA, "FREE TIME", "Planned Break",
                                 "", "Logged from Timeline Gap"
-                            ])
+                            ], value_input_option="USER_ENTERED")
                             get_activity_log.clear() 
                             st.rerun()
                 else:

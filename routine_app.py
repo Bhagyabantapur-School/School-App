@@ -332,11 +332,15 @@ try:
         elif current_activity in ["SLEEP", "PRE", "TEA", "OUT"]: color = "#ff9f36" 
         else: color = "#333333" 
 
-        # --- UPDATED: Left/Right Split Layout for Activity and Info ---
-        st.markdown("<hr style='margin-top:5px; margin-bottom:15px;'>", unsafe_allow_html=True)
-        
-        # Calculate elapsed time first so we can display it in the right column
-        elapsed_text = ""
+        # --- REVERTED: Centered layout for Activity, Elapsed, and Up Next ---
+        st.markdown(f"<h1 style='text-align: center; font-size: 4.5rem; color: {color}; margin-top: 10px; margin-bottom: 5px; line-height: 1.2;'>{current_activity}</h1>", unsafe_allow_html=True)
+
+        if is_auto_holiday or holiday_on:
+            if is_auto_holiday:
+                st.markdown(f"<p style='text-align: center; color: #ff9f36; font-weight: bold; font-size: 1.1rem; margin-top: -10px;'>🎉 {auto_occasion} (Holiday Schedule Active)</p>", unsafe_allow_html=True)
+            else:
+                st.markdown("<p style='text-align: center; color: #ff9f36; font-weight: bold; margin-top: -10px;'>🎉 Running Custom Holiday Schedule</p>", unsafe_allow_html=True)
+
         if current_activity_start and not flex_on:
             dt_start = datetime.combine(now.date(), current_activity_start)
             dt_start = ist_timezone.localize(dt_start)
@@ -344,35 +348,16 @@ try:
             eh, erem = divmod(int(elapsed.total_seconds()), 3600)
             em = erem // 60
             elapsed_text = f"{eh}h {em}m" if eh > 0 else f"{em}m"
+            st.markdown(f"<h3 style='text-align: center; color: #555; margin-top: 0px; margin-bottom: 10px; font-weight: 400;'>⏱️ Elapsed: {elapsed_text}</h3>", unsafe_allow_html=True)
+        else:
+            st.markdown("<div style='margin-bottom: 15px;'></div>", unsafe_allow_html=True)
 
-        col_act, col_info = st.columns([3, 2])
-        
-        with col_act:
-            st.markdown(f"<h1 style='text-align: left; font-size: 3.5rem; color: {color}; margin-top: 0px; margin-bottom: 5px; line-height: 1.1;'>{current_activity}</h1>", unsafe_allow_html=True)
-            
-            if is_auto_holiday or holiday_on:
-                if is_auto_holiday:
-                    st.markdown(f"<p style='text-align: left; color: #ff9f36; font-weight: bold; font-size: 1.0rem; margin-top: 0px;'>🎉 {auto_occasion} (Holiday)</p>", unsafe_allow_html=True)
-                else:
-                    st.markdown("<p style='text-align: left; color: #ff9f36; font-weight: bold; margin-top: 0px;'>🎉 Custom Holiday Schedule</p>", unsafe_allow_html=True)
-
-        with col_info:
-            st.markdown("<div style='text-align: right; padding-top: 10px;'>", unsafe_allow_html=True)
-            
-            if elapsed_text:
-                st.markdown(f"<h3 style='color: #555; margin-top: 0px; margin-bottom: 5px; font-weight: 400;'>⏱️ {elapsed_text}</h3>", unsafe_allow_html=True)
-            else:
-                st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
-                
-            if next_activity == "FLEX MODE ACTIVE":
-                st.markdown(f"<h4 style='color: #e65100; margin-top: 0px; margin-bottom: 0px; font-weight: 400;'>⚠️ Schedule Paused</h4>", unsafe_allow_html=True)
-            elif next_activity not in ["NONE", "END OF DAY"]:
-                st.markdown(f"<h4 style='color: #888; margin-top: 0px; margin-bottom: 0px; font-weight: 400; font-size: 1.1rem;'>Up Next:</h4>", unsafe_allow_html=True)
-                st.markdown(f"<h4 style='color: #555; margin-top: 0px; margin-bottom: 0px; font-weight: bold; font-size: 1.1rem;'>{next_activity} <span style='font-weight: 400;'>at {next_time_str}</span></h4>", unsafe_allow_html=True)
-            elif next_activity == "END OF DAY":
-                st.markdown(f"<h4 style='color: #888; margin-top: 0px; margin-bottom: 0px; font-weight: 400;'>Up Next: Complete</h4>", unsafe_allow_html=True)
-                
-            st.markdown("</div>", unsafe_allow_html=True)
+        if next_activity == "FLEX MODE ACTIVE":
+            st.markdown(f"<h4 style='text-align: center; color: #e65100; margin-bottom: 20px; font-weight: 400;'>⚠️ Schedule Paused - Logging Custom Activity</h4>", unsafe_allow_html=True)
+        elif next_activity not in ["NONE", "END OF DAY"]:
+            st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;'>Up Next: <b>{next_activity}</b> at {next_time_str}</h4>", unsafe_allow_html=True)
+        elif next_activity == "END OF DAY":
+            st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;'>Up Next: Schedule Complete</h4>", unsafe_allow_html=True)
 
         # --- SMART HYDRATION TRACKER ---
         st.markdown("---")

@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
@@ -18,6 +19,10 @@ if 'active_main_task' not in st.session_state:
     st.session_state.active_main_task = None
     st.session_state.active_sub_task = None
     st.session_state.active_start_time = None
+
+# Track Pomodoro states for audio beeps
+if 'pomodoro_state' not in st.session_state:
+    st.session_state.pomodoro_state = {}
 
 st_autorefresh(interval=120000, key="routine_refresh")
 
@@ -332,7 +337,6 @@ try:
         elif current_activity in ["SLEEP", "PRE", "TEA", "OUT"]: color = "#ff9f36" 
         else: color = "#333333" 
 
-        # --- REVERTED: Centered layout for Activity, Elapsed, and Up Next ---
         st.markdown(f"<h1 style='text-align: center; font-size: 4.5rem; color: {color}; margin-top: 10px; margin-bottom: 5px; line-height: 1.2;'>{current_activity}</h1>", unsafe_allow_html=True)
 
         if is_auto_holiday or holiday_on:
@@ -559,7 +563,7 @@ try:
             
             st.markdown("<h4 style='text-align: center; color: #333;'>Tap to Track Activity</h4>", unsafe_allow_html=True)
             
-            # --- 1. RENDER ALL RUNNING TASKS ---
+            # --- 1. RENDER ALL RUNNING TASKS WITH POMODORO ---
             if active_count > 0:
                 for idx, active_row in running_tasks.iterrows():
                     sheet_row = idx + 2 
@@ -575,7 +579,66 @@ try:
                         mins_elapsed = int(elapsed_time.total_seconds() // 60)
                     except: mins_elapsed = 0 
                     
-                    st.info(f"⏳ **In Progress:** {display_name} (Running for {mins_elapsed} min)")
+                    # --- POMODORO LOGIC & BEEP TRIGGER ---
+                    cycle_minute = mins_elapsed % 30
+                    pomodoro_count = (mins_elapsed // 30) + 1
+                    
+                    current_state = "Focus" if cycle_minute < 25 else "Break"
+                    task_id = f"task_{sheet_row}"
+                    
+                    # Trigger double-beep if state transitions (e.g. Focus -> Break)
+                    if task_id in st.session_state.pomodoro_state:
+                        if st.session_state.pomodoro_state[task_id] != current_state:
+                            components.html("""
+                                <script>
+                                    try {
+                                        var ctx = new (window.AudioContext || window.webkitAudioContext)();
+                                        function playBeep(freq, time, dur) {
+                                            var osc = ctx.createOscillator();
+                                            var gain = ctx.createGain();
+                                            osc.connect(gain);
+                                            gain.connect(ctx.destination);
+                                            osc.frequency.value = freq;
+                                            osc.type = "square";
+                                            gain.gain.setValueAtTime(0.1, time);
+                                            gain.gain.exponentialRampToValueAtTime(0.001, time + dur);
+                                            osc.start(time);
+                                            osc.stop(time + dur);
+                                        }
+                                        playBeep(600, ctx.currentTime, 0.2);
+                                        playBeep(800, ctx.currentTime + 0.2, 0.3);
+                                    } catch(e) {}
+                                </script>
+                            """, height=0, width=0)
+                            
+                    st.session_state.pomodoro_state[task_id] = current_state
+
+                    if current_state == "Focus":
+                        p_state = "🍅 Focus Time"
+                        p_color = "#d84315" # Deep Orange
+                        p_left = 25 - cycle_minute
+                        p_prog = cycle_minute / 25.0
+                    else:
+                        p_state = "☕ Break Time"
+                        p_color = "#2e7b32" # Green
+                        p_left = 30 - cycle_minute
+                        p_prog = (cycle_minute - 25) / 5.0
+                    
+                    st.markdown(f"""
+                    <div style='background-color: #f8f9fa; border-left: 5px solid {p_color}; padding: 12px; border-radius: 6px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);'>
+                        <div style='display: flex; justify-content: space-between; align-items: center;'>
+                            <strong style='font-size: 16px; color: #333;'>⏳ {display_name}</strong>
+                            <span style='color: #666; font-size: 14px;'>Total: {mins_elapsed}m</span>
+                        </div>
+                        <div style='margin-top: 8px; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;'>
+                            <span style='color: {p_color}; font-weight: bold; font-size: 14px;'>{p_state} (Cycle {pomodoro_count})</span>
+                            <span style='color: #555; font-size: 13px; font-weight: bold;'>{p_left}m left</span>
+                        </div>
+                        <div style='width: 100%; background-color: #e0e0e0; border-radius: 4px; height: 6px;'>
+                            <div style='width: {p_prog * 100}%; background-color: {p_color}; height: 6px; border-radius: 4px; transition: width 0.5s ease;'></div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
                     
                     is_project = str(active_row['Notes']).strip() == "Project Tracking"
                     new_proj_status = None

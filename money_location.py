@@ -76,14 +76,37 @@ def get_location_logic():
                 if place not in logic[area]: logic[area].append(place)
     return logic
 
-def get_current_location():
+def get_current_location_details():
+    """Returns the current location and how long the user has been there."""
     df_loc = load_location_data()
     if not df_loc.empty:
         last_record = df_loc.iloc[-1].to_dict()
         move_val = str(last_record.get('Move', '')).strip()
         if move_val in ["", "- Stationary -", "nan"]:
-            return str(last_record.get('Place', ''))
-    return None
+            loc = str(last_record.get('Place', ''))
+            date_str = str(last_record.get('Date', ''))
+            time_str = str(last_record.get('Time', ''))
+            duration_str = ""
+            try:
+                loc_dt = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%y %H:%M")
+                now = get_ist_now().replace(tzinfo=None)
+                diff = now - loc_dt
+                total_seconds = int(diff.total_seconds())
+                
+                if total_seconds >= 0:
+                    days, remainder = divmod(total_seconds, 86400)
+                    hours, remainder = divmod(remainder, 3600)
+                    minutes, _ = divmod(remainder, 60)
+                    if days > 0:
+                        duration_str = f"{days}d {hours}h"
+                    elif hours > 0:
+                        duration_str = f"{hours}h {minutes}m"
+                    else:
+                        duration_str = f"{minutes}m"
+            except Exception:
+                pass
+            return loc, duration_str
+    return None, None
 
 def get_shop_type(place_name):
     if 'Specific_Place' in config_df.columns and 'Shop_Type' in config_df.columns:
@@ -93,6 +116,24 @@ def get_shop_type(place_name):
             if len(s_type) > 0 and str(s_type[0]).strip() != "":
                 return str(s_type[0]).strip()
     return None
+
+def get_entity_for_place(place_name):
+    if 'Specific_Place' in config_df.columns and 'Map_Entity' in config_df.columns:
+        match = config_df[config_df['Specific_Place'].astype(str).str.strip() == place_name]
+        if not match.empty:
+            ent = match['Map_Entity'].dropna().values
+            if len(ent) > 0 and str(ent[0]).strip() != "":
+                return str(ent[0]).strip()
+    return "PERS" 
+
+def should_inject_tofrom(loc_name):
+    """Smart filter to block 'HOME' and any place with the word 'House' from TO/FROM field."""
+    if not loc_name:
+        return False
+    loc_lower = str(loc_name).strip().lower()
+    if loc_lower == "home" or "house" in loc_lower:
+        return False
+    return True
 
 def sync_journey_state():
     if 'state_synced' not in st.session_state:
@@ -127,7 +168,7 @@ st.title("📱 SK Ecosystem")
 
 tab_money, tab_shopping, tab_location, tab_dash, tab_help = st.tabs(["💰 Money", "🛒 Shopping", "📍 Location", "📊 Dash", "📖 Help"])
 
-current_loc = get_current_location()
+current_loc, loc_duration = get_current_location_details()
 current_shop_type = get_shop_type(current_loc) if current_loc else None
 
 # ==========================================
@@ -138,10 +179,11 @@ with tab_money:
     # --- 1. LOCATION HEADER & QUICK SYNC ---
     c_loc1, c_loc2 = st.columns([3, 1])
     with c_loc1:
+        loc_display = f"📍 Location: **{current_loc}** ({loc_duration})" if loc_duration else f"📍 Location: **{current_loc}**"
         if current_loc and current_shop_type:
-            st.success(f"📍 **{current_loc}** | 🛒 **{current_shop_type}**")
+            st.success(f"{loc_display} | 🛒 **{current_shop_type}**")
         elif current_loc:
-            st.success(f"📍 Location: **{current_loc}**")
+            st.success(loc_display)
         else:
             st.info("📍 Location: Unknown")
     with c_loc2:
@@ -170,8 +212,11 @@ with tab_money:
                     final_entity = "PERS" if chk_pers else ""
                     final_acc = "MB" if chk_mb else ""
                     
-                    # 12 Columns now (Date, Time, In, Out, Account, Fund, Entity, Category, SubCat, Particulars, TO_FROM, Remark)
-                    row_data = [today_str, time_str, in_val, out_val, final_acc, "", final_entity, "", "", "", current_loc or "", "⚠️ INCOMPLETE"]
+                    # Smart Logic: Inject into TO/FROM only if NOT Home/House
+                    final_tf = current_loc if should_inject_tofrom(current_loc) else ""
+                    
+                    # 13 Columns now (Date, Time, In, Out, Account, Fund, Entity, Category, SubCat, Particulars, TO_FROM, Location, Remark)
+                    row_data = [today_str, time_str, in_val, out_val, final_acc, "", final_entity, "", "", "", final_tf, current_loc or "", "⚠️ INCOMPLETE"]
                     sh.worksheet("MONEY_DATA").append_row(row_data)
                     load_money_data.clear()
                     st.success("Fast saved! Complete it later.")
@@ -179,7 +224,7 @@ with tab_money:
                 else:
                     st.warning("Enter an amount!")
         
-        st.caption(f"Location To/From: {current_loc or 'Unknown'}")
+        st.caption(f"Logged under App Location: {current_loc or 'Unknown'}")
 
     st.divider()
 
@@ -195,14 +240,14 @@ with tab_money:
                     is_out = float(row.get('Out', 0) or 0) > 0
                     amt_display = f"₹{row['Out']} (OUT)" if is_out else f"₹{row['In']} (IN)"
                     
-                    # Safely get time if it exists
                     row_time = row.get('Time', '')
                     time_disp = f" at {row_time}" if str(row_time).strip() != "" else ""
-                    st.markdown(f"**Date:** {row['Date']}{time_disp} | **Amount:** {amt_display} | **Entity:** {row.get('Entity', '')} | **Acc:** {row.get('Account', '')} | **To/From:** {row['TO_FROM']}")
+                    
+                    # Display TO/FROM so you can see if the Fast Save injected it!
+                    st.markdown(f"**Date:** {row['Date']}{time_disp} | **Amount:** {amt_display} | **Entity:** {row.get('Entity', '')} | **Acc:** {row.get('Account', '')} | **To/From:** {row.get('TO_FROM', '')} | **Loc:** {row.get('Location', '')}")
                     
                     c1, c2, c3 = st.columns(3)
                     with c1: 
-                        # Default indices for the dropdowns if data exists
                         acc_opts = get_list("Accounts")
                         default_acc = acc_opts.index(row.get('Account', '')) if row.get('Account', '') in acc_opts else 0
                         i_acc = st.selectbox("Account", acc_opts, index=default_acc, key=f"ac_{idx}")
@@ -212,30 +257,45 @@ with tab_money:
                         i_sub = st.selectbox("Sub Category", get_list("Sub-Categories") + ["-None-"], key=f"su_{idx}")
                     with c3:
                         i_part = st.selectbox("Particulars", get_list("Particulars") + ["-None-"], key=f"pa_{idx}")
-                        i_rem = st.text_input("Remark", key=f"re_{idx}")
-                    
-                    if st.button("💾 Complete & Save Record", key=f"sv_{idx}", type="primary"):
-                        try:
-                            money_ws = sh.worksheet("MONEY_DATA")
-                            final_cat = "" if i_cat == "-None-" else i_cat
-                            final_sub = "" if i_sub == "-None-" else i_sub
-                            final_part = "" if i_part == "-None-" else i_part
+                        
+                        tf_opts = get_list("TO_FROM")
+                        curr_tf = str(row.get('TO_FROM', '')).strip()
+                        if curr_tf and curr_tf not in tf_opts:
+                            tf_opts.insert(0, curr_tf)
                             
-                            row_data = [
-                                row['Date'], row.get('Time', ''), row['In'], row['Out'], 
-                                i_acc, i_fund, row.get('Entity', ''), 
-                                final_cat, final_sub, final_part, 
-                                row['TO_FROM'], i_rem
-                            ]
-                            # Updates A to L (12 columns)
-                            cells = money_ws.range(f"A{sheet_row}:L{sheet_row}")
-                            for i, val in enumerate(row_data): cells[i].value = str(val)
-                            money_ws.update_cells(cells)
-                            load_money_data.clear()
-                            st.success("Record Completed!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error: {e}")
+                        tf_opts_with_none = tf_opts + ["-None-"]
+                        default_tf = tf_opts_with_none.index(curr_tf) if curr_tf in tf_opts_with_none else (len(tf_opts_with_none)-1)
+                        i_tofrom = st.selectbox("TO / FROM", tf_opts_with_none, index=default_tf, key=f"tf_{idx}")
+                    
+                    c_rem, c_btn = st.columns([3, 1])
+                    with c_rem:
+                        i_rem = st.text_input("Remark", key=f"re_{idx}")
+                    with c_btn:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.button("💾 Save", key=f"sv_{idx}", type="primary", use_container_width=True):
+                            try:
+                                money_ws = sh.worksheet("MONEY_DATA")
+                                final_cat = "" if i_cat == "-None-" else i_cat
+                                final_sub = "" if i_sub == "-None-" else i_sub
+                                final_part = "" if i_part == "-None-" else i_part
+                                final_tf = "" if i_tofrom == "-None-" else i_tofrom
+                                
+                                # 13 Columns mapping
+                                row_data = [
+                                    row['Date'], row.get('Time', ''), row['In'], row['Out'], 
+                                    i_acc, i_fund, row.get('Entity', ''), 
+                                    final_cat, final_sub, final_part, 
+                                    final_tf, row.get('Location', ''), i_rem
+                                ]
+                                # Updates A to M (13 columns)
+                                cells = money_ws.range(f"A{sheet_row}:M{sheet_row}")
+                                for i, val in enumerate(row_data): cells[i].value = str(val)
+                                money_ws.update_cells(cells)
+                                load_money_data.clear()
+                                st.success("Record Completed!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error: {e}")
                     st.divider()
 
     # --- 4. EXPRESS SHOPPING CHECKOUT ---
@@ -269,7 +329,11 @@ with tab_money:
                                     today_str = time_now.strftime("%d-%m-%Y")
                                     time_str = time_now.strftime("%H:%M")
                                     
-                                    money_row = [today_str, time_str, "", final_cost, str(row.get('Account', '')), str(row.get('Fund', '')), ent, cat, subcat, part_name, current_loc, rem]
+                                    # Smart Logic: Inject TO/FROM if not Home/House
+                                    final_tf = current_loc if should_inject_tofrom(current_loc) else ""
+                                    
+                                    # 13 columns
+                                    money_row = [today_str, time_str, "", final_cost, str(row.get('Account', '')), str(row.get('Fund', '')), ent, cat, subcat, part_name, final_tf, current_loc, rem]
                                     sh.worksheet("MONEY_DATA").append_row(money_row)
                                     
                                     headers = shop_ws.row_values(1)
@@ -352,17 +416,20 @@ with tab_money:
             part_df = pd.DataFrame()
             
         mapped_tofrom = get_list("TO_FROM")
-        to_from_opts = ["-- Type New --"] + mapped_tofrom
-        default_index = 0
-        if current_loc:
+        to_from_opts = ["-- Type New --", "- None -"] + mapped_tofrom
+        default_index = 1
+        
+        # Inject Location to TO_FROM only if it is NOT Home/House
+        if should_inject_tofrom(current_loc):
             if current_loc not in to_from_opts:
-                to_from_opts.insert(1, current_loc)
-                default_index = 1
+                to_from_opts.insert(2, current_loc)
+                default_index = 2
             else:
                 default_index = to_from_opts.index(current_loc)
         
-        to_from = st.selectbox("TO / FROM", to_from_opts, index=default_index)
+        to_from = st.selectbox("TO / FROM (Person/Entity)", to_from_opts, index=default_index)
         if to_from == "-- Type New --": to_from = st.text_input("Type New TO / FROM")
+        elif to_from == "- None -": to_from = ""
 
     rem_opts = get_list("Remarks")
     remark_box = st.selectbox("Remark", ["- None -"] + rem_opts + ["-- Type New --"])
@@ -380,10 +447,11 @@ with tab_money:
                 st.stop()
                 
             formatted_date = entry_date.strftime("%d-%m-%Y")
-            row_data = [formatted_date, formatted_time, amount_in if amount_in > 0 else "", amount_out if amount_out > 0 else "", account, fund, entity, category, sub_cat, particulars, to_from, remark]
+            # 13 columns now
+            row_data = [formatted_date, formatted_time, amount_in if amount_in > 0 else "", amount_out if amount_out > 0 else "", account, fund, entity, category, sub_cat, particulars, to_from, current_loc or "", remark]
             sh.worksheet("MONEY_DATA").append_row(row_data)
             load_money_data.clear() 
-            st.success(f"Saved: ₹{amount_in if amount_in > 0 else amount_out} logged to {to_from}!")
+            st.success(f"Saved: ₹{amount_in if amount_in > 0 else amount_out} logged!")
             st.session_state.locked_date = get_ist_now().date() 
         except Exception as e:
             st.error(f"Failed to save: {e}")
@@ -751,4 +819,4 @@ with tab_dash:
 # ==========================================
 with tab_help:
     st.header("📖 ERP Manual")
-    st.write("You MUST manually insert a 'Time' column into your MONEY_DATA Google Sheet right after the 'Date' column for the new 12-column system to function.")
+    st.write("You MUST manually insert a 'Location' column into your MONEY_DATA Google Sheet right after the 'TO_FROM' column for the new 13-column system to function.")

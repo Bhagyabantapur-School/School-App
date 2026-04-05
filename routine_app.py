@@ -421,8 +421,9 @@ try:
         if upcoming_ui_elements_raw:
             upcoming_ui_elements_raw.sort(key=lambda x: x[0])
             
+            # --- UPDATED: Collapsible Expander with Count is now CLOSED by default ---
             upcoming_count = len(upcoming_ui_elements_raw)
-            with st.expander(f"⏳ Upcoming Special Tasks ({upcoming_count})", expanded=True):
+            with st.expander(f"⏳ Upcoming Special Tasks ({upcoming_count})", expanded=False):
                 for dt, r, html_text in upcoming_ui_elements_raw:
                     st.markdown(f"<p style='text-align: center; margin-bottom:5px; font-size:16px; color: #d84315;'>{html_text}</p>", unsafe_allow_html=True)
                     with st.expander(f"✏️ Manage Task", expanded=False):

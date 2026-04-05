@@ -15,7 +15,7 @@ def get_ist_now():
 
 # Initialize Session States
 if 'route_active' not in st.session_state: st.session_state.route_active = False
-if 'route_type' not in st.session_state: st.session_state.route_type = None # Tracks if it's "Dynamic" or "Express"
+if 'route_type' not in st.session_state: st.session_state.route_type = None 
 if 'active_route' not in st.session_state: st.session_state.active_route = ""
 if 'current_people' not in st.session_state: st.session_state.current_people = "I"
 if 'current_move' not in st.session_state: st.session_state.current_move = "BIKE"
@@ -94,8 +94,17 @@ def get_shop_type(place_name):
                 return str(s_type[0]).strip()
     return None
 
+def get_entity_for_place(place_name):
+    """Automatically guess the Entity based on your mapped Location data."""
+    if 'Specific_Place' in config_df.columns and 'Map_Entity' in config_df.columns:
+        match = config_df[config_df['Specific_Place'].astype(str).str.strip() == place_name]
+        if not match.empty:
+            ent = match['Map_Entity'].dropna().values
+            if len(ent) > 0 and str(ent[0]).strip() != "":
+                return str(ent[0]).strip()
+    return "PERS" # Default
+
 def sync_journey_state():
-    """Checks Google Sheets on startup to recover any running journey if the app closed."""
     if 'state_synced' not in st.session_state:
         df_loc = load_location_data()
         if not df_loc.empty:
@@ -119,7 +128,6 @@ def sync_journey_state():
                 
         st.session_state.state_synced = True
 
-# Sync state immediately
 sync_journey_state()
 
 # ==========================================
@@ -137,8 +145,94 @@ current_shop_type = get_shop_type(current_loc) if current_loc else None
 # ==========================================
 with tab_money:
     
+    # --- 1. LOCATION HEADER & QUICK SYNC ---
+    c_loc1, c_loc2 = st.columns([3, 1])
+    with c_loc1:
+        if current_loc and current_shop_type:
+            st.success(f"📍 **{current_loc}** | 🛒 **{current_shop_type}**")
+        elif current_loc:
+            st.success(f"📍 Location: **{current_loc}**")
+        else:
+            st.info("📍 Location: Unknown")
+    with c_loc2:
+        if st.button("🔄 Sync Loc", use_container_width=True):
+            load_location_data.clear()
+            st.rerun()
+
+    # --- 2. BUSY TIME QUICK ENTRY ---
+    st.markdown("### ⚡ Busy Time Quick Entry")
+    with st.container(border=True):
+        bq_c1, bq_c2, bq_c3 = st.columns([1.5, 1.5, 2])
+        with bq_c1: b_type = st.radio("Flow Type", ["Expense (OUT)", "Income (IN)"], horizontal=True, label_visibility="collapsed")
+        with bq_c2: b_amount = st.number_input("Amount (₹)", min_value=0.0, step=10.0, key="b_amt", label_visibility="collapsed")
+        with bq_c3:
+            b_entity = get_entity_for_place(current_loc) if current_loc else "PERS"
+            if st.button("🚀 Fast Save", use_container_width=True, type="primary"):
+                if b_amount > 0:
+                    today_str = get_ist_now().strftime("%d-%m-%Y")
+                    in_val = b_amount if "IN" in b_type else ""
+                    out_val = b_amount if "OUT" in b_type else ""
+                    # Save with missing fields and "⚠️ INCOMPLETE" remark
+                    row_data = [today_str, in_val, out_val, "", "", b_entity, "", "", "", current_loc or "", "⚠️ INCOMPLETE"]
+                    sh.worksheet("MONEY_DATA").append_row(row_data)
+                    load_money_data.clear()
+                    st.success("Fast saved! Complete it later.")
+                    st.rerun()
+                else:
+                    st.warning("Enter an amount!")
+        st.caption(f"Will auto-tag **Entity:** {b_entity} & **To/From:** {current_loc or 'Unknown'}")
+
+    st.divider()
+
+    # --- 3. INCOMPLETE LIST MANAGER ---
+    df_money = load_money_data()
+    if not df_money.empty and 'Remark' in df_money.columns:
+        incomplete_df = df_money[df_money['Remark'] == '⚠️ INCOMPLETE']
+        if not incomplete_df.empty:
+            st.error(f"⚠️ You have {len(incomplete_df)} incomplete Quick Entries waiting!")
+            with st.expander("📂 Open Incomplete List to Complete"):
+                for idx, row in incomplete_df.iterrows():
+                    sheet_row = idx + 2
+                    is_out = float(row.get('Out', 0) or 0) > 0
+                    amt_display = f"₹{row['Out']} (OUT)" if is_out else f"₹{row['In']} (IN)"
+                    st.markdown(f"**Date:** {row['Date']} | **Amount:** {amt_display} | **Entity:** {row['Entity']} | **To/From:** {row['TO_FROM']}")
+                    
+                    c1, c2, c3 = st.columns(3)
+                    with c1: 
+                        i_acc = st.selectbox("Account", get_list("Accounts"), key=f"ac_{idx}")
+                        i_cat = st.selectbox("Category", get_list("Categories") + ["-None-"], key=f"ca_{idx}")
+                    with c2: 
+                        i_fund = st.selectbox("Fund", get_list("Funds"), key=f"fu_{idx}")
+                        i_sub = st.selectbox("Sub Category", get_list("Sub-Categories") + ["-None-"], key=f"su_{idx}")
+                    with c3:
+                        i_part = st.selectbox("Particulars", get_list("Particulars") + ["-None-"], key=f"pa_{idx}")
+                        i_rem = st.text_input("Remark", key=f"re_{idx}")
+                    
+                    if st.button("💾 Complete & Save Record", key=f"sv_{idx}", type="primary"):
+                        try:
+                            money_ws = sh.worksheet("MONEY_DATA")
+                            final_cat = "" if i_cat == "-None-" else i_cat
+                            final_sub = "" if i_sub == "-None-" else i_sub
+                            final_part = "" if i_part == "-None-" else i_part
+                            row_data = [
+                                row['Date'], row['In'], row['Out'], 
+                                i_acc, i_fund, row['Entity'], 
+                                final_cat, final_sub, final_part, 
+                                row['TO_FROM'], i_rem
+                            ]
+                            # Efficient single-call update for the row
+                            cells = money_ws.range(f"A{sheet_row}:K{sheet_row}")
+                            for i, val in enumerate(row_data): cells[i].value = str(val)
+                            money_ws.update_cells(cells)
+                            load_money_data.clear()
+                            st.success("Record Completed!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+                    st.divider()
+
+    # --- 4. EXPRESS SHOPPING CHECKOUT ---
     if current_loc and current_shop_type:
-        st.success(f"📍 Location: **{current_loc}** | 🛒 Shop Profile: **{current_shop_type}**")
         df_shop = load_shopping_data()
         if not df_shop.empty and 'Status' in df_shop.columns:
             pending_items = df_shop[(df_shop['Status'] == 'Pending') & (df_shop['Shop_Type'] == current_shop_type)]
@@ -177,18 +271,20 @@ with tab_money:
                                     load_shopping_data.clear()
                                     st.success(f"Cleared {part_name} from your list!")
                                     st.rerun()
-                                except Exception as e:
-                                    st.error(f"Error processing item: {e}")
+                                except Exception as e: st.error(f"Error processing item: {e}")
                 st.divider()
-    else:
-        if current_loc: st.success(f"📍 Location: **{current_loc}** (No active shopping list for this area)")
 
-    st.subheader("Add Manual Financial Record")
+    # --- 5. STANDARD MANUAL FINANCIAL RECORD ---
+    st.subheader("📝 Add Manual Financial Record")
     entry_date = st.date_input("Date", value=st.session_state.locked_date)
+    
+    # 📱 MOBILE FIX: IN and OUT are now forced into side-by-side columns at the very top!
+    amt_col1, amt_col2 = st.columns(2)
+    with amt_col1: amount_in = st.number_input("IN (Income/Receive)", min_value=0.0, step=10.0)
+    with amt_col2: amount_out = st.number_input("OUT (Expense/Send)", min_value=0.0, step=10.0)
     
     col1, col2 = st.columns(2)
     with col1:
-        amount_in = st.number_input("IN (Income/Receive)", min_value=0.0, step=10.0)
         account = st.selectbox("Account (Physical)", get_list("Accounts"))
         fund = st.selectbox("Fund (Virtual Source)", get_list("Funds"))
         
@@ -215,8 +311,6 @@ with tab_money:
             cat_df = pd.DataFrame()
             
     with col2:
-        amount_out = st.number_input("OUT (Expense/Send)", min_value=0.0, step=10.0)
-        
         if not cat_df.empty and 'Map_SubCat' in cat_df.columns:
             sub_opts = list(dict.fromkeys([str(s).strip() for s in cat_df['Map_SubCat'].dropna() if str(s).strip() != ""]))
             sub_cat = st.selectbox("Sub Category", sub_opts + ["-- Type New --"])
@@ -366,10 +460,6 @@ with tab_shopping:
 # TAB 3: LOCATION ENTRY FORM
 # ==========================================
 with tab_location:
-    
-    # ---------------------------------------------------------
-    # 1. DYNAMIC AREA ROUTE (Pulled from CONFIG)
-    # ---------------------------------------------------------
     if not st.session_state.route_active or st.session_state.get('route_type') == "Dynamic":
         st.markdown("### 🗺️ Dynamic Area Route")
         dynamic_container = st.container(border=True)
@@ -377,7 +467,6 @@ with tab_location:
             location_logic = get_location_logic()
             route_opts = list(location_logic.keys())
             
-            # --- START JOURNEY UI ---
             if not st.session_state.route_active:
                 d_col1, d_col2 = st.columns(2)
                 with d_col1:
@@ -405,7 +494,6 @@ with tab_location:
                         st.rerun()
                     except Exception as e: st.error(f"Error: {e}")
                     
-            # --- LOG ARRIVAL UI ---
             else:
                 active_r = st.session_state.get('active_route', route_opts[0] if route_opts else "")
                 active_m = st.session_state.get('current_move', 'Transit')
@@ -431,9 +519,6 @@ with tab_location:
                         st.rerun()
                     except Exception as e: st.error(f"Error: {e}")
 
-    # ---------------------------------------------------------
-    # 2. LEGACY EXPRESS SCHOOL ROUTE
-    # ---------------------------------------------------------
     if not st.session_state.route_active or st.session_state.get('route_type') == "Express":
         st.markdown("### 🏫 Express School Route")
         express_container = st.container(border=True)
@@ -506,7 +591,6 @@ with tab_location:
 
     st.divider()
 
-    # --- ⚡ QUICK ACTIONS ---
     st.markdown("### ⚡ Quick Actions")
     st.markdown('<div class="green-btn-hook"></div>', unsafe_allow_html=True)
     st.markdown("""
@@ -532,7 +616,6 @@ with tab_location:
 
     st.divider()
 
-    # --- 📝 STANDARD MANUAL LOG ---
     st.markdown("### 📝 Manual Location Log")
     location_logic = get_location_logic()
     loc_date = st.date_input("Log Date", value=st.session_state.locked_date)
@@ -583,38 +666,46 @@ with tab_dash:
     st.header("📊 Financial Intelligence")
     df_money = load_money_data()
     if not df_money.empty:
-        df_money['In'] = pd.to_numeric(df_money['In'].replace('', 0), errors='coerce').fillna(0)
-        df_money['Out'] = pd.to_numeric(df_money['Out'].replace('', 0), errors='coerce').fillna(0)
+        # Filter out incomplete records from the charts so they don't skew the data
+        df_money_clean = df_money[df_money['Remark'] != '⚠️ INCOMPLETE'].copy()
         
-        st.subheader("💰 Virtual Fund Balances")
-        if 'Fund' in df_money.columns:
-            fund_summary = df_money.groupby('Fund').agg({'In': 'sum', 'Out': 'sum'}).reset_index()
-            fund_summary['Current Balance'] = fund_summary['In'] - fund_summary['Out']
-            fig_funds = px.bar(fund_summary, x='Fund', y='Current Balance', title="Net Balance by Virtual Fund", color='Current Balance', color_continuous_scale="Viridis", text_auto='.2s')
-            st.plotly_chart(fig_funds, use_container_width=True)
-        else: st.warning("Start logging with the new 'Fund' dropdown to see charts here!")
-        
-        st.divider()
+        if not df_money_clean.empty:
+            df_money_clean['In'] = pd.to_numeric(df_money_clean['In'].replace('', 0), errors='coerce').fillna(0)
+            df_money_clean['Out'] = pd.to_numeric(df_money_clean['Out'].replace('', 0), errors='coerce').fillna(0)
+            
+            st.subheader("💰 Virtual Fund Balances")
+            if 'Fund' in df_money_clean.columns:
+                fund_summary = df_money_clean.groupby('Fund').agg({'In': 'sum', 'Out': 'sum'}).reset_index()
+                fund_summary = fund_summary[fund_summary['Fund'] != ""] # Hide empty funds
+                fund_summary['Current Balance'] = fund_summary['In'] - fund_summary['Out']
+                fig_funds = px.bar(fund_summary, x='Fund', y='Current Balance', title="Net Balance by Virtual Fund", color='Current Balance', color_continuous_scale="Viridis", text_auto='.2s')
+                st.plotly_chart(fig_funds, use_container_width=True)
+            
+            st.divider()
 
-        st.subheader("🔄 Cross-Fund Borrowing")
-        if 'Fund' in df_money.columns:
-            pers_paid_for_sch = df_money[(df_money['Fund'].isin(['Salary', 'Personal Savings'])) & (df_money['Entity'] == 'SCH')]['Out'].sum()
-            sch_repaid_pers = df_money[(df_money['Fund'].isin(['Salary', 'Personal Savings'])) & (df_money['Entity'] == 'SCH')]['In'].sum()
-            school_owes_you = pers_paid_for_sch - sch_repaid_pers
-            sch_paid_for_pers = df_money[(df_money['Fund'].isin(['MDM', 'Sarba Sikha'])) & (df_money['Entity'] == 'PERS')]['Out'].sum()
-            pers_repaid_sch = df_money[(df_money['Fund'].isin(['MDM', 'Sarba Sikha'])) & (df_money['Entity'] == 'PERS')]['In'].sum()
-            you_owe_school = sch_paid_for_pers - pers_repaid_sch
-            c1, c2 = st.columns(2)
-            c1.metric("School Owes Salary/Personal", f"₹ {school_owes_you:,.2f}")
-            c2.metric("Salary Owes MDM/School", f"₹ {you_owe_school:,.2f}")
+            st.subheader("🔄 Cross-Fund Borrowing")
+            if 'Fund' in df_money_clean.columns:
+                pers_paid_for_sch = df_money_clean[(df_money_clean['Fund'].isin(['Salary', 'Personal Savings'])) & (df_money_clean['Entity'] == 'SCH')]['Out'].sum()
+                sch_repaid_pers = df_money_clean[(df_money_clean['Fund'].isin(['Salary', 'Personal Savings'])) & (df_money_clean['Entity'] == 'SCH')]['In'].sum()
+                school_owes_you = pers_paid_for_sch - sch_repaid_pers
+                
+                sch_paid_for_pers = df_money_clean[(df_money_clean['Fund'].isin(['MDM', 'Sarba Sikha'])) & (df_money_clean['Entity'] == 'PERS')]['Out'].sum()
+                pers_repaid_sch = df_money_clean[(df_money_clean['Fund'].isin(['MDM', 'Sarba Sikha'])) & (df_money_clean['Entity'] == 'PERS')]['In'].sum()
+                you_owe_school = sch_paid_for_pers - pers_repaid_sch
+                
+                c1, c2 = st.columns(2)
+                c1.metric("School Owes Salary/Personal", f"₹ {school_owes_you:,.2f}")
+                c2.metric("Salary Owes MDM/School", f"₹ {you_owe_school:,.2f}")
 
-        st.divider()
+            st.divider()
 
-        st.subheader("🥧 Expense Breakdown by Entity")
-        out_only = df_money[df_money['Out'] > 0]
-        if not out_only.empty:
-            fig_pie = px.pie(out_only, values='Out', names='Entity', title="Where is the money going?", hole=0.4)
-            st.plotly_chart(fig_pie, use_container_width=True)
+            st.subheader("🥧 Expense Breakdown by Entity")
+            out_only = df_money_clean[df_money_clean['Out'] > 0]
+            if not out_only.empty:
+                fig_pie = px.pie(out_only, values='Out', names='Entity', title="Where is the money going?", hole=0.4)
+                st.plotly_chart(fig_pie, use_container_width=True)
+        else:
+            st.info("Complete your incomplete records to view charts!")
             
         st.divider()
         
@@ -642,4 +733,4 @@ with tab_dash:
 # ==========================================
 with tab_help:
     st.header("📖 ERP Manual")
-    st.write("Your system perfectly maps Sub-Categories to Categories and cleans invisible spaces automatically!")
+    st.write("Your system automatically protects Dashboard charts by hiding incomplete quick-entries until you finalize them!")

@@ -94,16 +94,6 @@ def get_shop_type(place_name):
                 return str(s_type[0]).strip()
     return None
 
-def get_entity_for_place(place_name):
-    """Automatically guess the Entity based on your mapped Location data."""
-    if 'Specific_Place' in config_df.columns and 'Map_Entity' in config_df.columns:
-        match = config_df[config_df['Specific_Place'].astype(str).str.strip() == place_name]
-        if not match.empty:
-            ent = match['Map_Entity'].dropna().values
-            if len(ent) > 0 and str(ent[0]).strip() != "":
-                return str(ent[0]).strip()
-    return "PERS" # Default
-
 def sync_journey_state():
     if 'state_synced' not in st.session_state:
         df_loc = load_location_data()
@@ -162,25 +152,34 @@ with tab_money:
     # --- 2. BUSY TIME QUICK ENTRY ---
     st.markdown("### ⚡ Busy Time Quick Entry")
     with st.container(border=True):
-        bq_c1, bq_c2, bq_c3 = st.columns([1.5, 1.5, 2])
+        bq_c1, bq_c2, bq_c3, bq_c4 = st.columns([1.5, 1.5, 1.2, 1.5])
         with bq_c1: b_type = st.radio("Flow Type", ["Expense (OUT)", "Income (IN)"], horizontal=True, label_visibility="collapsed")
         with bq_c2: b_amount = st.number_input("Amount (₹)", min_value=0.0, step=10.0, key="b_amt", label_visibility="collapsed")
         with bq_c3:
-            b_entity = get_entity_for_place(current_loc) if current_loc else "PERS"
+            chk_pers = st.checkbox("Entity: PERS", value=True)
+            chk_mb = st.checkbox("Acc: MB", value=False)
+        with bq_c4:
             if st.button("🚀 Fast Save", use_container_width=True, type="primary"):
                 if b_amount > 0:
-                    today_str = get_ist_now().strftime("%d-%m-%Y")
+                    time_now = get_ist_now()
+                    today_str = time_now.strftime("%d-%m-%Y")
+                    time_str = time_now.strftime("%H:%M")
                     in_val = b_amount if "IN" in b_type else ""
                     out_val = b_amount if "OUT" in b_type else ""
-                    # Save with missing fields and "⚠️ INCOMPLETE" remark
-                    row_data = [today_str, in_val, out_val, "", "", b_entity, "", "", "", current_loc or "", "⚠️ INCOMPLETE"]
+                    
+                    final_entity = "PERS" if chk_pers else ""
+                    final_acc = "MB" if chk_mb else ""
+                    
+                    # 12 Columns now (Date, Time, In, Out, Account, Fund, Entity, Category, SubCat, Particulars, TO_FROM, Remark)
+                    row_data = [today_str, time_str, in_val, out_val, final_acc, "", final_entity, "", "", "", current_loc or "", "⚠️ INCOMPLETE"]
                     sh.worksheet("MONEY_DATA").append_row(row_data)
                     load_money_data.clear()
                     st.success("Fast saved! Complete it later.")
                     st.rerun()
                 else:
                     st.warning("Enter an amount!")
-        st.caption(f"Will auto-tag **Entity:** {b_entity} & **To/From:** {current_loc or 'Unknown'}")
+        
+        st.caption(f"Location To/From: {current_loc or 'Unknown'}")
 
     st.divider()
 
@@ -195,11 +194,18 @@ with tab_money:
                     sheet_row = idx + 2
                     is_out = float(row.get('Out', 0) or 0) > 0
                     amt_display = f"₹{row['Out']} (OUT)" if is_out else f"₹{row['In']} (IN)"
-                    st.markdown(f"**Date:** {row['Date']} | **Amount:** {amt_display} | **Entity:** {row['Entity']} | **To/From:** {row['TO_FROM']}")
+                    
+                    # Safely get time if it exists
+                    row_time = row.get('Time', '')
+                    time_disp = f" at {row_time}" if str(row_time).strip() != "" else ""
+                    st.markdown(f"**Date:** {row['Date']}{time_disp} | **Amount:** {amt_display} | **Entity:** {row.get('Entity', '')} | **Acc:** {row.get('Account', '')} | **To/From:** {row['TO_FROM']}")
                     
                     c1, c2, c3 = st.columns(3)
                     with c1: 
-                        i_acc = st.selectbox("Account", get_list("Accounts"), key=f"ac_{idx}")
+                        # Default indices for the dropdowns if data exists
+                        acc_opts = get_list("Accounts")
+                        default_acc = acc_opts.index(row.get('Account', '')) if row.get('Account', '') in acc_opts else 0
+                        i_acc = st.selectbox("Account", acc_opts, index=default_acc, key=f"ac_{idx}")
                         i_cat = st.selectbox("Category", get_list("Categories") + ["-None-"], key=f"ca_{idx}")
                     with c2: 
                         i_fund = st.selectbox("Fund", get_list("Funds"), key=f"fu_{idx}")
@@ -214,14 +220,15 @@ with tab_money:
                             final_cat = "" if i_cat == "-None-" else i_cat
                             final_sub = "" if i_sub == "-None-" else i_sub
                             final_part = "" if i_part == "-None-" else i_part
+                            
                             row_data = [
-                                row['Date'], row['In'], row['Out'], 
-                                i_acc, i_fund, row['Entity'], 
+                                row['Date'], row.get('Time', ''), row['In'], row['Out'], 
+                                i_acc, i_fund, row.get('Entity', ''), 
                                 final_cat, final_sub, final_part, 
                                 row['TO_FROM'], i_rem
                             ]
-                            # Efficient single-call update for the row
-                            cells = money_ws.range(f"A{sheet_row}:K{sheet_row}")
+                            # Updates A to L (12 columns)
+                            cells = money_ws.range(f"A{sheet_row}:L{sheet_row}")
                             for i, val in enumerate(row_data): cells[i].value = str(val)
                             money_ws.update_cells(cells)
                             load_money_data.clear()
@@ -258,8 +265,11 @@ with tab_money:
                                     subcat = str(match_row['Map_SubCat'].values[0]) if not match_row.empty else ""
                                     rem = "Auto-cleared from list"
                                     
-                                    today_str = get_ist_now().strftime("%d-%m-%Y")
-                                    money_row = [today_str, "", final_cost, str(row.get('Account', '')), str(row.get('Fund', '')), ent, cat, subcat, part_name, current_loc, rem]
+                                    time_now = get_ist_now()
+                                    today_str = time_now.strftime("%d-%m-%Y")
+                                    time_str = time_now.strftime("%H:%M")
+                                    
+                                    money_row = [today_str, time_str, "", final_cost, str(row.get('Account', '')), str(row.get('Fund', '')), ent, cat, subcat, part_name, current_loc, rem]
                                     sh.worksheet("MONEY_DATA").append_row(money_row)
                                     
                                     headers = shop_ws.row_values(1)
@@ -276,9 +286,11 @@ with tab_money:
 
     # --- 5. STANDARD MANUAL FINANCIAL RECORD ---
     st.subheader("📝 Add Manual Financial Record")
-    entry_date = st.date_input("Date", value=st.session_state.locked_date)
     
-    # 📱 MOBILE FIX: IN and OUT are now forced into side-by-side columns at the very top!
+    t_col1, t_col2 = st.columns(2)
+    with t_col1: entry_date = st.date_input("Date", value=st.session_state.locked_date)
+    with t_col2: entry_time_str = st.text_input("Time (HH:MM)", value=st.session_state.locked_time.strftime("%H:%M"))
+    
     amt_col1, amt_col2 = st.columns(2)
     with amt_col1: amount_in = st.number_input("IN (Income/Receive)", min_value=0.0, step=10.0)
     with amt_col2: amount_out = st.number_input("OUT (Expense/Send)", min_value=0.0, step=10.0)
@@ -360,8 +372,15 @@ with tab_money:
     
     if st.button("💾 Save Manual Money Entry", use_container_width=True):
         try:
+            try:
+                parsed_time = datetime.strptime(entry_time_str.strip(), "%H:%M")
+                formatted_time = parsed_time.strftime("%H:%M")
+            except ValueError:
+                st.error("⚠️ Invalid time! Use HH:MM format.")
+                st.stop()
+                
             formatted_date = entry_date.strftime("%d-%m-%Y")
-            row_data = [formatted_date, amount_in if amount_in > 0 else "", amount_out if amount_out > 0 else "", account, fund, entity, category, sub_cat, particulars, to_from, remark]
+            row_data = [formatted_date, formatted_time, amount_in if amount_in > 0 else "", amount_out if amount_out > 0 else "", account, fund, entity, category, sub_cat, particulars, to_from, remark]
             sh.worksheet("MONEY_DATA").append_row(row_data)
             load_money_data.clear() 
             st.success(f"Saved: ₹{amount_in if amount_in > 0 else amount_out} logged to {to_from}!")
@@ -666,7 +685,6 @@ with tab_dash:
     st.header("📊 Financial Intelligence")
     df_money = load_money_data()
     if not df_money.empty:
-        # Filter out incomplete records from the charts so they don't skew the data
         df_money_clean = df_money[df_money['Remark'] != '⚠️ INCOMPLETE'].copy()
         
         if not df_money_clean.empty:
@@ -676,7 +694,7 @@ with tab_dash:
             st.subheader("💰 Virtual Fund Balances")
             if 'Fund' in df_money_clean.columns:
                 fund_summary = df_money_clean.groupby('Fund').agg({'In': 'sum', 'Out': 'sum'}).reset_index()
-                fund_summary = fund_summary[fund_summary['Fund'] != ""] # Hide empty funds
+                fund_summary = fund_summary[fund_summary['Fund'] != ""] 
                 fund_summary['Current Balance'] = fund_summary['In'] - fund_summary['Out']
                 fig_funds = px.bar(fund_summary, x='Fund', y='Current Balance', title="Net Balance by Virtual Fund", color='Current Balance', color_continuous_scale="Viridis", text_auto='.2s')
                 st.plotly_chart(fig_funds, use_container_width=True)
@@ -733,4 +751,4 @@ with tab_dash:
 # ==========================================
 with tab_help:
     st.header("📖 ERP Manual")
-    st.write("Your system automatically protects Dashboard charts by hiding incomplete quick-entries until you finalize them!")
+    st.write("You MUST manually insert a 'Time' column into your MONEY_DATA Google Sheet right after the 'Date' column for the new 12-column system to function.")

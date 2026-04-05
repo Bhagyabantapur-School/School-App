@@ -15,6 +15,8 @@ def get_ist_now():
 
 # Initialize Session States
 if 'route_active' not in st.session_state: st.session_state.route_active = False
+if 'route_type' not in st.session_state: st.session_state.route_type = None # Tracks if it's "Dynamic" or "Express"
+if 'active_route' not in st.session_state: st.session_state.active_route = ""
 if 'current_people' not in st.session_state: st.session_state.current_people = "I"
 if 'current_move' not in st.session_state: st.session_state.current_move = "BIKE"
 if 'retro_time' not in st.session_state: st.session_state.retro_time = get_ist_now().time()
@@ -92,6 +94,34 @@ def get_shop_type(place_name):
                 return str(s_type[0]).strip()
     return None
 
+def sync_journey_state():
+    """Checks Google Sheets on startup to recover any running journey if the app closed."""
+    if 'state_synced' not in st.session_state:
+        df_loc = load_location_data()
+        if not df_loc.empty:
+            last_record = df_loc.iloc[-1].to_dict()
+            move_val = str(last_record.get('Move', '')).strip()
+            
+            if move_val not in ["", "- Stationary -", "nan"]:
+                st.session_state.route_active = True
+                st.session_state.current_move = move_val
+                st.session_state.current_people = str(last_record.get('People', 'I'))
+                
+                rem = str(last_record.get('Remark', ''))
+                if "Started Route:" in rem:
+                    st.session_state.active_route = rem.split("Started Route:")[-1].strip()
+                    st.session_state.route_type = "Dynamic"
+                else:
+                    st.session_state.route_type = "Express" 
+            else:
+                st.session_state.route_active = False
+                st.session_state.route_type = None
+                
+        st.session_state.state_synced = True
+
+# Sync state immediately
+sync_journey_state()
+
 # ==========================================
 # APP LAYOUT & TABS
 # ==========================================
@@ -107,7 +137,6 @@ current_shop_type = get_shop_type(current_loc) if current_loc else None
 # ==========================================
 with tab_money:
     
-    # --- ⚡ EXPRESS CHECKOUT ENGINE ---
     if current_loc and current_shop_type:
         st.success(f"📍 Location: **{current_loc}** | 🛒 Shop Profile: **{current_shop_type}**")
         df_shop = load_shopping_data()
@@ -154,7 +183,6 @@ with tab_money:
     else:
         if current_loc: st.success(f"📍 Location: **{current_loc}** (No active shopping list for this area)")
 
-    # --- 📝 STANDARD MANUAL MONEY FORM ---
     st.subheader("Add Manual Financial Record")
     entry_date = st.date_input("Date", value=st.session_state.locked_date)
     
@@ -164,7 +192,6 @@ with tab_money:
         account = st.selectbox("Account (Physical)", get_list("Accounts"))
         fund = st.selectbox("Fund (Virtual Source)", get_list("Funds"))
         
-        # Pull directly from Map_Entity to avoid duplicates and separate list maintenance
         mapped_entities = []
         if 'Map_Entity' in config_df.columns:
             mapped_entities = list(dict.fromkeys([str(e).strip() for e in config_df['Map_Entity'].dropna() if str(e).strip() != ""]))
@@ -174,7 +201,6 @@ with tab_money:
         
         if 'Map_Entity' in config_df.columns:
             ent_df = config_df[config_df['Map_Entity'].astype(str).str.strip() == entity]
-            # UPGRADED: Clean first, THEN remove duplicates
             cat_opts = list(dict.fromkeys([str(c).strip() for c in ent_df['Map_Category'].dropna() if str(c).strip() != ""]))
             category = st.selectbox("Category", cat_opts + ["-- Type New --"])
             if category == "-- Type New --":
@@ -192,7 +218,6 @@ with tab_money:
         amount_out = st.number_input("OUT (Expense/Send)", min_value=0.0, step=10.0)
         
         if not cat_df.empty and 'Map_SubCat' in cat_df.columns:
-            # UPGRADED: Clean first, THEN remove duplicates
             sub_opts = list(dict.fromkeys([str(s).strip() for s in cat_df['Map_SubCat'].dropna() if str(s).strip() != ""]))
             sub_cat = st.selectbox("Sub Category", sub_opts + ["-- Type New --"])
             if sub_cat == "-- Type New --":
@@ -207,7 +232,6 @@ with tab_money:
             sub_df = pd.DataFrame()
         
         if not sub_df.empty and 'Map_Particular' in sub_df.columns:
-            # UPGRADED: Clean first, THEN remove duplicates
             part_opts = list(dict.fromkeys([str(p).strip() for p in sub_df['Map_Particular'].dropna() if str(p).strip() != ""]))
             particulars = st.selectbox("Particulars", part_opts + ["-- Type New --"])
             if particulars == "-- Type New --":
@@ -260,7 +284,6 @@ with tab_shopping:
     
     col1, col2 = st.columns(2)
     with col1:
-        # Pull directly from Map_Entity
         mapped_entities = []
         if 'Map_Entity' in config_df.columns:
             mapped_entities = list(dict.fromkeys([str(e).strip() for e in config_df['Map_Entity'].dropna() if str(e).strip() != ""]))
@@ -270,7 +293,6 @@ with tab_shopping:
         
         if 'Map_Entity' in config_df.columns:
             p_ent_df = config_df[config_df['Map_Entity'].astype(str).str.strip() == p_entity]
-            # UPGRADED
             p_cat_opts = list(dict.fromkeys([str(c).strip() for c in p_ent_df['Map_Category'].dropna() if str(c).strip() != ""]))
             p_category = st.selectbox("Category", p_cat_opts + ["-- Type New --"], key="plan_cat")
             if p_category == "-- Type New --":
@@ -284,7 +306,6 @@ with tab_shopping:
             p_cat_df = pd.DataFrame()
             
         if not p_cat_df.empty and 'Map_SubCat' in p_cat_df.columns:
-            # UPGRADED
             p_sub_opts = list(dict.fromkeys([str(s).strip() for s in p_cat_df['Map_SubCat'].dropna() if str(s).strip() != ""]))
             p_sub_cat = st.selectbox("Sub Category", p_sub_opts + ["-- Type New --"], key="plan_sub")
             if p_sub_cat == "-- Type New --":
@@ -298,7 +319,6 @@ with tab_shopping:
             p_sub_df = pd.DataFrame()
             
         if not p_sub_df.empty and 'Map_Particular' in p_sub_df.columns:
-            # UPGRADED
             p_part_opts = list(dict.fromkeys([str(p).strip() for p in p_sub_df['Map_Particular'].dropna() if str(p).strip() != ""]))
         else:
             p_part_opts = get_list("Particulars")
@@ -346,72 +366,143 @@ with tab_shopping:
 # TAB 3: LOCATION ENTRY FORM
 # ==========================================
 with tab_location:
-    st.markdown("### 🏫 Express School Route")
-    express_container = st.container(border=True)
-    with express_container:
-        if not st.session_state.route_active:
-            col1, col2 = st.columns(2)
-            with col1: express_move = st.selectbox("Travel Mode", ["BIKE", "WALK", "BIKE + WALK", "TOTO"], key="exp_move")
-            with col2:
-                people_opts = get_list("People")
-                if not people_opts: people_opts = ["I", "I, BKP, TKM", "I, TKM"]
-                if "I" not in people_opts: people_opts.insert(0, "I")
-                express_people = st.selectbox("Companions", people_opts, index=people_opts.index("I"), key="exp_people")
+    
+    # ---------------------------------------------------------
+    # 1. DYNAMIC AREA ROUTE (Pulled from CONFIG)
+    # ---------------------------------------------------------
+    if not st.session_state.route_active or st.session_state.get('route_type') == "Dynamic":
+        st.markdown("### 🗺️ Dynamic Area Route")
+        dynamic_container = st.container(border=True)
+        with dynamic_container:
+            location_logic = get_location_logic()
+            route_opts = list(location_logic.keys())
+            
+            # --- START JOURNEY UI ---
+            if not st.session_state.route_active:
+                d_col1, d_col2 = st.columns(2)
+                with d_col1:
+                    selected_route = st.selectbox("Select Route (Area)", route_opts, key="dyn_route")
+                    dyn_move = st.selectbox("Travel Mode", ["BIKE", "WALK", "BIKE + WALK", "TOTO"], key="dyn_move")
+                with d_col2:
+                    people_opts = get_list("People")
+                    if not people_opts: people_opts = ["I"]
+                    if "I" not in people_opts: people_opts.insert(0, "I")
+                    dyn_people = st.selectbox("Companions", people_opts, index=people_opts.index("I"), key="dyn_people")
+                    
+                if st.button("🟢 Start Journey", key="start_dyn", use_container_width=True):
+                    try:
+                        time_now = get_ist_now()
+                        sh.worksheet("LOCATION_DATA").append_row([
+                            time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), 
+                            dyn_move, "", dyn_people, f"Started Route: {selected_route}"
+                        ])
+                        load_location_data.clear()
+                        st.session_state.route_active = True
+                        st.session_state.route_type = "Dynamic"
+                        st.session_state.active_route = selected_route
+                        st.session_state.current_move = dyn_move
+                        st.session_state.current_people = dyn_people
+                        st.rerun()
+                    except Exception as e: st.error(f"Error: {e}")
+                    
+            # --- LOG ARRIVAL UI ---
+            else:
+                active_r = st.session_state.get('active_route', route_opts[0] if route_opts else "")
+                active_m = st.session_state.get('current_move', 'Transit')
+                active_p = st.session_state.get('current_people', 'I')
                 
-            if st.button("🟢 Start Journey", use_container_width=True):
-                try:
-                    time_now = get_ist_now()
-                    sh.worksheet("LOCATION_DATA").append_row([time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), express_move, "", express_people, "Started Express Route"])
-                    load_location_data.clear()
-                    st.session_state.route_active = True
-                    st.session_state.current_people = express_people
-                    st.session_state.current_move = express_move
-                    st.session_state.retro_time = get_ist_now().time()
-                    st.rerun() 
-                except Exception as e: st.error(f"Error: {e}")
-        else:
-            st.success("🚲 Journey in progress...")
-            express_place = st.selectbox("Where did you arrive?", ["Karim Da's House (Keys)", "Bhagyabantapur Primary School", "Girishmore Bus Stop", "HOME"])
-            
-            forgot_keys_fwd, forgot_keys_ret, forgot_bus = False, False, False
-            if express_place == "Bhagyabantapur Primary School":
-                forgot_keys_fwd = st.checkbox("⚠️ I forgot to log Karim Da's House (Keys) on the way")
-                if forgot_keys_fwd: missed_time_fwd = st.time_input("Time you picked up the keys?", value=st.session_state.retro_time, step=60, key="fwd_keys")
-            if express_place == "HOME":
-                forgot_keys_ret = st.checkbox("⚠️ I forgot to log Karim Da's House (Keys)")
-                if forgot_keys_ret: missed_time_keys = st.time_input("Time you dropped the keys?", value=st.session_state.retro_time, step=60, key="ret_keys")
-                forgot_bus = st.checkbox("⚠️ I forgot to log Girishmore Bus Stop")
-                if forgot_bus: missed_time_bus = st.time_input("Time you stopped at Girishmore?", value=st.session_state.retro_time, step=60, key="ret_bus")
-            
-            if st.button("🛑 Log Arrival", use_container_width=True, type="primary"):
-                try:
-                    time_now = get_ist_now()
-                    today_str = time_now.strftime("%d.%m.%y")
-                    arrival_people = st.session_state.current_people
-                    travel_mode = st.session_state.current_move
+                st.success(f"🚲 Journey in progress... ({active_m} with {active_p} on {active_r})")
+                
+                places_for_route = location_logic.get(active_r, [])
+                if not places_for_route: places_for_route = ["-- No places mapped --"]
+                
+                dyn_place = st.selectbox("Where did you arrive?", places_for_route, key="dyn_arrive")
+                
+                if st.button("🛑 Log Arrival", key="log_dyn", use_container_width=True, type="primary"):
+                    try:
+                        time_now = get_ist_now()
+                        sh.worksheet("LOCATION_DATA").append_row([
+                            time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), 
+                            "- Stationary -", dyn_place, active_p, "Logged Arrival"
+                        ])
+                        load_location_data.clear()
+                        st.session_state.route_active = False 
+                        st.session_state.route_type = None
+                        st.rerun()
+                    except Exception as e: st.error(f"Error: {e}")
+
+    # ---------------------------------------------------------
+    # 2. LEGACY EXPRESS SCHOOL ROUTE
+    # ---------------------------------------------------------
+    if not st.session_state.route_active or st.session_state.get('route_type') == "Express":
+        st.markdown("### 🏫 Express School Route")
+        express_container = st.container(border=True)
+        with express_container:
+            if not st.session_state.route_active:
+                col1, col2 = st.columns(2)
+                with col1: express_move = st.selectbox("Travel Mode", ["BIKE", "WALK", "BIKE + WALK", "TOTO"], key="exp_move")
+                with col2:
+                    people_opts = get_list("People")
+                    if not people_opts: people_opts = ["I", "I, BKP, TKM", "I, TKM"]
+                    if "I" not in people_opts: people_opts.insert(0, "I")
+                    express_people = st.selectbox("Companions", people_opts, index=people_opts.index("I"), key="exp_people")
                     
-                    if forgot_keys_fwd and express_place == "Bhagyabantapur Primary School":
-                        m_time_str = missed_time_fwd.strftime("%H:%M")
-                        sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_str, "- Stationary -", "Karim Da's House (Keys)", arrival_people, "Retroactive arrival"])
-                        sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_str, travel_mode, "", arrival_people, "Retroactive transit"])
-                    if express_place == "HOME":
-                        if forgot_keys_ret:
-                            m_time_k = missed_time_keys.strftime("%H:%M")
-                            sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_k, "- Stationary -", "Karim Da's House (Keys)", arrival_people, "Retroactive arrival"])
-                            sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_k, travel_mode, "", arrival_people, "Retroactive transit"])
-                        if forgot_bus:
-                            m_time_b = missed_time_bus.strftime("%H:%M")
-                            sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_b, "- Stationary -", "Girishmore Bus Stop", arrival_people, "Retroactive arrival"])
-                            arrival_people = "I"
-                            sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_b, travel_mode, "", arrival_people, "Retroactive transit"])
-                    
-                    sh.worksheet("LOCATION_DATA").append_row([today_str, time_now.strftime("%H:%M"), "- Stationary -", express_place, arrival_people, ""])
-                    load_location_data.clear()
-                    st.session_state.route_active = False
-                    st.session_state.current_people = "I"
-                    st.session_state.retro_time = get_ist_now().time()
-                    st.rerun()
-                except Exception as e: st.error(f"Error: {e}")
+                if st.button("🟢 Start Express Journey", use_container_width=True):
+                    try:
+                        time_now = get_ist_now()
+                        sh.worksheet("LOCATION_DATA").append_row([time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), express_move, "", express_people, "Started Express Route"])
+                        load_location_data.clear()
+                        st.session_state.route_active = True
+                        st.session_state.route_type = "Express"
+                        st.session_state.current_people = express_people
+                        st.session_state.current_move = express_move
+                        st.session_state.retro_time = get_ist_now().time()
+                        st.rerun() 
+                    except Exception as e: st.error(f"Error: {e}")
+            else:
+                st.success("🚲 Express Journey in progress...")
+                express_place = st.selectbox("Where did you arrive?", ["Karim Da's House (Keys)", "Bhagyabantapur Primary School", "Girishmore Bus Stop", "HOME"])
+                
+                forgot_keys_fwd, forgot_keys_ret, forgot_bus = False, False, False
+                if express_place == "Bhagyabantapur Primary School":
+                    forgot_keys_fwd = st.checkbox("⚠️ I forgot to log Karim Da's House (Keys) on the way")
+                    if forgot_keys_fwd: missed_time_fwd = st.time_input("Time you picked up the keys?", value=st.session_state.retro_time, step=60, key="fwd_keys")
+                if express_place == "HOME":
+                    forgot_keys_ret = st.checkbox("⚠️ I forgot to log Karim Da's House (Keys)")
+                    if forgot_keys_ret: missed_time_keys = st.time_input("Time you dropped the keys?", value=st.session_state.retro_time, step=60, key="ret_keys")
+                    forgot_bus = st.checkbox("⚠️ I forgot to log Girishmore Bus Stop")
+                    if forgot_bus: missed_time_bus = st.time_input("Time you stopped at Girishmore?", value=st.session_state.retro_time, step=60, key="ret_bus")
+                
+                if st.button("🛑 Log Express Arrival", use_container_width=True, type="primary"):
+                    try:
+                        time_now = get_ist_now()
+                        today_str = time_now.strftime("%d.%m.%y")
+                        arrival_people = st.session_state.current_people
+                        travel_mode = st.session_state.current_move
+                        
+                        if forgot_keys_fwd and express_place == "Bhagyabantapur Primary School":
+                            m_time_str = missed_time_fwd.strftime("%H:%M")
+                            sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_str, "- Stationary -", "Karim Da's House (Keys)", arrival_people, "Retroactive arrival"])
+                            sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_str, travel_mode, "", arrival_people, "Retroactive transit"])
+                        if express_place == "HOME":
+                            if forgot_keys_ret:
+                                m_time_k = missed_time_keys.strftime("%H:%M")
+                                sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_k, "- Stationary -", "Karim Da's House (Keys)", arrival_people, "Retroactive arrival"])
+                                sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_k, travel_mode, "", arrival_people, "Retroactive transit"])
+                            if forgot_bus:
+                                m_time_b = missed_time_bus.strftime("%H:%M")
+                                sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_b, "- Stationary -", "Girishmore Bus Stop", arrival_people, "Retroactive arrival"])
+                                arrival_people = "I"
+                                sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_b, travel_mode, "", arrival_people, "Retroactive transit"])
+                        
+                        sh.worksheet("LOCATION_DATA").append_row([today_str, time_now.strftime("%H:%M"), "- Stationary -", express_place, arrival_people, ""])
+                        load_location_data.clear()
+                        st.session_state.route_active = False
+                        st.session_state.route_type = None
+                        st.session_state.current_people = "I"
+                        st.session_state.retro_time = get_ist_now().time()
+                        st.rerun()
+                    except Exception as e: st.error(f"Error: {e}")
 
     st.divider()
 
@@ -432,6 +523,7 @@ with tab_location:
             time_str = time_now.strftime("%H:%M")
             sh.worksheet("LOCATION_DATA").append_row([today_str, time_str, "- Stationary -", "HOME", "I", "Quick Home Log"])
             st.session_state.route_active = False
+            st.session_state.route_type = None
             st.session_state.current_people = "I"
             load_location_data.clear()
             st.success(f"Welcome Home! Logged at {time_str}")

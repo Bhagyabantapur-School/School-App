@@ -5,6 +5,7 @@ from google.oauth2.service_account import Credentials
 from datetime import datetime
 from PIL import Image
 import os
+import streamlit.components.v1 as components # Added for the beep sound
 
 # ==========================================
 # 1. SETUP & CONFIGURATION
@@ -30,6 +31,8 @@ if 'current_user' not in st.session_state:
     st.session_state.current_user = ""
 if 'current_role' not in st.session_state:
     st.session_state.current_role = ""
+if 'play_beep' not in st.session_state:
+    st.session_state.play_beep = False
 
 # ==========================================
 # 2. GOOGLE SHEETS CONNECTION & DATA LOADING
@@ -144,6 +147,10 @@ with tab_entry:
     # Load Data from their respective sheets
     df_students = load_gsheet_data("BPS_Database", "students_master")
     df_mdm = load_gsheet_data("BPS_Database", "mdm_log")
+    
+    # NEW: Load the historical distribution log to check for already-received items
+    df_logs_db = load_gsheet_data("BPS_Distribution_Log", "Sheet1")
+    
     active_items = get_active_items()
 
     if df_students.empty:
@@ -167,24 +174,16 @@ with tab_entry:
 
         st.markdown("---")
         
-        # ==========================================
-        # CRITICAL FILTERING LOGIC 
-        # ==========================================
         # Formatted exactly to match your Google Sheet format: DD-MM-YYYY
         today_str = datetime.now().strftime("%d-%m-%Y") 
         
         if not df_mdm.empty and 'Date' in df_mdm.columns and 'Name' in df_mdm.columns:
-            # 1. Filter MDM log for today
             mdm_today = df_mdm[df_mdm['Date'].astype(str) == today_str]
-            
-            # 2. Extract Names: Convert to lowercase and strip all extra spaces for a bulletproof match
             present_names_today = mdm_today['Name'].astype(str).str.strip().str.lower().tolist()
             
-            # 3. Filter Master Student List for Class & Section safely
             class_df = df_students[(df_students['Class'].astype(str) == sel_class) & 
                                    (df_students['Section'].astype(str) == sel_section)]
             
-            # 4. Apply the name check (ignoring spaces and case in the master list too)
             class_df = class_df[class_df['Name'].astype(str).str.strip().str.lower().isin(present_names_today)]
         else:
             class_df = pd.DataFrame() 
@@ -197,14 +196,58 @@ with tab_entry:
             if 'current_distribution' not in st.session_state:
                 st.session_state.current_distribution = {}
 
+            # Loop through present students
             for index, row in class_df.iterrows():
-                widget_key = f"{sel_class}_{sel_section}_{row['Roll']}_{row['Name']}"
+                student_name = str(row['Name']).strip()
                 
-                if widget_key not in st.session_state.current_distribution:
-                    st.session_state.current_distribution[widget_key] = False
+                # Check if this student ALREADY received the selected item
+                already_received = False
+                received_date = ""
+                
+                if not df_logs_db.empty and 'Name' in df_logs_db.columns and 'Item Given' in df_logs_db.columns:
+                    past_records = df_logs_db[
+                        (df_logs_db['Name'].astype(str).str.strip().str.lower() == student_name.lower()) &
+                        (df_logs_db['Item Given'].astype(str).str.strip().str.lower() == distribution_type.strip().lower())
+                    ]
+                    if not past_records.empty:
+                        already_received = True
+                        received_date = past_records.iloc[-1]['Date'] # Get the date they received it
+
+                widget_key = f"{sel_class}_{sel_section}_{row['Roll']}_{student_name}"
+                
+                if already_received:
+                    # Renders a disabled, checked box with the date received
+                    st.checkbox(f"Roll {row['Roll']}: {student_name} ✅ (Received on {received_date})", 
+                                value=True, disabled=True, key=f"dis_{widget_key}")
+                else:
+                    # Renders normal clickable checkbox
+                    if widget_key not in st.session_state.current_distribution:
+                        st.session_state.current_distribution[widget_key] = False
+                        
+                    is_checked = st.checkbox(f"Roll {row['Roll']}: {student_name}", key=f"chk_{widget_key}")
                     
-                is_checked = st.checkbox(f"Roll {row['Roll']}: {row['Name']}", key=f"chk_{widget_key}")
-                st.session_state.current_distribution[widget_key] = is_checked
+                    # Logic for the Beep Sound (triggers only when going from unchecked to checked)
+                    if is_checked and not st.session_state.current_distribution[widget_key]:
+                        st.session_state.play_beep = True
+                        
+                    st.session_state.current_distribution[widget_key] = is_checked
+
+            # Execute the Beep Sound via JavaScript if triggered
+            if st.session_state.play_beep:
+                components.html(
+                    """
+                    <script>
+                    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    const oscillator = audioCtx.createOscillator();
+                    oscillator.type = 'sine';
+                    oscillator.frequency.setValueAtTime(800, audioCtx.currentTime); // 800hz tone
+                    oscillator.connect(audioCtx.destination);
+                    oscillator.start();
+                    oscillator.stop(audioCtx.currentTime + 0.1); // Play for 0.1 seconds
+                    </script>
+                    """, height=0, width=0
+                )
+                st.session_state.play_beep = False # Reset immediately
 
             st.markdown("<br>", unsafe_allow_html=True)
             
@@ -215,7 +258,7 @@ with tab_entry:
                         log_ws = log_sheet.sheet1 
                         
                         now = datetime.now()
-                        current_date = now.strftime("%d-%m-%Y") # Save logs in the same DD-MM-YYYY format
+                        current_date = now.strftime("%d-%m-%Y") 
                         current_time = now.strftime("%H:%M:%S")
                         teacher = st.session_state.current_user
                         
@@ -224,6 +267,7 @@ with tab_entry:
                         for index, row in class_df.iterrows():
                             widget_key = f"{sel_class}_{sel_section}_{row['Roll']}_{row['Name']}"
                             
+                            # Only append students who were JUST checked right now
                             if st.session_state.current_distribution.get(widget_key, False):
                                 log_row = [
                                     current_date, 
@@ -246,9 +290,10 @@ with tab_entry:
                             st.session_state.recent_logs.extend(rows_to_append)
                             
                             st.session_state.current_distribution.clear()
+                            st.cache_data.clear() # Clear cache so the page immediately sees the new logs and locks the checkboxes
                             st.rerun()
                         else:
-                            st.warning("No students were selected. Nothing was saved.")
+                            st.warning("No new students were selected. Nothing was saved.")
                             
                     except Exception as e:
                         st.error(f"Failed to save to Google Sheets: {e}")

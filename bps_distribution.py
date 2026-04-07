@@ -61,6 +61,9 @@ def load_student_master():
 # ==========================================
 # 3. LOGIN SCREEN
 # ==========================================
+# ==========================================
+# 3. LOGIN SCREEN
+# ==========================================
 if not st.session_state.logged_in:
     col1, col2 = st.columns([1, 4])
     with col1:
@@ -72,6 +75,20 @@ if not st.session_state.logged_in:
     with col2:
         st.title("Bhagyabantapur Primary School")
         st.subheader("Staff Login")
+
+    # --- NEW: App Description and Purpose ---
+    st.info("""
+    **Welcome to the Digital Supply Distribution Portal!**
+    
+    **Purpose:** This application is designed to streamline and digitize the distribution of school supplies (Books, Uniforms, and Bags). 
+    
+    **Key Features:**
+    * 📦 **Real-time Tracking:** Replaces manual paper logs with instant digital records.
+    * 🔒 **Secure Audit Trail:** Every issued item is permanently timestamped and linked to the distributing teacher.
+    * 📊 **Instant Summaries:** Provides the administration with live, up-to-date distribution metrics.
+    """)
+    st.markdown("<br>", unsafe_allow_html=True) # A little spacing before the login box
+    # ----------------------------------------
 
     with st.form("login_form"):
         username = st.text_input("Username")

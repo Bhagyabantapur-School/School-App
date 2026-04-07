@@ -5,7 +5,7 @@ from google.oauth2.service_account import Credentials
 from datetime import datetime
 from PIL import Image
 import os
-import streamlit.components.v1 as components # Added for the beep sound
+import streamlit.components.v1 as components 
 
 # ==========================================
 # 1. SETUP & CONFIGURATION
@@ -56,13 +56,13 @@ def load_gsheet_data(sheet_name, tab_name):
         return pd.DataFrame()
 
 def get_active_items():
-    """Fetches the admin-selected items from the settings tab in BPS_Distribution_Log"""
+    """Fetches the admin-selected items vertically from Column A of the settings tab"""
     df_settings = load_gsheet_data("BPS_Distribution_Log", "settings")
-    if not df_settings.empty and 'Setting_Name' in df_settings.columns:
-        active_row = df_settings[df_settings['Setting_Name'] == 'Active_Items']
-        if not active_row.empty:
-            items_str = active_row.iloc[0]['Value']
-            return [item.strip() for item in items_str.split(',') if item.strip()]
+    if not df_settings.empty and 'Active_Items' in df_settings.columns:
+        items = df_settings['Active_Items'].dropna().astype(str).tolist()
+        valid_items = [item.strip() for item in items if item.strip() and item.lower() != 'nan']
+        if valid_items:
+            return valid_items
     return ["Books", "Uniform", "Bag"] # Fallback
 
 # ==========================================
@@ -85,7 +85,7 @@ if not st.session_state.logged_in:
     **Purpose:** Streamline the distribution of school supplies directly to students present today.
     
     **Key Features:**
-    * 📦 **Admin Controls:** Headmaster selects which items are active for distribution.
+    * 📦 **Admin Controls:** Headmaster manages stock and active distribution items.
     * 🔗 **Live MDM Sync:** Only displays students marked 'Present' in the BPS Digital App today.
     * 🔒 **Secure Audit Trail:** Every issued item is permanently timestamped.
     """)
@@ -112,7 +112,6 @@ if not st.session_state.logged_in:
 # ==========================================
 # 4. MAIN APPLICATION 
 # ==========================================
-# Header
 col1, col2, col3 = st.columns([1, 3, 1])
 with col1:
     if os.path.exists("logo.png"):
@@ -129,8 +128,9 @@ with col3:
 
 st.markdown("---")
 
+# Render extra tabs if the user is an Admin
 if st.session_state.current_role == "admin":
-    tab_entry, tab_summary, tab_admin = st.tabs(["Distribute Items", "My Session Summary", "⚙️ Admin Settings"])
+    tab_entry, tab_summary, tab_receive, tab_admin = st.tabs(["Distribute Items", "My Session Summary", "📦 Receive Stock", "⚙️ Admin Settings"])
 else:
     tab_entry, tab_summary = st.tabs(["Distribute Items", "My Session Summary"])
 
@@ -144,11 +144,8 @@ with tab_entry:
             st.cache_data.clear()
             st.rerun()
 
-    # Load Data from their respective sheets
     df_students = load_gsheet_data("BPS_Database", "students_master")
     df_mdm = load_gsheet_data("BPS_Database", "mdm_log")
-    
-    # NEW: Load the historical distribution log to check for already-received items
     df_logs_db = load_gsheet_data("BPS_Distribution_Log", "Sheet1")
     
     active_items = get_active_items()
@@ -174,7 +171,6 @@ with tab_entry:
 
         st.markdown("---")
         
-        # Formatted exactly to match your Google Sheet format: DD-MM-YYYY
         today_str = datetime.now().strftime("%d-%m-%Y") 
         
         if not df_mdm.empty and 'Date' in df_mdm.columns and 'Name' in df_mdm.columns:
@@ -196,11 +192,9 @@ with tab_entry:
             if 'current_distribution' not in st.session_state:
                 st.session_state.current_distribution = {}
 
-            # Loop through present students
             for index, row in class_df.iterrows():
                 student_name = str(row['Name']).strip()
                 
-                # Check if this student ALREADY received the selected item
                 already_received = False
                 received_date = ""
                 
@@ -211,28 +205,24 @@ with tab_entry:
                     ]
                     if not past_records.empty:
                         already_received = True
-                        received_date = past_records.iloc[-1]['Date'] # Get the date they received it
+                        received_date = past_records.iloc[-1]['Date']
 
                 widget_key = f"{sel_class}_{sel_section}_{row['Roll']}_{student_name}"
                 
                 if already_received:
-                    # Renders a disabled, checked box with the date received
                     st.checkbox(f"Roll {row['Roll']}: {student_name} ✅ (Received on {received_date})", 
                                 value=True, disabled=True, key=f"dis_{widget_key}")
                 else:
-                    # Renders normal clickable checkbox
                     if widget_key not in st.session_state.current_distribution:
                         st.session_state.current_distribution[widget_key] = False
                         
                     is_checked = st.checkbox(f"Roll {row['Roll']}: {student_name}", key=f"chk_{widget_key}")
                     
-                    # Logic for the Beep Sound (triggers only when going from unchecked to checked)
                     if is_checked and not st.session_state.current_distribution[widget_key]:
                         st.session_state.play_beep = True
                         
                     st.session_state.current_distribution[widget_key] = is_checked
 
-            # Execute the Beep Sound via JavaScript if triggered
             if st.session_state.play_beep:
                 components.html(
                     """
@@ -240,14 +230,14 @@ with tab_entry:
                     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                     const oscillator = audioCtx.createOscillator();
                     oscillator.type = 'sine';
-                    oscillator.frequency.setValueAtTime(800, audioCtx.currentTime); // 800hz tone
+                    oscillator.frequency.setValueAtTime(800, audioCtx.currentTime); 
                     oscillator.connect(audioCtx.destination);
                     oscillator.start();
-                    oscillator.stop(audioCtx.currentTime + 0.1); // Play for 0.1 seconds
+                    oscillator.stop(audioCtx.currentTime + 0.1); 
                     </script>
                     """, height=0, width=0
                 )
-                st.session_state.play_beep = False # Reset immediately
+                st.session_state.play_beep = False 
 
             st.markdown("<br>", unsafe_allow_html=True)
             
@@ -267,12 +257,11 @@ with tab_entry:
                         for index, row in class_df.iterrows():
                             widget_key = f"{sel_class}_{sel_section}_{row['Roll']}_{row['Name']}"
                             
-                            # Only append students who were JUST checked right now
                             if st.session_state.current_distribution.get(widget_key, False):
                                 log_row = [
                                     current_date, 
                                     current_time, 
-                                    teacher, 
+                                    teacher,  
                                     sel_class, 
                                     sel_section,
                                     row['Roll'], 
@@ -290,7 +279,7 @@ with tab_entry:
                             st.session_state.recent_logs.extend(rows_to_append)
                             
                             st.session_state.current_distribution.clear()
-                            st.cache_data.clear() # Clear cache so the page immediately sees the new logs and locks the checkboxes
+                            st.cache_data.clear() 
                             st.rerun()
                         else:
                             st.warning("No new students were selected. Nothing was saved.")
@@ -305,15 +294,67 @@ with tab_summary:
     
     if 'recent_logs' in st.session_state and st.session_state.recent_logs:
         df_logs = pd.DataFrame(st.session_state.recent_logs, columns=['Date', 'Time', 'Teacher', 'Class', 'Section', 'Roll', 'Name', 'Item Given'])
-        st.dataframe(df_logs, hide_index=True)
+        
+        df_display = df_logs.drop(columns=['Teacher'])
+        st.dataframe(df_display, hide_index=True)
     else:
         st.write("No distributions logged yet in this session.")
 
-# --- ADMIN SETTINGS TAB ---
+
+# --- ADMIN ONLY TABS ---
 if st.session_state.current_role == "admin":
+    
+    # 📦 RECEIVE STOCK TAB
+    with tab_receive:
+        st.header("Receive New Inventory")
+        st.write("Log newly arrived stock here. This will automatically add the quantity to your Master Stock.")
+        
+        active_items_list = get_active_items()
+        
+        if not active_items_list:
+            st.warning("No items available. Please add Active Items in the Admin Settings tab first.")
+        else:
+            with st.form("receive_form"):
+                recv_item = st.selectbox("Select Item Received:", active_items_list)
+                recv_qty = st.number_input("Quantity Received:", min_value=1, step=1, value=50)
+                recv_date = st.date_input("Date Received:", datetime.today())
+                
+                submit_receive = st.form_submit_button("Log Received Stock", type="primary")
+                
+                if submit_receive:
+                    with st.spinner("Updating inventory in Google Sheets..."):
+                        try:
+                            ws_settings = gc.open("BPS_Distribution_Log").worksheet("settings")
+                            # Find the row where the item lives in Column A (in_column=1)
+                            cell = ws_settings.find(recv_item, in_column=1)
+                            
+                            if cell:
+                                # Get the current quantity from Column C (Col 3)
+                                curr_qty_str = ws_settings.cell(cell.row, 3).value
+                                try:
+                                    curr_qty = int(curr_qty_str) if curr_qty_str else 0
+                                except ValueError:
+                                    curr_qty = 0
+                                
+                                new_qty = curr_qty + recv_qty
+                                formatted_date = recv_date.strftime("%d-%m-%Y")
+                                
+                                # Update Date in Col 2 (B) and New Qty in Col 3 (C)
+                                ws_settings.update_cell(cell.row, 2, formatted_date)
+                                ws_settings.update_cell(cell.row, 3, new_qty)
+                                
+                                st.success(f"Successfully added {recv_qty} to {recv_item}! Total received is now {new_qty}.")
+                                st.cache_data.clear()
+                            else:
+                                st.error(f"Could not locate '{recv_item}' in the settings tab. Please check your sheet.")
+                                
+                        except Exception as e:
+                            st.error(f"Error updating stock: {e}")
+
+    # ⚙️ ADMIN SETTINGS TAB
     with tab_admin:
         st.header("Distribution Configuration")
-        st.write("Select which items teachers are allowed to distribute today.")
+        st.write("Select which items teachers are allowed to distribute.")
         
         master_item_list = ["Books", "Uniform", "Bag", "Shoes", "Sweater", "Stationery"]
         current_active = get_active_items()
@@ -327,15 +368,19 @@ if st.session_state.current_role == "admin":
         if st.button("Save Settings", type="primary"):
             try:
                 ws_settings = gc.open("BPS_Distribution_Log").worksheet("settings")
-                items_to_save = ", ".join(new_active_items)
                 
-                cell = ws_settings.find("Active_Items")
-                if cell:
-                    ws_settings.update_cell(cell.row, cell.col + 1, items_to_save)
-                    st.success("Settings saved successfully! Teachers will now see these options.")
-                    st.cache_data.clear() 
-                else:
-                    st.error("Could not find 'Active_Items' row in the settings tab. Make sure A2 says exactly 'Active_Items'.")
+                # Clear the old list in column A 
+                ws_settings.batch_clear(["A2:A50"])
+                
+                # Format the new items vertically
+                items_to_save = [[item] for item in new_active_items]
+                
+                if items_to_save:
+                    # Write the list starting at cell A2, going down
+                    ws_settings.update(values=items_to_save, range_name="A2")
+                
+                st.success("Settings saved successfully! Teachers will now see these options.")
+                st.cache_data.clear() 
             except Exception as e:
                 st.error(f"Error saving settings: {e}")
 

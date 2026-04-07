@@ -11,7 +11,7 @@ import os
 # ==========================================
 st.set_page_config(page_title="BPS Supply Distribution", page_icon="🏫", layout="centered")
 
-# Actual Staff Database
+# Actual Staff Database 
 USERS = {
     "admin": {"name": "SUKHAMAY KISKU", "role": "admin", "password": "bpsAPP@2026"}, 
     "tr": {"name": "TAPASI RANA", "role": "teacher", "password": "tr26"}, 
@@ -24,43 +24,44 @@ USERS = {
     "mk": {"name": "MANJUMA KHATUN", "role": "teacher", "password": "mk26"}
 }
 
-# Initialize Session State for Login
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'current_user' not in st.session_state:
     st.session_state.current_user = ""
+if 'current_role' not in st.session_state:
+    st.session_state.current_role = ""
 
 # ==========================================
-# 2. GOOGLE SHEETS CONNECTION
+# 2. GOOGLE SHEETS CONNECTION & DATA LOADING
 # ==========================================
 @st.cache_resource
 def get_gspread_client():
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    credentials = Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
-        scopes=scopes
-    )
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
     return gspread.authorize(credentials)
 
 gc = get_gspread_client()
 
-# Fetch Student Data from BPS_Database
 @st.cache_data(ttl=600)
-def load_student_master():
+def load_gsheet_data(sheet_name, tab_name):
+    """Generic function to load a specific tab from a specific Google Sheet"""
     try:
-        db_sheet = gc.open("BPS_Database")
-        ws_students = db_sheet.worksheet("students_master")
-        return pd.DataFrame(ws_students.get_all_records())
+        ws = gc.open(sheet_name).worksheet(tab_name)
+        return pd.DataFrame(ws.get_all_records())
     except Exception as e:
-        st.error(f"Error loading students_master: {e}")
+        st.error(f"Error loading {tab_name} from {sheet_name}: {e}")
         return pd.DataFrame()
 
-# ==========================================
-# 3. LOGIN SCREEN
-# ==========================================
+def get_active_items():
+    """Fetches the admin-selected items from the settings tab in BPS_Distribution_Log"""
+    df_settings = load_gsheet_data("BPS_Distribution_Log", "settings")
+    if not df_settings.empty and 'Setting_Name' in df_settings.columns:
+        active_row = df_settings[df_settings['Setting_Name'] == 'Active_Items']
+        if not active_row.empty:
+            items_str = active_row.iloc[0]['Value']
+            return [item.strip() for item in items_str.split(',') if item.strip()]
+    return ["Books", "Uniform", "Bag"] # Fallback
+
 # ==========================================
 # 3. LOGIN SCREEN
 # ==========================================
@@ -68,27 +69,24 @@ if not st.session_state.logged_in:
     col1, col2 = st.columns([1, 4])
     with col1:
         if os.path.exists("logo.png"):
-            image = Image.open("logo.png")
-            st.image(image, width=80)
+            st.image(Image.open("logo.png"), width=80)
         else:
             st.write("🏫")
     with col2:
         st.title("Bhagyabantapur Primary School")
         st.subheader("Staff Login")
 
-    # --- NEW: App Description and Purpose ---
     st.info("""
     **Welcome to the Digital Supply Distribution Portal!**
     
-    **Purpose:** This application is designed to streamline and digitize the distribution of school supplies (Books, Uniforms, and Bags). 
+    **Purpose:** Streamline the distribution of school supplies directly to students present today.
     
     **Key Features:**
-    * 📦 **Real-time Tracking:** Replaces manual paper logs with instant digital records.
-    * 🔒 **Secure Audit Trail:** Every issued item is permanently timestamped and linked to the distributing teacher.
-    * 📊 **Instant Summaries:** Provides the administration with live, up-to-date distribution metrics.
+    * 📦 **Admin Controls:** Headmaster selects which items are active for distribution.
+    * 🔗 **Live MDM Sync:** Only displays students marked 'Present' in the BPS Digital App today.
+    * 🔒 **Secure Audit Trail:** Every issued item is permanently timestamped.
     """)
-    st.markdown("<br>", unsafe_allow_html=True) # A little spacing before the login box
-    # ----------------------------------------
+    st.markdown("<br>", unsafe_allow_html=True)
 
     with st.form("login_form"):
         username = st.text_input("Username")
@@ -98,8 +96,8 @@ if not st.session_state.logged_in:
         if submit_button:
             if username in USERS and USERS[username]["password"] == password:
                 st.session_state.logged_in = True
-                # Store the user's actual name instead of their login ID
-                st.session_state.current_user = USERS[username]["name"] 
+                st.session_state.current_user = USERS[username]["name"]
+                st.session_state.current_role = USERS[username]["role"]
                 st.success("Logged in successfully!")
                 st.rerun()
             else:
@@ -109,111 +107,148 @@ if not st.session_state.logged_in:
     st.stop()
 
 # ==========================================
-# 4. MAIN APPLICATION (LOGGED IN)
+# 4. MAIN APPLICATION 
 # ==========================================
+# Header
 col1, col2, col3 = st.columns([1, 3, 1])
 with col1:
     if os.path.exists("logo.png"):
-        image = Image.open("logo.png")
-        st.image(image, width=80)
+        st.image(Image.open("logo.png"), width=80)
 with col2:
     st.title("BPS Distribution")
 with col3:
-    st.info(f"👤 **{st.session_state.current_user}**")
+    st.info(f"👤 **{st.session_state.current_user}**\n\n({st.session_state.current_role.title()})")
     if st.button("Log Out"):
         st.session_state.logged_in = False
         st.session_state.current_user = ""
+        st.session_state.current_role = ""
         st.rerun()
 
 st.markdown("---")
 
-# Load Data
-df_students = load_student_master()
-if df_students.empty:
-    st.warning("No student data found in 'students_master' tab of 'BPS_Database'.")
-    st.stop()
-
-# Set up tabs
-tab_entry, tab_summary = st.tabs(["Distribute Items", "My Session Summary"])
+if st.session_state.current_role == "admin":
+    tab_entry, tab_summary, tab_admin = st.tabs(["Distribute Items", "My Session Summary", "⚙️ Admin Settings"])
+else:
+    tab_entry, tab_summary = st.tabs(["Distribute Items", "My Session Summary"])
 
 # --- TEACHER ENTRY TAB ---
 with tab_entry:
-    st.header("Issue Supplies to Students")
-    
-    distribution_type = st.radio("Select Item Category Being Distributed:", ["Books", "Uniform", "Bag"], horizontal=True)
-    
-    if 'current_distribution' not in st.session_state:
-        st.session_state.current_distribution = {}
+    col_a, col_b = st.columns([3, 1])
+    with col_a:
+        st.header("Issue Supplies")
+    with col_b:
+        if st.button("🔄 Sync Live Data"):
+            st.cache_data.clear()
+            st.rerun()
 
-    classes = df_students['Class'].unique()
-    
-    for cls in classes:
-        st.subheader(f"CLASS {cls}")
-        class_df = df_students[df_students['Class'] == cls]
+    # Load Data from their respective sheets
+    df_students = load_gsheet_data("BPS_Database", "students_master")
+    df_mdm = load_gsheet_data("BPS_Database", "mdm_log")
+    active_items = get_active_items()
+
+    if df_students.empty:
+        st.warning("No student data found in students_master.")
+        st.stop()
         
-        for index, row in class_df.iterrows():
-            widget_key = f"{cls}_{row['Roll']}_{row['Name']}"
-            
-            if widget_key not in st.session_state.current_distribution:
-                st.session_state.current_distribution[widget_key] = False
-                
-            is_checked = st.checkbox(f"Roll {row['Roll']}: {row['Name']}", key=f"chk_{widget_key}")
-            st.session_state.current_distribution[widget_key] = is_checked
+    st.info("⚠️ Only showing students who are present in the BPS Digital App today.")
+
+    if not active_items:
+        st.error("No items currently authorized for distribution. Please contact the Admin.")
+    else:
+        distribution_type = st.selectbox("Select Item Category Being Distributed:", active_items)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            classes = sorted(df_students['Class'].astype(str).unique())
+            sel_class = st.selectbox("Select Class", classes)
+        with col2:
+            available_sections = sorted(df_students[df_students['Class'].astype(str) == sel_class]['Section'].astype(str).unique())
+            sel_section = st.selectbox("Select Section", available_sections)
 
         st.markdown("---")
+        
+        # Filtering logic for Present Students Today
+        # NOTE: Ensure the Date format below matches how your MDM App writes to the sheet!
+        today_str = datetime.now().strftime("%Y-%m-%d") 
+        
+        if not df_mdm.empty and 'Date' in df_mdm.columns:
+            # Since there is no 'Status' column, we assume presence if they have an entry today
+            mdm_today = df_mdm[df_mdm['Date'].astype(str) == today_str]
+            
+            mdm_filtered = mdm_today[(mdm_today['Class'].astype(str) == sel_class) & 
+                                     (mdm_today['Section'].astype(str) == sel_section)]
+            
+            present_rolls = mdm_filtered['Roll'].astype(str).tolist()
+            
+            class_df = df_students[(df_students['Class'].astype(str) == sel_class) & 
+                                   (df_students['Section'].astype(str) == sel_section) &
+                                   (df_students['Roll'].astype(str).isin(present_rolls))]
+        else:
+            class_df = pd.DataFrame() 
 
-    if st.button(f"Submit {distribution_type} Distribution to Database", type="primary"):
-        with st.spinner("Saving logs to Google Sheets..."):
-            try:
-                log_sheet = gc.open("BPS_Distribution_Log")
-                log_ws = log_sheet.sheet1 
+        if class_df.empty:
+            st.warning(f"No students found logged in the MDM App today for Class {sel_class} - Section {sel_section}.")
+        else:
+            st.subheader(f"Present Students: Class {sel_class} ({sel_section})")
+            
+            if 'current_distribution' not in st.session_state:
+                st.session_state.current_distribution = {}
+
+            for index, row in class_df.iterrows():
+                widget_key = f"{sel_class}_{sel_section}_{row['Roll']}_{row['Name']}"
                 
-                now = datetime.now()
-                current_date = now.strftime("%Y-%m-%d")
-                current_time = now.strftime("%H:%M:%S")
-                teacher = st.session_state.current_user
-                
-                rows_to_append = []
-                
-                for cls in classes:
-                    class_df = df_students[df_students['Class'] == cls]
-                    for index, row in class_df.iterrows():
-                        widget_key = f"{cls}_{row['Roll']}_{row['Name']}"
+                if widget_key not in st.session_state.current_distribution:
+                    st.session_state.current_distribution[widget_key] = False
+                    
+                is_checked = st.checkbox(f"Roll {row['Roll']}: {row['Name']}", key=f"chk_{widget_key}")
+                st.session_state.current_distribution[widget_key] = is_checked
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            if st.button(f"Submit {distribution_type} Distribution", type="primary"):
+                with st.spinner("Saving logs to Google Sheets..."):
+                    try:
+                        log_sheet = gc.open("BPS_Distribution_Log")
+                        log_ws = log_sheet.sheet1 
                         
-                        if st.session_state.current_distribution.get(widget_key, False):
-                            books_given, uniform_given, bag_given = False, False, False
-                            if distribution_type == "Books": books_given = True
-                            if distribution_type == "Uniform": uniform_given = True
-                            if distribution_type == "Bag": bag_given = True
+                        now = datetime.now()
+                        current_date = now.strftime("%Y-%m-%d")
+                        current_time = now.strftime("%H:%M:%S")
+                        teacher = st.session_state.current_user
+                        
+                        rows_to_append = []
+                        
+                        for index, row in class_df.iterrows():
+                            widget_key = f"{sel_class}_{sel_section}_{row['Roll']}_{row['Name']}"
                             
-                            log_row = [
-                                current_date, 
-                                current_time, 
-                                teacher, 
-                                cls, 
-                                row['Roll'], 
-                                row['Name'], 
-                                books_given, 
-                                uniform_given, 
-                                bag_given
-                            ]
-                            rows_to_append.append(log_row)
-                
-                if rows_to_append:
-                    log_ws.append_rows(rows_to_append)
-                    st.success(f"Successfully logged {len(rows_to_append)} distributions!")
-                    
-                    if 'recent_logs' not in st.session_state:
-                        st.session_state.recent_logs = []
-                    st.session_state.recent_logs.extend(rows_to_append)
-                    
-                    st.session_state.current_distribution.clear()
-                    st.rerun()
-                else:
-                    st.warning("No students were selected. Nothing was saved.")
-                    
-            except Exception as e:
-                st.error(f"Failed to save to Google Sheets: {e}")
+                            if st.session_state.current_distribution.get(widget_key, False):
+                                log_row = [
+                                    current_date, 
+                                    current_time, 
+                                    teacher, 
+                                    sel_class, 
+                                    sel_section,
+                                    row['Roll'], 
+                                    row['Name'], 
+                                    distribution_type 
+                                ]
+                                rows_to_append.append(log_row)
+                        
+                        if rows_to_append:
+                            log_ws.append_rows(rows_to_append)
+                            st.success(f"Successfully logged {len(rows_to_append)} {distribution_type}(s)!")
+                            
+                            if 'recent_logs' not in st.session_state:
+                                st.session_state.recent_logs = []
+                            st.session_state.recent_logs.extend(rows_to_append)
+                            
+                            st.session_state.current_distribution.clear()
+                            st.rerun()
+                        else:
+                            st.warning("No students were selected. Nothing was saved.")
+                            
+                    except Exception as e:
+                        st.error(f"Failed to save to Google Sheets: {e}")
 
 # --- SUMMARY TAB ---
 with tab_summary:
@@ -221,13 +256,43 @@ with tab_summary:
     st.info("This shows the distributions you have logged during this current login session.")
     
     if 'recent_logs' in st.session_state and st.session_state.recent_logs:
-        df_logs = pd.DataFrame(st.session_state.recent_logs, columns=['Date', 'Time', 'Teacher', 'Class', 'Roll', 'Name', 'Books', 'Uniform', 'Bag'])
+        df_logs = pd.DataFrame(st.session_state.recent_logs, columns=['Date', 'Time', 'Teacher', 'Class', 'Section', 'Roll', 'Name', 'Item Given'])
         st.dataframe(df_logs, hide_index=True)
     else:
         st.write("No distributions logged yet in this session.")
 
+# --- ADMIN SETTINGS TAB ---
+if st.session_state.current_role == "admin":
+    with tab_admin:
+        st.header("Distribution Configuration")
+        st.write("Select which items teachers are allowed to distribute today.")
+        
+        master_item_list = ["Books", "Uniform", "Bag", "Shoes", "Sweater", "Stationery"]
+        current_active = get_active_items()
+        
+        for item in current_active:
+            if item not in master_item_list:
+                master_item_list.append(item)
+                
+        new_active_items = st.multiselect("Active Distribution Items:", master_item_list, default=current_active)
+        
+        if st.button("Save Settings", type="primary"):
+            try:
+                ws_settings = gc.open("BPS_Distribution_Log").worksheet("settings")
+                items_to_save = ", ".join(new_active_items)
+                
+                cell = ws_settings.find("Active_Items")
+                if cell:
+                    ws_settings.update_cell(cell.row, cell.col + 1, items_to_save)
+                    st.success("Settings saved successfully! Teachers will now see these options.")
+                    st.cache_data.clear() 
+                else:
+                    st.error("Could not find 'Active_Items' row in the settings tab. Make sure A2 says exactly 'Active_Items'.")
+            except Exception as e:
+                st.error(f"Error saving settings: {e}")
+
 # ==========================================
 # 5. FOOTER
 # ==========================================
-st.markdown("<br><br><br>", unsafe_allow_html=True) # Adds some breathing room at the bottom
+st.markdown("<br><br><br>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center; color: gray; font-size: 14px;'>Developed by Sukhamay Kisku (H.M.)</p>", unsafe_allow_html=True)

@@ -6,12 +6,12 @@ from datetime import datetime
 from PIL import Image
 import os
 import streamlit.components.v1 as components 
-import plotly.express as px # Added for Dashboard visuals
+import plotly.express as px
 
 # ==========================================
 # 1. SETUP & CONFIGURATION
 # ==========================================
-st.set_page_config(page_title="BPS Supply Distribution", page_icon="🏫", layout="wide") # Changed to wide layout for better charts
+st.set_page_config(page_title="BPS Supply Distribution", page_icon="🏫", layout="wide")
 
 # Actual Staff Database 
 USERS = {
@@ -70,7 +70,6 @@ def get_active_items():
 # 3. LOGIN SCREEN
 # ==========================================
 if not st.session_state.logged_in:
-    # Use columns to keep login centered even in wide mode
     _, col_login, _ = st.columns([1, 2, 1])
     
     with col_login:
@@ -133,7 +132,6 @@ with col3:
 
 st.markdown("---")
 
-# Render extra tabs if the user is an Admin
 if st.session_state.current_role == "admin":
     tab_entry, tab_summary, tab_receive, tab_dashboard, tab_admin = st.tabs(["Distribute Items", "My Session Summary", "📦 Receive Stock", "📊 Dashboard", "⚙️ Admin Settings"])
 else:
@@ -305,7 +303,6 @@ with tab_summary:
     else:
         st.write("No distributions logged yet in this session.")
 
-
 # --- ADMIN ONLY TABS ---
 if st.session_state.current_role == "admin":
     
@@ -364,24 +361,25 @@ if st.session_state.current_role == "admin":
         if df_settings.empty:
             st.warning("Settings data not found. Cannot generate dashboard.")
         else:
-            # 1. Prepare Summary Data
             summary_data = []
             
             for index, row in df_settings.iterrows():
-                item = str(row.get('Active_Items', '')).strip()
+                safe_row = {str(k).strip().lower(): v for k, v in row.items()}
+                
+                item = str(safe_row.get('active_items', '')).strip()
                 if not item or item.lower() == 'nan': 
                     continue
                     
-                recv_date = row.get('Receive Date', 'No Data')
-                
-                # Safely convert Total Received to integer
-                total_recv_raw = row.get('Total Received Qty', 0)
+                recv_date = safe_row.get('receive date', 'No Data')
+                if pd.isna(recv_date) or str(recv_date).strip() == '':
+                    recv_date = 'No Data'
+                    
+                total_recv_raw = safe_row.get('total received qty', safe_row.get('total received', 0))
                 try:
-                    total_recv = int(total_recv_raw) if total_recv_raw else 0
+                    total_recv = int(float(total_recv_raw)) if not pd.isna(total_recv_raw) else 0
                 except:
                     total_recv = 0
                     
-                # Calculate Total Distributed from the Log Sheet
                 if not df_logs.empty and 'Item Given' in df_logs.columns:
                     distributed_df = df_logs[df_logs['Item Given'].astype(str).str.strip().str.lower() == item.lower()]
                     total_dist = len(distributed_df)
@@ -392,7 +390,7 @@ if st.session_state.current_role == "admin":
                 
                 summary_data.append({
                     "Item": item,
-                    "Last Received Date": recv_date,
+                    "Receive Date": recv_date, 
                     "Total Received": total_recv,
                     "Total Distributed": total_dist,
                     "Remaining Stock": remaining
@@ -400,19 +398,16 @@ if st.session_state.current_role == "admin":
                 
             summary_df = pd.DataFrame(summary_data)
             
-            # Display Summary Table
             st.subheader("Current Stock Overview")
             st.dataframe(summary_df, use_container_width=True, hide_index=True)
             
             st.markdown("---")
             
-            # 2. Visual Charts
             if not summary_df.empty:
                 col1, col2 = st.columns(2)
                 
                 with col1:
                     st.subheader("Remaining vs Distributed")
-                    # Plotly Stacked Bar Chart
                     fig_bar = px.bar(
                         summary_df, 
                         x="Item", 
@@ -426,10 +421,8 @@ if st.session_state.current_role == "admin":
                 with col2:
                     st.subheader("Distribution Timeline")
                     if not df_logs.empty and 'Date' in df_logs.columns and 'Item Given' in df_logs.columns:
-                        # Group by Date and Item to see trends
                         dist_trends = df_logs.groupby(['Date', 'Item Given']).size().reset_index(name='Items Distributed')
                         
-                        # Convert string dates to actual datetime objects so the chart orders them correctly
                         dist_trends['Date_Obj'] = pd.to_datetime(dist_trends['Date'], format='%d-%m-%Y', errors='coerce')
                         dist_trends = dist_trends.sort_values(by='Date_Obj')
                         
@@ -448,33 +441,42 @@ if st.session_state.current_role == "admin":
     # ⚙️ ADMIN SETTINGS TAB
     with tab_admin:
         st.header("Distribution Configuration")
-        st.write("Select which items teachers are allowed to distribute.")
+        st.write("Manage the items available for teachers to distribute.")
         
         master_item_list = ["Books", "Uniform", "Bag", "Shoes", "Sweater", "Stationery"]
         current_active = get_active_items()
         
+        # Make sure previously added custom items appear in the dropdown list
         for item in current_active:
             if item not in master_item_list:
                 master_item_list.append(item)
                 
         new_active_items = st.multiselect("Active Distribution Items:", master_item_list, default=current_active)
         
+        st.markdown("---")
+        st.write("➕ **Add a New Custom Item**")
+        custom_item = st.text_input("Type a new item here if it is not in the dropdown list:")
+        
         if st.button("Save Settings", type="primary"):
             try:
                 ws_settings = gc.open("BPS_Distribution_Log").worksheet("settings")
                 
-                # Clear the old list in column A 
+                # If the Admin typed a new item, add it to the list!
+                if custom_item and custom_item.strip():
+                    cleaned_item = custom_item.strip()
+                    if cleaned_item not in new_active_items:
+                        new_active_items.append(cleaned_item)
+
                 ws_settings.batch_clear(["A2:A50"])
                 
-                # Format the new items vertically
                 items_to_save = [[item] for item in new_active_items]
                 
                 if items_to_save:
-                    # Write the list starting at cell A2, going down
                     ws_settings.update(values=items_to_save, range_name="A2")
                 
-                st.success("Settings saved successfully! Teachers will now see these options.")
+                st.success("Settings saved successfully!")
                 st.cache_data.clear() 
+                st.rerun() # Refresh the page to immediately show the new item
             except Exception as e:
                 st.error(f"Error saving settings: {e}")
 

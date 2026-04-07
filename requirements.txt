@@ -10,3 +10,4 @@ uharfbuzz
 plotly
 pytz
 streamlit-autorefresh
+st-gsheets-connection

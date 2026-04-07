@@ -167,22 +167,21 @@ with tab_entry:
 
         st.markdown("---")
         
-        # Filtering logic for Present Students Today
-        # NOTE: Ensure the Date format below matches how your MDM App writes to the sheet!
+        # Filtering logic for Present Students Today (Matching by Name)
+        # NOTE: If your MDM app logs dates as DD-MM-YYYY (e.g., 07-04-2026), change the format below to "%d-%m-%Y"
         today_str = datetime.now().strftime("%Y-%m-%d") 
         
-        if not df_mdm.empty and 'Date' in df_mdm.columns:
-            # Since there is no 'Status' column, we assume presence if they have an entry today
+        if not df_mdm.empty and 'Date' in df_mdm.columns and 'Name' in df_mdm.columns:
+            # 1. Filter the MDM log for ONLY today's date
             mdm_today = df_mdm[df_mdm['Date'].astype(str) == today_str]
             
-            mdm_filtered = mdm_today[(mdm_today['Class'].astype(str) == sel_class) & 
-                                     (mdm_today['Section'].astype(str) == sel_section)]
+            # 2. Extract the list of Names who have an entry today
+            present_names_today = mdm_today['Name'].astype(str).tolist()
             
-            present_rolls = mdm_filtered['Roll'].astype(str).tolist()
-            
+            # 3. Filter the Master Student List for the selected class/section AND check if their name is in today's MDM list
             class_df = df_students[(df_students['Class'].astype(str) == sel_class) & 
                                    (df_students['Section'].astype(str) == sel_section) &
-                                   (df_students['Roll'].astype(str).isin(present_rolls))]
+                                   (df_students['Name'].astype(str).isin(present_names_today))]
         else:
             class_df = pd.DataFrame() 
 

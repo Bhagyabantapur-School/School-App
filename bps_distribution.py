@@ -6,11 +6,12 @@ from datetime import datetime
 from PIL import Image
 import os
 import streamlit.components.v1 as components 
+import plotly.express as px # Added for Dashboard visuals
 
 # ==========================================
 # 1. SETUP & CONFIGURATION
 # ==========================================
-st.set_page_config(page_title="BPS Supply Distribution", page_icon="🏫", layout="centered")
+st.set_page_config(page_title="BPS Supply Distribution", page_icon="🏫", layout="wide") # Changed to wide layout for better charts
 
 # Actual Staff Database 
 USERS = {
@@ -69,44 +70,48 @@ def get_active_items():
 # 3. LOGIN SCREEN
 # ==========================================
 if not st.session_state.logged_in:
-    col1, col2 = st.columns([1, 4])
-    with col1:
-        if os.path.exists("logo.png"):
-            st.image(Image.open("logo.png"), width=80)
-        else:
-            st.write("🏫")
-    with col2:
-        st.title("Bhagyabantapur Primary School")
-        st.subheader("Staff Login")
-
-    st.info("""
-    **Welcome to the Digital Supply Distribution Portal!**
+    # Use columns to keep login centered even in wide mode
+    _, col_login, _ = st.columns([1, 2, 1])
     
-    **Purpose:** Streamline the distribution of school supplies directly to students present today.
-    
-    **Key Features:**
-    * 📦 **Admin Controls:** Headmaster manages stock and active distribution items.
-    * 🔗 **Live MDM Sync:** Only displays students marked 'Present' in the BPS Digital App today.
-    * 🔒 **Secure Audit Trail:** Every issued item is permanently timestamped.
-    """)
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    with st.form("login_form"):
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        submit_button = st.form_submit_button("Log In")
-
-        if submit_button:
-            if username in USERS and USERS[username]["password"] == password:
-                st.session_state.logged_in = True
-                st.session_state.current_user = USERS[username]["name"]
-                st.session_state.current_role = USERS[username]["role"]
-                st.success("Logged in successfully!")
-                st.rerun()
+    with col_login:
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            if os.path.exists("logo.png"):
+                st.image(Image.open("logo.png"), width=80)
             else:
-                st.error("Invalid Username or Password")
-                
-    st.markdown("<br><br><p style='text-align: center; color: gray; font-size: 14px;'>Developed by Sukhamay Kisku (H.M.)</p>", unsafe_allow_html=True)
+                st.write("🏫")
+        with col2:
+            st.title("Bhagyabantapur Primary School")
+            st.subheader("Staff Login")
+
+        st.info("""
+        **Welcome to the Digital Supply Distribution Portal!**
+        
+        **Purpose:** Streamline the distribution of school supplies directly to students present today.
+        
+        **Key Features:**
+        * 📦 **Admin Controls:** Headmaster manages stock and active distribution items.
+        * 🔗 **Live MDM Sync:** Only displays students marked 'Present' in the BPS Digital App today.
+        * 📊 **Live Dashboard:** Track inventory and distribution trends in real-time.
+        """)
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        with st.form("login_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submit_button = st.form_submit_button("Log In")
+
+            if submit_button:
+                if username in USERS and USERS[username]["password"] == password:
+                    st.session_state.logged_in = True
+                    st.session_state.current_user = USERS[username]["name"]
+                    st.session_state.current_role = USERS[username]["role"]
+                    st.success("Logged in successfully!")
+                    st.rerun()
+                else:
+                    st.error("Invalid Username or Password")
+                    
+        st.markdown("<br><br><p style='text-align: center; color: gray; font-size: 14px;'>Developed by Sukhamay Kisku (H.M.)</p>", unsafe_allow_html=True)
     st.stop()
 
 # ==========================================
@@ -130,7 +135,7 @@ st.markdown("---")
 
 # Render extra tabs if the user is an Admin
 if st.session_state.current_role == "admin":
-    tab_entry, tab_summary, tab_receive, tab_admin = st.tabs(["Distribute Items", "My Session Summary", "📦 Receive Stock", "⚙️ Admin Settings"])
+    tab_entry, tab_summary, tab_receive, tab_dashboard, tab_admin = st.tabs(["Distribute Items", "My Session Summary", "📦 Receive Stock", "📊 Dashboard", "⚙️ Admin Settings"])
 else:
     tab_entry, tab_summary = st.tabs(["Distribute Items", "My Session Summary"])
 
@@ -325,11 +330,9 @@ if st.session_state.current_role == "admin":
                     with st.spinner("Updating inventory in Google Sheets..."):
                         try:
                             ws_settings = gc.open("BPS_Distribution_Log").worksheet("settings")
-                            # Find the row where the item lives in Column A (in_column=1)
                             cell = ws_settings.find(recv_item, in_column=1)
                             
                             if cell:
-                                # Get the current quantity from Column C (Col 3)
                                 curr_qty_str = ws_settings.cell(cell.row, 3).value
                                 try:
                                     curr_qty = int(curr_qty_str) if curr_qty_str else 0
@@ -339,7 +342,6 @@ if st.session_state.current_role == "admin":
                                 new_qty = curr_qty + recv_qty
                                 formatted_date = recv_date.strftime("%d-%m-%Y")
                                 
-                                # Update Date in Col 2 (B) and New Qty in Col 3 (C)
                                 ws_settings.update_cell(cell.row, 2, formatted_date)
                                 ws_settings.update_cell(cell.row, 3, new_qty)
                                 
@@ -350,6 +352,98 @@ if st.session_state.current_role == "admin":
                                 
                         except Exception as e:
                             st.error(f"Error updating stock: {e}")
+
+    # 📊 DASHBOARD TAB
+    with tab_dashboard:
+        st.header("Master Inventory Dashboard")
+        st.info("Live overview of stock levels and distribution history.")
+        
+        df_settings = load_gsheet_data("BPS_Distribution_Log", "settings")
+        df_logs = load_gsheet_data("BPS_Distribution_Log", "Sheet1")
+        
+        if df_settings.empty:
+            st.warning("Settings data not found. Cannot generate dashboard.")
+        else:
+            # 1. Prepare Summary Data
+            summary_data = []
+            
+            for index, row in df_settings.iterrows():
+                item = str(row.get('Active_Items', '')).strip()
+                if not item or item.lower() == 'nan': 
+                    continue
+                    
+                recv_date = row.get('Receive Date', 'No Data')
+                
+                # Safely convert Total Received to integer
+                total_recv_raw = row.get('Total Received Qty', 0)
+                try:
+                    total_recv = int(total_recv_raw) if total_recv_raw else 0
+                except:
+                    total_recv = 0
+                    
+                # Calculate Total Distributed from the Log Sheet
+                if not df_logs.empty and 'Item Given' in df_logs.columns:
+                    distributed_df = df_logs[df_logs['Item Given'].astype(str).str.strip().str.lower() == item.lower()]
+                    total_dist = len(distributed_df)
+                else:
+                    total_dist = 0
+                    
+                remaining = total_recv - total_dist
+                
+                summary_data.append({
+                    "Item": item,
+                    "Last Received Date": recv_date,
+                    "Total Received": total_recv,
+                    "Total Distributed": total_dist,
+                    "Remaining Stock": remaining
+                })
+                
+            summary_df = pd.DataFrame(summary_data)
+            
+            # Display Summary Table
+            st.subheader("Current Stock Overview")
+            st.dataframe(summary_df, use_container_width=True, hide_index=True)
+            
+            st.markdown("---")
+            
+            # 2. Visual Charts
+            if not summary_df.empty:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.subheader("Remaining vs Distributed")
+                    # Plotly Stacked Bar Chart
+                    fig_bar = px.bar(
+                        summary_df, 
+                        x="Item", 
+                        y=["Total Distributed", "Remaining Stock"], 
+                        title="Inventory Breakdown by Item",
+                        barmode="stack",
+                        color_discrete_map={"Total Distributed": "#FF7F0E", "Remaining Stock": "#1F77B4"}
+                    )
+                    st.plotly_chart(fig_bar, use_container_width=True)
+                
+                with col2:
+                    st.subheader("Distribution Timeline")
+                    if not df_logs.empty and 'Date' in df_logs.columns and 'Item Given' in df_logs.columns:
+                        # Group by Date and Item to see trends
+                        dist_trends = df_logs.groupby(['Date', 'Item Given']).size().reset_index(name='Items Distributed')
+                        
+                        # Convert string dates to actual datetime objects so the chart orders them correctly
+                        dist_trends['Date_Obj'] = pd.to_datetime(dist_trends['Date'], format='%d-%m-%Y', errors='coerce')
+                        dist_trends = dist_trends.sort_values(by='Date_Obj')
+                        
+                        fig_line = px.line(
+                            dist_trends, 
+                            x="Date", 
+                            y="Items Distributed", 
+                            color="Item Given", 
+                            markers=True,
+                            title="Daily Distributions"
+                        )
+                        st.plotly_chart(fig_line, use_container_width=True)
+                    else:
+                        st.info("Not enough distribution data to plot a timeline yet.")
 
     # ⚙️ ADMIN SETTINGS TAB
     with tab_admin:

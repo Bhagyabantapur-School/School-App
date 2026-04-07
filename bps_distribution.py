@@ -170,9 +170,8 @@ with tab_entry:
         # ==========================================
         # CRITICAL FILTERING LOGIC 
         # ==========================================
-        # IF NO STUDENTS APPEAR, CHANGE THE DATE FORMAT BELOW TO MATCH YOUR SHEET EXACTLY:
-        # e.g., "%d-%m-%Y" for 07-04-2026 OR "%d/%m/%Y" for 07/04/2026
-        today_str = datetime.now().strftime("%Y-%m-%d") 
+        # Formatted exactly to match your Google Sheet format: DD-MM-YYYY
+        today_str = datetime.now().strftime("%d-%m-%Y") 
         
         if not df_mdm.empty and 'Date' in df_mdm.columns and 'Name' in df_mdm.columns:
             # 1. Filter MDM log for today
@@ -216,7 +215,7 @@ with tab_entry:
                         log_ws = log_sheet.sheet1 
                         
                         now = datetime.now()
-                        current_date = now.strftime("%Y-%m-%d")
+                        current_date = now.strftime("%d-%m-%Y") # Save logs in the same DD-MM-YYYY format
                         current_time = now.strftime("%H:%M:%S")
                         teacher = st.session_state.current_user
                         

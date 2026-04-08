@@ -56,15 +56,27 @@ def load_gsheet_data(sheet_name, tab_name):
         st.error(f"Error loading {tab_name} from {sheet_name}: {e}")
         return pd.DataFrame()
 
-def get_active_items():
-    """Fetches the admin-selected items vertically from Column A of the settings tab"""
+def get_inventory_items(only_active=True):
+    """Fetches items. If only_active is True, hides items marked as 'Hidden'."""
     df_settings = load_gsheet_data("BPS_Distribution_Log", "settings")
-    if not df_settings.empty and 'Active_Items' in df_settings.columns:
-        items = df_settings['Active_Items'].dropna().astype(str).tolist()
-        valid_items = [item.strip() for item in items if item.strip() and item.lower() != 'nan']
-        if valid_items:
-            return valid_items
-    return ["Books", "Uniform", "Bag"] # Fallback
+    if df_settings.empty or 'Active_Items' not in df_settings.columns:
+        return ["Books", "Uniform", "Bag"]
+
+    valid_items = []
+    for index, row in df_settings.iterrows():
+        # Safely convert headers to lowercase to avoid exact match errors
+        safe_row = {str(k).strip().lower(): v for k, v in row.items()}
+        
+        item = str(safe_row.get('active_items', '')).strip()
+        status = str(safe_row.get('status', 'Active')).strip() # Defaults to Active if the column is missing
+        
+        if item and item.lower() != 'nan':
+            # Skip hidden items ONLY if we are requesting the active list for teachers
+            if only_active and status.lower() == 'hidden':
+                continue
+            valid_items.append(item)
+            
+    return valid_items
 
 # ==========================================
 # 3. LOGIN SCREEN
@@ -132,18 +144,21 @@ with col3:
 
 st.markdown("---")
 
-# Load Master Data Once for Speed
 with st.spinner("Loading School Database..."):
     df_students = load_gsheet_data("BPS_Database", "students_master")
     df_mdm = load_gsheet_data("BPS_Database", "mdm_log")
     df_logs_db = load_gsheet_data("BPS_Distribution_Log", "Sheet1")
-    active_items = get_active_items()
+    
+    # Get only active items for teachers
+    teacher_active_items = get_inventory_items(only_active=True)
+    
+    # Get all items (including hidden) for the admin inventory tabs
+    all_master_items = get_inventory_items(only_active=False)
 
 if df_students.empty:
     st.warning("No student data found in students_master.")
     st.stop()
 
-# Render extra tabs if the user is an Admin
 if st.session_state.current_role == "admin":
     tab_entry, tab_summary, tab_receive, tab_dashboard, tab_admin = st.tabs(["Distribute Items", "My Session Summary", "📦 Receive Stock", "📊 Dashboard", "⚙️ Admin Settings"])
 else:
@@ -161,10 +176,10 @@ with tab_entry:
 
     st.info("⚠️ Only showing students who are present in the BPS Digital App today.")
 
-    if not active_items:
+    if not teacher_active_items:
         st.error("No items currently authorized for distribution. Please contact the Admin.")
     else:
-        distribution_type = st.selectbox("Select Item Category Being Distributed:", active_items)
+        distribution_type = st.selectbox("Select Item Category Being Distributed:", teacher_active_items)
         
         col1, col2 = st.columns(2)
         with col1:
@@ -313,11 +328,11 @@ if st.session_state.current_role == "admin":
         st.header("Receive New Inventory")
         st.write("Log newly arrived stock here. Select an existing item or add a completely new one.")
         
-        item_options = active_items + ["➕ Add New Item"]
+        # Admin can receive stock for ALL items, even ones hidden from teachers
+        item_options = all_master_items + ["➕ Add New Item"]
         
         recv_item_selection = st.selectbox("Select Item Received:", item_options)
         
-        # --- NEW ALLOTMENT LOGIC ---
         if recv_item_selection == "➕ Add New Item":
             final_item_base = st.text_input("Type New Item Name (e.g., Geometry Box):")
             
@@ -333,7 +348,6 @@ if st.session_state.current_role == "admin":
                     avail_sections = ["All Sections"]
                 allot_section = st.selectbox("Allotted Section:", avail_sections)
                 
-            # Intelligently construct the final item name
             if not final_item_base.strip():
                 final_item = ""
             elif allot_class == "All Classes":
@@ -343,7 +357,6 @@ if st.session_state.current_role == "admin":
                 final_item = f"{final_item_base.strip()} (Class {allot_class}{sec_str})"
         else:
             final_item = recv_item_selection
-        # ---------------------------
             
         recv_qty = st.number_input("Quantity Received:", min_value=1, step=1, value=50)
         recv_date = st.date_input("Date Received:", datetime.today())
@@ -360,7 +373,6 @@ if st.session_state.current_role == "admin":
                         formatted_date = recv_date.strftime("%d-%m-%Y")
                         
                         if cell:
-                            # Existing item: Add to current quantity
                             curr_qty_str = ws_settings.cell(cell.row, 3).value
                             try:
                                 curr_qty = int(curr_qty_str) if curr_qty_str else 0
@@ -373,13 +385,13 @@ if st.session_state.current_role == "admin":
                             ws_settings.update_cell(cell.row, 3, new_qty)
                             st.success(f"Successfully added {recv_qty} to {final_item}! Total received is now {new_qty}.")
                         else:
-                            # Brand New Item: Find the next empty row and create it!
                             col_a_values = ws_settings.col_values(1)
                             next_row = len(col_a_values) + 1
                             
                             ws_settings.update_cell(next_row, 1, final_item)
                             ws_settings.update_cell(next_row, 2, formatted_date)
                             ws_settings.update_cell(next_row, 3, recv_qty)
+                            ws_settings.update_cell(next_row, 4, "Active") # New items are set to Active automatically
                             st.success(f"Successfully added NEW item '{final_item}' with a starting quantity of {recv_qty}!")
 
                         st.cache_data.clear()
@@ -423,12 +435,17 @@ if st.session_state.current_role == "admin":
                     
                 remaining = total_recv - total_dist
                 
+                # Fetch status to display on dashboard
+                status = str(safe_row.get('status', 'Active')).strip()
+                display_status = "👁️ Active" if status.lower() != 'hidden' else "🙈 Hidden"
+                
                 summary_data.append({
                     "Item": item,
                     "Receive Date": recv_date, 
                     "Total Received": total_recv,
                     "Total Distributed": total_dist,
-                    "Remaining Stock": remaining
+                    "Remaining Stock": remaining,
+                    "App Status": display_status
                 })
                 
             summary_df = pd.DataFrame(summary_data)
@@ -476,24 +493,40 @@ if st.session_state.current_role == "admin":
     # ⚙️ ADMIN SETTINGS TAB
     with tab_admin:
         st.header("Distribution Configuration")
-        st.write("Manage the items available for teachers to distribute.")
+        st.write("Manage what items are currently visible to teachers in the Distribute Items tab.")
+        st.info("💡 Deselecting an item here only hides it from the teachers. It remains safely in your Master Inventory and Dashboard!")
         
-        master_item_list = get_active_items()
-                
-        new_active_items = st.multiselect("Active Distribution Items:", master_item_list, default=master_item_list)
+        # We load ALL master items so the Admin can see everything that exists in the database
+        new_active_items = st.multiselect(
+            "Select items that teachers are allowed to distribute today:", 
+            all_master_items, 
+            default=teacher_active_items
+        )
         
         if st.button("Save Settings", type="primary"):
             try:
                 ws_settings = gc.open("BPS_Distribution_Log").worksheet("settings")
-                ws_settings.batch_clear(["A2:A50"])
                 
-                items_to_save = [[item] for item in new_active_items]
-                
-                if items_to_save:
-                    ws_settings.update(values=items_to_save, range_name="A2")
-                
-                st.success("Settings saved successfully! Teachers will now see these options.")
-                st.cache_data.clear() 
+                with st.spinner("Updating status in Google Sheets..."):
+                    # We safely update ONLY Column D (Status) without touching Col A, B, or C
+                    col_a_values = ws_settings.col_values(1)
+                    
+                    status_updates = []
+                    for i, item in enumerate(col_a_values):
+                        if i == 0:
+                            status_updates.append(["Status"]) # Write Header for Column D
+                        else:
+                            if str(item).strip() in new_active_items:
+                                status_updates.append(["Active"])
+                            else:
+                                status_updates.append(["Hidden"])
+                    
+                    # Update Column D (which is Column 4) starting at D1
+                    ws_settings.update(values=status_updates, range_name="D1")
+                    
+                st.success("Settings saved successfully! The app display has been updated.")
+                st.cache_data.clear()
+                st.rerun()
             except Exception as e:
                 st.error(f"Error saving settings: {e}")
 

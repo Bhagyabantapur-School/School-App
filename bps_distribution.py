@@ -309,46 +309,62 @@ if st.session_state.current_role == "admin":
     # 📦 RECEIVE STOCK TAB
     with tab_receive:
         st.header("Receive New Inventory")
-        st.write("Log newly arrived stock here. This will automatically add the quantity to your Master Stock.")
+        st.write("Log newly arrived stock here. Select an existing item or add a completely new one.")
         
         active_items_list = get_active_items()
         
-        if not active_items_list:
-            st.warning("No items available. Please add Active Items in the Admin Settings tab first.")
+        # Add the option to create a new item dynamically
+        item_options = active_items_list + ["➕ Add New Item"]
+        
+        # We removed the st.form here to allow instant UI updates!
+        recv_item_selection = st.selectbox("Select Item Received:", item_options)
+        
+        if recv_item_selection == "➕ Add New Item":
+            final_item = st.text_input("Type New Item Name:")
         else:
-            with st.form("receive_form"):
-                recv_item = st.selectbox("Select Item Received:", active_items_list)
-                recv_qty = st.number_input("Quantity Received:", min_value=1, step=1, value=50)
-                recv_date = st.date_input("Date Received:", datetime.today())
-                
-                submit_receive = st.form_submit_button("Log Received Stock", type="primary")
-                
-                if submit_receive:
-                    with st.spinner("Updating inventory in Google Sheets..."):
-                        try:
-                            ws_settings = gc.open("BPS_Distribution_Log").worksheet("settings")
-                            cell = ws_settings.find(recv_item, in_column=1)
+            final_item = recv_item_selection
+            
+        recv_qty = st.number_input("Quantity Received:", min_value=1, step=1, value=50)
+        recv_date = st.date_input("Date Received:", datetime.today())
+        
+        if st.button("Log Received Stock", type="primary"):
+            if not final_item or not final_item.strip():
+                st.error("Please specify the item name before submitting.")
+            else:
+                with st.spinner("Updating inventory in Google Sheets..."):
+                    try:
+                        final_item = final_item.strip()
+                        ws_settings = gc.open("BPS_Distribution_Log").worksheet("settings")
+                        cell = ws_settings.find(final_item, in_column=1)
+                        formatted_date = recv_date.strftime("%d-%m-%Y")
+                        
+                        if cell:
+                            # Existing item: Add to current quantity
+                            curr_qty_str = ws_settings.cell(cell.row, 3).value
+                            try:
+                                curr_qty = int(curr_qty_str) if curr_qty_str else 0
+                            except ValueError:
+                                curr_qty = 0
                             
-                            if cell:
-                                curr_qty_str = ws_settings.cell(cell.row, 3).value
-                                try:
-                                    curr_qty = int(curr_qty_str) if curr_qty_str else 0
-                                except ValueError:
-                                    curr_qty = 0
-                                
-                                new_qty = curr_qty + recv_qty
-                                formatted_date = recv_date.strftime("%d-%m-%Y")
-                                
-                                ws_settings.update_cell(cell.row, 2, formatted_date)
-                                ws_settings.update_cell(cell.row, 3, new_qty)
-                                
-                                st.success(f"Successfully added {recv_qty} to {recv_item}! Total received is now {new_qty}.")
-                                st.cache_data.clear()
-                            else:
-                                st.error(f"Could not locate '{recv_item}' in the settings tab. Please check your sheet.")
-                                
-                        except Exception as e:
-                            st.error(f"Error updating stock: {e}")
+                            new_qty = curr_qty + recv_qty
+                            
+                            ws_settings.update_cell(cell.row, 2, formatted_date)
+                            ws_settings.update_cell(cell.row, 3, new_qty)
+                            st.success(f"Successfully added {recv_qty} to {final_item}! Total received is now {new_qty}.")
+                        else:
+                            # Brand New Item: Find the next empty row and create it!
+                            col_a_values = ws_settings.col_values(1)
+                            next_row = len(col_a_values) + 1
+                            
+                            ws_settings.update_cell(next_row, 1, final_item)
+                            ws_settings.update_cell(next_row, 2, formatted_date)
+                            ws_settings.update_cell(next_row, 3, recv_qty)
+                            st.success(f"Successfully added NEW item '{final_item}' with a starting quantity of {recv_qty}!")
+
+                        st.cache_data.clear()
+                        # Optional: Use a short delay or prompt user to click "Sync" to see changes everywhere instantly
+                    except Exception as e:
+                        st.error(f"Error updating stock: {e}")
 
     # 📊 DASHBOARD TAB
     with tab_dashboard:
@@ -441,32 +457,16 @@ if st.session_state.current_role == "admin":
     # ⚙️ ADMIN SETTINGS TAB
     with tab_admin:
         st.header("Distribution Configuration")
-        st.write("Manage the items available for teachers to distribute.")
+        st.write("Select which items teachers are allowed to distribute from the existing inventory list.")
         
-        master_item_list = ["Books", "Uniform", "Bag", "Shoes", "Sweater", "Stationery"]
-        current_active = get_active_items()
-        
-        # Make sure previously added custom items appear in the dropdown list
-        for item in current_active:
-            if item not in master_item_list:
-                master_item_list.append(item)
+        # The list is now strictly pulled from the stock list. No custom typing here.
+        master_item_list = get_active_items()
                 
-        new_active_items = st.multiselect("Active Distribution Items:", master_item_list, default=current_active)
-        
-        st.markdown("---")
-        st.write("➕ **Add a New Custom Item**")
-        custom_item = st.text_input("Type a new item here if it is not in the dropdown list:")
+        new_active_items = st.multiselect("Active Distribution Items:", master_item_list, default=master_item_list)
         
         if st.button("Save Settings", type="primary"):
             try:
                 ws_settings = gc.open("BPS_Distribution_Log").worksheet("settings")
-                
-                # If the Admin typed a new item, add it to the list!
-                if custom_item and custom_item.strip():
-                    cleaned_item = custom_item.strip()
-                    if cleaned_item not in new_active_items:
-                        new_active_items.append(cleaned_item)
-
                 ws_settings.batch_clear(["A2:A50"])
                 
                 items_to_save = [[item] for item in new_active_items]
@@ -474,9 +474,8 @@ if st.session_state.current_role == "admin":
                 if items_to_save:
                     ws_settings.update(values=items_to_save, range_name="A2")
                 
-                st.success("Settings saved successfully!")
+                st.success("Settings saved successfully! Teachers will now see these options.")
                 st.cache_data.clear() 
-                st.rerun() # Refresh the page to immediately show the new item
             except Exception as e:
                 st.error(f"Error saving settings: {e}")
 

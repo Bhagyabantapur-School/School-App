@@ -1331,7 +1331,7 @@ try:
         
         day_logs = log_df[(log_df['Date'] == selected_date_str) & (log_df['End_Time'] != 'RUNNING')].copy()
         
-        # --- SMART LOCATION & TRANSIT PARSING ---
+        # --- FIXED: Smart Location & Movement Parsing ---
         loc_df_safe = loc_df.copy()
         
         def parse_custom_date(date_str):

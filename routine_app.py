@@ -1331,12 +1331,11 @@ try:
         
         day_logs = log_df[(log_df['Date'] == selected_date_str) & (log_df['End_Time'] != 'RUNNING')].copy()
         
-        # --- FIXED: Process Location Data for Timeline (Handling DD.MM.YY Day Formats) ---
+        # --- FIXED: Location Data Gap Splitting ---
         loc_df_safe = loc_df.copy()
         
         def parse_custom_date(date_str):
             try:
-                # CLEAN string to grab only DD.MM.YY (ignores the " Mon" part)
                 clean_date = str(date_str).strip().split(' ')[0]
                 return datetime.strptime(clean_date, '%d.%m.%y').date()
             except:
@@ -1351,7 +1350,6 @@ try:
         if not day_locs.empty:
             def parse_custom_dt(row):
                 try:
-                    # CLEAN string to grab only DD.MM.YY (ignores the " Mon" part)
                     d_str = str(row['Date']).strip().split(' ')[0]
                     t_str = str(row['Time']).strip()
                     return datetime.strptime(f"{d_str} {t_str}", '%d.%m.%y %H:%M')
@@ -1361,7 +1359,6 @@ try:
             day_locs['Loc_DT'] = day_locs.apply(parse_custom_dt, axis=1)
             day_locs = day_locs.dropna(subset=['Loc_DT']).sort_values('Loc_DT')
             
-            # Filter out manual entry misalignments where Place is just "I" or empty
             valid_places = day_locs[day_locs['Place'].astype(str).str.strip().str.len() > 1]
             day_locs = valid_places if not valid_places.empty else day_locs
         
@@ -1381,15 +1378,7 @@ try:
                 current_start = row['Start_DT']
                 current_end = row['End_DT']
                 
-                # Extract the last known location for this activity
-                current_loc = ""
-                if not day_locs.empty:
-                    past_locs = day_locs[day_locs['Loc_DT'] <= current_start]
-                    if not past_locs.empty:
-                        current_loc = past_locs.iloc[-1]['Place']
-                    else:
-                        current_loc = day_locs.iloc[0]['Place']
-                
+                # --- Gap Slicing Logic ---
                 if last_end_time and current_start > last_end_time:
                     gap_duration = (current_start - last_end_time).total_seconds() / 60
                     if gap_duration > 0:
@@ -1405,17 +1394,63 @@ try:
                                 'place': ''
                             })
                         else: 
-                            timeline_events.append({
-                                'type': 'gap',
-                                'start': last_end_time.strftime('%I:%M %p'),
-                                'end': current_start.strftime('%I:%M %p'),
-                                'duration': int(gap_duration),
-                                'activity': 'Unlogged Time / Break',
-                                'sub': '',
-                                'notes': '',
-                                'place': ''
-                            })
+                            gap_start_dt = last_end_time
+                            gap_end_dt = current_start
+                            
+                            if not day_locs.empty:
+                                locs_in_gap = day_locs[(day_locs['Loc_DT'] > gap_start_dt) & (day_locs['Loc_DT'] < gap_end_dt)]
+                            else:
+                                locs_in_gap = pd.DataFrame()
+                                
+                            curr_gap_start = gap_start_dt
+                            
+                            def get_loc_at_time(t):
+                                if day_locs.empty: return ""
+                                past = day_locs[day_locs['Loc_DT'] <= t]
+                                if not past.empty: return past.iloc[-1]['Place']
+                                return day_locs.iloc[0]['Place']
+                                
+                            for _, l_row in locs_in_gap.iterrows():
+                                split_dt = l_row['Loc_DT']
+                                sub_gap_dur = (split_dt - curr_gap_start).total_seconds() / 60
+                                
+                                if sub_gap_dur >= 1: 
+                                    loc_at_start = get_loc_at_time(curr_gap_start)
+                                    timeline_events.append({
+                                        'type': 'gap',
+                                        'start': curr_gap_start.strftime('%I:%M %p'),
+                                        'end': split_dt.strftime('%I:%M %p'),
+                                        'duration': int(sub_gap_dur),
+                                        'activity': 'Unlogged Time / Break',
+                                        'sub': '',
+                                        'notes': '',
+                                        'place': str(loc_at_start).strip()
+                                    })
+                                curr_gap_start = split_dt
+                                
+                            final_gap_dur = (gap_end_dt - curr_gap_start).total_seconds() / 60
+                            if final_gap_dur >= 1:
+                                loc_at_start = get_loc_at_time(curr_gap_start)
+                                timeline_events.append({
+                                    'type': 'gap',
+                                    'start': curr_gap_start.strftime('%I:%M %p'),
+                                    'end': gap_end_dt.strftime('%I:%M %p'),
+                                    'duration': int(final_gap_dur),
+                                    'activity': 'Unlogged Time / Break',
+                                    'sub': '',
+                                    'notes': '',
+                                    'place': str(loc_at_start).strip()
+                                })
                 
+                # --- Task Location Tagging ---
+                current_loc = ""
+                if not day_locs.empty:
+                    past_locs = day_locs[day_locs['Loc_DT'] <= current_start]
+                    if not past_locs.empty:
+                        current_loc = past_locs.iloc[-1]['Place']
+                    else:
+                        current_loc = day_locs.iloc[0]['Place']
+
                 dur_mins = (current_end - current_start).total_seconds() / 60
                 timeline_events.append({
                     'type': 'task',
@@ -1449,16 +1484,20 @@ try:
                     
                 elif event['type'] == 'gap':
                     col_g1, col_g2 = st.columns([3, 1])
+                    
+                    place_str = str(event.get('place', '')).strip()
+                    loc_html_gap = f"<br><span style='color: #d32f2f; font-size: 13px; font-weight: 500;'>📍 {place_str}</span>" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else ""
+
                     with col_g1:
                         st.markdown(f"""
                         <div style='background-color: #fafafa; border: 2px dashed #cccccc; padding: 10px; border-radius: 8px; margin-bottom: 10px; text-align: center; color: #888;'>
                             <b>{event['start']} - {event['end']}</b> (Gap: {dur_display})<br>
-                            <em>{event['activity']}</em>
+                            <em>{event['activity']}</em>{loc_html_gap}
                         </div>
                         """, unsafe_allow_html=True)
                     with col_g2:
                         st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
-                        if st.button("☕ Log as Break", key=f"gap_{event['start']}_{event['end']}", use_container_width=True):
+                        if st.button("☕ Log as Break", key=f"gap_{event['start']}_{event['end']}_{place_str}", use_container_width=True):
                             start_24 = datetime.strptime(event['start'], '%I:%M %p').strftime('%H:%M')
                             end_24 = datetime.strptime(event['end'], '%I:%M %p').strftime('%H:%M')
                             
@@ -1482,7 +1521,6 @@ try:
                     sub_text = f"<br><b>{event['sub']}</b>" if event['sub'] else ""
                     note_text = f"<br><span style='font-size: 13px; color: #666;'>{event['notes']}</span>" if event['notes'] else ""
                     
-                    # --- Safe Location Display Filter ---
                     place_str = str(event.get('place', '')).strip()
                     loc_html = f"<div style='color: #d32f2f; font-size: 13px; font-weight: 500; margin-top: 4px;'>📍 {place_str}</div>" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else ""
                     

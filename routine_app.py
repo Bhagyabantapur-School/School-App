@@ -236,7 +236,7 @@ try:
             </div>
         """, unsafe_allow_html=True)
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["⏱️ Live View", "📅 Schedule", "💧 Hydration", "📊 Projects", "⏳ Timeline", "🔗 Hub"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["⏱️ Live", "📅 Sched", "💧 Water", "📊 Proj", "⏳ Time", "🔗 Hub", "✨ AI Routine"])
 
     # ==========================================
     # TAB 1: LIVE DASHBOARD
@@ -289,11 +289,9 @@ try:
                 else: 
                     end_t = datetime.strptime(end_str, '%H:%M').time()
 
-                # --- NEW: Smart Midnight Crossover Check ---
                 if start_t <= end_t:
                     is_current = start_t <= current_time <= end_t
                 else:
-                    # Activity spans across midnight (e.g. 22:30 to 05:30)
                     is_current = current_time >= start_t or current_time <= end_t
 
                 if is_current:
@@ -358,7 +356,6 @@ try:
             dt_start = datetime.combine(now.date(), current_activity_start)
             dt_start = ist_timezone.localize(dt_start)
             
-            # --- NEW: Adjust start date backward if activity started yesterday ---
             if current_time < current_activity_start:
                 dt_start -= timedelta(days=1)
                 
@@ -1473,6 +1470,79 @@ try:
         st.link_button("📱 Main Dashboard (app.py)", "https://your-main-app-url.streamlit.app", use_container_width=True)
         st.link_button("📋 Form Manager", "https://your-form-manager-url.streamlit.app", use_container_width=True)
         st.link_button("🪪 ID Card Generator", "https://your-id-card-url.streamlit.app", use_container_width=True)
+
+    # ==========================================
+    # TAB 7: AI ROUTINE
+    # ==========================================
+    with tab7:
+        st.markdown("<h3 style='text-align: center; color: #555;'>✨ AI Routine Suggestions</h3>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #888;'>Based on your actual past activity, here is an optimized daily routine.</p>", unsafe_allow_html=True)
+
+        completed_logs = log_df[log_df['End_Time'] != 'RUNNING'].copy()
+        if not completed_logs.empty:
+            # 1. Calculate actual duration in minutes
+            completed_logs['Mins'] = completed_logs['Duration'].apply(parse_duration_to_minutes)
+
+            # 2. Convert start time to minutes from midnight
+            def time_to_mins(t_str):
+                try:
+                    h, m = map(int, t_str.split(':'))
+                    return h * 60 + m
+                except:
+                    return 0
+            completed_logs['Start_Mins'] = completed_logs['Start_Time'].apply(time_to_mins)
+
+            # 3. Aggregate data: average start time and average daily duration
+            unique_days = completed_logs['Date'].nunique()
+            if unique_days == 0: unique_days = 1
+
+            suggestion_df = completed_logs.groupby('Activity').agg({
+                'Start_Mins': 'median',  
+                'Mins': 'sum'            
+            }).reset_index()
+
+            suggestion_df['Avg_Daily_Mins'] = (suggestion_df['Mins'] / unique_days).astype(int)
+
+            # Filter out tiny anomalies
+            suggestion_df = suggestion_df[suggestion_df['Avg_Daily_Mins'] >= 10]
+
+            suggestion_df = suggestion_df.sort_values('Start_Mins')
+
+            def mins_to_time(m):
+                m = int(m)
+                h = m // 60
+                mins = m % 60
+                return f"{h:02d}:{mins:02d}"
+
+            suggestion_df['Suggested_Start'] = suggestion_df['Start_Mins'].apply(mins_to_time)
+
+            suggestion_df['Suggested_End'] = (suggestion_df['Start_Mins'] + suggestion_df['Avg_Daily_Mins']).apply(mins_to_time)
+
+            def format_dur(m):
+                h = m // 60
+                mins = m % 60
+                if h > 0 and mins > 0: return f"{h}h {mins}m"
+                elif h > 0: return f"{h}h"
+                else: return f"{mins}m"
+
+            suggestion_df['Suggested_Duration'] = suggestion_df['Avg_Daily_Mins'].apply(format_dur)
+
+            display_df = suggestion_df[['Suggested_Start', 'Suggested_End', 'Suggested_Duration', 'Activity']].copy()
+            display_df.columns = ["Start Time", "End Time", "Avg. Time Spent", "Activity"]
+
+            st.markdown("#### 🎯 Your Data-Driven Routine")
+            st.info("💡 **How this works:** The app analyzed your past activity logs. It calculated the **median time** you usually start a task, and the **average time** you spend on it per day, to build this hyper-realistic routine.")
+
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+            st.markdown("#### ⚖️ Recommended Time Balance")
+            fig = px.pie(suggestion_df, values='Avg_Daily_Mins', names='Activity', hole=0.4)
+            fig.update_traces(textposition='inside', textinfo='percent+label')
+            fig.update_layout(margin=dict(l=0, r=0, t=30, b=0), showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+
+        else:
+            st.info("Not enough data yet! Keep logging your activities to get smart routine suggestions.")
 
 except Exception as e:
     st.error(f"System Error: {e}")

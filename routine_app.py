@@ -1331,16 +1331,16 @@ try:
         
         day_logs = log_df[(log_df['Date'] == selected_date_str) & (log_df['End_Time'] != 'RUNNING')].copy()
         
-        # --- FIXED: Process Location Data for Timeline (Handling DD.MM.YY Date Formats) ---
+        # --- FIXED: Process Location Data for Timeline (Handling DD.MM.YY Day Formats) ---
         loc_df_safe = loc_df.copy()
         
         def parse_custom_date(date_str):
             try:
-                # Force exact DD.MM.YY match
-                return datetime.strptime(str(date_str).strip(), '%d.%m.%y').date()
+                # CLEAN string to grab only DD.MM.YY (ignores the " Mon" part)
+                clean_date = str(date_str).strip().split(' ')[0]
+                return datetime.strptime(clean_date, '%d.%m.%y').date()
             except:
                 try:
-                    # Fallback just in case
                     return pd.to_datetime(str(date_str).strip(), dayfirst=True).date()
                 except:
                     return None
@@ -1351,7 +1351,8 @@ try:
         if not day_locs.empty:
             def parse_custom_dt(row):
                 try:
-                    d_str = str(row['Date']).strip()
+                    # CLEAN string to grab only DD.MM.YY (ignores the " Mon" part)
+                    d_str = str(row['Date']).strip().split(' ')[0]
                     t_str = str(row['Time']).strip()
                     return datetime.strptime(f"{d_str} {t_str}", '%d.%m.%y %H:%M')
                 except:
@@ -1481,7 +1482,7 @@ try:
                     sub_text = f"<br><b>{event['sub']}</b>" if event['sub'] else ""
                     note_text = f"<br><span style='font-size: 13px; color: #666;'>{event['notes']}</span>" if event['notes'] else ""
                     
-                    # --- NEW: Safe Location Display Filter ---
+                    # --- Safe Location Display Filter ---
                     place_str = str(event.get('place', '')).strip()
                     loc_html = f"<div style='color: #d32f2f; font-size: 13px; font-weight: 500; margin-top: 4px;'>📍 {place_str}</div>" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else ""
                     

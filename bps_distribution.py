@@ -132,6 +132,18 @@ with col3:
 
 st.markdown("---")
 
+# Load Master Data Once for Speed
+with st.spinner("Loading School Database..."):
+    df_students = load_gsheet_data("BPS_Database", "students_master")
+    df_mdm = load_gsheet_data("BPS_Database", "mdm_log")
+    df_logs_db = load_gsheet_data("BPS_Distribution_Log", "Sheet1")
+    active_items = get_active_items()
+
+if df_students.empty:
+    st.warning("No student data found in students_master.")
+    st.stop()
+
+# Render extra tabs if the user is an Admin
 if st.session_state.current_role == "admin":
     tab_entry, tab_summary, tab_receive, tab_dashboard, tab_admin = st.tabs(["Distribute Items", "My Session Summary", "📦 Receive Stock", "📊 Dashboard", "⚙️ Admin Settings"])
 else:
@@ -147,16 +159,6 @@ with tab_entry:
             st.cache_data.clear()
             st.rerun()
 
-    df_students = load_gsheet_data("BPS_Database", "students_master")
-    df_mdm = load_gsheet_data("BPS_Database", "mdm_log")
-    df_logs_db = load_gsheet_data("BPS_Distribution_Log", "Sheet1")
-    
-    active_items = get_active_items()
-
-    if df_students.empty:
-        st.warning("No student data found in students_master.")
-        st.stop()
-        
     st.info("⚠️ Only showing students who are present in the BPS Digital App today.")
 
     if not active_items:
@@ -311,18 +313,37 @@ if st.session_state.current_role == "admin":
         st.header("Receive New Inventory")
         st.write("Log newly arrived stock here. Select an existing item or add a completely new one.")
         
-        active_items_list = get_active_items()
+        item_options = active_items + ["➕ Add New Item"]
         
-        # Add the option to create a new item dynamically
-        item_options = active_items_list + ["➕ Add New Item"]
-        
-        # We removed the st.form here to allow instant UI updates!
         recv_item_selection = st.selectbox("Select Item Received:", item_options)
         
+        # --- NEW ALLOTMENT LOGIC ---
         if recv_item_selection == "➕ Add New Item":
-            final_item = st.text_input("Type New Item Name:")
+            final_item_base = st.text_input("Type New Item Name (e.g., Geometry Box):")
+            
+            st.markdown("**Optional: Allot Item to Specific Class/Section**")
+            col1, col2 = st.columns(2)
+            with col1:
+                all_classes = ["All Classes"] + sorted(df_students['Class'].astype(str).unique().tolist())
+                allot_class = st.selectbox("Allotted Class:", all_classes)
+            with col2:
+                if allot_class != "All Classes":
+                    avail_sections = ["All Sections"] + sorted(df_students[df_students['Class'].astype(str) == allot_class]['Section'].astype(str).unique().tolist())
+                else:
+                    avail_sections = ["All Sections"]
+                allot_section = st.selectbox("Allotted Section:", avail_sections)
+                
+            # Intelligently construct the final item name
+            if not final_item_base.strip():
+                final_item = ""
+            elif allot_class == "All Classes":
+                final_item = final_item_base.strip()
+            else:
+                sec_str = f" - Sec {allot_section}" if allot_section != "All Sections" else ""
+                final_item = f"{final_item_base.strip()} (Class {allot_class}{sec_str})"
         else:
             final_item = recv_item_selection
+        # ---------------------------
             
         recv_qty = st.number_input("Quantity Received:", min_value=1, step=1, value=50)
         recv_date = st.date_input("Date Received:", datetime.today())
@@ -362,7 +383,6 @@ if st.session_state.current_role == "admin":
                             st.success(f"Successfully added NEW item '{final_item}' with a starting quantity of {recv_qty}!")
 
                         st.cache_data.clear()
-                        # Optional: Use a short delay or prompt user to click "Sync" to see changes everywhere instantly
                     except Exception as e:
                         st.error(f"Error updating stock: {e}")
 
@@ -372,7 +392,6 @@ if st.session_state.current_role == "admin":
         st.info("Live overview of stock levels and distribution history.")
         
         df_settings = load_gsheet_data("BPS_Distribution_Log", "settings")
-        df_logs = load_gsheet_data("BPS_Distribution_Log", "Sheet1")
         
         if df_settings.empty:
             st.warning("Settings data not found. Cannot generate dashboard.")
@@ -396,8 +415,8 @@ if st.session_state.current_role == "admin":
                 except:
                     total_recv = 0
                     
-                if not df_logs.empty and 'Item Given' in df_logs.columns:
-                    distributed_df = df_logs[df_logs['Item Given'].astype(str).str.strip().str.lower() == item.lower()]
+                if not df_logs_db.empty and 'Item Given' in df_logs_db.columns:
+                    distributed_df = df_logs_db[df_logs_db['Item Given'].astype(str).str.strip().str.lower() == item.lower()]
                     total_dist = len(distributed_df)
                 else:
                     total_dist = 0
@@ -436,8 +455,8 @@ if st.session_state.current_role == "admin":
                 
                 with col2:
                     st.subheader("Distribution Timeline")
-                    if not df_logs.empty and 'Date' in df_logs.columns and 'Item Given' in df_logs.columns:
-                        dist_trends = df_logs.groupby(['Date', 'Item Given']).size().reset_index(name='Items Distributed')
+                    if not df_logs_db.empty and 'Date' in df_logs_db.columns and 'Item Given' in df_logs_db.columns:
+                        dist_trends = df_logs_db.groupby(['Date', 'Item Given']).size().reset_index(name='Items Distributed')
                         
                         dist_trends['Date_Obj'] = pd.to_datetime(dist_trends['Date'], format='%d-%m-%Y', errors='coerce')
                         dist_trends = dist_trends.sort_values(by='Date_Obj')
@@ -457,9 +476,8 @@ if st.session_state.current_role == "admin":
     # ⚙️ ADMIN SETTINGS TAB
     with tab_admin:
         st.header("Distribution Configuration")
-        st.write("Select which items teachers are allowed to distribute from the existing inventory list.")
+        st.write("Manage the items available for teachers to distribute.")
         
-        # The list is now strictly pulled from the stock list. No custom typing here.
         master_item_list = get_active_items()
                 
         new_active_items = st.multiselect("Active Distribution Items:", master_item_list, default=master_item_list)

@@ -1331,7 +1331,6 @@ try:
         
         day_logs = log_df[(log_df['Date'] == selected_date_str) & (log_df['End_Time'] != 'RUNNING')].copy()
         
-        # --- FIXED: Location Data Gap Splitting ---
         loc_df_safe = loc_df.copy()
         
         def parse_custom_date(date_str):
@@ -1378,7 +1377,18 @@ try:
                 current_start = row['Start_DT']
                 current_end = row['End_DT']
                 
-                # --- Gap Slicing Logic ---
+                # --- UPDATED: Extract Place AND Move status ---
+                current_loc = ""
+                current_move = ""
+                if not day_locs.empty:
+                    past_locs = day_locs[day_locs['Loc_DT'] <= current_start]
+                    if not past_locs.empty:
+                        current_loc = past_locs.iloc[-1]['Place']
+                        current_move = past_locs.iloc[-1]['Move']
+                    else:
+                        current_loc = day_locs.iloc[0]['Place']
+                        current_move = day_locs.iloc[0]['Move']
+                
                 if last_end_time and current_start > last_end_time:
                     gap_duration = (current_start - last_end_time).total_seconds() / 60
                     if gap_duration > 0:
@@ -1391,7 +1401,8 @@ try:
                                 'activity': 'Transition',
                                 'sub': '',
                                 'notes': '',
-                                'place': ''
+                                'place': '',
+                                'move': ''
                             })
                         else: 
                             gap_start_dt = last_end_time
@@ -1405,17 +1416,17 @@ try:
                             curr_gap_start = gap_start_dt
                             
                             def get_loc_at_time(t):
-                                if day_locs.empty: return ""
+                                if day_locs.empty: return "", ""
                                 past = day_locs[day_locs['Loc_DT'] <= t]
-                                if not past.empty: return past.iloc[-1]['Place']
-                                return day_locs.iloc[0]['Place']
+                                if not past.empty: return past.iloc[-1]['Place'], past.iloc[-1]['Move']
+                                return day_locs.iloc[0]['Place'], day_locs.iloc[0]['Move']
                                 
                             for _, l_row in locs_in_gap.iterrows():
                                 split_dt = l_row['Loc_DT']
                                 sub_gap_dur = (split_dt - curr_gap_start).total_seconds() / 60
                                 
                                 if sub_gap_dur >= 1: 
-                                    loc_at_start = get_loc_at_time(curr_gap_start)
+                                    loc_at_start, move_at_start = get_loc_at_time(curr_gap_start)
                                     timeline_events.append({
                                         'type': 'gap',
                                         'start': curr_gap_start.strftime('%I:%M %p'),
@@ -1424,13 +1435,14 @@ try:
                                         'activity': 'Unlogged Time / Break',
                                         'sub': '',
                                         'notes': '',
-                                        'place': str(loc_at_start).strip()
+                                        'place': str(loc_at_start).strip(),
+                                        'move': str(move_at_start).strip()
                                     })
                                 curr_gap_start = split_dt
                                 
                             final_gap_dur = (gap_end_dt - curr_gap_start).total_seconds() / 60
                             if final_gap_dur >= 1:
-                                loc_at_start = get_loc_at_time(curr_gap_start)
+                                loc_at_start, move_at_start = get_loc_at_time(curr_gap_start)
                                 timeline_events.append({
                                     'type': 'gap',
                                     'start': curr_gap_start.strftime('%I:%M %p'),
@@ -1439,18 +1451,10 @@ try:
                                     'activity': 'Unlogged Time / Break',
                                     'sub': '',
                                     'notes': '',
-                                    'place': str(loc_at_start).strip()
+                                    'place': str(loc_at_start).strip(),
+                                    'move': str(move_at_start).strip()
                                 })
                 
-                # --- Task Location Tagging ---
-                current_loc = ""
-                if not day_locs.empty:
-                    past_locs = day_locs[day_locs['Loc_DT'] <= current_start]
-                    if not past_locs.empty:
-                        current_loc = past_locs.iloc[-1]['Place']
-                    else:
-                        current_loc = day_locs.iloc[0]['Place']
-
                 dur_mins = (current_end - current_start).total_seconds() / 60
                 timeline_events.append({
                     'type': 'task',
@@ -1460,7 +1464,8 @@ try:
                     'activity': str(row['Activity']).upper(),
                     'sub': str(row['Sub_Activities']).title(),
                     'notes': str(row['Notes']),
-                    'place': str(current_loc).strip()
+                    'place': str(current_loc).strip(),
+                    'move': str(current_move).strip()
                 })
                 
                 if last_end_time is None or current_end > last_end_time:
@@ -1485,8 +1490,22 @@ try:
                 elif event['type'] == 'gap':
                     col_g1, col_g2 = st.columns([3, 1])
                     
+                    # --- UPDATED: Movement display for gaps ---
                     place_str = str(event.get('place', '')).strip()
-                    loc_html_gap = f"<br><span style='color: #d32f2f; font-size: 13px; font-weight: 500;'>📍 {place_str}</span>" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else ""
+                    move_str = str(event.get('move', '')).strip()
+                    
+                    is_valid_place = place_str and place_str.upper() not in ["I", "NAN", "NONE"]
+                    is_moving = move_str and move_str.upper() != "- STATIONARY -"
+                    
+                    loc_text = ""
+                    if is_moving and is_valid_place:
+                        loc_text = f"🛣️ On the way ({move_str}) near {place_str}"
+                    elif is_moving and not is_valid_place:
+                        loc_text = f"🛣️ On the way ({move_str})"
+                    elif not is_moving and is_valid_place:
+                        loc_text = f"📍 {place_str}"
+                        
+                    loc_html_gap = f"<br><span style='color: #d32f2f; font-size: 13px; font-weight: 500;'>{loc_text}</span>" if loc_text else ""
 
                     with col_g1:
                         st.markdown(f"""
@@ -1521,8 +1540,22 @@ try:
                     sub_text = f"<br><b>{event['sub']}</b>" if event['sub'] else ""
                     note_text = f"<br><span style='font-size: 13px; color: #666;'>{event['notes']}</span>" if event['notes'] else ""
                     
+                    # --- UPDATED: Movement display for tasks ---
                     place_str = str(event.get('place', '')).strip()
-                    loc_html = f"<div style='color: #d32f2f; font-size: 13px; font-weight: 500; margin-top: 4px;'>📍 {place_str}</div>" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else ""
+                    move_str = str(event.get('move', '')).strip()
+                    
+                    is_valid_place = place_str and place_str.upper() not in ["I", "NAN", "NONE"]
+                    is_moving = move_str and move_str.upper() != "- STATIONARY -"
+                    
+                    loc_text = ""
+                    if is_moving and is_valid_place:
+                        loc_text = f"🛣️ On the way ({move_str}) near {place_str}"
+                    elif is_moving and not is_valid_place:
+                        loc_text = f"🛣️ On the way ({move_str})"
+                    elif not is_moving and is_valid_place:
+                        loc_text = f"📍 {place_str}"
+                        
+                    loc_html = f"<div style='color: #d32f2f; font-size: 13px; font-weight: 500; margin-top: 4px;'>{loc_text}</div>" if loc_text else ""
                     
                     st.markdown(f"""
                     <div style='background-color: white; border-left: 6px solid {border_color}; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'>

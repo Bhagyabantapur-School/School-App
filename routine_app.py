@@ -185,7 +185,6 @@ def get_holidays():
     df.columns = ["Date", "Occasion"]
     return df
 
-# --- NEW: Location Data Fetcher ---
 @st.cache_data(ttl=300)
 def get_location_data():
     client = init_connection()
@@ -240,7 +239,7 @@ try:
     water_df = get_water_log()
     proj_df = get_project_tasks()
     holidays_df = get_holidays()
-    loc_df = get_location_data() # Load Location Data
+    loc_df = get_location_data() 
     
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist_timezone)
@@ -281,7 +280,7 @@ try:
                 get_water_log.clear()
                 get_project_tasks.clear()
                 get_holidays.clear()
-                get_location_data.clear() # Clear location cache
+                get_location_data.clear() 
                 st.toast("✅ Force Synced with Google Sheets!")
                 time.sleep(0.5)
                 st.rerun()
@@ -1332,11 +1331,38 @@ try:
         
         day_logs = log_df[(log_df['Date'] == selected_date_str) & (log_df['End_Time'] != 'RUNNING')].copy()
         
-        # --- NEW: Process Location Data for Timeline ---
-        day_locs = loc_df[loc_df['Date'] == selected_date_str].copy()
+        # --- FIXED: Process Location Data for Timeline (Handling DD.MM.YY Date Formats) ---
+        loc_df_safe = loc_df.copy()
+        
+        def parse_custom_date(date_str):
+            try:
+                # Force exact DD.MM.YY match
+                return datetime.strptime(str(date_str).strip(), '%d.%m.%y').date()
+            except:
+                try:
+                    # Fallback just in case
+                    return pd.to_datetime(str(date_str).strip(), dayfirst=True).date()
+                except:
+                    return None
+
+        loc_df_safe['Parsed_Date'] = loc_df_safe['Date'].apply(parse_custom_date)
+        day_locs = loc_df_safe[loc_df_safe['Parsed_Date'] == selected_timeline_date].copy()
+        
         if not day_locs.empty:
-            day_locs['Loc_DT'] = pd.to_datetime(day_locs['Date'] + ' ' + day_locs['Time'], errors='coerce')
+            def parse_custom_dt(row):
+                try:
+                    d_str = str(row['Date']).strip()
+                    t_str = str(row['Time']).strip()
+                    return datetime.strptime(f"{d_str} {t_str}", '%d.%m.%y %H:%M')
+                except:
+                    return pd.NaT
+            
+            day_locs['Loc_DT'] = day_locs.apply(parse_custom_dt, axis=1)
             day_locs = day_locs.dropna(subset=['Loc_DT']).sort_values('Loc_DT')
+            
+            # Filter out manual entry misalignments where Place is just "I" or empty
+            valid_places = day_locs[day_locs['Place'].astype(str).str.strip().str.len() > 1]
+            day_locs = valid_places if not valid_places.empty else day_locs
         
         if not day_logs.empty:
             day_logs['Start_DT'] = pd.to_datetime(day_logs['Date'] + ' ' + day_logs['Start_Time'], errors='coerce')
@@ -1455,8 +1481,9 @@ try:
                     sub_text = f"<br><b>{event['sub']}</b>" if event['sub'] else ""
                     note_text = f"<br><span style='font-size: 13px; color: #666;'>{event['notes']}</span>" if event['notes'] else ""
                     
-                    # --- NEW: Inject Location PIN if exists ---
-                    loc_html = f"<div style='color: #d32f2f; font-size: 13px; font-weight: 500; margin-top: 4px;'>📍 {event['place']}</div>" if event.get('place') else ""
+                    # --- NEW: Safe Location Display Filter ---
+                    place_str = str(event.get('place', '')).strip()
+                    loc_html = f"<div style='color: #d32f2f; font-size: 13px; font-weight: 500; margin-top: 4px;'>📍 {place_str}</div>" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else ""
                     
                     st.markdown(f"""
                     <div style='background-color: white; border-left: 6px solid {border_color}; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'>

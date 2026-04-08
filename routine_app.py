@@ -1331,12 +1331,10 @@ try:
         
         day_logs = log_df[(log_df['Date'] == selected_date_str) & (log_df['End_Time'] != 'RUNNING')].copy()
         
-        # --- FIXED: Smart Location & Movement Parsing ---
         loc_df_safe = loc_df.copy()
         
         def parse_custom_date(date_str):
             try:
-                # Chop off " Mon", " Tue", etc.
                 clean_date = str(date_str).strip().split(' ')[0]
                 return datetime.strptime(clean_date, '%d.%m.%y').date()
             except:
@@ -1349,7 +1347,6 @@ try:
         day_locs = loc_df_safe[loc_df_safe['Parsed_Date'] == selected_timeline_date].copy()
         
         if not day_locs.empty:
-            # 1. Parse timestamps
             def parse_custom_dt(row):
                 try:
                     d_str = str(row['Date']).strip().split(' ')[0]
@@ -1360,7 +1357,6 @@ try:
             
             day_locs['Loc_DT'] = day_locs.apply(parse_custom_dt, axis=1)
             
-            # 2. Aggressive Move/Place Cleaning (Fixing Empty Move columns)
             def parse_loc_row(row):
                 move_raw = str(row['Move']).strip()
                 place_raw = str(row['Place']).strip()
@@ -1374,24 +1370,21 @@ try:
                 elif is_stat:
                     return pd.Series(["- Stationary -", place_raw])
                 else:
-                    # If Move is empty, but Place has value, assume Stationary
                     if place_raw and place_raw.upper() not in ["I", "NAN", "NONE"]:
                         return pd.Series(["- Stationary -", place_raw])
-                    # If Place is empty but Move has something weird, assume Stationary
                     return pd.Series(["- Stationary -", move_raw])
 
             day_locs[['Clean_Move', 'Clean_Place']] = day_locs.apply(parse_loc_row, axis=1)
             day_locs['Move'] = day_locs['Clean_Move']
             day_locs['Place'] = day_locs['Clean_Place']
             
-            # Keep ALL valid rows (both Stationary and Transit)
             def is_valid_row(row):
                 move = str(row['Move']).strip().upper()
                 place = str(row['Place']).strip().upper()
                 if move != "- STATIONARY -": 
-                    return True # It's a transit record, keep it
+                    return True 
                 if len(place) > 1 and place not in ["I", "NAN", "NONE"]: 
-                    return True # It's a valid stationary record
+                    return True 
                 return False
                 
             day_locs = day_locs[day_locs.apply(is_valid_row, axis=1)]
@@ -1413,7 +1406,6 @@ try:
                 current_start = row['Start_DT']
                 current_end = row['End_DT']
                 
-                # --- GAP SLICING & TRANSIT CONSOLIDATION ---
                 if last_end_time and current_start > last_end_time:
                     gap_duration = (current_start - last_end_time).total_seconds() / 60
                     if gap_duration > 0:
@@ -1462,7 +1454,6 @@ try:
                                     'move': ""
                                 })
                             else:
-                                # State Machine: Split gaps intelligently
                                 for _, l_row in locs_in_gap.iterrows():
                                     split_time = l_row['Loc_DT']
                                     new_move = str(l_row['Move']).strip()
@@ -1473,9 +1464,11 @@ try:
                                     
                                     if is_new_stationary:
                                         if not is_curr_stationary:
-                                            # Arriving at destination! Split the transit gap here.
+                                            # Arriving at destination
                                             sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
-                                            if sub_gap_dur >= 1:
+                                            
+                                            # --- FIXED: Log even if duration is 0 mins ---
+                                            if sub_gap_dur >= 0:
                                                 act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else "On the way"
                                                 timeline_events.append({
                                                     'type': 'gap',
@@ -1493,10 +1486,10 @@ try:
                                             curr_move = new_move
                                             transit_modes = []
                                         else:
-                                            # Location update while already stationary
+                                            # Update location while stationary
                                             if new_loc.upper() != curr_loc.upper() and curr_loc != "":
                                                 sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
-                                                if sub_gap_dur >= 1:
+                                                if sub_gap_dur >= 0:
                                                     timeline_events.append({
                                                         'type': 'gap',
                                                         'start': curr_gap_start.strftime('%I:%M %p'),
@@ -1512,11 +1505,13 @@ try:
                                             curr_loc = new_loc
                                             curr_move = new_move
                                             
-                                    else: # New move is Transit (WALK, BIKE, etc.)
+                                    else: 
                                         if is_curr_stationary:
-                                            # Departing from destination! Split the stationary gap here.
+                                            # Departing from destination
                                             sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
-                                            if sub_gap_dur >= 1:
+                                            
+                                            # --- FIXED: Log even if duration is 0 mins ---
+                                            if sub_gap_dur >= 0:
                                                 timeline_events.append({
                                                     'type': 'gap',
                                                     'start': curr_gap_start.strftime('%I:%M %p'),
@@ -1532,14 +1527,12 @@ try:
                                             curr_move = new_move
                                             transit_modes = [new_move]
                                         else:
-                                            # Still in transit, maybe changed vehicle (BIKE -> WALK)
                                             if new_move not in transit_modes:
                                                 transit_modes.append(new_move)
                                             curr_move = new_move
 
-                                # Log remainder of the gap
                                 final_dur = (gap_end_dt - curr_gap_start).total_seconds() / 60
-                                if final_dur >= 1:
+                                if final_dur > 0:
                                     if curr_move.upper() != "- STATIONARY -":
                                         act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else "On the way"
                                     else:
@@ -1557,7 +1550,6 @@ try:
                                         'move': ""
                                     })
                 
-                # --- Task Location Tagging ---
                 current_loc = ""
                 current_move = ""
                 if not day_locs.empty:
@@ -1591,8 +1583,10 @@ try:
                     dur_display = f"{eh}h {em}m"
                 elif eh > 0:
                     dur_display = f"{eh}h"
-                else:
+                elif em > 0:
                     dur_display = f"{em}m"
+                else:
+                    dur_display = "<1m" # --- FIXED: Handle 0 duration beautifully ---
 
                 if event['type'] == 'transition':
                     st.markdown(f"""
@@ -1605,7 +1599,6 @@ try:
                     is_transit_gap = event['activity'].startswith('On the way')
                     
                     if is_transit_gap:
-                        # Render specialized UI for "On the way" (No break button needed)
                         st.markdown(f"""
                         <div style='background-color: #e0f7fa; border-left: 6px solid #00838f; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'>
                             <div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({dur_display})</div>
@@ -1613,7 +1606,6 @@ try:
                         </div>
                         """, unsafe_allow_html=True)
                     else:
-                        # Render normal unlogged gap with Break button
                         col_g1, col_g2 = st.columns([3, 1])
                         place_str = str(event.get('place', '')).strip()
                         is_valid_place = place_str and place_str.upper() not in ["I", "NAN", "NONE"]
@@ -1735,7 +1727,7 @@ try:
         st.link_button("🪪 ID Card Generator", "https://your-id-card-url.streamlit.app", use_container_width=True)
 
     # ==========================================
-    # TAB 7: AI Routine
+    # TAB 7: AI ROUTINE
     # ==========================================
     with tab7:
         st.markdown("<h3 style='text-align: center; color: #555;'>✨ AI Routine Suggestions</h3>", unsafe_allow_html=True)

@@ -7,6 +7,7 @@ from PIL import Image
 import os
 import streamlit.components.v1 as components 
 import plotly.express as px
+import re # Added for parsing allotted Class/Section
 
 # ==========================================
 # 1. SETUP & CONFIGURATION
@@ -68,10 +69,9 @@ def get_inventory_items(only_active=True):
         safe_row = {str(k).strip().lower(): v for k, v in row.items()}
         
         item = str(safe_row.get('active_items', '')).strip()
-        status = str(safe_row.get('status', 'Active')).strip() # Defaults to Active if the column is missing
+        status = str(safe_row.get('status', 'Active')).strip() 
         
         if item and item.lower() != 'nan':
-            # Skip hidden items ONLY if we are requesting the active list for teachers
             if only_active and status.lower() == 'hidden':
                 continue
             valid_items.append(item)
@@ -149,10 +149,7 @@ with st.spinner("Loading School Database..."):
     df_mdm = load_gsheet_data("BPS_Database", "mdm_log")
     df_logs_db = load_gsheet_data("BPS_Distribution_Log", "Sheet1")
     
-    # Get only active items for teachers
     teacher_active_items = get_inventory_items(only_active=True)
-    
-    # Get all items (including hidden) for the admin inventory tabs
     all_master_items = get_inventory_items(only_active=False)
 
 if df_students.empty:
@@ -181,131 +178,166 @@ with tab_entry:
     else:
         distribution_type = st.selectbox("Select Item Category Being Distributed:", teacher_active_items)
         
+        # --- SMART DROPDOWN FILTERING LOGIC ---
+        allotted_class = "All"
+        allotted_section = "All"
+        
+        # Scan the item name to see if it was allotted to a specific Class/Section
+        match = re.search(r'\((Class [^)]+)\)', distribution_type)
+        if match:
+            inner_text = match.group(1) 
+            parts = inner_text.split(" - Sec ")
+            allotted_class = parts[0].replace("Class ", "").strip()
+            if len(parts) > 1:
+                allotted_section = parts[1].strip()
+        # --------------------------------------
+        
         col1, col2 = st.columns(2)
         with col1:
-            classes = sorted(df_students['Class'].astype(str).unique())
-            sel_class = st.selectbox("Select Class", classes)
+            all_classes_in_db = sorted(df_students['Class'].astype(str).unique())
+            
+            # If the item is locked to a specific class, ONLY show that class
+            if allotted_class != "All":
+                classes_to_show = [allotted_class] if allotted_class in all_classes_in_db else []
+            else:
+                classes_to_show = all_classes_in_db
+                
+            sel_class = st.selectbox("Select Class", classes_to_show)
+            
         with col2:
-            available_sections = sorted(df_students[df_students['Class'].astype(str) == sel_class]['Section'].astype(str).unique())
-            sel_section = st.selectbox("Select Section", available_sections)
+            if sel_class:
+                all_sections_in_db = sorted(df_students[df_students['Class'].astype(str) == sel_class]['Section'].astype(str).unique())
+                
+                # If the item is locked to a specific section, ONLY show that section
+                if allotted_section != "All":
+                    sections_to_show = [allotted_section] if allotted_section in all_sections_in_db else []
+                else:
+                    sections_to_show = all_sections_in_db
+            else:
+                sections_to_show = []
+                
+            sel_section = st.selectbox("Select Section", sections_to_show)
 
         st.markdown("---")
         
-        today_str = datetime.now().strftime("%d-%m-%Y") 
-        
-        if not df_mdm.empty and 'Date' in df_mdm.columns and 'Name' in df_mdm.columns:
-            mdm_today = df_mdm[df_mdm['Date'].astype(str) == today_str]
-            present_names_today = mdm_today['Name'].astype(str).str.strip().str.lower().tolist()
-            
-            class_df = df_students[(df_students['Class'].astype(str) == sel_class) & 
-                                   (df_students['Section'].astype(str) == sel_section)]
-            
-            class_df = class_df[class_df['Name'].astype(str).str.strip().str.lower().isin(present_names_today)]
+        if not sel_class or not sel_section:
+            st.warning("Please ensure a valid Class and Section are selected.")
         else:
-            class_df = pd.DataFrame() 
-
-        if class_df.empty:
-            st.warning(f"No students found logged in the MDM App today for Class {sel_class} - Section {sel_section}.")
-        else:
-            st.subheader(f"Present Students: Class {sel_class} ({sel_section})")
+            today_str = datetime.now().strftime("%d-%m-%Y") 
             
-            if 'current_distribution' not in st.session_state:
-                st.session_state.current_distribution = {}
-
-            for index, row in class_df.iterrows():
-                student_name = str(row['Name']).strip()
+            if not df_mdm.empty and 'Date' in df_mdm.columns and 'Name' in df_mdm.columns:
+                mdm_today = df_mdm[df_mdm['Date'].astype(str) == today_str]
+                present_names_today = mdm_today['Name'].astype(str).str.strip().str.lower().tolist()
                 
-                already_received = False
-                received_date = ""
+                class_df = df_students[(df_students['Class'].astype(str) == sel_class) & 
+                                       (df_students['Section'].astype(str) == sel_section)]
                 
-                if not df_logs_db.empty and 'Name' in df_logs_db.columns and 'Item Given' in df_logs_db.columns:
-                    past_records = df_logs_db[
-                        (df_logs_db['Name'].astype(str).str.strip().str.lower() == student_name.lower()) &
-                        (df_logs_db['Item Given'].astype(str).str.strip().str.lower() == distribution_type.strip().lower())
-                    ]
-                    if not past_records.empty:
-                        already_received = True
-                        received_date = past_records.iloc[-1]['Date']
-
-                widget_key = f"{sel_class}_{sel_section}_{row['Roll']}_{student_name}"
+                class_df = class_df[class_df['Name'].astype(str).str.strip().str.lower().isin(present_names_today)]
+            else:
+                class_df = pd.DataFrame() 
+    
+            if class_df.empty:
+                st.warning(f"No students found logged in the MDM App today for Class {sel_class} - Section {sel_section}.")
+            else:
+                st.subheader(f"Present Students: Class {sel_class} ({sel_section})")
                 
-                if already_received:
-                    st.checkbox(f"Roll {row['Roll']}: {student_name} ✅ (Received on {received_date})", 
-                                value=True, disabled=True, key=f"dis_{widget_key}")
-                else:
-                    if widget_key not in st.session_state.current_distribution:
-                        st.session_state.current_distribution[widget_key] = False
-                        
-                    is_checked = st.checkbox(f"Roll {row['Roll']}: {student_name}", key=f"chk_{widget_key}")
+                if 'current_distribution' not in st.session_state:
+                    st.session_state.current_distribution = {}
+    
+                for index, row in class_df.iterrows():
+                    student_name = str(row['Name']).strip()
                     
-                    if is_checked and not st.session_state.current_distribution[widget_key]:
-                        st.session_state.play_beep = True
-                        
-                    st.session_state.current_distribution[widget_key] = is_checked
-
-            if st.session_state.play_beep:
-                components.html(
-                    """
-                    <script>
-                    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                    const oscillator = audioCtx.createOscillator();
-                    oscillator.type = 'sine';
-                    oscillator.frequency.setValueAtTime(800, audioCtx.currentTime); 
-                    oscillator.connect(audioCtx.destination);
-                    oscillator.start();
-                    oscillator.stop(audioCtx.currentTime + 0.1); 
-                    </script>
-                    """, height=0, width=0
-                )
-                st.session_state.play_beep = False 
-
-            st.markdown("<br>", unsafe_allow_html=True)
-            
-            if st.button(f"Submit {distribution_type} Distribution", type="primary"):
-                with st.spinner("Saving logs to Google Sheets..."):
-                    try:
-                        log_sheet = gc.open("BPS_Distribution_Log")
-                        log_ws = log_sheet.sheet1 
-                        
-                        now = datetime.now()
-                        current_date = now.strftime("%d-%m-%Y") 
-                        current_time = now.strftime("%H:%M:%S")
-                        teacher = st.session_state.current_user
-                        
-                        rows_to_append = []
-                        
-                        for index, row in class_df.iterrows():
-                            widget_key = f"{sel_class}_{sel_section}_{row['Roll']}_{row['Name']}"
+                    already_received = False
+                    received_date = ""
+                    
+                    if not df_logs_db.empty and 'Name' in df_logs_db.columns and 'Item Given' in df_logs_db.columns:
+                        past_records = df_logs_db[
+                            (df_logs_db['Name'].astype(str).str.strip().str.lower() == student_name.lower()) &
+                            (df_logs_db['Item Given'].astype(str).str.strip().str.lower() == distribution_type.strip().lower())
+                        ]
+                        if not past_records.empty:
+                            already_received = True
+                            received_date = past_records.iloc[-1]['Date']
+    
+                    widget_key = f"{sel_class}_{sel_section}_{row['Roll']}_{student_name}"
+                    
+                    if already_received:
+                        st.checkbox(f"Roll {row['Roll']}: {student_name} ✅ (Received on {received_date})", 
+                                    value=True, disabled=True, key=f"dis_{widget_key}")
+                    else:
+                        if widget_key not in st.session_state.current_distribution:
+                            st.session_state.current_distribution[widget_key] = False
                             
-                            if st.session_state.current_distribution.get(widget_key, False):
-                                log_row = [
-                                    current_date, 
-                                    current_time, 
-                                    teacher,  
-                                    sel_class, 
-                                    sel_section,
-                                    row['Roll'], 
-                                    row['Name'], 
-                                    distribution_type 
-                                ]
-                                rows_to_append.append(log_row)
+                        is_checked = st.checkbox(f"Roll {row['Roll']}: {student_name}", key=f"chk_{widget_key}")
                         
-                        if rows_to_append:
-                            log_ws.append_rows(rows_to_append)
-                            st.success(f"Successfully logged {len(rows_to_append)} {distribution_type}(s)!")
+                        if is_checked and not st.session_state.current_distribution[widget_key]:
+                            st.session_state.play_beep = True
                             
-                            if 'recent_logs' not in st.session_state:
-                                st.session_state.recent_logs = []
-                            st.session_state.recent_logs.extend(rows_to_append)
+                        st.session_state.current_distribution[widget_key] = is_checked
+    
+                if st.session_state.play_beep:
+                    components.html(
+                        """
+                        <script>
+                        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                        const oscillator = audioCtx.createOscillator();
+                        oscillator.type = 'sine';
+                        oscillator.frequency.setValueAtTime(800, audioCtx.currentTime); 
+                        oscillator.connect(audioCtx.destination);
+                        oscillator.start();
+                        oscillator.stop(audioCtx.currentTime + 0.1); 
+                        </script>
+                        """, height=0, width=0
+                    )
+                    st.session_state.play_beep = False 
+    
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                if st.button(f"Submit {distribution_type} Distribution", type="primary"):
+                    with st.spinner("Saving logs to Google Sheets..."):
+                        try:
+                            log_sheet = gc.open("BPS_Distribution_Log")
+                            log_ws = log_sheet.sheet1 
                             
-                            st.session_state.current_distribution.clear()
-                            st.cache_data.clear() 
-                            st.rerun()
-                        else:
-                            st.warning("No new students were selected. Nothing was saved.")
+                            now = datetime.now()
+                            current_date = now.strftime("%d-%m-%Y") 
+                            current_time = now.strftime("%H:%M:%S")
+                            teacher = st.session_state.current_user
                             
-                    except Exception as e:
-                        st.error(f"Failed to save to Google Sheets: {e}")
+                            rows_to_append = []
+                            
+                            for index, row in class_df.iterrows():
+                                widget_key = f"{sel_class}_{sel_section}_{row['Roll']}_{row['Name']}"
+                                
+                                if st.session_state.current_distribution.get(widget_key, False):
+                                    log_row = [
+                                        current_date, 
+                                        current_time, 
+                                        teacher,  
+                                        sel_class, 
+                                        sel_section,
+                                        row['Roll'], 
+                                        row['Name'], 
+                                        distribution_type 
+                                    ]
+                                    rows_to_append.append(log_row)
+                            
+                            if rows_to_append:
+                                log_ws.append_rows(rows_to_append)
+                                st.success(f"Successfully logged {len(rows_to_append)} {distribution_type}(s)!")
+                                
+                                if 'recent_logs' not in st.session_state:
+                                    st.session_state.recent_logs = []
+                                st.session_state.recent_logs.extend(rows_to_append)
+                                
+                                st.session_state.current_distribution.clear()
+                                st.cache_data.clear() 
+                                st.rerun()
+                            else:
+                                st.warning("No new students were selected. Nothing was saved.")
+                                
+                        except Exception as e:
+                            st.error(f"Failed to save to Google Sheets: {e}")
 
 # --- SUMMARY TAB ---
 with tab_summary:
@@ -328,7 +360,6 @@ if st.session_state.current_role == "admin":
         st.header("Receive New Inventory")
         st.write("Log newly arrived stock here. Select an existing item or add a completely new one.")
         
-        # Admin can receive stock for ALL items, even ones hidden from teachers
         item_options = all_master_items + ["➕ Add New Item"]
         
         recv_item_selection = st.selectbox("Select Item Received:", item_options)
@@ -391,7 +422,7 @@ if st.session_state.current_role == "admin":
                             ws_settings.update_cell(next_row, 1, final_item)
                             ws_settings.update_cell(next_row, 2, formatted_date)
                             ws_settings.update_cell(next_row, 3, recv_qty)
-                            ws_settings.update_cell(next_row, 4, "Active") # New items are set to Active automatically
+                            ws_settings.update_cell(next_row, 4, "Active") 
                             st.success(f"Successfully added NEW item '{final_item}' with a starting quantity of {recv_qty}!")
 
                         st.cache_data.clear()
@@ -434,8 +465,6 @@ if st.session_state.current_role == "admin":
                     total_dist = 0
                     
                 remaining = total_recv - total_dist
-                
-                # Fetch status to display on dashboard
                 status = str(safe_row.get('status', 'Active')).strip()
                 display_status = "👁️ Active" if status.lower() != 'hidden' else "🙈 Hidden"
                 
@@ -496,7 +525,6 @@ if st.session_state.current_role == "admin":
         st.write("Manage what items are currently visible to teachers in the Distribute Items tab.")
         st.info("💡 Deselecting an item here only hides it from the teachers. It remains safely in your Master Inventory and Dashboard!")
         
-        # We load ALL master items so the Admin can see everything that exists in the database
         new_active_items = st.multiselect(
             "Select items that teachers are allowed to distribute today:", 
             all_master_items, 
@@ -508,20 +536,18 @@ if st.session_state.current_role == "admin":
                 ws_settings = gc.open("BPS_Distribution_Log").worksheet("settings")
                 
                 with st.spinner("Updating status in Google Sheets..."):
-                    # We safely update ONLY Column D (Status) without touching Col A, B, or C
                     col_a_values = ws_settings.col_values(1)
                     
                     status_updates = []
                     for i, item in enumerate(col_a_values):
                         if i == 0:
-                            status_updates.append(["Status"]) # Write Header for Column D
+                            status_updates.append(["Status"]) 
                         else:
                             if str(item).strip() in new_active_items:
                                 status_updates.append(["Active"])
                             else:
                                 status_updates.append(["Hidden"])
                     
-                    # Update Column D (which is Column 4) starting at D1
                     ws_settings.update(values=status_updates, range_name="D1")
                     
                 st.success("Settings saved successfully! The app display has been updated.")

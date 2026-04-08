@@ -185,6 +185,29 @@ def get_holidays():
     df.columns = ["Date", "Occasion"]
     return df
 
+# --- NEW: Location Data Fetcher ---
+@st.cache_data(ttl=300)
+def get_location_data():
+    client = init_connection()
+    try:
+        ss = client.open("sk_money_location")
+    except Exception as e:
+        return pd.DataFrame(columns=["Date", "Time", "Move", "Place", "People", "Remark"])
+        
+    try:
+        sheet = ss.worksheet("LOCATION_DATA")
+    except gspread.exceptions.WorksheetNotFound:
+        sheet = ss.add_worksheet(title="LOCATION_DATA", rows="1000", cols="6")
+        sheet.append_row(["Date", "Time", "Move", "Place", "People", "Remark"])
+    data = sheet.get_all_values()
+    if len(data) <= 1:
+        return pd.DataFrame(columns=["Date", "Time", "Move", "Place", "People", "Remark"])
+    df = pd.DataFrame(data[1:], columns=data[0])
+    while df.shape[1] < 6: df[df.shape[1]] = ""
+    df = df.iloc[:, :6]
+    df.columns = ["Date", "Time", "Move", "Place", "People", "Remark"]
+    return df
+
 def parse_duration_to_minutes(dur_str):
     try:
         h, m = map(int, str(dur_str).strip().split(':'))
@@ -217,6 +240,7 @@ try:
     water_df = get_water_log()
     proj_df = get_project_tasks()
     holidays_df = get_holidays()
+    loc_df = get_location_data() # Load Location Data
     
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist_timezone)
@@ -257,6 +281,7 @@ try:
                 get_water_log.clear()
                 get_project_tasks.clear()
                 get_holidays.clear()
+                get_location_data.clear() # Clear location cache
                 st.toast("✅ Force Synced with Google Sheets!")
                 time.sleep(0.5)
                 st.rerun()
@@ -1307,6 +1332,12 @@ try:
         
         day_logs = log_df[(log_df['Date'] == selected_date_str) & (log_df['End_Time'] != 'RUNNING')].copy()
         
+        # --- NEW: Process Location Data for Timeline ---
+        day_locs = loc_df[loc_df['Date'] == selected_date_str].copy()
+        if not day_locs.empty:
+            day_locs['Loc_DT'] = pd.to_datetime(day_locs['Date'] + ' ' + day_locs['Time'], errors='coerce')
+            day_locs = day_locs.dropna(subset=['Loc_DT']).sort_values('Loc_DT')
+        
         if not day_logs.empty:
             day_logs['Start_DT'] = pd.to_datetime(day_logs['Date'] + ' ' + day_logs['Start_Time'], errors='coerce')
             day_logs['End_DT'] = pd.to_datetime(day_logs['Date'] + ' ' + day_logs['End_Time'], errors='coerce')
@@ -1323,6 +1354,15 @@ try:
                 current_start = row['Start_DT']
                 current_end = row['End_DT']
                 
+                # Extract the last known location for this activity
+                current_loc = ""
+                if not day_locs.empty:
+                    past_locs = day_locs[day_locs['Loc_DT'] <= current_start]
+                    if not past_locs.empty:
+                        current_loc = past_locs.iloc[-1]['Place']
+                    else:
+                        current_loc = day_locs.iloc[0]['Place']
+                
                 if last_end_time and current_start > last_end_time:
                     gap_duration = (current_start - last_end_time).total_seconds() / 60
                     if gap_duration > 0:
@@ -1334,7 +1374,8 @@ try:
                                 'duration': int(gap_duration),
                                 'activity': 'Transition',
                                 'sub': '',
-                                'notes': ''
+                                'notes': '',
+                                'place': ''
                             })
                         else: 
                             timeline_events.append({
@@ -1344,7 +1385,8 @@ try:
                                 'duration': int(gap_duration),
                                 'activity': 'Unlogged Time / Break',
                                 'sub': '',
-                                'notes': ''
+                                'notes': '',
+                                'place': ''
                             })
                 
                 dur_mins = (current_end - current_start).total_seconds() / 60
@@ -1355,7 +1397,8 @@ try:
                     'duration': int(dur_mins),
                     'activity': str(row['Activity']).upper(),
                     'sub': str(row['Sub_Activities']).title(),
-                    'notes': str(row['Notes'])
+                    'notes': str(row['Notes']),
+                    'place': str(current_loc).strip()
                 })
                 
                 if last_end_time is None or current_end > last_end_time:
@@ -1412,11 +1455,15 @@ try:
                     sub_text = f"<br><b>{event['sub']}</b>" if event['sub'] else ""
                     note_text = f"<br><span style='font-size: 13px; color: #666;'>{event['notes']}</span>" if event['notes'] else ""
                     
+                    # --- NEW: Inject Location PIN if exists ---
+                    loc_html = f"<div style='color: #d32f2f; font-size: 13px; font-weight: 500; margin-top: 4px;'>📍 {event['place']}</div>" if event.get('place') else ""
+                    
                     st.markdown(f"""
                     <div style='background-color: white; border-left: 6px solid {border_color}; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'>
                         <div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({dur_display})</div>
                         <div style='color: {border_color}; font-weight: bold; font-size: 16px;'>{event['activity']}</div>
                         <div style='color: #333;'>{sub_text}{note_text}</div>
+                        {loc_html}
                     </div>
                     """, unsafe_allow_html=True)
                     

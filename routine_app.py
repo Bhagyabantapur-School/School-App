@@ -284,10 +284,19 @@ try:
                 end_str = str(row['End_Time']).strip()
                 
                 start_t = datetime.strptime(start_str, '%H:%M').time()
-                if end_str == '0:00': end_t = datetime.strptime('23:59:59', '%H:%M:%S').time()
-                else: end_t = datetime.strptime(end_str, '%H:%M').time()
+                if end_str in ['0:00', '00:00', '24:00']: 
+                    end_t = datetime.strptime('23:59:59', '%H:%M:%S').time()
+                else: 
+                    end_t = datetime.strptime(end_str, '%H:%M').time()
 
-                if start_t <= current_time <= end_t:
+                # --- NEW: Smart Midnight Crossover Check ---
+                if start_t <= end_t:
+                    is_current = start_t <= current_time <= end_t
+                else:
+                    # Activity spans across midnight (e.g. 22:30 to 05:30)
+                    is_current = current_time >= start_t or current_time <= end_t
+
+                if is_current:
                     scheduled_activity = str(row['Activity']).strip().upper()
                     scheduled_activity_start = start_t
                     scheduled_sub_activities = str(row.get('Sub_Activities', '')).strip()
@@ -348,6 +357,11 @@ try:
         if current_activity_start and not flex_on:
             dt_start = datetime.combine(now.date(), current_activity_start)
             dt_start = ist_timezone.localize(dt_start)
+            
+            # --- NEW: Adjust start date backward if activity started yesterday ---
+            if current_time < current_activity_start:
+                dt_start -= timedelta(days=1)
+                
             elapsed = now - dt_start
             eh, erem = divmod(int(elapsed.total_seconds()), 3600)
             em = erem // 60
@@ -586,7 +600,6 @@ try:
                     current_state = "Focus" if cycle_minute < 25 else "Break"
                     task_id = f"task_{sheet_row}"
                     
-                    # Trigger double-beep if state transitions (e.g. Focus -> Break)
                     if task_id in st.session_state.pomodoro_state:
                         if st.session_state.pomodoro_state[task_id] != current_state:
                             components.html("""

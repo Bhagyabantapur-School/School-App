@@ -1480,7 +1480,7 @@ try:
                         transit_modes = [curr_move] if curr_move.upper() != "- STATIONARY -" else []
                         
                         if locs_in_gap.empty:
-                            act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else "Unlogged Time / Break"
+                            act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else ("Quick Stop" if gap_duration < 5 else "Unlogged Time / Break")
                             timeline_events.append({
                                 'type': 'gap',
                                 'start': gap_start_dt.strftime('%I:%M %p'),
@@ -1528,12 +1528,13 @@ try:
                                         if new_loc.upper() != curr_loc.upper() and curr_loc != "":
                                             sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
                                             if sub_gap_dur >= 0:
+                                                act_label = "Quick Stop" if sub_gap_dur < 5 else "Unlogged Time / Break"
                                                 timeline_events.append({
                                                     'type': 'gap',
                                                     'start': curr_gap_start.strftime('%I:%M %p'),
                                                     'end': split_time.strftime('%I:%M %p'),
                                                     'duration': int(sub_gap_dur),
-                                                    'activity': 'Unlogged Time / Break',
+                                                    'activity': act_label,
                                                     'sub': '',
                                                     'notes': '',
                                                     'place': str(curr_loc).strip(),
@@ -1548,12 +1549,13 @@ try:
                                         # Departing from destination! Split the stationary gap here.
                                         sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
                                         if sub_gap_dur >= 0:
+                                            act_label = "Quick Stop" if sub_gap_dur < 5 else "Unlogged Time / Break"
                                             timeline_events.append({
                                                 'type': 'gap',
                                                 'start': curr_gap_start.strftime('%I:%M %p'),
                                                 'end': split_time.strftime('%I:%M %p'),
                                                 'duration': int(sub_gap_dur),
-                                                'activity': 'Unlogged Time / Break',
+                                                'activity': act_label,
                                                 'sub': '',
                                                 'notes': '',
                                                 'place': str(curr_loc).strip(),
@@ -1574,7 +1576,7 @@ try:
                                 if curr_move.upper() != "- STATIONARY -":
                                     act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else "On the way"
                                 else:
-                                    act_label = 'Unlogged Time / Break'
+                                    act_label = "Quick Stop" if final_dur < 5 else "Unlogged Time / Break"
                                     
                                 timeline_events.append({
                                     'type': 'gap',
@@ -1637,17 +1639,28 @@ try:
                 
             elif event['type'] == 'gap':
                 is_transit_gap = event['activity'].startswith('On the way')
+                is_quick_stop = event['activity'] == 'Quick Stop'
                 
                 if is_transit_gap:
-                    # Render specialized UI for "On the way" (No break button needed)
                     st.markdown(f"""
                     <div style='background-color: #e0f7fa; border-left: 6px solid #00838f; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'>
                         <div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({dur_display})</div>
                         <div style='color: #00838f; font-weight: bold; font-size: 16px;'>🛣️ {event['activity']}</div>
                     </div>
                     """, unsafe_allow_html=True)
+                elif is_quick_stop:
+                    place_str = str(event.get('place', '')).strip()
+                    loc_html_gap = f"<div style='color: #0097a7; font-size: 14px; font-weight: 500; margin-top: 4px;'>📍 {place_str}</div>" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else ""
+
+                    st.markdown(f"""
+                    <div style='background-color: #e0f2f1; border-left: 6px solid #00acc1; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'>
+                        <div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({dur_display})</div>
+                        <div style='color: #00acc1; font-weight: bold; font-size: 16px;'>🛑 Quick Stop</div>
+                        {loc_html_gap}
+                    </div>
+                    """, unsafe_allow_html=True)
                 else:
-                    # Render normal unlogged gap with Break button
+                    # Normal unlogged gap with Break button
                     col_g1, col_g2 = st.columns([3, 1])
                     place_str = str(event.get('place', '')).strip()
                     is_valid_place = place_str and place_str.upper() not in ["I", "NAN", "NONE"]
@@ -1717,8 +1730,8 @@ try:
         st.markdown("<h4 style='text-align: center; color: #555;'>📊 Daily Summary</h4>", unsafe_allow_html=True)
         
         total_tracked = sum(e['duration'] for e in timeline_events if e['type'] == 'task')
-        total_gap = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and not e['activity'].startswith('On the way'))
-        total_transit = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and e['activity'].startswith('On the way'))
+        total_gap = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and not e['activity'].startswith('On the way') and e['activity'] != 'Quick Stop')
+        total_transit = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and (e['activity'].startswith('On the way') or e['activity'] == 'Quick Stop'))
         
         col_s1, col_s2, col_s3 = st.columns(3)
         with col_s1:
@@ -1729,7 +1742,7 @@ try:
             st.metric(label="Total Unlogged Time", value=f"{int(gh)}h {int(gm)}m")
         with col_s3:
             trh, trm = divmod(total_transit, 60)
-            st.metric(label="Total Transit Time", value=f"{int(trh)}h {int(trm)}m")
+            st.metric(label="Total Transit & Stops", value=f"{int(trh)}h {int(trm)}m")
             
         category_totals = {}
         for e in timeline_events:
@@ -1739,7 +1752,7 @@ try:
         
         # Add transit to categories
         if total_transit > 0:
-            category_totals['TRANSIT'] = total_transit
+            category_totals['TRANSIT & STOPS'] = total_transit
             
         if category_totals:
             st.markdown("<h5 style='color: #555; margin-top: 15px;'>Time by Category</h5>", unsafe_allow_html=True)

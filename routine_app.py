@@ -232,6 +232,21 @@ def get_last_done_str(sub_task, log_df, now):
     elif diff.seconds >= 60: return f"{diff.seconds // 60}m ago"
     else: return "Just now"
 
+# --- GLOBAL PLACE CATEGORIZER ---
+def get_short_stop_label(place):
+    p = str(place).upper()
+    if "HOME" in p:
+        return "🏠 Home Base"
+    if "KARIM" in p: 
+        return "🔑 Key Drop / Pickup"
+    if any(keyword in p for keyword in ["FRUIT", "SHOP", "STORE", "MARKET", "MALL"]): 
+        return "🛒 Quick Errand"
+    if any(keyword in p for keyword in ["BUS", "STAND", "STATION", "STOP"]): 
+        return "🚏 Transit Wait"
+    if any(keyword in p for keyword in ["SCHOOL", "MADRASA"]):
+        return "🏫 School / Education"
+    return "📍 General Visit"
+
 try:
     df = get_routine_data()
     log_df = get_activity_log() 
@@ -259,7 +274,7 @@ try:
             </div>
         """, unsafe_allow_html=True)
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["⏱️ Live", "📅 Sched", "💧 Water", "📊 Proj", "⏳ Time", "🔗 Hub", "✨ AI Routine"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["⏱️ Live", "📅 Sched", "💧 Water", "📊 Proj", "⏳ Time", "🔗 Hub", "✨ AI", "📍 Places"])
 
     # ==========================================
     # TAB 1: LIVE DASHBOARD
@@ -1331,19 +1346,15 @@ try:
         
         day_logs = log_df[(log_df['Date'] == selected_date_str) & (log_df['End_Time'] != 'RUNNING')].copy()
         
-        # Ensure day_logs is initialized properly to act as the timeline skeleton
         if day_logs.empty:
             day_logs = pd.DataFrame(columns=['Date', 'Start_Time', 'End_Time', 'Duration', 'Activity', 'Sub_Activities', 'check_list', 'Notes', 'Start_DT', 'End_DT'])
         else:
             day_logs['Start_DT'] = pd.to_datetime(day_logs['Date'] + ' ' + day_logs['Start_Time'], errors='coerce')
             day_logs['End_DT'] = pd.to_datetime(day_logs['Date'] + ' ' + day_logs['End_Time'], errors='coerce')
-            
             mask = day_logs['End_DT'] < day_logs['Start_DT']
             day_logs.loc[mask, 'End_DT'] = day_logs.loc[mask, 'End_DT'] + pd.Timedelta(days=1)
-            
             day_logs = day_logs.sort_values('Start_DT').dropna(subset=['Start_DT', 'End_DT'])
 
-        # Inject end marker to force gap processing until NOW
         if selected_date_str == today_str:
             end_marker_dt = pd.to_datetime(now.strftime('%Y-%m-%d %H:%M'))
         else:
@@ -1363,12 +1374,10 @@ try:
         day_logs = pd.concat([day_logs, dummy_row], ignore_index=True)
         day_logs = day_logs.sort_values('Start_DT')
 
-        # --- SMART LOCATION & TRANSIT PARSING ---
         loc_df_safe = loc_df.copy()
         
         def parse_custom_date(date_str):
             try:
-                # Chop off " Mon", " Tue", etc.
                 clean_date = str(date_str).strip().split(' ')[0]
                 return datetime.strptime(clean_date, '%d.%m.%y').date()
             except:
@@ -1381,7 +1390,6 @@ try:
         day_locs = loc_df_safe[loc_df_safe['Parsed_Date'] == selected_timeline_date].copy()
         
         if not day_locs.empty:
-            # 1. Parse timestamps
             def parse_custom_dt(row):
                 try:
                     d_str = str(row['Date']).strip().split(' ')[0]
@@ -1392,7 +1400,6 @@ try:
             
             day_locs['Loc_DT'] = day_locs.apply(parse_custom_dt, axis=1)
             
-            # 2. Aggressive Move/Place Cleaning (Fixing Empty Move columns)
             def parse_loc_row(row):
                 move_raw = str(row['Move']).strip()
                 place_raw = str(row['Place']).strip()
@@ -1406,30 +1413,26 @@ try:
                 elif is_stat:
                     return pd.Series(["- Stationary -", place_raw])
                 else:
-                    # If Move is empty, but Place has value, assume Stationary
                     if place_raw and place_raw.upper() not in ["I", "NAN", "NONE"]:
                         return pd.Series(["- Stationary -", place_raw])
-                    # If Place is empty but Move has something weird, assume Stationary
                     return pd.Series(["- Stationary -", move_raw])
 
             day_locs[['Clean_Move', 'Clean_Place']] = day_locs.apply(parse_loc_row, axis=1)
             day_locs['Move'] = day_locs['Clean_Move']
             day_locs['Place'] = day_locs['Clean_Place']
             
-            # Keep ALL valid rows (both Stationary and Transit)
             def is_valid_row(row):
                 move = str(row['Move']).strip().upper()
                 place = str(row['Place']).strip().upper()
                 if move != "- STATIONARY -": 
-                    return True # It's a transit record, keep it
+                    return True 
                 if len(place) > 1 and place not in ["I", "NAN", "NONE"]: 
-                    return True # It's a valid stationary record
+                    return True 
                 return False
                 
             day_locs = day_locs[day_locs.apply(is_valid_row, axis=1)]
             day_locs = day_locs.dropna(subset=['Loc_DT']).sort_values('Loc_DT')
         
-        # Start timeline at 05:00 AM or earliest location ping, whichever is earlier.
         start_time_limit = pd.to_datetime(selected_date_str + ' 05:00')
         if not day_locs.empty and day_locs['Loc_DT'].min() < start_time_limit:
             start_time_limit = day_locs['Loc_DT'].min()
@@ -1444,7 +1447,6 @@ try:
             current_start = row['Start_DT']
             current_end = row['End_DT']
             
-            # --- GAP SLICING & TRANSIT CONSOLIDATION ---
             if last_end_time and current_start > last_end_time:
                 gap_duration = (current_start - last_end_time).total_seconds() / 60
                 if gap_duration > 0:
@@ -1480,7 +1482,10 @@ try:
                         transit_modes = [curr_move] if curr_move.upper() != "- STATIONARY -" else []
                         
                         if locs_in_gap.empty:
-                            act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else ("Quick Stop" if gap_duration < 5 else "Unlogged Time / Break")
+                            if transit_modes:
+                                act_label = f"On the way ({' + '.join(transit_modes)})"
+                            else:
+                                act_label = get_short_stop_label(curr_loc) if gap_duration < 5 else "Unlogged Time / Break"
                             timeline_events.append({
                                 'type': 'gap',
                                 'start': gap_start_dt.strftime('%I:%M %p'),
@@ -1493,7 +1498,6 @@ try:
                                 'move': ""
                             })
                         else:
-                            # State Machine: Split gaps intelligently
                             for _, l_row in locs_in_gap.iterrows():
                                 split_time = l_row['Loc_DT']
                                 new_move = str(l_row['Move']).strip()
@@ -1504,7 +1508,6 @@ try:
                                 
                                 if is_new_stationary:
                                     if not is_curr_stationary:
-                                        # Arriving at destination! Split the transit gap here.
                                         sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
                                         if sub_gap_dur >= 0:
                                             act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else "On the way"
@@ -1524,11 +1527,10 @@ try:
                                         curr_move = new_move
                                         transit_modes = []
                                     else:
-                                        # Location update while already stationary
                                         if new_loc.upper() != curr_loc.upper() and curr_loc != "":
                                             sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
                                             if sub_gap_dur >= 0:
-                                                act_label = "Quick Stop" if sub_gap_dur < 5 else "Unlogged Time / Break"
+                                                act_label = get_short_stop_label(curr_loc) if sub_gap_dur < 5 else "Unlogged Time / Break"
                                                 timeline_events.append({
                                                     'type': 'gap',
                                                     'start': curr_gap_start.strftime('%I:%M %p'),
@@ -1544,12 +1546,11 @@ try:
                                         curr_loc = new_loc
                                         curr_move = new_move
                                         
-                                else: # New move is Transit (WALK, BIKE, etc.)
+                                else: 
                                     if is_curr_stationary:
-                                        # Departing from destination! Split the stationary gap here.
                                         sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
                                         if sub_gap_dur >= 0:
-                                            act_label = "Quick Stop" if sub_gap_dur < 5 else "Unlogged Time / Break"
+                                            act_label = get_short_stop_label(curr_loc) if sub_gap_dur < 5 else "Unlogged Time / Break"
                                             timeline_events.append({
                                                 'type': 'gap',
                                                 'start': curr_gap_start.strftime('%I:%M %p'),
@@ -1565,18 +1566,16 @@ try:
                                         curr_move = new_move
                                         transit_modes = [new_move]
                                     else:
-                                        # Still in transit, maybe changed vehicle (BIKE -> WALK)
                                         if new_move not in transit_modes:
                                             transit_modes.append(new_move)
                                         curr_move = new_move
 
-                            # Log remainder of the gap
                             final_dur = (gap_end_dt - curr_gap_start).total_seconds() / 60
                             if final_dur > 0:
                                 if curr_move.upper() != "- STATIONARY -":
                                     act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else "On the way"
                                 else:
-                                    act_label = "Quick Stop" if final_dur < 5 else "Unlogged Time / Break"
+                                    act_label = get_short_stop_label(curr_loc) if final_dur < 5 else "Unlogged Time / Break"
                                     
                                 timeline_events.append({
                                     'type': 'gap',
@@ -1590,7 +1589,6 @@ try:
                                     'move': ""
                                 })
             
-            # --- Task Location Tagging ---
             current_loc = ""
             current_move = ""
             if not day_locs.empty:
@@ -1639,7 +1637,7 @@ try:
                 
             elif event['type'] == 'gap':
                 is_transit_gap = event['activity'].startswith('On the way')
-                is_quick_stop = event['activity'] == 'Quick Stop'
+                is_short_stop = event['duration'] < 5 and not is_transit_gap
                 
                 if is_transit_gap:
                     st.markdown(f"""
@@ -1648,19 +1646,18 @@ try:
                         <div style='color: #00838f; font-weight: bold; font-size: 16px;'>🛣️ {event['activity']}</div>
                     </div>
                     """, unsafe_allow_html=True)
-                elif is_quick_stop:
+                elif is_short_stop:
                     place_str = str(event.get('place', '')).strip()
                     loc_html_gap = f"<div style='color: #0097a7; font-size: 14px; font-weight: 500; margin-top: 4px;'>📍 {place_str}</div>" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else ""
 
                     st.markdown(f"""
                     <div style='background-color: #e0f2f1; border-left: 6px solid #00acc1; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'>
                         <div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({dur_display})</div>
-                        <div style='color: #00acc1; font-weight: bold; font-size: 16px;'>🛑 Quick Stop</div>
+                        <div style='color: #00acc1; font-weight: bold; font-size: 16px;'>{event['activity']}</div>
                         {loc_html_gap}
                     </div>
                     """, unsafe_allow_html=True)
                 else:
-                    # Normal unlogged gap with Break button
                     col_g1, col_g2 = st.columns([3, 1])
                     place_str = str(event.get('place', '')).strip()
                     is_valid_place = place_str and place_str.upper() not in ["I", "NAN", "NONE"]
@@ -1730,8 +1727,9 @@ try:
         st.markdown("<h4 style='text-align: center; color: #555;'>📊 Daily Summary</h4>", unsafe_allow_html=True)
         
         total_tracked = sum(e['duration'] for e in timeline_events if e['type'] == 'task')
-        total_gap = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and not e['activity'].startswith('On the way') and e['activity'] != 'Quick Stop')
-        total_transit = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and (e['activity'].startswith('On the way') or e['activity'] == 'Quick Stop'))
+        
+        total_gap = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and e['activity'] == 'Unlogged Time / Break')
+        total_transit = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and e['activity'] != 'Unlogged Time / Break')
         
         col_s1, col_s2, col_s3 = st.columns(3)
         with col_s1:
@@ -1750,7 +1748,6 @@ try:
                 cat = e['activity']
                 category_totals[cat] = category_totals.get(cat, 0) + e['duration']
         
-        # Add transit to categories
         if total_transit > 0:
             category_totals['TRANSIT & STOPS'] = total_transit
             
@@ -1765,7 +1762,7 @@ try:
                 col_idx = idx % 4 if len(cat_df) >= 4 else idx
                 with cat_cols[col_idx]:
                     st.markdown(f"<div style='background-color:#f0f2f6; padding:10px; border-radius:8px; text-align:center; margin-bottom:10px;'><b style='color:#333;'>{row['Category']}</b><br><span style='color:#0068c9;'>{int(ch)}h {int(cm)}m</span></div>", unsafe_allow_html=True)
-                        
+
     # ==========================================
     # TAB 6: APP HUB
     # ==========================================
@@ -1787,10 +1784,8 @@ try:
 
         completed_logs = log_df[log_df['End_Time'] != 'RUNNING'].copy()
         if not completed_logs.empty:
-            # 1. Calculate actual duration in minutes
             completed_logs['Mins'] = completed_logs['Duration'].apply(parse_duration_to_minutes)
 
-            # 2. Convert start time to minutes from midnight
             def time_to_mins(t_str):
                 try:
                     h, m = map(int, t_str.split(':'))
@@ -1799,7 +1794,6 @@ try:
                     return 0
             completed_logs['Start_Mins'] = completed_logs['Start_Time'].apply(time_to_mins)
 
-            # 3. Aggregate data: average start time and average daily duration
             unique_days = completed_logs['Date'].nunique()
             if unique_days == 0: unique_days = 1
 
@@ -1809,10 +1803,7 @@ try:
             }).reset_index()
 
             suggestion_df['Avg_Daily_Mins'] = (suggestion_df['Mins'] / unique_days).astype(int)
-
-            # Filter out tiny anomalies
             suggestion_df = suggestion_df[suggestion_df['Avg_Daily_Mins'] >= 10]
-
             suggestion_df = suggestion_df.sort_values('Start_Mins')
 
             def mins_to_time(m):
@@ -1822,7 +1813,6 @@ try:
                 return f"{h:02d}:{mins:02d}"
 
             suggestion_df['Suggested_Start'] = suggestion_df['Start_Mins'].apply(mins_to_time)
-
             suggestion_df['Suggested_End'] = (suggestion_df['Start_Mins'] + suggestion_df['Avg_Daily_Mins']).apply(mins_to_time)
 
             def format_dur(m):
@@ -1839,7 +1829,6 @@ try:
 
             st.markdown("#### 🎯 Your Data-Driven Routine")
             st.info("💡 **How this works:** The app analyzed your past activity logs. It calculated the **median time** you usually start a task, and the **average time** you spend on it per day, to build this hyper-realistic routine.")
-
             st.dataframe(display_df, use_container_width=True, hide_index=True)
 
             st.markdown("#### ⚖️ Recommended Time Balance")
@@ -1847,9 +1836,86 @@ try:
             fig.update_traces(textposition='inside', textinfo='percent+label')
             fig.update_layout(margin=dict(l=0, r=0, t=30, b=0), showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
-
         else:
             st.info("Not enough data yet! Keep logging your activities to get smart routine suggestions.")
+
+    # ==========================================
+    # TAB 8: PLACES LOG
+    # ==========================================
+    with tab8:
+        st.markdown("<h3 style='text-align: center; color: #555;'>📍 Visited Places Database</h3>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #888;'>Auto-generate a log of all places you've visited, grouped by purpose.</p>", unsafe_allow_html=True)
+        
+        if st.button("🔄 Generate & Sync to Google Sheets", type="primary", use_container_width=True):
+            with st.spinner("Analyzing location history and syncing..."):
+                raw_loc = get_location_data()
+                
+                valid_visits = []
+                for _, row in raw_loc.iterrows():
+                    move_raw = str(row.get('Move', '')).strip()
+                    place_raw = str(row.get('Place', '')).strip()
+                    date_raw = str(row.get('Date', '')).strip()
+                    time_raw = str(row.get('Time', '')).strip()
+                    
+                    # 1. Skip Transit
+                    transit_keywords = ['BIKE', 'WALK', 'TOTO', 'AUTO', 'BUS', 'CAR', 'TRAIN', 'CYCLE', 'SCOOTER', 'VAN']
+                    if any(k in move_raw.upper() for k in transit_keywords):
+                        continue
+                        
+                    # 2. Extract Place properly (Handling blank Move bugs)
+                    actual_place = place_raw
+                    if actual_place == "" or actual_place.upper() in ["I", "NAN", "NONE"]:
+                        actual_place = move_raw
+                        
+                    if not actual_place or actual_place.upper() in ["I", "NAN", "NONE", "- STATIONARY -"]:
+                        continue
+                        
+                    # 3. Clean Date
+                    clean_date = date_raw.split(' ')[0] if ' ' in date_raw else date_raw
+                    dt_str = f"{clean_date} {time_raw}"
+                    
+                    # 4. Determine Purpose
+                    purpose = get_short_stop_label(actual_place)
+                    
+                    # Allow manual Remark to act as purpose if it exists
+                    remark_raw = str(row.get('Remark', '')).strip()
+                    ignore_remarks = ["I", "NAN", "NONE", "LOGGED ARRIVAL", "QUICK HOME LOG", "UPDATE DETAILS LATER"]
+                    if remark_raw and remark_raw.upper() not in ignore_remarks:
+                        purpose = remark_raw
+                        
+                    valid_visits.append({
+                        "Place": actual_place,
+                        "Purpose": purpose,
+                        "Visit_DateTime": dt_str
+                    })
+                    
+                if valid_visits:
+                    v_df = pd.DataFrame(valid_visits)
+                    
+                    # Group by Place and Purpose, append times
+                    grouped = v_df.groupby(['Place', 'Purpose'])['Visit_DateTime'].apply(
+                        lambda x: '\n'.join(list(dict.fromkeys(x)))
+                    ).reset_index()
+                    
+                    # Sync to Sheets
+                    try:
+                        client = init_connection()
+                        ss = client.open("sk_money_location")
+                        try:
+                            ws = ss.worksheet("VISITED_PLACES")
+                        except gspread.exceptions.WorksheetNotFound:
+                            ws = ss.add_worksheet(title="VISITED_PLACES", rows="1000", cols="3")
+                            
+                        upload_data = [["Place", "Purpose", "Visit Dates & Times"]] + grouped.values.tolist()
+                        ws.clear()
+                        ws.update(values=upload_data, range_name="A1")
+                        
+                        st.success("✅ 'VISITED_PLACES' tab successfully created/updated in your Google Sheet!")
+                        st.dataframe(grouped, use_container_width=True, hide_index=True)
+                    except Exception as e:
+                        st.error(f"Failed to write to Google Sheets: {e}")
+                else:
+                    st.info("No stationary places found to log.")
 
 except Exception as e:
     st.error(f"System Error: {e}")

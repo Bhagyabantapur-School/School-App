@@ -207,6 +207,20 @@ def get_location_data():
     df.columns = ["Date", "Time", "Move", "Place", "People", "Remark"]
     return df
 
+@st.cache_data(ttl=300)
+def get_visited_places():
+    client = init_connection()
+    try:
+        ss = client.open("sk_money_location")
+        sheet = ss.worksheet("VISITED_PLACES")
+        data = sheet.get_all_values()
+        if len(data) <= 1:
+            return pd.DataFrame(columns=["Place", "Purpose"])
+        df = pd.DataFrame(data[1:], columns=data[0])
+        return df
+    except Exception as e:
+        return pd.DataFrame(columns=["Place", "Purpose"])
+
 def parse_duration_to_minutes(dur_str):
     try:
         h, m = map(int, str(dur_str).strip().split(':'))
@@ -255,6 +269,7 @@ try:
     proj_df = get_project_tasks()
     holidays_df = get_holidays()
     loc_df = get_location_data() 
+    visited_places_df = get_visited_places()
     
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist_timezone)
@@ -296,6 +311,7 @@ try:
                 get_project_tasks.clear()
                 get_holidays.clear()
                 get_location_data.clear() 
+                get_visited_places.clear()
                 st.toast("✅ Force Synced with Google Sheets!")
                 time.sleep(0.5)
                 st.rerun()
@@ -1341,6 +1357,23 @@ try:
         st.markdown("<h3 style='text-align: center; color: #555;'>⏳ Daily Activity Timeline</h3>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #888;'>Audit your day to find unlogged time and gaps.</p>", unsafe_allow_html=True)
         
+        # --- NEW HELPER: Fetch Gap Label based on VISITED_PLACES ---
+        def get_gap_label(dur, loc, visited_df):
+            if "HOME" in str(loc).upper():
+                return get_short_stop_label(loc) if dur < 5 else "Unlogged Time / Break"
+            
+            if dur < 5:
+                return get_short_stop_label(loc)
+            
+            if not visited_df.empty:
+                matches = visited_df[visited_df['Place'].str.strip().str.upper() == str(loc).strip().upper()]
+                if not matches.empty:
+                    purpose = matches.iloc[0]['Purpose']
+                    if pd.notna(purpose) and str(purpose).strip() != "":
+                        return str(purpose).strip()
+                        
+            return "Unlogged Time / Break"
+        
         selected_timeline_date = st.date_input("Select Date to Review", value=now.date(), key="timeline_date_sel")
         selected_date_str = selected_timeline_date.strftime('%Y-%m-%d')
         
@@ -1485,7 +1518,7 @@ try:
                             if transit_modes:
                                 act_label = f"On the way ({' + '.join(transit_modes)})"
                             else:
-                                act_label = get_short_stop_label(curr_loc) if gap_duration < 5 else "Unlogged Time / Break"
+                                act_label = get_gap_label(gap_duration, curr_loc, visited_places_df)
                             timeline_events.append({
                                 'type': 'gap',
                                 'start': gap_start_dt.strftime('%I:%M %p'),
@@ -1530,7 +1563,7 @@ try:
                                         if new_loc.upper() != curr_loc.upper() and curr_loc != "":
                                             sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
                                             if sub_gap_dur >= 0:
-                                                act_label = get_short_stop_label(curr_loc) if sub_gap_dur < 5 else "Unlogged Time / Break"
+                                                act_label = get_gap_label(sub_gap_dur, curr_loc, visited_places_df)
                                                 timeline_events.append({
                                                     'type': 'gap',
                                                     'start': curr_gap_start.strftime('%I:%M %p'),
@@ -1550,7 +1583,7 @@ try:
                                     if is_curr_stationary:
                                         sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
                                         if sub_gap_dur >= 0:
-                                            act_label = get_short_stop_label(curr_loc) if sub_gap_dur < 5 else "Unlogged Time / Break"
+                                            act_label = get_gap_label(sub_gap_dur, curr_loc, visited_places_df)
                                             timeline_events.append({
                                                 'type': 'gap',
                                                 'start': curr_gap_start.strftime('%I:%M %p'),
@@ -1575,7 +1608,7 @@ try:
                                 if curr_move.upper() != "- STATIONARY -":
                                     act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else "On the way"
                                 else:
-                                    act_label = get_short_stop_label(curr_loc) if final_dur < 5 else "Unlogged Time / Break"
+                                    act_label = get_gap_label(final_dur, curr_loc, visited_places_df)
                                     
                                 timeline_events.append({
                                     'type': 'gap',
@@ -1658,33 +1691,17 @@ try:
                     </div>
                     """, unsafe_allow_html=True)
                 else:
-                    col_g1, col_g2 = st.columns([3, 1])
                     place_str = str(event.get('place', '')).strip()
                     is_valid_place = place_str and place_str.upper() not in ["I", "NAN", "NONE"]
-                    
                     loc_html_gap = f"<br><span style='color: #d32f2f; font-size: 13px; font-weight: 500;'>📍 {place_str}</span>" if is_valid_place else ""
 
-                    with col_g1:
-                        st.markdown(f"""
-                        <div style='background-color: #fafafa; border: 2px dashed #cccccc; padding: 10px; border-radius: 8px; margin-bottom: 10px; text-align: center; color: #888;'>
-                            <b>{event['start']} - {event['end']}</b> (Gap: {dur_display})<br>
-                            <em>{event['activity']}</em>{loc_html_gap}
-                        </div>
-                        """, unsafe_allow_html=True)
-                    with col_g2:
-                        st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
-                        if st.button("☕ Log as Break", key=f"gap_{event['start']}_{event['end']}_{place_str}", use_container_width=True):
-                            start_24 = datetime.strptime(event['start'], '%I:%M %p').strftime('%H:%M')
-                            end_24 = datetime.strptime(event['end'], '%I:%M %p').strftime('%H:%M')
-                            
-                            sheet_log = get_sheet("activity_log")
-                            sheet_log.append_row([
-                                selected_date_str, start_24, end_24, 
-                                GS_FORMULA, "FREE TIME", "Planned Break",
-                                "", f"Logged from Timeline Gap. Loc: {place_str}"
-                            ], value_input_option="USER_ENTERED")
-                            get_activity_log.clear() 
-                            st.rerun()
+                    # Replaced column layout and button with a clean centered Purpose text block
+                    st.markdown(f"""
+                    <div style='background-color: #fafafa; border: 2px dashed #cccccc; padding: 10px; border-radius: 8px; margin-bottom: 10px; text-align: center; color: #888;'>
+                        <b>{event['start']} - {event['end']}</b> (Gap: {dur_display})<br>
+                        <span style='color: #00acc1; font-weight: bold; font-size: 16px;'>{event['activity']}</span>{loc_html_gap}
+                    </div>
+                    """, unsafe_allow_html=True)
             else:
                 cat = event['activity']
                 if cat in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"]: border_color = "#ff4b4b" 

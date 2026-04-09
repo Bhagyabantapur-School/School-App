@@ -1331,10 +1331,44 @@ try:
         
         day_logs = log_df[(log_df['Date'] == selected_date_str) & (log_df['End_Time'] != 'RUNNING')].copy()
         
+        # Ensure day_logs is initialized properly to act as the timeline skeleton
+        if day_logs.empty:
+            day_logs = pd.DataFrame(columns=['Date', 'Start_Time', 'End_Time', 'Duration', 'Activity', 'Sub_Activities', 'check_list', 'Notes', 'Start_DT', 'End_DT'])
+        else:
+            day_logs['Start_DT'] = pd.to_datetime(day_logs['Date'] + ' ' + day_logs['Start_Time'], errors='coerce')
+            day_logs['End_DT'] = pd.to_datetime(day_logs['Date'] + ' ' + day_logs['End_Time'], errors='coerce')
+            
+            mask = day_logs['End_DT'] < day_logs['Start_DT']
+            day_logs.loc[mask, 'End_DT'] = day_logs.loc[mask, 'End_DT'] + pd.Timedelta(days=1)
+            
+            day_logs = day_logs.sort_values('Start_DT').dropna(subset=['Start_DT', 'End_DT'])
+
+        # Inject end marker to force gap processing until NOW
+        if selected_date_str == today_str:
+            end_marker_dt = pd.to_datetime(now.strftime('%Y-%m-%d %H:%M'))
+        else:
+            end_marker_dt = pd.to_datetime(selected_date_str + ' 23:59')
+
+        dummy_row = pd.DataFrame([{
+            'Start_DT': end_marker_dt, 
+            'End_DT': end_marker_dt, 
+            'Activity': 'CURRENT_TIME_MARKER', 
+            'Sub_Activities': '', 
+            'Notes': '',
+            'Date': selected_date_str,
+            'Start_Time': end_marker_dt.strftime('%H:%M'),
+            'End_Time': end_marker_dt.strftime('%H:%M'),
+            'Duration': '0:00'
+        }])
+        day_logs = pd.concat([day_logs, dummy_row], ignore_index=True)
+        day_logs = day_logs.sort_values('Start_DT')
+
+        # --- SMART LOCATION & TRANSIT PARSING ---
         loc_df_safe = loc_df.copy()
         
         def parse_custom_date(date_str):
             try:
+                # Chop off " Mon", " Tue", etc.
                 clean_date = str(date_str).strip().split(' ')[0]
                 return datetime.strptime(clean_date, '%d.%m.%y').date()
             except:
@@ -1347,6 +1381,7 @@ try:
         day_locs = loc_df_safe[loc_df_safe['Parsed_Date'] == selected_timeline_date].copy()
         
         if not day_locs.empty:
+            # 1. Parse timestamps
             def parse_custom_dt(row):
                 try:
                     d_str = str(row['Date']).strip().split(' ')[0]
@@ -1357,6 +1392,7 @@ try:
             
             day_locs['Loc_DT'] = day_locs.apply(parse_custom_dt, axis=1)
             
+            # 2. Aggressive Move/Place Cleaning (Fixing Empty Move columns)
             def parse_loc_row(row):
                 move_raw = str(row['Move']).strip()
                 place_raw = str(row['Place']).strip()
@@ -1370,147 +1406,127 @@ try:
                 elif is_stat:
                     return pd.Series(["- Stationary -", place_raw])
                 else:
+                    # If Move is empty, but Place has value, assume Stationary
                     if place_raw and place_raw.upper() not in ["I", "NAN", "NONE"]:
                         return pd.Series(["- Stationary -", place_raw])
+                    # If Place is empty but Move has something weird, assume Stationary
                     return pd.Series(["- Stationary -", move_raw])
 
             day_locs[['Clean_Move', 'Clean_Place']] = day_locs.apply(parse_loc_row, axis=1)
             day_locs['Move'] = day_locs['Clean_Move']
             day_locs['Place'] = day_locs['Clean_Place']
             
+            # Keep ALL valid rows (both Stationary and Transit)
             def is_valid_row(row):
                 move = str(row['Move']).strip().upper()
                 place = str(row['Place']).strip().upper()
                 if move != "- STATIONARY -": 
-                    return True 
+                    return True # It's a transit record, keep it
                 if len(place) > 1 and place not in ["I", "NAN", "NONE"]: 
-                    return True 
+                    return True # It's a valid stationary record
                 return False
                 
             day_locs = day_locs[day_locs.apply(is_valid_row, axis=1)]
             day_locs = day_locs.dropna(subset=['Loc_DT']).sort_values('Loc_DT')
         
-        if not day_logs.empty:
-            day_logs['Start_DT'] = pd.to_datetime(day_logs['Date'] + ' ' + day_logs['Start_Time'], errors='coerce')
-            day_logs['End_DT'] = pd.to_datetime(day_logs['Date'] + ' ' + day_logs['End_Time'], errors='coerce')
+        # Start timeline at 05:00 AM or earliest location ping, whichever is earlier.
+        start_time_limit = pd.to_datetime(selected_date_str + ' 05:00')
+        if not day_locs.empty and day_locs['Loc_DT'].min() < start_time_limit:
+            start_time_limit = day_locs['Loc_DT'].min()
+        if not day_logs.empty and day_logs['Start_DT'].min() < start_time_limit:
+            if day_logs.iloc[0]['Activity'] != 'CURRENT_TIME_MARKER':
+                start_time_limit = day_logs['Start_DT'].min()
+
+        last_end_time = start_time_limit
+        timeline_events = []
+        
+        for _, row in day_logs.iterrows():
+            current_start = row['Start_DT']
+            current_end = row['End_DT']
             
-            mask = day_logs['End_DT'] < day_logs['Start_DT']
-            day_logs.loc[mask, 'End_DT'] = day_logs.loc[mask, 'End_DT'] + pd.Timedelta(days=1)
-            
-            day_logs = day_logs.sort_values('Start_DT').dropna(subset=['Start_DT', 'End_DT'])
-            
-            timeline_events = []
-            last_end_time = None
-            
-            for _, row in day_logs.iterrows():
-                current_start = row['Start_DT']
-                current_end = row['End_DT']
-                
-                if last_end_time and current_start > last_end_time:
-                    gap_duration = (current_start - last_end_time).total_seconds() / 60
-                    if gap_duration > 0:
-                        if gap_duration <= 5: 
+            # --- GAP SLICING & TRANSIT CONSOLIDATION ---
+            if last_end_time and current_start > last_end_time:
+                gap_duration = (current_start - last_end_time).total_seconds() / 60
+                if gap_duration > 0:
+                    if gap_duration <= 5: 
+                        timeline_events.append({
+                            'type': 'transition',
+                            'start': last_end_time.strftime('%I:%M %p'),
+                            'end': current_start.strftime('%I:%M %p'),
+                            'duration': int(gap_duration),
+                            'activity': 'Transition',
+                            'sub': '',
+                            'notes': '',
+                            'place': '',
+                            'move': ''
+                        })
+                    else: 
+                        gap_start_dt = last_end_time
+                        gap_end_dt = current_start
+                        
+                        if not day_locs.empty:
+                            locs_in_gap = day_locs[(day_locs['Loc_DT'] > gap_start_dt) & (day_locs['Loc_DT'] < gap_end_dt)]
+                        else:
+                            locs_in_gap = pd.DataFrame()
+                            
+                        def get_loc_state_at_time(t):
+                            if day_locs.empty: return "", "- Stationary -"
+                            past = day_locs[day_locs['Loc_DT'] <= t]
+                            if not past.empty: return past.iloc[-1]['Place'], past.iloc[-1]['Move']
+                            return day_locs.iloc[0]['Place'], day_locs.iloc[0]['Move']
+                            
+                        curr_gap_start = gap_start_dt
+                        curr_loc, curr_move = get_loc_state_at_time(curr_gap_start)
+                        transit_modes = [curr_move] if curr_move.upper() != "- STATIONARY -" else []
+                        
+                        if locs_in_gap.empty:
+                            act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else "Unlogged Time / Break"
                             timeline_events.append({
-                                'type': 'transition',
-                                'start': last_end_time.strftime('%I:%M %p'),
-                                'end': current_start.strftime('%I:%M %p'),
+                                'type': 'gap',
+                                'start': gap_start_dt.strftime('%I:%M %p'),
+                                'end': gap_end_dt.strftime('%I:%M %p'),
                                 'duration': int(gap_duration),
-                                'activity': 'Transition',
+                                'activity': act_label,
                                 'sub': '',
                                 'notes': '',
-                                'place': '',
-                                'move': ''
+                                'place': str(curr_loc).strip(),
+                                'move': ""
                             })
-                        else: 
-                            gap_start_dt = last_end_time
-                            gap_end_dt = current_start
-                            
-                            if not day_locs.empty:
-                                locs_in_gap = day_locs[(day_locs['Loc_DT'] > gap_start_dt) & (day_locs['Loc_DT'] < gap_end_dt)]
-                            else:
-                                locs_in_gap = pd.DataFrame()
+                        else:
+                            # State Machine: Split gaps intelligently
+                            for _, l_row in locs_in_gap.iterrows():
+                                split_time = l_row['Loc_DT']
+                                new_move = str(l_row['Move']).strip()
+                                new_loc = str(l_row['Place']).strip()
                                 
-                            def get_loc_state_at_time(t):
-                                if day_locs.empty: return "", "- Stationary -"
-                                past = day_locs[day_locs['Loc_DT'] <= t]
-                                if not past.empty: return past.iloc[-1]['Place'], past.iloc[-1]['Move']
-                                return day_locs.iloc[0]['Place'], day_locs.iloc[0]['Move']
+                                is_new_stationary = (new_move.upper() == "- STATIONARY -")
+                                is_curr_stationary = (curr_move.upper() == "- STATIONARY -")
                                 
-                            curr_gap_start = gap_start_dt
-                            curr_loc, curr_move = get_loc_state_at_time(curr_gap_start)
-                            transit_modes = [curr_move] if curr_move.upper() != "- STATIONARY -" else []
-                            
-                            if locs_in_gap.empty:
-                                act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else "Unlogged Time / Break"
-                                timeline_events.append({
-                                    'type': 'gap',
-                                    'start': gap_start_dt.strftime('%I:%M %p'),
-                                    'end': gap_end_dt.strftime('%I:%M %p'),
-                                    'duration': int(gap_duration),
-                                    'activity': act_label,
-                                    'sub': '',
-                                    'notes': '',
-                                    'place': str(curr_loc).strip(),
-                                    'move': ""
-                                })
-                            else:
-                                for _, l_row in locs_in_gap.iterrows():
-                                    split_time = l_row['Loc_DT']
-                                    new_move = str(l_row['Move']).strip()
-                                    new_loc = str(l_row['Place']).strip()
-                                    
-                                    is_new_stationary = (new_move.upper() == "- STATIONARY -")
-                                    is_curr_stationary = (curr_move.upper() == "- STATIONARY -")
-                                    
-                                    if is_new_stationary:
-                                        if not is_curr_stationary:
-                                            # Arriving at destination
+                                if is_new_stationary:
+                                    if not is_curr_stationary:
+                                        # Arriving at destination! Split the transit gap here.
+                                        sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
+                                        if sub_gap_dur >= 0:
+                                            act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else "On the way"
+                                            timeline_events.append({
+                                                'type': 'gap',
+                                                'start': curr_gap_start.strftime('%I:%M %p'),
+                                                'end': split_time.strftime('%I:%M %p'),
+                                                'duration': int(sub_gap_dur),
+                                                'activity': act_label,
+                                                'sub': '',
+                                                'notes': '',
+                                                'place': str(curr_loc).strip(),
+                                                'move': ""
+                                            })
+                                        curr_gap_start = split_time
+                                        curr_loc = new_loc
+                                        curr_move = new_move
+                                        transit_modes = []
+                                    else:
+                                        # Location update while already stationary
+                                        if new_loc.upper() != curr_loc.upper() and curr_loc != "":
                                             sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
-                                            
-                                            # --- FIXED: Log even if duration is 0 mins ---
-                                            if sub_gap_dur >= 0:
-                                                act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else "On the way"
-                                                timeline_events.append({
-                                                    'type': 'gap',
-                                                    'start': curr_gap_start.strftime('%I:%M %p'),
-                                                    'end': split_time.strftime('%I:%M %p'),
-                                                    'duration': int(sub_gap_dur),
-                                                    'activity': act_label,
-                                                    'sub': '',
-                                                    'notes': '',
-                                                    'place': str(curr_loc).strip(),
-                                                    'move': ""
-                                                })
-                                            curr_gap_start = split_time
-                                            curr_loc = new_loc
-                                            curr_move = new_move
-                                            transit_modes = []
-                                        else:
-                                            # Update location while stationary
-                                            if new_loc.upper() != curr_loc.upper() and curr_loc != "":
-                                                sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
-                                                if sub_gap_dur >= 0:
-                                                    timeline_events.append({
-                                                        'type': 'gap',
-                                                        'start': curr_gap_start.strftime('%I:%M %p'),
-                                                        'end': split_time.strftime('%I:%M %p'),
-                                                        'duration': int(sub_gap_dur),
-                                                        'activity': 'Unlogged Time / Break',
-                                                        'sub': '',
-                                                        'notes': '',
-                                                        'place': str(curr_loc).strip(),
-                                                        'move': ""
-                                                    })
-                                                curr_gap_start = split_time
-                                            curr_loc = new_loc
-                                            curr_move = new_move
-                                            
-                                    else: 
-                                        if is_curr_stationary:
-                                            # Departing from destination
-                                            sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
-                                            
-                                            # --- FIXED: Log even if duration is 0 mins ---
                                             if sub_gap_dur >= 0:
                                                 timeline_events.append({
                                                     'type': 'gap',
@@ -1524,43 +1540,67 @@ try:
                                                     'move': ""
                                                 })
                                             curr_gap_start = split_time
-                                            curr_move = new_move
-                                            transit_modes = [new_move]
-                                        else:
-                                            if new_move not in transit_modes:
-                                                transit_modes.append(new_move)
-                                            curr_move = new_move
-
-                                final_dur = (gap_end_dt - curr_gap_start).total_seconds() / 60
-                                if final_dur > 0:
-                                    if curr_move.upper() != "- STATIONARY -":
-                                        act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else "On the way"
-                                    else:
-                                        act_label = 'Unlogged Time / Break'
+                                        curr_loc = new_loc
+                                        curr_move = new_move
                                         
-                                    timeline_events.append({
-                                        'type': 'gap',
-                                        'start': curr_gap_start.strftime('%I:%M %p'),
-                                        'end': gap_end_dt.strftime('%I:%M %p'),
-                                        'duration': int(final_dur),
-                                        'activity': act_label,
-                                        'sub': '',
-                                        'notes': '',
-                                        'place': str(curr_loc).strip(),
-                                        'move': ""
-                                    })
-                
-                current_loc = ""
-                current_move = ""
-                if not day_locs.empty:
-                    past_locs = day_locs[day_locs['Loc_DT'] <= current_start]
-                    if not past_locs.empty:
-                        current_loc = past_locs.iloc[-1]['Place']
-                        current_move = past_locs.iloc[-1]['Move']
-                    else:
-                        current_loc = day_locs.iloc[0]['Place']
-                        current_move = day_locs.iloc[0]['Move']
+                                else: # New move is Transit (WALK, BIKE, etc.)
+                                    if is_curr_stationary:
+                                        # Departing from destination! Split the stationary gap here.
+                                        sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
+                                        if sub_gap_dur >= 0:
+                                            timeline_events.append({
+                                                'type': 'gap',
+                                                'start': curr_gap_start.strftime('%I:%M %p'),
+                                                'end': split_time.strftime('%I:%M %p'),
+                                                'duration': int(sub_gap_dur),
+                                                'activity': 'Unlogged Time / Break',
+                                                'sub': '',
+                                                'notes': '',
+                                                'place': str(curr_loc).strip(),
+                                                'move': ""
+                                            })
+                                        curr_gap_start = split_time
+                                        curr_move = new_move
+                                        transit_modes = [new_move]
+                                    else:
+                                        # Still in transit, maybe changed vehicle (BIKE -> WALK)
+                                        if new_move not in transit_modes:
+                                            transit_modes.append(new_move)
+                                        curr_move = new_move
 
+                            # Log remainder of the gap
+                            final_dur = (gap_end_dt - curr_gap_start).total_seconds() / 60
+                            if final_dur > 0:
+                                if curr_move.upper() != "- STATIONARY -":
+                                    act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else "On the way"
+                                else:
+                                    act_label = 'Unlogged Time / Break'
+                                    
+                                timeline_events.append({
+                                    'type': 'gap',
+                                    'start': curr_gap_start.strftime('%I:%M %p'),
+                                    'end': gap_end_dt.strftime('%I:%M %p'),
+                                    'duration': int(final_dur),
+                                    'activity': act_label,
+                                    'sub': '',
+                                    'notes': '',
+                                    'place': str(curr_loc).strip(),
+                                    'move': ""
+                                })
+            
+            # --- Task Location Tagging ---
+            current_loc = ""
+            current_move = ""
+            if not day_locs.empty:
+                past_locs = day_locs[day_locs['Loc_DT'] <= current_start]
+                if not past_locs.empty:
+                    current_loc = past_locs.iloc[-1]['Place']
+                    current_move = past_locs.iloc[-1]['Move']
+                else:
+                    current_loc = day_locs.iloc[0]['Place']
+                    current_move = day_locs.iloc[0]['Move']
+
+            if row['Activity'] != 'CURRENT_TIME_MARKER':
                 dur_mins = (current_end - current_start).total_seconds() / 60
                 timeline_events.append({
                     'type': 'task',
@@ -1573,147 +1613,146 @@ try:
                     'place': str(current_loc).strip(),
                     'move': str(current_move).strip()
                 })
-                
-                if last_end_time is None or current_end > last_end_time:
-                    last_end_time = current_end
             
-            for event in timeline_events:
-                eh, em = divmod(event['duration'], 60)
-                if eh > 0 and em > 0:
-                    dur_display = f"{eh}h {em}m"
-                elif eh > 0:
-                    dur_display = f"{eh}h"
-                elif em > 0:
-                    dur_display = f"{em}m"
-                else:
-                    dur_display = "<1m" # --- FIXED: Handle 0 duration beautifully ---
+            if last_end_time is None or current_end > last_end_time:
+                last_end_time = current_end
+        
+        for event in timeline_events:
+            eh, em = divmod(event['duration'], 60)
+            if eh > 0 and em > 0:
+                dur_display = f"{eh}h {em}m"
+            elif eh > 0:
+                dur_display = f"{eh}h"
+            elif em > 0:
+                dur_display = f"{em}m"
+            else:
+                dur_display = "<1m"
 
-                if event['type'] == 'transition':
+            if event['type'] == 'transition':
+                st.markdown(f"""
+                <div style='background-color: #fff3e0; border: 1px solid #ffb74d; padding: 8px; border-radius: 6px; margin-bottom: 10px; text-align: center; color: #e65100; font-size: 14px;'>
+                    <b>{event['start']} - {event['end']}</b> | ⏳ Transition Time: {dur_display}
+                </div>
+                """, unsafe_allow_html=True)
+                
+            elif event['type'] == 'gap':
+                is_transit_gap = event['activity'].startswith('On the way')
+                
+                if is_transit_gap:
+                    # Render specialized UI for "On the way" (No break button needed)
                     st.markdown(f"""
-                    <div style='background-color: #fff3e0; border: 1px solid #ffb74d; padding: 8px; border-radius: 6px; margin-bottom: 10px; text-align: center; color: #e65100; font-size: 14px;'>
-                        <b>{event['start']} - {event['end']}</b> | ⏳ Transition Time: {dur_display}
+                    <div style='background-color: #e0f7fa; border-left: 6px solid #00838f; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'>
+                        <div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({dur_display})</div>
+                        <div style='color: #00838f; font-weight: bold; font-size: 16px;'>🛣️ {event['activity']}</div>
                     </div>
                     """, unsafe_allow_html=True)
+                else:
+                    # Render normal unlogged gap with Break button
+                    col_g1, col_g2 = st.columns([3, 1])
+                    place_str = str(event.get('place', '')).strip()
+                    is_valid_place = place_str and place_str.upper() not in ["I", "NAN", "NONE"]
                     
-                elif event['type'] == 'gap':
-                    is_transit_gap = event['activity'].startswith('On the way')
-                    
-                    if is_transit_gap:
+                    loc_html_gap = f"<br><span style='color: #d32f2f; font-size: 13px; font-weight: 500;'>📍 {place_str}</span>" if is_valid_place else ""
+
+                    with col_g1:
                         st.markdown(f"""
-                        <div style='background-color: #e0f7fa; border-left: 6px solid #00838f; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'>
-                            <div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({dur_display})</div>
-                            <div style='color: #00838f; font-weight: bold; font-size: 16px;'>🛣️ {event['activity']}</div>
+                        <div style='background-color: #fafafa; border: 2px dashed #cccccc; padding: 10px; border-radius: 8px; margin-bottom: 10px; text-align: center; color: #888;'>
+                            <b>{event['start']} - {event['end']}</b> (Gap: {dur_display})<br>
+                            <em>{event['activity']}</em>{loc_html_gap}
                         </div>
                         """, unsafe_allow_html=True)
-                    else:
-                        col_g1, col_g2 = st.columns([3, 1])
-                        place_str = str(event.get('place', '')).strip()
-                        is_valid_place = place_str and place_str.upper() not in ["I", "NAN", "NONE"]
-                        
-                        loc_html_gap = f"<br><span style='color: #d32f2f; font-size: 13px; font-weight: 500;'>📍 {place_str}</span>" if is_valid_place else ""
-
-                        with col_g1:
-                            st.markdown(f"""
-                            <div style='background-color: #fafafa; border: 2px dashed #cccccc; padding: 10px; border-radius: 8px; margin-bottom: 10px; text-align: center; color: #888;'>
-                                <b>{event['start']} - {event['end']}</b> (Gap: {dur_display})<br>
-                                <em>{event['activity']}</em>{loc_html_gap}
-                            </div>
-                            """, unsafe_allow_html=True)
-                        with col_g2:
-                            st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
-                            if st.button("☕ Log as Break", key=f"gap_{event['start']}_{event['end']}_{place_str}", use_container_width=True):
-                                start_24 = datetime.strptime(event['start'], '%I:%M %p').strftime('%H:%M')
-                                end_24 = datetime.strptime(event['end'], '%I:%M %p').strftime('%H:%M')
-                                
-                                sheet_log = get_sheet("activity_log")
-                                sheet_log.append_row([
-                                    selected_date_str, start_24, end_24, 
-                                    GS_FORMULA, "FREE TIME", "Planned Break",
-                                    "", f"Logged from Timeline Gap. Loc: {place_str}"
-                                ], value_input_option="USER_ENTERED")
-                                get_activity_log.clear() 
-                                st.rerun()
-                else:
-                    cat = event['activity']
-                    if cat in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"]: border_color = "#ff4b4b" 
-                    elif cat in ["WORK", "REPORT", "TASK"]: border_color = "#0068c9" 
-                    elif cat == "HEALTH": border_color = "#2e7b32" 
-                    elif cat in ["SLEEP", "PRE", "TEA", "OUT"]: border_color = "#ff9f36" 
-                    elif cat == "FREE TIME": border_color = "#29b6f6" 
-                    else: border_color = "#555555"
-                    
-                    sub_text = f"<br><b>{event['sub']}</b>" if event['sub'] else ""
-                    note_text = f"<br><span style='font-size: 13px; color: #666;'>{event['notes']}</span>" if event['notes'] else ""
-                    
-                    place_str = str(event.get('place', '')).strip()
-                    move_str = str(event.get('move', '')).strip()
-                    
-                    is_valid_place = place_str and place_str.upper() not in ["I", "NAN", "NONE"]
-                    is_moving = move_str and move_str.upper() != "- STATIONARY -"
-                    
-                    loc_text = ""
-                    if is_moving and is_valid_place:
-                        loc_text = f"🛣️ On the way ({move_str}) near {place_str}"
-                    elif is_moving and not is_valid_place:
-                        loc_text = f"🛣️ On the way ({move_str})"
-                    elif not is_moving and is_valid_place:
-                        loc_text = f"📍 {place_str}"
-                        
-                    loc_html = f"<div style='color: #d32f2f; font-size: 13px; font-weight: 500; margin-top: 4px;'>{loc_text}</div>" if loc_text else ""
-                    
-                    st.markdown(f"""
-                    <div style='background-color: white; border-left: 6px solid {border_color}; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'>
-                        <div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({dur_display})</div>
-                        <div style='color: {border_color}; font-weight: bold; font-size: 16px;'>{event['activity']}</div>
-                        <div style='color: #333;'>{sub_text}{note_text}</div>
-                        {loc_html}
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-            # --- DAILY SUMMARY ---
-            st.markdown("---")
-            st.markdown("<h4 style='text-align: center; color: #555;'>📊 Daily Summary</h4>", unsafe_allow_html=True)
-            
-            total_tracked = sum(e['duration'] for e in timeline_events if e['type'] == 'task')
-            total_gap = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and not e['activity'].startswith('On the way'))
-            total_transit = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and e['activity'].startswith('On the way'))
-            
-            col_s1, col_s2, col_s3 = st.columns(3)
-            with col_s1:
-                th, tm = divmod(total_tracked, 60)
-                st.metric(label="Total Tracked Time", value=f"{int(th)}h {int(tm)}m")
-            with col_s2:
-                gh, gm = divmod(total_gap, 60)
-                st.metric(label="Total Unlogged Time", value=f"{int(gh)}h {int(gm)}m")
-            with col_s3:
-                trh, trm = divmod(total_transit, 60)
-                st.metric(label="Total Transit Time", value=f"{int(trh)}h {int(trm)}m")
+                    with col_g2:
+                        st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
+                        if st.button("☕ Log as Break", key=f"gap_{event['start']}_{event['end']}_{place_str}", use_container_width=True):
+                            start_24 = datetime.strptime(event['start'], '%I:%M %p').strftime('%H:%M')
+                            end_24 = datetime.strptime(event['end'], '%I:%M %p').strftime('%H:%M')
+                            
+                            sheet_log = get_sheet("activity_log")
+                            sheet_log.append_row([
+                                selected_date_str, start_24, end_24, 
+                                GS_FORMULA, "FREE TIME", "Planned Break",
+                                "", f"Logged from Timeline Gap. Loc: {place_str}"
+                            ], value_input_option="USER_ENTERED")
+                            get_activity_log.clear() 
+                            st.rerun()
+            else:
+                cat = event['activity']
+                if cat in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"]: border_color = "#ff4b4b" 
+                elif cat in ["WORK", "REPORT", "TASK"]: border_color = "#0068c9" 
+                elif cat == "HEALTH": border_color = "#2e7b32" 
+                elif cat in ["SLEEP", "PRE", "TEA", "OUT"]: border_color = "#ff9f36" 
+                elif cat == "FREE TIME": border_color = "#29b6f6" 
+                else: border_color = "#555555"
                 
-            category_totals = {}
-            for e in timeline_events:
-                if e['type'] == 'task':
-                    cat = e['activity']
-                    category_totals[cat] = category_totals.get(cat, 0) + e['duration']
+                sub_text = f"<br><b>{event['sub']}</b>" if event['sub'] else ""
+                note_text = f"<br><span style='font-size: 13px; color: #666;'>{event['notes']}</span>" if event['notes'] else ""
+                
+                place_str = str(event.get('place', '')).strip()
+                move_str = str(event.get('move', '')).strip()
+                
+                is_valid_place = place_str and place_str.upper() not in ["I", "NAN", "NONE"]
+                is_moving = move_str and move_str.upper() != "- STATIONARY -"
+                
+                loc_text = ""
+                if is_moving and is_valid_place:
+                    loc_text = f"🛣️ On the way ({move_str}) near {place_str}"
+                elif is_moving and not is_valid_place:
+                    loc_text = f"🛣️ On the way ({move_str})"
+                elif not is_moving and is_valid_place:
+                    loc_text = f"📍 {place_str}"
+                    
+                loc_html = f"<div style='color: #d32f2f; font-size: 13px; font-weight: 500; margin-top: 4px;'>{loc_text}</div>" if loc_text else ""
+                
+                st.markdown(f"""
+                <div style='background-color: white; border-left: 6px solid {border_color}; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'>
+                    <div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({dur_display})</div>
+                    <div style='color: {border_color}; font-weight: bold; font-size: 16px;'>{event['activity']}</div>
+                    <div style='color: #333;'>{sub_text}{note_text}</div>
+                    {loc_html}
+                </div>
+                """, unsafe_allow_html=True)
+                
+        # --- DAILY SUMMARY ---
+        st.markdown("---")
+        st.markdown("<h4 style='text-align: center; color: #555;'>📊 Daily Summary</h4>", unsafe_allow_html=True)
+        
+        total_tracked = sum(e['duration'] for e in timeline_events if e['type'] == 'task')
+        total_gap = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and not e['activity'].startswith('On the way'))
+        total_transit = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and e['activity'].startswith('On the way'))
+        
+        col_s1, col_s2, col_s3 = st.columns(3)
+        with col_s1:
+            th, tm = divmod(total_tracked, 60)
+            st.metric(label="Total Tracked Time", value=f"{int(th)}h {int(tm)}m")
+        with col_s2:
+            gh, gm = divmod(total_gap, 60)
+            st.metric(label="Total Unlogged Time", value=f"{int(gh)}h {int(gm)}m")
+        with col_s3:
+            trh, trm = divmod(total_transit, 60)
+            st.metric(label="Total Transit Time", value=f"{int(trh)}h {int(trm)}m")
             
-            # Add transit to categories
-            if total_transit > 0:
-                category_totals['TRANSIT'] = total_transit
-                
-            if category_totals:
-                st.markdown("<h5 style='color: #555; margin-top: 15px;'>Time by Category</h5>", unsafe_allow_html=True)
-                cat_df = pd.DataFrame(list(category_totals.items()), columns=['Category', 'Minutes'])
-                cat_df = cat_df.sort_values(by='Minutes', ascending=False)
-                
-                cat_cols = st.columns(min(len(cat_df), 4))
-                for idx, row in cat_df.iterrows():
-                    ch, cm = divmod(row['Minutes'], 60)
-                    col_idx = idx % 4 if len(cat_df) >= 4 else idx
-                    with cat_cols[col_idx]:
-                        st.markdown(f"<div style='background-color:#f0f2f6; padding:10px; border-radius:8px; text-align:center; margin-bottom:10px;'><b style='color:#333;'>{row['Category']}</b><br><span style='color:#0068c9;'>{int(ch)}h {int(cm)}m</span></div>", unsafe_allow_html=True)
+        category_totals = {}
+        for e in timeline_events:
+            if e['type'] == 'task':
+                cat = e['activity']
+                category_totals[cat] = category_totals.get(cat, 0) + e['duration']
+        
+        # Add transit to categories
+        if total_transit > 0:
+            category_totals['TRANSIT'] = total_transit
+            
+        if category_totals:
+            st.markdown("<h5 style='color: #555; margin-top: 15px;'>Time by Category</h5>", unsafe_allow_html=True)
+            cat_df = pd.DataFrame(list(category_totals.items()), columns=['Category', 'Minutes'])
+            cat_df = cat_df.sort_values(by='Minutes', ascending=False)
+            
+            cat_cols = st.columns(min(len(cat_df), 4))
+            for idx, row in cat_df.iterrows():
+                ch, cm = divmod(row['Minutes'], 60)
+                col_idx = idx % 4 if len(cat_df) >= 4 else idx
+                with cat_cols[col_idx]:
+                    st.markdown(f"<div style='background-color:#f0f2f6; padding:10px; border-radius:8px; text-align:center; margin-bottom:10px;'><b style='color:#333;'>{row['Category']}</b><br><span style='color:#0068c9;'>{int(ch)}h {int(cm)}m</span></div>", unsafe_allow_html=True)
                         
-        else:
-            st.info(f"No completed activities logged for {selected_date_str}.")
-
     # ==========================================
     # TAB 6: APP HUB
     # ==========================================

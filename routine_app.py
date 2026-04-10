@@ -1357,27 +1357,36 @@ try:
         st.markdown("<h3 style='text-align: center; color: #555;'>⏳ Daily Activity Timeline</h3>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #888;'>Audit your day to find unlogged time and gaps.</p>", unsafe_allow_html=True)
         
+        selected_timeline_date = st.date_input("Select Date to Review", value=now.date(), key="timeline_date_sel")
+        selected_date_str = selected_timeline_date.strftime('%Y-%m-%d')
+        formatted_target_date = selected_timeline_date.strftime('%d.%m.%y') # Used to match VISITED_PLACES dates
+        prev_date_str = (selected_timeline_date - timedelta(days=1)).strftime('%Y-%m-%d')
+        
         # --- NEW HELPER: Fetch Gap Label based on VISITED_PLACES ---
         def get_gap_label(dur, loc, visited_df):
             if "HOME" in str(loc).upper():
                 return get_short_stop_label(loc) if dur < 5 else "Unlogged Time / Break"
             
-            if dur < 5:
-                return get_short_stop_label(loc)
-            
             if not visited_df.empty:
                 matches = visited_df[visited_df['Place'].str.strip().str.upper() == str(loc).strip().upper()]
                 if not matches.empty:
+                    # 1. Look for the exact date in "Visit Dates & Times"
+                    if 'Visit Dates & Times' in matches.columns:
+                        for _, m_row in matches.iterrows():
+                            if pd.notna(m_row['Visit Dates & Times']) and formatted_target_date in str(m_row['Visit Dates & Times']):
+                                purpose = m_row['Purpose']
+                                if pd.notna(purpose) and str(purpose).strip() != "":
+                                    return str(purpose).strip()
+                                    
+                    # 2. Fallback to the first match if no date matches
                     purpose = matches.iloc[0]['Purpose']
                     if pd.notna(purpose) and str(purpose).strip() != "":
                         return str(purpose).strip()
+
+            if dur < 5:
+                return get_short_stop_label(loc)
                         
             return "Unlogged Time / Break"
-        
-        selected_timeline_date = st.date_input("Select Date to Review", value=now.date(), key="timeline_date_sel")
-        selected_date_str = selected_timeline_date.strftime('%Y-%m-%d')
-        # FIX: Pull yesterday's date too so we can check for tasks that crossed midnight
-        prev_date_str = (selected_timeline_date - timedelta(days=1)).strftime('%Y-%m-%d')
         
         day_logs_raw = log_df[(log_df['Date'].isin([selected_date_str, prev_date_str])) & (log_df['End_Time'] != 'RUNNING')].copy()
         
@@ -1394,7 +1403,7 @@ try:
             mask = day_logs_raw['End_DT'] < day_logs_raw['Start_DT']
             day_logs_raw.loc[mask, 'End_DT'] = day_logs_raw.loc[mask, 'End_DT'] + pd.Timedelta(days=1)
             
-            # FIX 1: Filter to ONLY keep logs that intersect with the selected day
+            # Filter to ONLY keep logs that intersect with the selected day
             day_logs = day_logs_raw[(day_logs_raw['End_DT'] > day_start_dt) & (day_logs_raw['Start_DT'] <= day_end_dt)].copy()
 
             # Clip the start and end times visually so it doesn't bleed off the timeline
@@ -1654,7 +1663,7 @@ try:
             if row['Activity'] != 'CURRENT_TIME_MARKER':
                 dur_mins = (current_end - current_start).total_seconds() / 60
                 
-                # FIX 2: Render checklist items beautifully in the subtitle
+                # Checklists format fix
                 sub_str = str(row['Sub_Activities']).strip().title()
                 chk_str = str(row['check_list']).strip()
                 
@@ -1741,7 +1750,13 @@ try:
                 else: border_color = "#555555"
                 
                 sub_text = f"<br><b>{event['sub']}</b>" if event['sub'] else ""
-                note_text = f"<br><span style='font-size: 13px; color: #666;'>{event['notes']}</span>" if event['notes'] else ""
+                
+                # Cleanup redundant notes text (hides "Checked off" to keep UI clean)
+                note_val = str(event.get('notes', '')).strip()
+                if note_val in ["Checked off", "Auto-logged via Timer"]:
+                    note_text = ""
+                else:
+                    note_text = f"<br><span style='font-size: 13px; color: #666;'>{note_val}</span>" if note_val else ""
                 
                 place_str = str(event.get('place', '')).strip()
                 move_str = str(event.get('move', '')).strip()
@@ -1807,9 +1822,7 @@ try:
                 ch, cm = divmod(row['Minutes'], 60)
                 col_idx = idx % 4 if len(cat_df) >= 4 else idx
                 with cat_cols[col_idx]:
-                    st.markdown(f"<div style='background-color:#f0f2f6; padding:10px; border-radius:8px; text-align:center; margin-bottom:10px;'><b style='color:#333;'>{row['Category']}</b><br><span style='color:#0068c9;'>{int(ch)}h {int(cm)}m</span></div>", unsafe_allow_html=True)
-
-    # ==========================================
+                    st.markdown(f"<div style='background-color:#f0f2f6; padding:10px; border-radius:8px; text-align:center; margin-bottom:10px;'><b style='color:#333;'>{row['Category']}</b><br><span style='color:#0068c9;'>{int(ch)}h {int(cm)}m</span></div>", unsafe_allow_html=True)    # ==========================================
     # TAB 6: APP HUB
     # ==========================================
     with tab6:

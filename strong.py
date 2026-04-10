@@ -68,19 +68,19 @@ def next_step_widget(page_name):
             st.write("") 
             submitted = st.form_submit_button("Log Action")
             
-        if submitted and action:
-            new_row = [get_current_time(), page_name, action, "Pending"]
-            append_data("Next Steps", new_row)
-            st.success("Next action logged!")
+            if submitted and action:
+                new_row = [get_current_time(), page_name, action, "Pending"]
+                append_data("Next Steps", new_row)
+                st.success("Next action logged!")
 
-    # 2. Display pending steps for this specific category
+    # 2. Display pending steps for this specific category (Always Visible)
     df_steps = get_data("Next Steps")
     if not df_steps.empty and "Category" in df_steps.columns:
         # Filter data for the current page and only show "Pending" tasks
         pending = df_steps[(df_steps["Category"] == page_name) & (df_steps["Status"] == "Pending")]
         if not pending.empty:
-            with st.expander(f"View Pending Actions for {page_name}"):
-                st.dataframe(pending[["Date", "Next Step"]], hide_index=True, use_container_width=True)
+            st.markdown(f"**📌 Pending Actions for {page_name}**")
+            st.dataframe(pending[["Date", "Next Step"]], hide_index=True, use_container_width=True)
 
 
 # --- Navigation ---

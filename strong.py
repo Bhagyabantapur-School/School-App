@@ -42,7 +42,7 @@ def get_data(worksheet_name):
         data = worksheet.get_all_records()
         return pd.DataFrame(data)
     except Exception as e:
-        st.error(f"Error reading tab '{worksheet_name}': {e}")
+        st.error(f"Error reading tab '{worksheet_name}'. Did you create it with the exact headers? Error: {e}")
         return pd.DataFrame()
 
 def append_data(worksheet_name, row_data):
@@ -59,12 +59,9 @@ def mark_step_done(date_str, step_text):
         worksheet = sh.worksheet("Next Steps")
         records = worksheet.get_all_records()
         
-        # Loop through to find the exact row
         for i, row in enumerate(records):
             if row['Date'] == date_str and row['Next Step'] == step_text and row['Status'] == 'Pending':
-                # Status is the 4th column (A=1, B=2, C=3, D=4)
-                # We add 2 to 'i' because enumerate starts at 0, and row 1 is the header
-                worksheet.update_cell(i + 2, 4, "Done")
+                worksheet.update_cell(i + 2, 4, "Done") # Column 4 is Status
                 return True
         return False
     except Exception as e:
@@ -76,13 +73,12 @@ def next_step_widget(page_name):
     st.divider()
     st.subheader(f"🎯 Next Action: {page_name}")
     
-    # 1. Form to log the next step
     with st.form(f"next_step_form_{page_name}", clear_on_submit=True):
         col1, col2 = st.columns([4, 1])
         with col1:
             action = st.text_input("What is the immediate next step?", placeholder="e.g., Draft email, review budget...")
         with col2:
-            st.write("") # Spacing to align button
+            st.write("") 
             st.write("") 
             submitted = st.form_submit_button("Log Action")
             
@@ -90,27 +86,22 @@ def next_step_widget(page_name):
                 new_row = [get_current_time(), page_name, action, "Pending"]
                 append_data("Next Steps", new_row)
                 st.success("Next action logged!")
-                st.rerun() # Refresh to show the new task instantly
+                st.rerun()
 
-    # 2. Display pending steps for this specific category with a Done button
     df_steps = get_data("Next Steps")
     if not df_steps.empty and "Category" in df_steps.columns:
         pending = df_steps[(df_steps["Category"] == page_name) & (df_steps["Status"] == "Pending")]
         
         if not pending.empty:
             st.markdown(f"**📌 Pending Actions for {page_name}**")
-            
-            # Iterate through the pending tasks to create interactive rows
             for index, row in pending.iterrows():
                 col_text, col_btn = st.columns([5, 1])
                 with col_text:
-                    # Cleanly display the date and task
                     st.write(f"📅 {row['Date'][:10]} | **{row['Next Step']}**")
                 with col_btn:
-                    # Unique key required for buttons in a loop
                     if st.button("✅ Done", key=f"btn_{page_name}_{index}"):
                         if mark_step_done(row['Date'], row['Next Step']):
-                            st.rerun() # Instantly refresh the page to remove the completed item
+                            st.rerun()
 
 # --- Navigation ---
 st.sidebar.title("Navigation")
@@ -120,7 +111,6 @@ tabs = [
     "Social Life", "Idea", "Update"
 ]
 choice = st.sidebar.radio("Go to:", tabs)
-
 
 # --- Tab Pages ---
 
@@ -142,14 +132,13 @@ if choice == "Idea":
             new_row = [get_current_time(), idea_category, idea_impact, idea_text]
             append_data("Idea", new_row)
             st.success("Idea saved successfully!")
+            st.rerun()
 
     st.divider()
     st.subheader("Idea Vault")
     df_ideas = get_data("Idea")
     if not df_ideas.empty:
         st.dataframe(df_ideas, use_container_width=True)
-    else:
-        st.info("No ideas logged yet. Add your first one above!")
         
     next_step_widget("Idea")
 
@@ -166,13 +155,12 @@ elif choice == "Health":
             new_row = [str(date), activity, duration]
             append_data("Health", new_row)
             st.success("Health log saved!")
+            st.rerun()
             
     st.divider()
     df_health = get_data("Health")
     if not df_health.empty:
         st.dataframe(df_health, use_container_width=True)
-    else:
-         st.info("Log your first activity above!")
          
     next_step_widget("Health")
 
@@ -193,18 +181,16 @@ elif choice == "Financial Growth":
                 new_row = [get_current_time(), fin_category, amount, notes]
                 append_data("Financial Growth", new_row)
                 st.success("Entry saved!")
+                st.rerun()
 
     with col2:
         st.subheader("Trends")
         df_finance = get_data("Financial Growth")
-        if not df_finance.empty:
+        if not df_finance.empty and "Amount/Progress" in df_finance.columns:
             fig = px.bar(df_finance, x="Date", y="Amount/Progress", color="Category", title="Financial Growth Over Time")
             st.plotly_chart(fig, use_container_width=True)
-            
             with st.expander("View Raw Data"):
                 st.dataframe(df_finance, use_container_width=True)
-        else:
-            st.info("Log your first entry to see the chart!")
             
     next_step_widget("Financial Growth")
 
@@ -231,21 +217,61 @@ elif choice == "Skill Development":
                 new_row = [get_current_time(), project, status, hours]
                 append_data("Skill Development", new_row)
                 st.success(f"Logged {hours} hours for {project}!")
+                st.rerun()
 
     with col2:
         st.subheader("Time Allocation")
         df_skills = get_data("Skill Development")
-        if not df_skills.empty:
+        if not df_skills.empty and "Time Spent (Hours)" in df_skills.columns:
             fig_pie = px.pie(df_skills, values='Time Spent (Hours)', names='Project', title='Time Distribution')
             st.plotly_chart(fig_pie, use_container_width=True)
-        else:
-            st.info("Log project time to see your distribution chart!")
             
     next_step_widget("Skill Development")
 
+elif choice == "Update":
+    st.title("🔄 System Updates & Dev Log")
+    st.write("Track the evolution and codebase growth of Balance OS.")
+    
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        with st.form("update_form", clear_on_submit=True):
+            st.subheader("Log App Update")
+            now_ist = datetime.now(IST)
+            auto_date = now_ist.strftime("%Y-%m-%d")
+            auto_time = now_ist.strftime("%H:%M:%S")
+            st.caption(f"🕒 Auto-logging at: {auto_date} | {auto_time}")
+            
+            short_desc = st.text_input("Short (e.g., 'Added Update Tab')")
+            details = st.text_area("Details of Update")
+            lines = st.number_input("Total Lines of Code", min_value=0, step=10)
+            
+            submitted = st.form_submit_button("Log Update")
+            
+            if submitted and short_desc:
+                new_row = [auto_date, auto_time, details, short_desc, lines]
+                append_data("Update", new_row)
+                st.success("Update logged successfully!")
+                st.rerun()
+
+    with col2:
+        st.subheader("Codebase Growth")
+        df_update = get_data("Update")
+        
+        if not df_update.empty and "Lines" in df_update.columns:
+            fig = px.line(
+                df_update, x="Date", y="Lines", title="Total Lines of Code Over Time", 
+                markers=True, text="Short"
+            )
+            fig.update_traces(textposition="top center")
+            st.plotly_chart(fig, use_container_width=True)
+            
+            st.markdown("**📝 Changelog History**")
+            st.dataframe(df_update.iloc[::-1], hide_index=True, use_container_width=True)
+
+    next_step_widget("Update")
+
 else:
-    # Placeholder for Family Life, Work Life Balance, Social Life, and Update
     st.title(f"🚀 {choice}")
     st.write(f"The workspace for **{choice}** is under construction. Ready for future modules!")
-    
     next_step_widget(choice)

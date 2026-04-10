@@ -17,7 +17,6 @@ def get_current_time():
 st.set_page_config(page_title="Balance OS", layout="wide", page_icon="⚖️")
 
 # --- Database Connection ---
-# Cache the connection so it doesn't re-authenticate on every button click
 @st.cache_resource
 def init_connection():
     scopes = [
@@ -54,6 +53,36 @@ def append_data(worksheet_name, row_data):
     except Exception as e:
         st.error(f"Error saving to tab '{worksheet_name}': {e}")
 
+def next_step_widget(page_name):
+    """A modular widget to log and view next steps for a specific page."""
+    st.divider()
+    st.subheader(f"🎯 Next Action: {page_name}")
+    
+    # 1. Form to log the next step
+    with st.form(f"next_step_form_{page_name}", clear_on_submit=True):
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            action = st.text_input("What is the immediate next step?", placeholder="e.g., Draft email, review budget...")
+        with col2:
+            st.write("") # Spacing to align button
+            st.write("") 
+            submitted = st.form_submit_button("Log Action")
+            
+        if submitted and action:
+            new_row = [get_current_time(), page_name, action, "Pending"]
+            append_data("Next Steps", new_row)
+            st.success("Next action logged!")
+
+    # 2. Display pending steps for this specific category
+    df_steps = get_data("Next Steps")
+    if not df_steps.empty and "Category" in df_steps.columns:
+        # Filter data for the current page and only show "Pending" tasks
+        pending = df_steps[(df_steps["Category"] == page_name) & (df_steps["Status"] == "Pending")]
+        if not pending.empty:
+            with st.expander(f"View Pending Actions for {page_name}"):
+                st.dataframe(pending[["Date", "Next Step"]], hide_index=True, use_container_width=True)
+
+
 # --- Navigation ---
 st.sidebar.title("Navigation")
 tabs = [
@@ -62,6 +91,7 @@ tabs = [
     "Social Life", "Idea", "Update"
 ]
 choice = st.sidebar.radio("Go to:", tabs)
+
 
 # --- Tab Pages ---
 
@@ -91,6 +121,8 @@ if choice == "Idea":
         st.dataframe(df_ideas, use_container_width=True)
     else:
         st.info("No ideas logged yet. Add your first one above!")
+        
+    next_step_widget("Idea")
 
 elif choice == "Health":
     st.title("🧘 Health Development")
@@ -112,6 +144,8 @@ elif choice == "Health":
         st.dataframe(df_health, use_container_width=True)
     else:
          st.info("Log your first activity above!")
+         
+    next_step_widget("Health")
 
 elif choice == "Financial Growth":
     st.title("📈 Financial Growth")
@@ -142,6 +176,8 @@ elif choice == "Financial Growth":
                 st.dataframe(df_finance, use_container_width=True)
         else:
             st.info("Log your first entry to see the chart!")
+            
+    next_step_widget("Financial Growth")
 
 elif choice == "Skill Development":
     st.title("🛠️ Skill Development")
@@ -175,8 +211,12 @@ elif choice == "Skill Development":
             st.plotly_chart(fig_pie, use_container_width=True)
         else:
             st.info("Log project time to see your distribution chart!")
+            
+    next_step_widget("Skill Development")
 
 else:
     # Placeholder for Family Life, Work Life Balance, Social Life, and Update
     st.title(f"🚀 {choice}")
     st.write(f"The workspace for **{choice}** is under construction. Ready for future modules!")
+    
+    next_step_widget(choice)

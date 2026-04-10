@@ -1376,28 +1376,46 @@ try:
         
         selected_timeline_date = st.date_input("Select Date to Review", value=now.date(), key="timeline_date_sel")
         selected_date_str = selected_timeline_date.strftime('%Y-%m-%d')
+        # FIX: Pull yesterday's date too so we can check for tasks that crossed midnight
+        prev_date_str = (selected_timeline_date - timedelta(days=1)).strftime('%Y-%m-%d')
         
-        day_logs = log_df[(log_df['Date'] == selected_date_str) & (log_df['End_Time'] != 'RUNNING')].copy()
+        day_logs_raw = log_df[(log_df['Date'].isin([selected_date_str, prev_date_str])) & (log_df['End_Time'] != 'RUNNING')].copy()
         
-        if day_logs.empty:
-            day_logs = pd.DataFrame(columns=['Date', 'Start_Time', 'End_Time', 'Duration', 'Activity', 'Sub_Activities', 'check_list', 'Notes', 'Start_DT', 'End_DT'])
+        day_start_dt = pd.to_datetime(selected_date_str + ' 00:00:00')
+        day_end_dt = pd.to_datetime(selected_date_str + ' 23:59:59')
+        
+        if day_logs_raw.empty:
+            day_logs = pd.DataFrame(columns=['Date', 'Start_Time', 'End_Time', 'Duration', 'Activity', 'Sub_Activities', 'check_list', 'Notes', 'Start_DT', 'End_DT', 'Display_Start', 'Display_End'])
         else:
-            day_logs['Start_DT'] = pd.to_datetime(day_logs['Date'] + ' ' + day_logs['Start_Time'], errors='coerce')
-            day_logs['End_DT'] = pd.to_datetime(day_logs['Date'] + ' ' + day_logs['End_Time'], errors='coerce')
-            mask = day_logs['End_DT'] < day_logs['Start_DT']
-            day_logs.loc[mask, 'End_DT'] = day_logs.loc[mask, 'End_DT'] + pd.Timedelta(days=1)
-            day_logs = day_logs.sort_values('Start_DT').dropna(subset=['Start_DT', 'End_DT'])
+            day_logs_raw['Start_DT'] = pd.to_datetime(day_logs_raw['Date'] + ' ' + day_logs_raw['Start_Time'], errors='coerce')
+            day_logs_raw['End_DT'] = pd.to_datetime(day_logs_raw['Date'] + ' ' + day_logs_raw['End_Time'], errors='coerce')
+            
+            # Fix overnight shifts
+            mask = day_logs_raw['End_DT'] < day_logs_raw['Start_DT']
+            day_logs_raw.loc[mask, 'End_DT'] = day_logs_raw.loc[mask, 'End_DT'] + pd.Timedelta(days=1)
+            
+            # FIX 1: Filter to ONLY keep logs that intersect with the selected day
+            day_logs = day_logs_raw[(day_logs_raw['End_DT'] > day_start_dt) & (day_logs_raw['Start_DT'] <= day_end_dt)].copy()
+
+            # Clip the start and end times visually so it doesn't bleed off the timeline
+            day_logs['Display_Start'] = day_logs['Start_DT'].clip(lower=day_start_dt)
+            day_logs['Display_End'] = day_logs['End_DT'].clip(upper=day_end_dt)
+            
+            day_logs = day_logs.sort_values('Display_Start').dropna(subset=['Display_Start', 'Display_End'])
 
         if selected_date_str == today_str:
             end_marker_dt = pd.to_datetime(now.strftime('%Y-%m-%d %H:%M'))
         else:
-            end_marker_dt = pd.to_datetime(selected_date_str + ' 23:59')
+            end_marker_dt = pd.to_datetime(selected_date_str + ' 23:59:00')
 
         dummy_row = pd.DataFrame([{
             'Start_DT': end_marker_dt, 
             'End_DT': end_marker_dt, 
+            'Display_Start': end_marker_dt,
+            'Display_End': end_marker_dt,
             'Activity': 'CURRENT_TIME_MARKER', 
             'Sub_Activities': '', 
+            'check_list': '',
             'Notes': '',
             'Date': selected_date_str,
             'Start_Time': end_marker_dt.strftime('%H:%M'),
@@ -1405,7 +1423,7 @@ try:
             'Duration': '0:00'
         }])
         day_logs = pd.concat([day_logs, dummy_row], ignore_index=True)
-        day_logs = day_logs.sort_values('Start_DT')
+        day_logs = day_logs.sort_values('Display_Start')
 
         loc_df_safe = loc_df.copy()
         
@@ -1469,16 +1487,16 @@ try:
         start_time_limit = pd.to_datetime(selected_date_str + ' 05:00')
         if not day_locs.empty and day_locs['Loc_DT'].min() < start_time_limit:
             start_time_limit = day_locs['Loc_DT'].min()
-        if not day_logs.empty and day_logs['Start_DT'].min() < start_time_limit:
+        if not day_logs.empty and day_logs.iloc[0]['Display_Start'] < start_time_limit:
             if day_logs.iloc[0]['Activity'] != 'CURRENT_TIME_MARKER':
-                start_time_limit = day_logs['Start_DT'].min()
+                start_time_limit = day_logs.iloc[0]['Display_Start']
 
         last_end_time = start_time_limit
         timeline_events = []
         
         for _, row in day_logs.iterrows():
-            current_start = row['Start_DT']
-            current_end = row['End_DT']
+            current_start = row['Display_Start']
+            current_end = row['Display_End']
             
             if last_end_time and current_start > last_end_time:
                 gap_duration = (current_start - last_end_time).total_seconds() / 60
@@ -1635,13 +1653,25 @@ try:
 
             if row['Activity'] != 'CURRENT_TIME_MARKER':
                 dur_mins = (current_end - current_start).total_seconds() / 60
+                
+                # FIX 2: Render checklist items beautifully in the subtitle
+                sub_str = str(row['Sub_Activities']).strip().title()
+                chk_str = str(row['check_list']).strip()
+                
+                if chk_str and not sub_str:
+                    display_sub = f"☑️ {chk_str}"
+                elif chk_str and sub_str:
+                    display_sub = f"{sub_str} | ☑️ {chk_str}"
+                else:
+                    display_sub = sub_str
+
                 timeline_events.append({
                     'type': 'task',
                     'start': current_start.strftime('%I:%M %p'),
                     'end': current_end.strftime('%I:%M %p'),
                     'duration': int(dur_mins),
                     'activity': str(row['Activity']).upper(),
-                    'sub': str(row['Sub_Activities']).title(),
+                    'sub': display_sub,
                     'notes': str(row['Notes']),
                     'place': str(current_loc).strip(),
                     'move': str(current_move).strip()
@@ -1695,7 +1725,6 @@ try:
                     is_valid_place = place_str and place_str.upper() not in ["I", "NAN", "NONE"]
                     loc_html_gap = f"<br><span style='color: #d32f2f; font-size: 13px; font-weight: 500;'>📍 {place_str}</span>" if is_valid_place else ""
 
-                    # Replaced column layout and button with a clean centered Purpose text block
                     st.markdown(f"""
                     <div style='background-color: #fafafa; border: 2px dashed #cccccc; padding: 10px; border-radius: 8px; margin-bottom: 10px; text-align: center; color: #888;'>
                         <b>{event['start']} - {event['end']}</b> (Gap: {dur_display})<br>

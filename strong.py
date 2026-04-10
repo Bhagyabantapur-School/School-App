@@ -53,6 +53,24 @@ def append_data(worksheet_name, row_data):
     except Exception as e:
         st.error(f"Error saving to tab '{worksheet_name}': {e}")
 
+def mark_step_done(date_str, step_text):
+    """Finds a specific pending task and marks its status as 'Done' in Google Sheets."""
+    try:
+        worksheet = sh.worksheet("Next Steps")
+        records = worksheet.get_all_records()
+        
+        # Loop through to find the exact row
+        for i, row in enumerate(records):
+            if row['Date'] == date_str and row['Next Step'] == step_text and row['Status'] == 'Pending':
+                # Status is the 4th column (A=1, B=2, C=3, D=4)
+                # We add 2 to 'i' because enumerate starts at 0, and row 1 is the header
+                worksheet.update_cell(i + 2, 4, "Done")
+                return True
+        return False
+    except Exception as e:
+        st.error(f"Error updating task in Sheets: {e}")
+        return False
+
 def next_step_widget(page_name):
     """A modular widget to log and view next steps for a specific page."""
     st.divider()
@@ -72,16 +90,27 @@ def next_step_widget(page_name):
                 new_row = [get_current_time(), page_name, action, "Pending"]
                 append_data("Next Steps", new_row)
                 st.success("Next action logged!")
+                st.rerun() # Refresh to show the new task instantly
 
-    # 2. Display pending steps for this specific category (Always Visible)
+    # 2. Display pending steps for this specific category with a Done button
     df_steps = get_data("Next Steps")
     if not df_steps.empty and "Category" in df_steps.columns:
-        # Filter data for the current page and only show "Pending" tasks
         pending = df_steps[(df_steps["Category"] == page_name) & (df_steps["Status"] == "Pending")]
+        
         if not pending.empty:
             st.markdown(f"**📌 Pending Actions for {page_name}**")
-            st.dataframe(pending[["Date", "Next Step"]], hide_index=True, use_container_width=True)
-
+            
+            # Iterate through the pending tasks to create interactive rows
+            for index, row in pending.iterrows():
+                col_text, col_btn = st.columns([5, 1])
+                with col_text:
+                    # Cleanly display the date and task
+                    st.write(f"📅 {row['Date'][:10]} | **{row['Next Step']}**")
+                with col_btn:
+                    # Unique key required for buttons in a loop
+                    if st.button("✅ Done", key=f"btn_{page_name}_{index}"):
+                        if mark_step_done(row['Date'], row['Next Step']):
+                            st.rerun() # Instantly refresh the page to remove the completed item
 
 # --- Navigation ---
 st.sidebar.title("Navigation")

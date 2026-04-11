@@ -136,32 +136,26 @@ def should_inject_tofrom(loc_name):
     return True
 
 def sync_journey_state():
-    """Reads the last log from GSheets to detect active journeys on app load based on the Remark column."""
     if 'state_synced' not in st.session_state:
         df_loc = load_location_data()
         if not df_loc.empty:
             last_record = df_loc.iloc[-1].to_dict()
             move_val = str(last_record.get('Move', '')).strip()
-            remark_val = str(last_record.get('Remark', '')).strip()
             
-            # Check if the last log indicates a journey start
-            if "Started Route:" in remark_val:
+            if move_val not in ["", "- Stationary -", "nan"]:
                 st.session_state.route_active = True
                 st.session_state.current_move = move_val
                 st.session_state.current_people = str(last_record.get('People', 'I'))
-                # Extract the route name from the remark
-                st.session_state.active_route = remark_val.split("Started Route:")[-1].strip()
-                st.session_state.route_type = "Dynamic"
-            elif remark_val == "Started Express Route":
-                st.session_state.route_active = True
-                st.session_state.route_type = "Express"
-                st.session_state.current_move = move_val
-                st.session_state.current_people = str(last_record.get('People', 'I'))
+                
+                rem = str(last_record.get('Remark', ''))
+                if "Started Route:" in rem:
+                    st.session_state.active_route = rem.split("Started Route:")[-1].strip()
+                    st.session_state.route_type = "Dynamic"
+                else:
+                    st.session_state.route_type = "Express" 
             else:
-                # If last log was an arrival or stationary, no route is active
                 st.session_state.route_active = False
                 st.session_state.route_type = None
-                st.session_state.active_route = ""
                 
         st.session_state.state_synced = True
 

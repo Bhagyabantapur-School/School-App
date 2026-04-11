@@ -22,6 +22,7 @@ if 'current_move' not in st.session_state: st.session_state.current_move = "BIKE
 if 'retro_time' not in st.session_state: st.session_state.retro_time = get_ist_now().time()
 if 'locked_date' not in st.session_state: st.session_state.locked_date = get_ist_now().date()
 if 'locked_time' not in st.session_state: st.session_state.locked_time = get_ist_now().time()
+if 'last_used_route' not in st.session_state: st.session_state.last_used_route = None # NEW STATE
 
 @st.cache_resource
 def init_connection():
@@ -139,6 +140,18 @@ def sync_journey_state():
     if 'state_synced' not in st.session_state:
         df_loc = load_location_data()
         if not df_loc.empty:
+            # --- NEW LOGIC: Find the most recent route used from history ---
+            recent_route = None
+            if 'Remark' in df_loc.columns:
+                # Loop backwards through the remarks to find the last started route
+                for remark in reversed(df_loc['Remark'].tolist()):
+                    rem_str = str(remark)
+                    if "Started Route:" in rem_str:
+                        recent_route = rem_str.split("Started Route:")[-1].strip()
+                        break
+            st.session_state.last_used_route = recent_route
+            # ----------------------------------------------------------------
+
             last_record = df_loc.iloc[-1].to_dict()
             move_val = str(last_record.get('Move', '')).strip()
             
@@ -557,7 +570,14 @@ with tab_location:
             if not st.session_state.route_active:
                 d_col1, d_col2 = st.columns(2)
                 with d_col1:
-                    selected_route = st.selectbox("Select Route (Area)", route_opts, key="dyn_route")
+                    # --- NEW LOGIC: Use the saved 'last_used_route' as the default dropdown index ---
+                    default_idx = 0
+                    if st.session_state.get('last_used_route') in route_opts:
+                        default_idx = route_opts.index(st.session_state.last_used_route)
+                        
+                    selected_route = st.selectbox("Select Route (Area)", route_opts, index=default_idx, key="dyn_route")
+                    # ---------------------------------------------------------------------------------
+                    
                     dyn_move = st.selectbox("Travel Mode", ["BIKE", "WALK", "BIKE + WALK", "TOTO"], key="dyn_move")
                 with d_col2:
                     people_opts = get_list("People")
@@ -576,6 +596,7 @@ with tab_location:
                         st.session_state.route_active = True
                         st.session_state.route_type = "Dynamic"
                         st.session_state.active_route = selected_route
+                        st.session_state.last_used_route = selected_route # SAVE STATE
                         st.session_state.current_move = dyn_move
                         st.session_state.current_people = dyn_people
                         st.rerun()

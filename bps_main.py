@@ -9,11 +9,8 @@ st.set_page_config(
 )
 
 # 2. Define each app as a separate page
-# Setting default=True makes app.py the landing dashboard when the system loads
-home_page = st.Page("app.py", title="System Dashboard", icon="🏠", default=True)
-
-# Student Management
-admission_page = st.Page("admission_hub.py", title="Admission Hub", icon="📝")
+# Set admission_hub.py as the new default landing page since app.py is removed
+admission_page = st.Page("admission_hub.py", title="Admission Hub", icon="📝", default=True)
 student_profile_page = st.Page("student_profile.py", title="Student Profiles", icon="🧑‍🎓")
 id_card_page = st.Page("id_card_app.py", title="ID Card Generator", icon="🪪")
 
@@ -27,7 +24,6 @@ returns_page = st.Page("bps_returns.py", title="Returns", icon="📑")
 
 # 3. Create the grouped navigation menu
 pg = st.navigation({
-    "System Home": [home_page],
     "Student Management": [admission_page, student_profile_page, id_card_page],
     "Academics & Finance": [school_data_page, exam_fees_page],
     "Operations": [distribution_page, returns_page]

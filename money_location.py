@@ -256,21 +256,72 @@ with tab_money:
                     row_time = row.get('Time', '')
                     time_disp = f" at {row_time}" if str(row_time).strip() != "" else ""
                     
-                    # Display TO/FROM so you can see if the Fast Save injected it!
-                    st.markdown(f"**Date:** {row['Date']}{time_disp} | **Amount:** {amt_display} | **Entity:** {row.get('Entity', '')} | **Acc:** {row.get('Account', '')} | **To/From:** {row.get('TO_FROM', '')} | **Loc:** {row.get('Location', '')}")
+                    st.markdown(f"**Date:** {row['Date']}{time_disp} | **Amount:** {amt_display} | **Loc:** {row.get('Location', '')}")
                     
-                    c1, c2, c3 = st.columns(3)
-                    with c1: 
+                    # Row 1: Account, Fund, Entity
+                    c_r1_1, c_r1_2, c_r1_3 = st.columns(3)
+                    with c_r1_1: 
                         acc_opts = get_list("Accounts")
                         default_acc = acc_opts.index(row.get('Account', '')) if row.get('Account', '') in acc_opts else 0
                         i_acc = st.selectbox("Account", acc_opts, index=default_acc, key=f"ac_{idx}")
-                        i_cat = st.selectbox("Category", get_list("Categories") + ["-None-"], key=f"ca_{idx}")
-                    with c2: 
+                    with c_r1_2: 
                         i_fund = st.selectbox("Fund", get_list("Funds"), key=f"fu_{idx}")
-                        i_sub = st.selectbox("Sub Category", get_list("Sub-Categories") + ["-None-"], key=f"su_{idx}")
-                    with c3:
-                        i_part = st.selectbox("Particulars", get_list("Particulars") + ["-None-"], key=f"pa_{idx}")
+                    with c_r1_3:
+                        mapped_entities = []
+                        if 'Map_Entity' in config_df.columns:
+                            mapped_entities = list(dict.fromkeys([str(e).strip() for e in config_df['Map_Entity'].dropna() if str(e).strip() != ""]))
+                        ent_opts = mapped_entities if mapped_entities else get_list("Entities")
                         
+                        curr_ent = str(row.get('Entity', '')).strip()
+                        if curr_ent and curr_ent not in ent_opts:
+                            ent_opts.insert(0, curr_ent)
+                        default_ent_idx = ent_opts.index(curr_ent) if curr_ent in ent_opts else 0
+                        i_ent = st.selectbox("Entity", ent_opts, index=default_ent_idx, key=f"en_{idx}")
+
+                    # Row 2: Category, Sub Category, Particulars (DEPENDENT LOGIC)
+                    c_r2_1, c_r2_2, c_r2_3 = st.columns(3)
+                    with c_r2_1:
+                        if 'Map_Entity' in config_df.columns:
+                            ent_df = config_df[config_df['Map_Entity'].astype(str).str.strip() == i_ent]
+                            cat_opts = list(dict.fromkeys([str(c).strip() for c in ent_df['Map_Category'].dropna() if str(c).strip() != ""]))
+                            i_cat = st.selectbox("Category", cat_opts + ["-- Type New --", "-None-"], key=f"ca_{idx}")
+                            if i_cat == "-- Type New --":
+                                i_cat = st.text_input("Type New Category", key=f"ca_new_{idx}")
+                                cat_df = pd.DataFrame() 
+                            else:
+                                cat_df = ent_df[ent_df['Map_Category'].astype(str).str.strip() == i_cat]
+                        else:
+                            i_cat = st.selectbox("Category", get_list("Categories") + ["-- Type New --", "-None-"], key=f"ca_{idx}")
+                            if i_cat == "-- Type New --": i_cat = st.text_input("Type New Category", key=f"ca_new_{idx}")
+                            cat_df = pd.DataFrame()
+                            
+                    with c_r2_2:
+                        if not cat_df.empty and 'Map_SubCat' in cat_df.columns:
+                            sub_opts = list(dict.fromkeys([str(s).strip() for s in cat_df['Map_SubCat'].dropna() if str(s).strip() != ""]))
+                            i_sub = st.selectbox("Sub Category", sub_opts + ["-- Type New --", "-None-"], key=f"su_{idx}")
+                            if i_sub == "-- Type New --":
+                                i_sub = st.text_input("Type New Sub Category", key=f"su_new_{idx}")
+                                sub_df = pd.DataFrame()
+                            else:
+                                sub_df = cat_df[cat_df['Map_SubCat'].astype(str).str.strip() == i_sub]
+                        else:
+                            i_sub = st.selectbox("Sub Category", get_list("Sub-Categories") + ["-- Type New --", "-None-"], key=f"su_{idx}")
+                            if i_sub == "-- Type New --": i_sub = st.text_input("Type New Sub Category", key=f"su_new_{idx}")
+                            sub_df = pd.DataFrame()
+                            
+                    with c_r2_3:
+                        if not sub_df.empty and 'Map_Particular' in sub_df.columns:
+                            part_opts = list(dict.fromkeys([str(p).strip() for p in sub_df['Map_Particular'].dropna() if str(p).strip() != ""]))
+                            i_part = st.selectbox("Particulars", part_opts + ["-- Type New --", "-None-"], key=f"pa_{idx}")
+                            if i_part == "-- Type New --":
+                                i_part = st.text_input("Type New Particulars", key=f"pa_new_{idx}")
+                        else:
+                            i_part = st.selectbox("Particulars", get_list("Particulars") + ["-- Type New --", "-None-"], key=f"pa_{idx}")
+                            if i_part == "-- Type New --": i_part = st.text_input("Type New Particulars", key=f"pa_new_{idx}")
+
+                    # Row 3: TO/FROM, Remark, Save
+                    c_r3_1, c_r3_2, c_r3_3 = st.columns([1.5, 1.5, 1])
+                    with c_r3_1:
                         tf_opts = get_list("TO_FROM")
                         curr_tf = str(row.get('TO_FROM', '')).strip()
                         if curr_tf and curr_tf not in tf_opts:
@@ -280,10 +331,10 @@ with tab_money:
                         default_tf = tf_opts_with_none.index(curr_tf) if curr_tf in tf_opts_with_none else (len(tf_opts_with_none)-1)
                         i_tofrom = st.selectbox("TO / FROM", tf_opts_with_none, index=default_tf, key=f"tf_{idx}")
                     
-                    c_rem, c_btn = st.columns([3, 1])
-                    with c_rem:
+                    with c_r3_2:
                         i_rem = st.text_input("Remark", key=f"re_{idx}")
-                    with c_btn:
+                        
+                    with c_r3_3:
                         st.markdown("<br>", unsafe_allow_html=True)
                         if st.button("💾 Save", key=f"sv_{idx}", type="primary", use_container_width=True):
                             try:
@@ -293,10 +344,10 @@ with tab_money:
                                 final_part = "" if i_part == "-None-" else i_part
                                 final_tf = "" if i_tofrom == "-None-" else i_tofrom
                                 
-                                # 13 Columns mapping
+                                # 13 Columns mapping - Now using editable i_ent!
                                 row_data = [
                                     row['Date'], row.get('Time', ''), row['In'], row['Out'], 
-                                    i_acc, i_fund, row.get('Entity', ''), 
+                                    i_acc, i_fund, i_ent, 
                                     final_cat, final_sub, final_part, 
                                     final_tf, row.get('Location', ''), i_rem
                                 ]

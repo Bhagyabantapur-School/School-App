@@ -227,9 +227,9 @@ def parse_duration_to_minutes(dur_str):
         return (h * 60) + m
     except: return 0
 
-def get_last_done_str(sub_task, log_df, now):
+def get_last_done_str(item_name, log_df, now, col_name='Sub_Activities'):
     completed_logs = log_df[log_df['End_Time'] != 'RUNNING']
-    matches = completed_logs[completed_logs['Sub_Activities'].astype(str).str.strip().str.upper() == sub_task.upper()]
+    matches = completed_logs[completed_logs[col_name].astype(str).str.strip().str.upper() == item_name.upper()]
     if matches.empty: return "Never"
     max_dt = None
     for _, r in matches.iterrows():
@@ -596,8 +596,12 @@ try:
                     if not matches.empty and str(matches.iloc[0]['Status']).strip().upper() in ['COMPLETED', 'CANCELED']: is_done = True
                     else: is_done = any(task.upper() == str(x).strip().upper() for x in all_logged_items)
                 else: is_done = any(task.upper() == str(x).strip().upper() for x in today_logged_tasks)
+                
+                # Fetch last done time for the checklist item
+                last_done = get_last_done_str(task, log_df, now, col_name='check_list')
+                display_label = f"{task} (Last: {last_done})" if "[Due:" not in task else f"{task} (Last: {last_done})"
                     
-                checked = st.checkbox(task, value=is_done, disabled=is_done, key=f"chk_{task}_{current_activity}")
+                checked = st.checkbox(display_label, value=is_done, disabled=is_done, key=f"chk_{task}_{current_activity}")
                 if checked and not is_done:
                     sheet_log = get_sheet("activity_log")
                     sheet_log.append_row([
@@ -775,7 +779,7 @@ try:
                 cols = st.columns(3)
                 for idx, task in enumerate(avail_subs):
                     with cols[idx % 3]:
-                        last_done = get_last_done_str(task, log_df, now)
+                        last_done = get_last_done_str(task, log_df, now, col_name='Sub_Activities')
                         last_txt = f"\n(Last: {last_done})" if "[Due:" not in task else ""
                         if st.button(f"▶️ {task}{last_txt}", key=f"btn_{idx}_{task}", use_container_width=True):
                             log_sheet = get_sheet("activity_log")
@@ -1822,7 +1826,9 @@ try:
                 ch, cm = divmod(row['Minutes'], 60)
                 col_idx = idx % 4 if len(cat_df) >= 4 else idx
                 with cat_cols[col_idx]:
-                    st.markdown(f"<div style='background-color:#f0f2f6; padding:10px; border-radius:8px; text-align:center; margin-bottom:10px;'><b style='color:#333;'>{row['Category']}</b><br><span style='color:#0068c9;'>{int(ch)}h {int(cm)}m</span></div>", unsafe_allow_html=True)    # ==========================================
+                    st.markdown(f"<div style='background-color:#f0f2f6; padding:10px; border-radius:8px; text-align:center; margin-bottom:10px;'><b style='color:#333;'>{row['Category']}</b><br><span style='color:#0068c9;'>{int(ch)}h {int(cm)}m</span></div>", unsafe_allow_html=True)
+
+    # ==========================================
     # TAB 6: APP HUB
     # ==========================================
     with tab6:

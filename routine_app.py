@@ -1366,15 +1366,38 @@ try:
         formatted_target_date = selected_timeline_date.strftime('%d.%m.%y') # Used to match VISITED_PLACES dates
         prev_date_str = (selected_timeline_date - timedelta(days=1)).strftime('%Y-%m-%d')
         
-        # --- NEW HELPER: Fetch Gap Label based on VISITED_PLACES ---
-        def get_gap_label(dur, loc, visited_df):
+        # --- NEW HELPER: Fetch Gap Label based on VISITED_PLACES (Time-Aware) ---
+        def get_gap_label(dur, loc, visited_df, start_dt, end_dt):
             if "HOME" in str(loc).upper():
                 return get_short_stop_label(loc) if dur < 5 else "Unlogged Time / Break"
             
+            found_purposes = []
             if not visited_df.empty:
                 matches = visited_df[visited_df['Place'].str.strip().str.upper() == str(loc).strip().upper()]
                 if not matches.empty:
-                    # 1. Look for the exact date in "Visit Dates & Times"
+                    # 1. Look for EXACT time matches within this specific gap
+                    if 'Visit Dates & Times' in matches.columns:
+                        for _, m_row in matches.iterrows():
+                            visit_times_str = str(m_row['Visit Dates & Times'])
+                            if pd.notna(visit_times_str) and visit_times_str.strip() != "":
+                                for t_str in visit_times_str.split('\n'):
+                                    t_str = t_str.strip()
+                                    if t_str:
+                                        try:
+                                            v_dt = pd.to_datetime(t_str, format="%d.%m.%y %H:%M")
+                                            # Buffer of 1 minute to catch exact boundary timestamps safely
+                                            if (start_dt - pd.Timedelta(minutes=1)) <= v_dt <= (end_dt + pd.Timedelta(minutes=1)):
+                                                purpose = str(m_row['Purpose']).strip()
+                                                if purpose and purpose not in found_purposes:
+                                                    found_purposes.append(purpose)
+                                        except:
+                                            pass
+                    
+                    # Return joined purposes if time matches were found
+                    if found_purposes:
+                        return " + ".join(found_purposes)
+
+                    # 2. Fallback to just matching the date if no exact times align
                     if 'Visit Dates & Times' in matches.columns:
                         for _, m_row in matches.iterrows():
                             if pd.notna(m_row['Visit Dates & Times']) and formatted_target_date in str(m_row['Visit Dates & Times']):
@@ -1382,7 +1405,7 @@ try:
                                 if pd.notna(purpose) and str(purpose).strip() != "":
                                     return str(purpose).strip()
                                     
-                    # 2. Fallback to the first match if no date matches
+                    # 3. Fallback to the first match overall if no date matches
                     purpose = matches.iloc[0]['Purpose']
                     if pd.notna(purpose) and str(purpose).strip() != "":
                         return str(purpose).strip()
@@ -1403,14 +1426,11 @@ try:
             day_logs_raw['Start_DT'] = pd.to_datetime(day_logs_raw['Date'] + ' ' + day_logs_raw['Start_Time'], errors='coerce')
             day_logs_raw['End_DT'] = pd.to_datetime(day_logs_raw['Date'] + ' ' + day_logs_raw['End_Time'], errors='coerce')
             
-            # Fix overnight shifts
             mask = day_logs_raw['End_DT'] < day_logs_raw['Start_DT']
             day_logs_raw.loc[mask, 'End_DT'] = day_logs_raw.loc[mask, 'End_DT'] + pd.Timedelta(days=1)
             
-            # Filter to ONLY keep logs that intersect with the selected day
             day_logs = day_logs_raw[(day_logs_raw['End_DT'] > day_start_dt) & (day_logs_raw['Start_DT'] <= day_end_dt)].copy()
 
-            # Clip the start and end times visually so it doesn't bleed off the timeline
             day_logs['Display_Start'] = day_logs['Start_DT'].clip(lower=day_start_dt)
             day_logs['Display_End'] = day_logs['End_DT'].clip(upper=day_end_dt)
             
@@ -1549,7 +1569,7 @@ try:
                             if transit_modes:
                                 act_label = f"On the way ({' + '.join(transit_modes)})"
                             else:
-                                act_label = get_gap_label(gap_duration, curr_loc, visited_places_df)
+                                act_label = get_gap_label(gap_duration, curr_loc, visited_places_df, gap_start_dt, gap_end_dt)
                             timeline_events.append({
                                 'type': 'gap',
                                 'start': gap_start_dt.strftime('%I:%M %p'),
@@ -1594,7 +1614,7 @@ try:
                                         if new_loc.upper() != curr_loc.upper() and curr_loc != "":
                                             sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
                                             if sub_gap_dur >= 0:
-                                                act_label = get_gap_label(sub_gap_dur, curr_loc, visited_places_df)
+                                                act_label = get_gap_label(sub_gap_dur, curr_loc, visited_places_df, curr_gap_start, split_time)
                                                 timeline_events.append({
                                                     'type': 'gap',
                                                     'start': curr_gap_start.strftime('%I:%M %p'),
@@ -1614,7 +1634,7 @@ try:
                                     if is_curr_stationary:
                                         sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
                                         if sub_gap_dur >= 0:
-                                            act_label = get_gap_label(sub_gap_dur, curr_loc, visited_places_df)
+                                            act_label = get_gap_label(sub_gap_dur, curr_loc, visited_places_df, curr_gap_start, split_time)
                                             timeline_events.append({
                                                 'type': 'gap',
                                                 'start': curr_gap_start.strftime('%I:%M %p'),
@@ -1639,7 +1659,7 @@ try:
                                 if curr_move.upper() != "- STATIONARY -":
                                     act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else "On the way"
                                 else:
-                                    act_label = get_gap_label(final_dur, curr_loc, visited_places_df)
+                                    act_label = get_gap_label(final_dur, curr_loc, visited_places_df, curr_gap_start, gap_end_dt)
                                     
                                 timeline_events.append({
                                     'type': 'gap',
@@ -1667,7 +1687,6 @@ try:
             if row['Activity'] != 'CURRENT_TIME_MARKER':
                 dur_mins = (current_end - current_start).total_seconds() / 60
                 
-                # Checklists format fix
                 sub_str = str(row['Sub_Activities']).strip().title()
                 chk_str = str(row['check_list']).strip()
                 
@@ -1755,7 +1774,6 @@ try:
                 
                 sub_text = f"<br><b>{event['sub']}</b>" if event['sub'] else ""
                 
-                # Cleanup redundant notes text (hides "Checked off" to keep UI clean)
                 note_val = str(event.get('notes', '')).strip()
                 if note_val in ["Checked off", "Auto-logged via Timer"]:
                     note_text = ""
@@ -1827,7 +1845,6 @@ try:
                 col_idx = idx % 4 if len(cat_df) >= 4 else idx
                 with cat_cols[col_idx]:
                     st.markdown(f"<div style='background-color:#f0f2f6; padding:10px; border-radius:8px; text-align:center; margin-bottom:10px;'><b style='color:#333;'>{row['Category']}</b><br><span style='color:#0068c9;'>{int(ch)}h {int(cm)}m</span></div>", unsafe_allow_html=True)
-
     # ==========================================
     # TAB 6: APP HUB
     # ==========================================

@@ -124,11 +124,27 @@ with tab2:
     df = fetch_data()
 
     if not df.empty:
+        # --- NEW CLEANUP LOGIC ---
+        # Look for old entries ending in "mins" and convert them for display
+        def clean_old_durations(val):
+            if isinstance(val, str) and 'mins' in val:
+                try:
+                    total_mins = int(val.replace(' mins', '').strip())
+                    h = total_mins // 60
+                    m = total_mins % 60
+                    return f"{h:02d}h {m:02d}m"
+                except:
+                    return val
+            return val
+            
+        # Apply the cleaner function to the Duration column
+        if 'Duration' in df.columns:
+            df['Duration'] = df['Duration'].apply(clean_old_durations)
+        # -------------------------
+
         st.dataframe(
             df, 
             use_container_width=True,
             hide_index=True
         )
         st.caption(f"Total entries logged: {len(df)}")
-    else:
-        st.info("No logs found yet. Start by adding a new entry in the 'Log Entry' tab!")

@@ -34,7 +34,7 @@ except Exception as e:
 # --- App Layout: Tabs ---
 tab1, tab2 = st.tabs(["📝 Log Entry", "📊 View Logs"])
 
-# === TAB 1: LOG ENTRY ===
+# === TAB 1: LOG Entry ===
 with tab1:
     with st.form("duty_log_form"):
         st.subheader("New Session Entry")
@@ -43,9 +43,11 @@ with tab1:
         with col1:
             log_date = st.date_input("Date", date.today())
         with col2:
-            start_time = st.time_input("Start Time")
+            # Added step=60 to allow 1-minute increments in the dropdown
+            start_time = st.time_input("Start Time", step=60)
         with col3:
-            end_time = st.time_input("End Time")
+            # Added step=60 to allow 1-minute increments in the dropdown
+            end_time = st.time_input("End Time", step=60)
             
         activity_selection = st.selectbox(
             "Activity Type", 
@@ -55,11 +57,10 @@ with tab1:
                 "Hands-on Training Review",
                 "EVM/VVPAT Mock Practice",
                 "Marked Copy / Voter Roll Review",
-                "Other / Custom (Type below)" # Updated option
+                "Other / Custom (Type below)"
             ]
         )
         
-        # New text input for custom activity
         custom_activity = st.text_input("Custom Activity Type", placeholder="Type new activity if 'Other' is selected above...")
         
         notes = st.text_area("Notes / Key Learnings", placeholder="What did you focus on today?")
@@ -68,10 +69,8 @@ with tab1:
 
     # Form Submission Logic
     if submitted:
-        # Determine which activity name to use
         final_activity = custom_activity.strip() if activity_selection == "Other / Custom (Type below)" and custom_activity.strip() else activity_selection
         
-        # Require text if "Other" was selected
         if activity_selection == "Other / Custom (Type below)" and not custom_activity.strip():
             st.warning("⚠️ Please type a Custom Activity Type before submitting.")
         else:
@@ -87,7 +86,7 @@ with tab1:
                 log_date.strftime("%d-%m-%Y"),
                 start_time.strftime("%I:%M %p"),
                 end_time.strftime("%I:%M %p"),
-                final_activity, # Using the custom text if provided
+                final_activity, 
                 f"{duration_minutes} mins",
                 notes
             ]

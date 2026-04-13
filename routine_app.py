@@ -149,25 +149,6 @@ def get_water_log():
     return df
 
 @st.cache_data(ttl=300)
-def get_project_tasks():
-    client = init_connection()
-    ss = client.open("MY ROUTINE 2026")
-    try:
-        sheet = ss.worksheet("project_tasks")
-    except gspread.exceptions.WorksheetNotFound:
-        sheet = ss.add_worksheet(title="project_tasks", rows="200", cols="5")
-        sheet.append_row(["Task Name", "Project Name", "Status", "Start Date", "End Date"])
-    data = sheet.get_all_values()
-    if len(data) <= 1:
-        return pd.DataFrame(columns=["Task Name", "Project Name", "Status", "Start Date", "End Date", "row_index"])
-    df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 5: df[df.shape[1]] = ""
-    df = df.iloc[:, :5]
-    df.columns = ["Task Name", "Project Name", "Status", "Start Date", "End Date"]
-    df['row_index'] = df.index + 2 
-    return df
-
-@st.cache_data(ttl=300)
 def get_holidays():
     client = init_connection()
     ss = client.open("MY ROUTINE 2026")
@@ -266,7 +247,6 @@ try:
     log_df = get_activity_log() 
     future_df = get_future_tasks()
     water_df = get_water_log()
-    proj_df = get_project_tasks()
     holidays_df = get_holidays()
     loc_df = get_location_data() 
     visited_places_df = get_visited_places()
@@ -308,7 +288,6 @@ try:
                 get_activity_log.clear()
                 get_future_tasks.clear()
                 get_water_log.clear()
-                get_project_tasks.clear()
                 get_holidays.clear()
                 get_location_data.clear() 
                 get_visited_places.clear()
@@ -624,11 +603,7 @@ try:
         # ==========================================
         # MULTI-TASKING LOGIC (LIVE TIMERS)
         # ==========================================
-        pending_projs = pd.DataFrame()
-        if not proj_df.empty:
-            pending_projs = proj_df[proj_df['Status'].str.strip().str.title() != 'Completed']
-        
-        if sub_list or active_count > 0 or not pending_projs.empty:
+        if sub_list or active_count > 0:
             st.markdown("---")
             
             st.markdown("<h4 style='text-align: center; color: #333;'>Tap to Track Activity</h4>", unsafe_allow_html=True)
@@ -708,23 +683,6 @@ try:
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
-                    
-                    is_project = str(active_row['Notes']).strip() == "Project Tracking"
-                    new_proj_status = None
-                    raw_task_name = ""
-                    
-                    if is_project:
-                        raw_task_name = active_sub.split(" (")[0]
-                        curr_stat_matches = proj_df[proj_df['Task Name'] == raw_task_name]['Status']
-                        curr_stat = curr_stat_matches.values[0].strip().title() if not curr_stat_matches.empty else "In Progress"
-                        
-                        status_opts = ["In Progress", "Completed", "Not Started"]
-                        try:
-                            def_idx = status_opts.index(curr_stat)
-                        except ValueError:
-                            def_idx = 0
-                            
-                        new_proj_status = st.selectbox("Update Project Status upon saving:", status_opts, index=def_idx, key=f"pstat_{sheet_row}")
 
                     col_stop, col_cancel = st.columns(2)
                     with col_stop:
@@ -747,14 +705,6 @@ try:
                                     fsheet = get_sheet("future_tasks")
                                     fsheet.update_cell(r_idx, 7, "Completed") 
                                     get_future_tasks.clear() 
-                                    
-                            if is_project and new_proj_status:
-                                p_matches = proj_df[proj_df['Task Name'] == raw_task_name]
-                                if not p_matches.empty:
-                                    p_idx = int(p_matches.iloc[0]['row_index'])
-                                    psheet = get_sheet("project_tasks")
-                                    psheet.update_cell(p_idx, 3, new_proj_status)
-                                    get_project_tasks.clear() 
                                     
                             get_activity_log.clear() 
                             st.success(f"Saved: {display_name}")
@@ -789,59 +739,8 @@ try:
                             ], value_input_option="USER_ENTERED")
                             get_activity_log.clear() 
                             st.rerun()
-            
-            # --- 3. RENDER PROJECT TRACKER (Not Currently Running) ---
-            if not pending_projs.empty:
-                avail_projs = pending_projs[~pending_projs['Task Name'].isin([x.split(" (")[0] for x in running_subs])]
-                if not avail_projs.empty:
-                    st.markdown("<div style='margin-top: 15px; margin-bottom: 5px; color: #0068c9;'><b>🚀 Start a Project Task:</b></div>", unsafe_allow_html=True)
-                    
-                    col_proj, col_task, col_btn = st.columns([2, 2, 1])
-                    
-                    with col_proj:
-                        unique_projs = sorted(avail_projs['Project Name'].unique().tolist())
-                        selected_project = st.selectbox("Project", unique_projs, label_visibility="collapsed", key="live_proj_sel")
-                    
-                    with col_task:
-                        filtered_tasks = avail_projs[avail_projs['Project Name'] == selected_project]['Task Name'].tolist()
-                        selected_task = st.selectbox("Task", filtered_tasks, label_visibility="collapsed", key="live_task_sel")
 
-                    with col_btn:
-                        st.markdown(
-                            """
-                            <div id="proj_start_anchor"></div>
-                            <style>
-                            div[data-testid="column"]:nth-of-type(3) div.element-container:has(#proj_start_anchor) + div.element-container button {
-                                background-color: #2e7b32 !important; 
-                                color: white !important;
-                                border: none !important;
-                            }
-                            div[data-testid="column"]:nth-of-type(3) div.element-container:has(#proj_start_anchor) + div.element-container button:hover {
-                                background-color: #1b5e20 !important; 
-                            }
-                            </style>
-                            """,
-                            unsafe_allow_html=True
-                        )
-                        if st.button("▶️ Start", key="start_proj", use_container_width=True):
-                            selected_p_task_full = f"{selected_task} ({selected_project})"
-                            r_idx = int(proj_df[(proj_df['Task Name'] == selected_task) & (proj_df['Project Name'] == selected_project)]['row_index'].values[0])
-                            psheet = get_sheet("project_tasks")
-                            curr_stat = proj_df[(proj_df['Task Name'] == selected_task) & (proj_df['Project Name'] == selected_project)]['Status'].values[0].strip().title()
-                            
-                            if curr_stat == "Not Started":
-                                psheet.update_cell(r_idx, 3, "In Progress")
-                                get_project_tasks.clear() 
-                                
-                            log_sheet = get_sheet("activity_log")
-                            log_sheet.append_row([
-                                today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
-                                "WORK", selected_p_task_full, "", "Project Tracking"
-                            ], value_input_option="USER_ENTERED")
-                            get_activity_log.clear() 
-                            st.rerun()
-
-            # --- 4. RENDER MEETING/VISITOR TRACKER ---
+            # --- 3. RENDER MEETING/VISITOR TRACKER ---
             st.markdown("<div style='margin-top: 15px; margin-bottom: 5px; color: #ff4b4b;'><b>👥 Meeting / Visitor Tracker:</b></div>", unsafe_allow_html=True)
             
             if st.button("⚡ Quick Start (Update Details Later)", use_container_width=True):

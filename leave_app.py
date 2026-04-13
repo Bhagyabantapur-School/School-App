@@ -1,8 +1,8 @@
 import streamlit as st
+import gspread
+from google.oauth2.service_account import Credentials
 from datetime import date
 from fpdf import FPDF
-from streamlit_gsheets import GSheetsConnection
-import pandas as pd
 import tempfile
 import os
 
@@ -26,9 +26,6 @@ TEACHER_LIST = [
     "TAPASI RANA", "BIMAL KUMAR PATRA", "SUJATA BISWAS ROTHA", 
     "TAPAN KUMAR MANDAL", "ROHINI SINGH", "MANJUMA KHATUN"
 ]
-
-# Connect using the exact header name from your secrets.toml
-conn = st.connection("gcp_service_account", type=GSheetsConnection)
 
 # Application Form
 with st.form("leave_form"):
@@ -112,28 +109,44 @@ def create_pdf(name, desig, l_type, n_days, start, end, rsn, app_dt):
     return pdf_bytes
 
 if submitted:
-    # 1. Log to Google Sheets
+    # 1. Log to Google Sheets using gspread
     if sheet_url_input.strip() == "":
         st.warning("⚠️ Google Sheet URL is missing. The PDF will be generated, but data will NOT be logged. Please paste the link in the sidebar.")
     else:
-        new_data = pd.DataFrame([{
-            "Date": app_date.strftime("%d-%m-%Y"),
-            "Teacher": applicant_name,
-            "Leave Type": leave_type,
-            "Days": num_days,
-            "From": start_date.strftime("%d-%m-%Y"),
-            "To": end_date.strftime("%d-%m-%Y"),
-            "Reason": reason
-        }])
-        
         try:
-            # Pass the URL from the sidebar directly to the read and update methods
-            existing_data = conn.read(spreadsheet=sheet_url_input, worksheet="Leaves", ttl=0)
-            updated_df = pd.concat([existing_data, new_data], ignore_index=True)
-            conn.update(spreadsheet=sheet_url_input, worksheet="Leaves", data=updated_df)
+            # Set up the authentication scopes required by Google
+            scopes = [
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
+            ]
+            
+            # Fetch secrets exactly as formatted in your secrets.toml
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            
+            # Authenticate using your existing google-auth library
+            credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+            client = gspread.authorize(credentials)
+            
+            # Open the sheet via URL and target the "Leaves" worksheet
+            sheet = client.open_by_url(sheet_url_input).worksheet("Leaves")
+            
+            # Prepare the row data
+            row_to_insert = [
+                app_date.strftime("%d-%m-%Y"),
+                applicant_name,
+                leave_type,
+                num_days,
+                start_date.strftime("%d-%m-%Y"),
+                end_date.strftime("%d-%m-%Y"),
+                reason
+            ]
+            
+            # Append the row to the next available empty line in the sheet
+            sheet.append_row(row_to_insert)
             st.success("📊 Leave successfully logged to Google Sheets.")
+            
         except Exception as e:
-            st.error(f"⚠️ Google Sheet log failed. Please check the URL and permissions. Error: {e}")
+            st.error(f"⚠️ Google Sheet log failed. Please check the URL and your secrets. Error: {e}")
 
     # 2. PDF Generation
     pdf_file = create_pdf(applicant_name, designation, leave_type, num_days, 

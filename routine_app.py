@@ -289,7 +289,7 @@ try:
             </div>
         """, unsafe_allow_html=True)
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["⏱️ Live", "📅 Sched", "💧 Water", "📊 Proj", "⏳ Time", "🔗 Hub", "✨ AI", "📍 Places"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["⏱️ Live", "📅 Sched", "💧 Water", "⏳ Time", "✨ AI", "📍 Places"])
 
     # ==========================================
     # TAB 1: LIVE DASHBOARD
@@ -1265,99 +1265,9 @@ try:
             else: st.info("No data for this month.")
 
     # ==========================================
-    # TAB 4: PROJECTS
+    # TAB 4: TIMELINE (DAILY AUDIT)
     # ==========================================
     with tab4:
-        st.markdown("<h3 style='text-align: center; color: #0068c9;'>📊 Project Tracking</h3>", unsafe_allow_html=True)
-        st.markdown("---")
-        
-        status_colors = {"Completed": "#2e7b32", "In Progress": "#0068c9", "Not Started": "#ff9f36"}
-        
-        if not proj_df.empty:
-            plot_df = proj_df.copy()
-            plot_df['Start Date'] = pd.to_datetime(plot_df['Start Date'], errors='coerce')
-            plot_df['End Date'] = pd.to_datetime(plot_df['End Date'], errors='coerce')
-            plot_df = plot_df.dropna(subset=['Start Date', 'End Date'])
-            
-            if not plot_df.empty:
-                st.markdown("### 📈 Overall Progress")
-                project_stats = plot_df.groupby('Project Name').apply(
-                    lambda x: (x['Status'].str.strip().str.title() == 'Completed').sum() / len(x)
-                ).reset_index(name='Progress')
-                
-                cols = st.columns(3)
-                for i, row in project_stats.iterrows():
-                    with cols[i % 3]:
-                        percent_complete = int(row['Progress'] * 100)
-                        st.markdown(f"""
-                        <div style='background-color: #f0f2f6; padding: 15px; border-radius: 10px; margin-bottom: 5px; height: 110px;'>
-                            <p style='margin: 0; font-size: 16px; font-weight: 600; color: #333; line-height: 1.2; word-wrap: break-word;'>{row['Project Name']}</p>
-                            <h2 style='margin: 0; color: #0068c9; padding-top: 5px;'>{percent_complete}%</h2>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        st.progress(row['Progress'])
-                        st.markdown("<br>", unsafe_allow_html=True)
-                
-                st.markdown("<br>", unsafe_allow_html=True)
-                
-                col_gantt, col_pie = st.columns([2, 1])
-                with col_gantt:
-                    st.markdown("#### 🗓️ Task Timeline")
-                    plot_df['Status'] = plot_df['Status'].str.strip().str.title()
-                    plot_df = plot_df.sort_values('Start Date')
-                    fig_gantt = px.timeline(plot_df, x_start="Start Date", x_end="End Date", y="Task Name", color="Status", color_discrete_map=status_colors, hover_data=["Project Name"])
-                    fig_gantt.update_yaxes(autorange="reversed", tickmode='linear')
-                    fig_gantt.update_layout(margin=dict(l=0, r=0, t=30, b=0), xaxis_title="", yaxis_title="", showlegend=False)
-                    st.plotly_chart(fig_gantt, use_container_width=True)
-                    
-                with col_pie:
-                    st.markdown("#### 📌 Status")
-                    status_counts = plot_df['Status'].value_counts().reset_index()
-                    status_counts.columns = ['Status', 'Count']
-                    fig_pie = px.pie(status_counts, names='Status', values='Count', color='Status', color_discrete_map=status_colors, hole=0.45)
-                    fig_pie.update_layout(margin=dict(l=0, r=0, t=30, b=0), legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
-                    fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-                    st.plotly_chart(fig_pie, use_container_width=True)
-            else:
-                st.info("Project dates are missing or invalid. Please update them.")
-        else:
-            st.info("No project tasks found. Add your first task below!")
-            
-        st.markdown("---")    
-        with st.expander("➕ Add New Project Task"):
-            with st.form("add_project_task"):
-                p_task = st.text_input("Task Name")
-                
-                if not proj_df.empty:
-                    existing_projects = ["-- Select Existing Project --"] + sorted(list(set(proj_df['Project Name'].dropna().tolist())))
-                else:
-                    existing_projects = ["-- Select Existing Project --"]
-                
-                col_p1, col_p2 = st.columns(2)
-                with col_p1: p_name_sel = st.selectbox("Existing Project", existing_projects)
-                with col_p2: p_name_new = st.text_input("OR New Project Name", placeholder="Type new name here")
-                
-                col_s, col_d1, col_d2 = st.columns(3)
-                with col_s: p_status = st.selectbox("Status", ["Not Started", "In Progress", "Completed"])
-                with col_d1: p_start = st.date_input("Start Date")
-                with col_d2: p_end = st.date_input("End Date")
-                
-                if st.form_submit_button("Add Task", use_container_width=True):
-                    final_p_name = p_name_new.strip() if p_name_new.strip() else (p_name_sel if p_name_sel != "-- Select Existing Project --" else "")
-                    
-                    if p_task and final_p_name:
-                        psheet = get_sheet("project_tasks")
-                        psheet.append_row([p_task.strip(), final_p_name, p_status, p_start.strftime('%Y-%m-%d'), p_end.strftime('%Y-%m-%d')])
-                        get_project_tasks.clear() 
-                        st.success("Task added!")
-                        time.sleep(1)
-                        st.rerun()
-                    else: st.error("Task Name and Project Name are required.")
-
-    # ==========================================
-    # TAB 5: TIMELINE (DAILY AUDIT)
-    # ==========================================
-    with tab5:
         st.markdown("<h3 style='text-align: center; color: #555;'>⏳ Daily Activity Timeline</h3>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #888;'>Audit your day to find unlogged time and gaps.</p>", unsafe_allow_html=True)
         
@@ -1845,22 +1755,11 @@ try:
                 col_idx = idx % 4 if len(cat_df) >= 4 else idx
                 with cat_cols[col_idx]:
                     st.markdown(f"<div style='background-color:#f0f2f6; padding:10px; border-radius:8px; text-align:center; margin-bottom:10px;'><b style='color:#333;'>{row['Category']}</b><br><span style='color:#0068c9;'>{int(ch)}h {int(cm)}m</span></div>", unsafe_allow_html=True)
-    # ==========================================
-    # TAB 6: APP HUB
-    # ==========================================
-    with tab6:
-        st.markdown("<h3 style='text-align: center; color: #555; margin-bottom: 20px;'>🔗 Quick Links</h3>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #888; margin-bottom: 30px;'>Access your other modules directly from here.</p>", unsafe_allow_html=True)
-        
-        st.link_button("🏫 Admission Hub", "https://your-admission-hub-url.streamlit.app", use_container_width=True)
-        st.link_button("📱 Main Dashboard (app.py)", "https://your-main-app-url.streamlit.app", use_container_width=True)
-        st.link_button("📋 Form Manager", "https://your-form-manager-url.streamlit.app", use_container_width=True)
-        st.link_button("🪪 ID Card Generator", "https://your-id-card-url.streamlit.app", use_container_width=True)
 
     # ==========================================
-    # TAB 7: AI ROUTINE
+    # TAB 5: AI ROUTINE
     # ==========================================
-    with tab7:
+    with tab5:
         st.markdown("<h3 style='text-align: center; color: #555;'>✨ AI Routine Suggestions</h3>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #888;'>Based on your actual past activity, here is an optimized daily routine.</p>", unsafe_allow_html=True)
 
@@ -1922,9 +1821,9 @@ try:
             st.info("Not enough data yet! Keep logging your activities to get smart routine suggestions.")
 
     # ==========================================
-    # TAB 8: PLACES LOG
+    # TAB 6: PLACES LOG
     # ==========================================
-    with tab8:
+    with tab6:
         st.markdown("<h3 style='text-align: center; color: #555;'>📍 Visited Places Database</h3>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #888;'>Auto-generate a log of all places you've visited, grouped by purpose.</p>", unsafe_allow_html=True)
         

@@ -34,46 +34,50 @@ except Exception as e:
 # --- App Layout: Tabs ---
 tab1, tab2 = st.tabs(["📝 Log Entry", "📊 View Logs"])
 
-# === TAB 1: LOG Entry ===
+# === TAB 1: LOG ENTRY (Dynamic without st.form) ===
 with tab1:
-    with st.form("duty_log_form"):
-        st.subheader("New Session Entry")
+    st.subheader("New Session Entry")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        log_date = st.date_input("Date", date.today())
+    with col2:
+        start_time = st.time_input("Start Time", step=60)
+    with col3:
+        end_time = st.time_input("End Time", step=60)
         
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            log_date = st.date_input("Date", date.today())
-        with col2:
-            # Added step=60 to allow 1-minute increments in the dropdown
-            start_time = st.time_input("Start Time", step=60)
-        with col3:
-            # Added step=60 to allow 1-minute increments in the dropdown
-            end_time = st.time_input("End Time", step=60)
-            
-        activity_selection = st.selectbox(
-            "Activity Type", 
-            [
-                "PPT Study (Bengali Rules)", 
-                "Form 12/12A Practice", 
-                "Hands-on Training Review",
-                "EVM/VVPAT Mock Practice",
-                "Marked Copy / Voter Roll Review",
-                "Other / Custom (Type below)"
-            ]
-        )
+    activity_selection = st.selectbox(
+        "Activity Type", 
+        [
+            "PPT Study (Bengali Rules)", 
+            "Form 12/12A Practice", 
+            "Hands-on Training Review",
+            "EVM/VVPAT Mock Practice",
+            "Marked Copy / Voter Roll Review",
+            "Other / Custom (Type below)"
+        ]
+    )
+    
+    # --- DYNAMIC LOGIC ---
+    # The custom activity variable starts empty
+    custom_activity = ""
+    
+    # If "Other" is selected, SHOW the text input
+    if activity_selection == "Other / Custom (Type below)":
+        custom_activity = st.text_input("Custom Activity Type", placeholder="Type your new activity here...")
+    
+    notes = st.text_area("Notes / Key Learnings", placeholder="What did you focus on today?")
+    
+    # Use a standard button instead of a form submit button
+    if st.button("Log Activity to Sheet", type="primary"):
         
-        custom_activity = st.text_input("Custom Activity Type", placeholder="Type new activity if 'Other' is selected above...")
-        
-        notes = st.text_area("Notes / Key Learnings", placeholder="What did you focus on today?")
-        
-        submitted = st.form_submit_button("Log Activity to Sheet")
-
-    # Form Submission Logic
-    if submitted:
-        final_activity = custom_activity.strip() if activity_selection == "Other / Custom (Type below)" and custom_activity.strip() else activity_selection
-        
+        # Validation checks
         if activity_selection == "Other / Custom (Type below)" and not custom_activity.strip():
             st.warning("⚠️ Please type a Custom Activity Type before submitting.")
         else:
+            # Determine the final activity name
+            final_activity = custom_activity.strip() if activity_selection == "Other / Custom (Type below)" else activity_selection
+            
             start_dt = datetime.combine(log_date, start_time)
             end_dt = datetime.combine(log_date, end_time)
             

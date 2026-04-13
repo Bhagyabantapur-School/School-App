@@ -34,7 +34,7 @@ except Exception as e:
 # --- App Layout: Tabs ---
 tab1, tab2 = st.tabs(["📝 Log Entry", "📊 View Logs"])
 
-# === TAB 1: LOG ENTRY (Dynamic without st.form) ===
+# === TAB 1: LOG ENTRY ===
 with tab1:
     st.subheader("New Session Entry")
     
@@ -58,24 +58,18 @@ with tab1:
         ]
     )
     
-    # --- DYNAMIC LOGIC ---
-    # The custom activity variable starts empty
     custom_activity = ""
     
-    # If "Other" is selected, SHOW the text input
     if activity_selection == "Other / Custom (Type below)":
         custom_activity = st.text_input("Custom Activity Type", placeholder="Type your new activity here...")
     
     notes = st.text_area("Notes / Key Learnings", placeholder="What did you focus on today?")
     
-    # Use a standard button instead of a form submit button
     if st.button("Log Activity to Sheet", type="primary"):
         
-        # Validation checks
         if activity_selection == "Other / Custom (Type below)" and not custom_activity.strip():
             st.warning("⚠️ Please type a Custom Activity Type before submitting.")
         else:
-            # Determine the final activity name
             final_activity = custom_activity.strip() if activity_selection == "Other / Custom (Type below)" else activity_selection
             
             start_dt = datetime.combine(log_date, start_time)
@@ -84,21 +78,28 @@ with tab1:
             if end_dt < start_dt:
                 end_dt += timedelta(days=1)
                 
-            duration_minutes = int((end_dt - start_dt).total_seconds() / 60)
+            # --- UPDATED DURATION CALCULATION ---
+            total_minutes = int((end_dt - start_dt).total_seconds() / 60)
+            hours = total_minutes // 60
+            minutes = total_minutes % 60
+            
+            # Format as 00h 00m (the :02d ensures it always has two digits, like 01h 05m)
+            duration_formatted = f"{hours:02d}h {minutes:02d}m"
             
             row_data = [
                 log_date.strftime("%d-%m-%Y"),
                 start_time.strftime("%I:%M %p"),
                 end_time.strftime("%I:%M %p"),
                 final_activity, 
-                f"{duration_minutes} mins",
+                duration_formatted, # Using the new formatted string here
                 notes
             ]
             
             with st.spinner("Saving to Google Sheets..."):
                 try:
                     sheet.append_row(row_data)
-                    st.success(f"✅ Successfully logged {duration_minutes} minutes of **{final_activity}**!")
+                    # Updated success message to show the new format
+                    st.success(f"✅ Successfully logged {duration_formatted} of **{final_activity}**!")
                     st.cache_data.clear() 
                 except Exception as e:
                     st.error(f"An error occurred while saving: {e}")

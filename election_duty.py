@@ -216,7 +216,6 @@ with tab3:
 
     st.divider()
     
-    # --- CHANGED: Wrapped the Add form in an expander ---
     with st.expander("➕ Add New Team Member"):
         with st.form("add_officer_form"):
             t_name = st.text_input("Name")
@@ -260,44 +259,44 @@ with tab4:
     else:
         st.info("No logs found yet.")
 
-# === TAB 5: QUICK REFERENCE ===
+# === TAB 5: QUICK REFERENCE (BENGALI / ENGLISH) ===
 with tab5:
     st.header("📖 1st Polling Officer Guide")
-    st.markdown("Quick reference for your statutory duties on Polling Day.")
+    st.markdown("Polling Day-তে আপনার statutory duty-র quick reference.")
     
-    with st.expander("📝 1. Marking the Electoral Roll"):
+    with st.expander("📝 1. Electoral Roll Marking (ভোটার তালিকা দাগানো)"):
         st.markdown("""
-        When a voter's identity is verified, mark the **Marked Copy of the Electoral Roll** exactly as follows:
-        * **Male Voter:** Draw a diagonal red line across the voter's box.
-        * **Female Voter:** Draw a diagonal red line **AND** circle the serial number.
-        * **Third Gender Voter:** Draw a diagonal red line **AND** put a star/checkmark next to the serial number.
+        ভোটারের পরিচয় verify করার পর, **Marked Copy of the Electoral Roll**-এ ঠিক এইভাবে দাগ দেবেন:
+        * **Male Voter (পুরুষ ভোটার):** ভোটারের নামের বাক্সের ওপর আড়াআড়ি লাল দাগ (Diagonal red line) টানুন।
+        * **Female Voter (মহিলা ভোটার):** আড়াআড়ি লাল দাগ (Diagonal red line) টানুন **এবং** Serial Number-টি গোল (Circle) করে দিন।
+        * **Third Gender Voter (তৃতীয় লিঙ্গ):** আড়াআড়ি লাল দাগ (Diagonal red line) টানুন **এবং** Serial Number-এর পাশে একটি স্টার (*) বা টিক (✓) চিহ্ন দিন।
         """)
-        st.info("💡 **Pro Tip:** Keep a clear, loud voice when reading the Serial Number and Name so polling agents can hear you.")
+        st.info("💡 **Pro Tip:** Serial Number এবং নাম জোরে, স্পষ্ট গলায় বলবেন যাতে Polling Agent-রা শুনতে পায়।")
 
-    with st.expander("🪪 2. Approved Alternate ID Documents"):
+    with st.expander("🪪 2. Approved Alternate ID (বিকল্প সচিত্র পরিচয়পত্র)"):
         st.markdown("""
-        If a voter does not have their EPIC, they **must** present one of the alternative photo identity documents approved by the ECI. Common alternates include:
+        যদি ভোটারের কাছে EPIC না থাকে, তবে ECI অনুমোদিত নিচের যেকোনো একটি পরিচয়পত্র দেখাতে হবে:
         1. Aadhaar Card
         2. PAN Card
         3. Driving License
         4. Indian Passport
-        5. Passbooks with photograph issued by Bank/Post Office
-        6. Smart Card issued by RGI under NPR
+        5. Passbooks with photograph (Bank/Post Office ইস্যু করা)
+        6. Smart Card (RGI/NPR ইস্যু করা)
         7. MNREGA Job Card
-        8. Health Insurance Smart Card issued under scheme of Ministry of Labour
+        8. Health Insurance Smart Card (Ministry of Labour)
         9. Pension document with photograph
-        10. Official identity cards issued to MPs/MLAs/MLCs
-        11. Service Identity Cards with photograph issued by Central/State Govt./PSUs/Public Limited Companies
+        10. Official ID cards (MPs/MLAs/MLCs-দের জন্য)
+        11. Service Identity Cards (Central/State Govt./PSUs)
         12. Unique Disability ID (UDID) Card
         """)
 
-    with st.expander("⚠️ 3. Handling Special Cases (ASD & Challenges)"):
+    with st.expander("⚠️ 3. Special Cases (ASD, Challenge & EDC)"):
         st.markdown("""
-        * **ASD (Absent, Shifted, Dead) Voters:** If a voter is on the ASD list, you must verify their identity meticulously. Inform the Presiding Officer immediately. A separate declaration will be taken from them.
-        * **Challenged Votes:** If a polling agent challenges a voter's identity, the challenge happens at your desk. 
-            * Direct the agent to deposit the challenge fee (₹2) with the Presiding Officer.
-            * The Presiding Officer will hold a summary inquiry. 
-            * Do not mark the roll until the Presiding Officer decides the challenge.
-        * **Blind and Infirm Voters:** They may be assisted by a companion (18+ years old). Ensure the companion does not act for more than one voter.
-        * **EDC (Election Duty Certificate):** Ensure their name is not struck off the marked copy unless they are voting at your specific booth via EDC.
+        * **ASD (Absent, Shifted, Dead) Voters:** যদি কোনো ভোটারের নাম ASD লিস্টে থাকে, খুব সতর্কভাবে পরিচয় verify করুন। সাথে সাথে Presiding Officer-কে জানান। এদের থেকে একটি আলাদা Declaration নেওয়া হবে।
+        * **Challenged Votes:** কোনো Polling Agent ভোটারের পরিচয় নিয়ে আপত্তি (challenge) জানালে, তা আপনার টেবিলেই হবে। 
+            * Agent-কে ₹2 challenge fee দিয়ে Presiding Officer-এর কাছে যেতে বলুন।
+            * Presiding Officer summary inquiry করবেন। 
+            * Presiding Officer চূড়ান্ত সিদ্ধান্ত না নেওয়া পর্যন্ত Electoral Roll-এ দাগ (strike off) দেবেন না।
+        * **Blind & Infirm Voters:** দৃষ্টিহীন বা শারীরিকভাবে অক্ষম ভোটারদের সাথে একজন Companion (বয়স 18+ হতে হবে) থাকতে পারেন। খেয়াল রাখবেন, একজন companion যেন একাধিক ভোটারের হয়ে কাজ না করে।
+        * **EDC (Election Duty Certificate):** Marked copy-তে EDC ভোটারের নাম strike off করা থাকলেও, যদি তারা আপনার specific booth-এ EDC নিয়ে ভোট দিতে আসে, তবে তাদের ভোট দিতে হবে।
         """)

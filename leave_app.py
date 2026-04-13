@@ -9,6 +9,13 @@ import os
 # Page Config
 st.set_page_config(page_title="Leave App - BPS Digital", layout="centered")
 
+# --- CONFIGURATION SIDEBAR ---
+st.sidebar.header("⚙️ App Settings")
+st.sidebar.markdown("Enter your Google Sheet link below to enable automatic logging.")
+sheet_url_input = st.sidebar.text_input("Google Sheet URL", placeholder="https://docs.google.com/spreadsheets/d/...")
+st.sidebar.divider()
+# -----------------------------
+
 st.title("📝 Leave Application & Logger")
 st.markdown("Select teacher, generate PDF, and log to Google Sheet.")
 st.divider()
@@ -20,16 +27,14 @@ TEACHER_LIST = [
     "TAPAN KUMAR MANDAL", "ROHINI SINGH", "MANJUMA KHATUN"
 ]
 
-# Google Sheets Connection
-# Note: App ke 'Secrets' me GSHEETS_URL set hona chahiye
-conn = st.connection("gsheets", type=GSheetsConnection)
+# Connect using the exact header name from your secrets.toml
+conn = st.connection("gcp_service_account", type=GSheetsConnection)
 
 # Application Form
 with st.form("leave_form"):
     col1, col2 = st.columns(2)
     
     with col1:
-        # Teacher Dropdown
         applicant_name = st.selectbox("Select Teacher Name", TEACHER_LIST)
         designation = st.selectbox("Designation", ["A.T", "H.T"])
         leave_type = st.selectbox("Type of Leave", ["Casual Leave", "Medical Leave", "Commuted Leave"])
@@ -108,37 +113,40 @@ def create_pdf(name, desig, l_type, n_days, start, end, rsn, app_dt):
 
 if submitted:
     # 1. Log to Google Sheets
-    new_data = pd.DataFrame([{
-        "Date": app_date.strftime("%d-%m-%Y"),
-        "Teacher": applicant_name,
-        "Leave Type": leave_type,
-        "Days": num_days,
-        "From": start_date.strftime("%d-%m-%Y"),
-        "To": end_date.strftime("%d-%m-%Y"),
-        "Reason": reason
-    }])
-    
-    try:
-        # Purana data read karein aur naya append karein
-        existing_data = conn.read(worksheet="Leaves", ttl=0)
-        updated_df = pd.concat([existing_data, new_data], ignore_index=True)
-        conn.update(worksheet="Leaves", data=updated_df)
-        st.info("📊 Data logged to Google Sheet.")
-    except Exception as e:
-        st.warning("Google Sheet log failed. Check your connection settings.")
+    if sheet_url_input.strip() == "":
+        st.warning("⚠️ Google Sheet URL is missing. The PDF will be generated, but data will NOT be logged. Please paste the link in the sidebar.")
+    else:
+        new_data = pd.DataFrame([{
+            "Date": app_date.strftime("%d-%m-%Y"),
+            "Teacher": applicant_name,
+            "Leave Type": leave_type,
+            "Days": num_days,
+            "From": start_date.strftime("%d-%m-%Y"),
+            "To": end_date.strftime("%d-%m-%Y"),
+            "Reason": reason
+        }])
+        
+        try:
+            # Pass the URL from the sidebar directly to the read and update methods
+            existing_data = conn.read(spreadsheet=sheet_url_input, worksheet="Leaves", ttl=0)
+            updated_df = pd.concat([existing_data, new_data], ignore_index=True)
+            conn.update(spreadsheet=sheet_url_input, worksheet="Leaves", data=updated_df)
+            st.success("📊 Leave successfully logged to Google Sheets.")
+        except Exception as e:
+            st.error(f"⚠️ Google Sheet log failed. Please check the URL and permissions. Error: {e}")
 
     # 2. PDF Generation
     pdf_file = create_pdf(applicant_name, designation, leave_type, num_days, 
                           start_date.strftime("%d-%m-%Y"), end_date.strftime("%d-%m-%Y"), 
                           reason, app_date.strftime("%d-%m-%Y"))
     
-    st.success(f"✅ Application for {applicant_name} is ready!")
+    st.success(f"✅ Leave application for {applicant_name} is ready to download!")
     
     # Download Button
     st.download_button(
         label="📥 Download A4 PDF for Print",
         data=pdf_file,
-        file_name=f"Leave_{applicant_name.replace(' ', '_')}_{app_date}.pdf",
+        file_name=f"Leave_{applicant_name.replace(' ', '_')}_{app_date.strftime('%d-%m-%Y')}.pdf",
         mime="application/pdf",
         type="primary"
     )

@@ -53,8 +53,18 @@ for index, rec in enumerate(records):
     if rec.get("Start Time") == "Pending":
         pending_sessions.append({"sheet_row": index + 2, "data": rec})
 
+team_list = []
+for index, rec in enumerate(team_records):
+    team_list.append({"sheet_row": index + 2, "data": rec})
+
 # --- App Layout: Tabs ---
-tab1, tab2, tab3, tab4 = st.tabs(["📝 Log & Complete", "📅 Schedule Future", "👥 Team Dashboard", "📊 View Logs"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📝 Log & Complete", 
+    "📅 Schedule Future", 
+    "👥 Team Dashboard", 
+    "📊 View Logs",
+    "📖 Quick Reference"
+])
 
 # === TAB 1: LOG & COMPLETE ===
 with tab1:
@@ -151,72 +161,81 @@ with tab2:
 with tab3:
     st.subheader("👥 Polling Team Directory")
     
-    if not team_records:
+    if not team_list:
         st.info("No team members added yet. Add them below!")
     else:
-        for idx, officer in enumerate(team_records):
-            with st.expander(f"{idx + 1}. {officer.get('Name', 'Unknown')} - {officer.get('Polling Office Rank', 'Rank N/A')}"):
+        for idx, officer_info in enumerate(team_list):
+            officer = officer_info['data']
+            row_num = officer_info['sheet_row']
+            
+            status = officer.get('Status', 'Active')
+            if not status: status = 'Active'
+                
+            status_icon = "🟢" if status == "Active" else "🔴"
+            status_text = "" if status == "Active" else "(INACTIVE)"
+            
+            with st.expander(f"{status_icon} {idx + 1}. {officer.get('Name', 'Unknown')} - {officer.get('Polling Office Rank', 'Rank N/A')} {status_text}"):
                 st.write(f"**Designation:** {officer.get('Designation', 'N/A')}")
                 st.write(f"**Office Address:** {officer.get('Office Address', 'N/A')}")
                 mobile = officer.get('Mobile Number', 'N/A')
                 st.write(f"**Mobile:** {mobile}")
                 
-                # Outgoing Call Button
-                st.markdown(f"<a href='tel:{mobile}' style='display: block; text-align: center; padding: 8px; background-color: #4CAF50; color: white; border-radius: 5px; text-decoration: none; margin-bottom: 15px;'>📞 Tap to Dial</a>", unsafe_allow_html=True)
-                
-                st.caption("📝 **Log a Conversation**")
-                
-                # --- NEW: Incoming / Outgoing Toggle ---
-                call_direction = st.radio(
-                    "Direction", 
-                    ["Outgoing (I called them)", "Incoming (They called me)"], 
-                    key=f"dir_{idx}", 
-                    horizontal=True
-                )
-                
-                call_notes = st.text_input("Call Notes", placeholder="What was discussed?", key=f"note_{idx}")
-                
-                if st.button("Save Call Record", key=f"btn_{idx}", use_container_width=True):
-                    now = datetime.now()
+                if status == "Active":
+                    st.markdown(f"<a href='tel:{mobile}' style='display: block; text-align: center; padding: 8px; background-color: #4CAF50; color: white; border-radius: 5px; text-decoration: none; margin-bottom: 15px;'>📞 Tap to Dial</a>", unsafe_allow_html=True)
                     
-                    # Clean up the direction string for the spreadsheet
-                    direction_val = "Incoming" if "Incoming" in call_direction else "Outgoing"
+                    st.caption("📝 **Log a Conversation**")
+                    call_direction = st.radio("Direction", ["Outgoing (I called them)", "Incoming (They called me)"], key=f"dir_{idx}", horizontal=True)
+                    call_notes = st.text_input("Call Notes", placeholder="What was discussed?", key=f"note_{idx}")
                     
-                    # New format matching updated headers
-                    call_data = [
-                        now.strftime("%d-%m-%Y"), 
-                        now.strftime("%I:%M %p"), 
-                        officer.get('Name'), 
-                        direction_val,
-                        call_notes
-                    ]
-                    try:
-                        sheet_calls.append_row(call_data)
-                        st.success(f"✅ {direction_val} call logged successfully!")
-                    except Exception as e:
-                        st.error("Failed to log call.")
+                    if st.button("Save Call Record", key=f"btn_{idx}", use_container_width=True):
+                        now = datetime.now()
+                        direction_val = "Incoming" if "Incoming" in call_direction else "Outgoing"
+                        call_data = [now.strftime("%d-%m-%Y"), now.strftime("%I:%M %p"), officer.get('Name'), direction_val, call_notes]
+                        try:
+                            sheet_calls.append_row(call_data)
+                            st.success(f"✅ {direction_val} call logged successfully!")
+                        except Exception as e:
+                            st.error("Failed to log call.")
+                else:
+                    st.error("⚠️ This officer is currently marked as INACTIVE. Call logging is disabled.")
+                
+                st.divider()
+                
+                toggle_text = "🔴 Mark as Inactive (Disable)" if status == "Active" else "🟢 Mark as Active (Enable)"
+                new_status_val = "Inactive" if status == "Active" else "Active"
+                
+                if st.button(toggle_text, key=f"tog_{idx}"):
+                    with st.spinner("Updating status..."):
+                        try:
+                            sheet_team.update_cell(row_num, 6, new_status_val)
+                            st.success(f"Officer status updated to {new_status_val}!")
+                            st.cache_data.clear()
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed to update status: {e}")
 
     st.divider()
     
-    st.subheader("➕ Add New Team Member")
-    with st.form("add_officer_form"):
-        t_name = st.text_input("Name")
-        t_desig = st.text_input("Designation (e.g., Assistant Teacher)")
-        t_rank = st.selectbox("Polling Office Rank", ["Presiding Officer", "1st Polling Officer", "2nd Polling Officer", "3rd Polling Officer", "Sector Officer", "Micro Observer"])
-        t_address = st.text_area("Office Address")
-        t_mobile = st.text_input("Mobile Number")
-        
-        if st.form_submit_button("Save Officer Data"):
-            if t_name and t_mobile:
-                try:
-                    sheet_team.append_row([t_name, t_desig, t_rank, t_address, t_mobile])
-                    st.success(f"{t_name} added to the team!")
-                    st.cache_data.clear()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Failed to add officer. Error: {e}")
-            else:
-                st.warning("Name and Mobile Number are required!")
+    # --- CHANGED: Wrapped the Add form in an expander ---
+    with st.expander("➕ Add New Team Member"):
+        with st.form("add_officer_form"):
+            t_name = st.text_input("Name")
+            t_desig = st.text_input("Designation (e.g., Assistant Teacher)")
+            t_rank = st.selectbox("Polling Office Rank", ["Presiding Officer", "1st Polling Officer", "2nd Polling Officer", "3rd Polling Officer", "Sector Officer", "Micro Observer"])
+            t_address = st.text_area("Office Address")
+            t_mobile = st.text_input("Mobile Number")
+            
+            if st.form_submit_button("Save Officer Data"):
+                if t_name and t_mobile:
+                    try:
+                        sheet_team.append_row([t_name, t_desig, t_rank, t_address, t_mobile, "Active"])
+                        st.success(f"{t_name} added to the team!")
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to add officer. Error: {e}")
+                else:
+                    st.warning("Name and Mobile Number are required!")
 
 # === TAB 4: VIEW LOGS ===
 with tab4:
@@ -240,3 +259,45 @@ with tab4:
         st.caption(f"Total entries logged: {len(df)}")
     else:
         st.info("No logs found yet.")
+
+# === TAB 5: QUICK REFERENCE ===
+with tab5:
+    st.header("📖 1st Polling Officer Guide")
+    st.markdown("Quick reference for your statutory duties on Polling Day.")
+    
+    with st.expander("📝 1. Marking the Electoral Roll"):
+        st.markdown("""
+        When a voter's identity is verified, mark the **Marked Copy of the Electoral Roll** exactly as follows:
+        * **Male Voter:** Draw a diagonal red line across the voter's box.
+        * **Female Voter:** Draw a diagonal red line **AND** circle the serial number.
+        * **Third Gender Voter:** Draw a diagonal red line **AND** put a star/checkmark next to the serial number.
+        """)
+        st.info("💡 **Pro Tip:** Keep a clear, loud voice when reading the Serial Number and Name so polling agents can hear you.")
+
+    with st.expander("🪪 2. Approved Alternate ID Documents"):
+        st.markdown("""
+        If a voter does not have their EPIC, they **must** present one of the alternative photo identity documents approved by the ECI. Common alternates include:
+        1. Aadhaar Card
+        2. PAN Card
+        3. Driving License
+        4. Indian Passport
+        5. Passbooks with photograph issued by Bank/Post Office
+        6. Smart Card issued by RGI under NPR
+        7. MNREGA Job Card
+        8. Health Insurance Smart Card issued under scheme of Ministry of Labour
+        9. Pension document with photograph
+        10. Official identity cards issued to MPs/MLAs/MLCs
+        11. Service Identity Cards with photograph issued by Central/State Govt./PSUs/Public Limited Companies
+        12. Unique Disability ID (UDID) Card
+        """)
+
+    with st.expander("⚠️ 3. Handling Special Cases (ASD & Challenges)"):
+        st.markdown("""
+        * **ASD (Absent, Shifted, Dead) Voters:** If a voter is on the ASD list, you must verify their identity meticulously. Inform the Presiding Officer immediately. A separate declaration will be taken from them.
+        * **Challenged Votes:** If a polling agent challenges a voter's identity, the challenge happens at your desk. 
+            * Direct the agent to deposit the challenge fee (₹2) with the Presiding Officer.
+            * The Presiding Officer will hold a summary inquiry. 
+            * Do not mark the roll until the Presiding Officer decides the challenge.
+        * **Blind and Infirm Voters:** They may be assisted by a companion (18+ years old). Ensure the companion does not act for more than one voter.
+        * **EDC (Election Duty Certificate):** Ensure their name is not struck off the marked copy unless they are voting at your specific booth via EDC.
+        """)

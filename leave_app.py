@@ -29,12 +29,13 @@ with st.form("leave_form"):
         else:
             reason = reason_type
             
-        app_date = st.date_input("Date of Application", default=date.today())
+        # FIX: Changed 'default' to 'value'
+        app_date = st.date_input("Date of Application", value=date.today())
 
-    # Submit button
+    # FIX: Ensure this submit button is indented INSIDE the 'with st.form' block
     submitted = st.form_submit_button("Generate Letter", type="primary")
 
-# Generate and Display Letter
+# Generate and Display Letter (This is OUTSIDE the form block)
 if submitted:
     if not applicant_name.strip():
         st.error("⚠️ Please enter the Applicant Name to generate the letter.")

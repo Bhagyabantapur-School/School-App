@@ -9,13 +9,6 @@ import os
 # Page Config
 st.set_page_config(page_title="Leave App - BPS Digital", layout="centered")
 
-# --- CONFIGURATION SIDEBAR ---
-st.sidebar.header("⚙️ App Settings")
-st.sidebar.markdown("Enter your Google Sheet link below to enable automatic logging.")
-sheet_url_input = st.sidebar.text_input("Google Sheet URL", placeholder="https://docs.google.com/spreadsheets/d/...")
-st.sidebar.divider()
-# -----------------------------
-
 st.title("📝 Leave Application & Logger")
 st.markdown("Select teacher, generate PDF, and log to Google Sheet.")
 st.divider()
@@ -109,44 +102,44 @@ def create_pdf(name, desig, l_type, n_days, start, end, rsn, app_dt):
     return pdf_bytes
 
 if submitted:
-    # 1. Log to Google Sheets using gspread
-    if sheet_url_input.strip() == "":
-        st.warning("⚠️ Google Sheet URL is missing. The PDF will be generated, but data will NOT be logged. Please paste the link in the sidebar.")
-    else:
+    # 1. Log to Google Sheets using gspread (No URL needed)
+    try:
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        
+        # Fetch secrets exactly as formatted in your secrets.toml
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        client = gspread.authorize(credentials)
+        
+        # Open the spreadsheet by its name
+        doc = client.open("Leaves")
+        
+        # Try to open a tab named "Leaves", fallback to the first tab if not found
         try:
-            # Set up the authentication scopes required by Google
-            scopes = [
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive"
-            ]
-            
-            # Fetch secrets exactly as formatted in your secrets.toml
-            creds_dict = dict(st.secrets["gcp_service_account"])
-            
-            # Authenticate using your existing google-auth library
-            credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-            client = gspread.authorize(credentials)
-            
-            # Open the sheet via URL and target the "Leaves" worksheet
-            sheet = client.open_by_url(sheet_url_input).worksheet("Leaves")
-            
-            # Prepare the row data
-            row_to_insert = [
-                app_date.strftime("%d-%m-%Y"),
-                applicant_name,
-                leave_type,
-                num_days,
-                start_date.strftime("%d-%m-%Y"),
-                end_date.strftime("%d-%m-%Y"),
-                reason
-            ]
-            
-            # Append the row to the next available empty line in the sheet
-            sheet.append_row(row_to_insert)
-            st.success("📊 Leave successfully logged to Google Sheets.")
-            
-        except Exception as e:
-            st.error(f"⚠️ Google Sheet log failed. Please check the URL and your secrets. Error: {e}")
+            sheet = doc.worksheet("Leaves")
+        except gspread.exceptions.WorksheetNotFound:
+            sheet = doc.sheet1
+        
+        # Prepare the row data
+        row_to_insert = [
+            app_date.strftime("%d-%m-%Y"),
+            applicant_name,
+            leave_type,
+            num_days,
+            start_date.strftime("%d-%m-%Y"),
+            end_date.strftime("%d-%m-%Y"),
+            reason
+        ]
+        
+        # Append the row
+        sheet.append_row(row_to_insert)
+        st.success("📊 Leave successfully logged to Google Sheets.")
+        
+    except Exception as e:
+        st.error(f"⚠️ Google Sheet log failed. Ensure the file is named 'Leaves' and shared with the service account. Error: {e}")
 
     # 2. PDF Generation
     pdf_file = create_pdf(applicant_name, designation, leave_type, num_days, 

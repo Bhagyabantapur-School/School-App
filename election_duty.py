@@ -47,7 +47,7 @@ with tab1:
         with col3:
             end_time = st.time_input("End Time")
             
-        activity = st.selectbox(
+        activity_selection = st.selectbox(
             "Activity Type", 
             [
                 "PPT Study (Bengali Rules)", 
@@ -55,9 +55,12 @@ with tab1:
                 "Hands-on Training Review",
                 "EVM/VVPAT Mock Practice",
                 "Marked Copy / Voter Roll Review",
-                "Other"
+                "Other / Custom (Type below)" # Updated option
             ]
         )
+        
+        # New text input for custom activity
+        custom_activity = st.text_input("Custom Activity Type", placeholder="Type new activity if 'Other' is selected above...")
         
         notes = st.text_area("Notes / Key Learnings", placeholder="What did you focus on today?")
         
@@ -65,41 +68,46 @@ with tab1:
 
     # Form Submission Logic
     if submitted:
-        start_dt = datetime.combine(log_date, start_time)
-        end_dt = datetime.combine(log_date, end_time)
+        # Determine which activity name to use
+        final_activity = custom_activity.strip() if activity_selection == "Other / Custom (Type below)" and custom_activity.strip() else activity_selection
         
-        if end_dt < start_dt:
-            end_dt += timedelta(days=1)
+        # Require text if "Other" was selected
+        if activity_selection == "Other / Custom (Type below)" and not custom_activity.strip():
+            st.warning("⚠️ Please type a Custom Activity Type before submitting.")
+        else:
+            start_dt = datetime.combine(log_date, start_time)
+            end_dt = datetime.combine(log_date, end_time)
             
-        duration_minutes = int((end_dt - start_dt).total_seconds() / 60)
-        
-        row_data = [
-            log_date.strftime("%d-%m-%Y"),
-            start_time.strftime("%I:%M %p"),
-            end_time.strftime("%I:%M %p"),
-            activity,
-            f"{duration_minutes} mins",
-            notes
-        ]
-        
-        with st.spinner("Saving to Google Sheets..."):
-            try:
-                sheet.append_row(row_data)
-                st.success(f"✅ Successfully logged {duration_minutes} minutes of {activity}!")
-                st.cache_data.clear() # Clear cache so the new entry shows in Tab 2
-            except Exception as e:
-                st.error(f"An error occurred while saving: {e}")
+            if end_dt < start_dt:
+                end_dt += timedelta(days=1)
+                
+            duration_minutes = int((end_dt - start_dt).total_seconds() / 60)
+            
+            row_data = [
+                log_date.strftime("%d-%m-%Y"),
+                start_time.strftime("%I:%M %p"),
+                end_time.strftime("%I:%M %p"),
+                final_activity, # Using the custom text if provided
+                f"{duration_minutes} mins",
+                notes
+            ]
+            
+            with st.spinner("Saving to Google Sheets..."):
+                try:
+                    sheet.append_row(row_data)
+                    st.success(f"✅ Successfully logged {duration_minutes} minutes of **{final_activity}**!")
+                    st.cache_data.clear() 
+                except Exception as e:
+                    st.error(f"An error occurred while saving: {e}")
 
 
 # === TAB 2: VIEW LOGS ===
 with tab2:
     st.subheader("Your Study History")
     
-    # Button to manually refresh data if needed
     if st.button("🔄 Refresh Data"):
         st.cache_data.clear()
 
-    # Function to fetch data, cached to prevent hitting Google Sheets API limit on every click
     @st.cache_data(ttl=60) 
     def fetch_data():
         try:
@@ -112,14 +120,11 @@ with tab2:
     df = fetch_data()
 
     if not df.empty:
-        # Display as an interactive dataframe
         st.dataframe(
             df, 
             use_container_width=True,
             hide_index=True
         )
-        
-        # Optional: Add a quick summary stat
         st.caption(f"Total entries logged: {len(df)}")
     else:
         st.info("No logs found yet. Start by adding a new entry in the 'Log Entry' tab!")

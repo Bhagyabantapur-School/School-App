@@ -1,15 +1,15 @@
 import streamlit as st
 
-# 1. Configure the BPS workspace (Must be the first Streamlit command)
+# 1. Configure the BPS workspace
 st.set_page_config(
     page_title="BPS Digital", 
     page_icon="🏫", 
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded" # Keeps the sidebar open for the school system
 )
 
 # 2. Define each app as a separate page
-# Set admission_hub.py as the new default landing page since app.py is removed
+# Student Management
 admission_page = st.Page("admission_hub.py", title="Admission Hub", icon="📝", default=True)
 student_profile_page = st.Page("student_profile.py", title="Student Profiles", icon="🧑‍🎓")
 id_card_page = st.Page("id_card_app.py", title="ID Card Generator", icon="🪪")
@@ -22,11 +22,14 @@ exam_fees_page = st.Page("sch_exam_fees.py", title="Exam & Fees", icon="💰")
 distribution_page = st.Page("bps_distribution.py", title="Distributions", icon="🎒")
 returns_page = st.Page("bps_returns.py", title="Returns", icon="📑")
 
+# NEW: Define your Leave Management app
+leave_page = st.Page("leave_app.py", title="Leave Management", icon="🗓️")
+
 # 3. Create the grouped navigation menu
 pg = st.navigation({
     "Student Management": [admission_page, student_profile_page, id_card_page],
     "Academics & Finance": [school_data_page, exam_fees_page],
-    "Operations": [distribution_page, returns_page]
+    "Operations": [leave_page, distribution_page, returns_page] # Added leave_page here
 })
 
 # 4. Add school branding to the bottom of the sidebar

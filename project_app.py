@@ -1,15 +1,23 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
+import pytz
 import time
 import plotly.express as px
 
+# --- Master Google Sheets Formula for Duration ---
+GS_FORMULA = '=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm"), ""))'
+
 # ==========================================
-# 1. Configuration & Styling
+# 1. Configuration & Session State Init
 # ==========================================
 st.set_page_config(page_title="Project Tracker", page_icon="📊", layout="wide")
+
+if 'pomodoro_state' not in st.session_state:
+    st.session_state.pomodoro_state = {}
 
 st.markdown("""
     <style>
@@ -24,6 +32,13 @@ st.markdown("""
         background-color: #ffffff !important;
         box-shadow: none !important;
     }
+    
+    /* CSS for the pulsing dot animation */
+    @keyframes pulse {
+        0% { transform: scale(0.95); opacity: 0.9; }
+        50% { transform: scale(1.1); opacity: 1; }
+        100% { transform: scale(0.95); opacity: 0.9; }
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -36,7 +51,6 @@ def init_connection():
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    # Ensure you have your secrets configured in .streamlit/secrets.toml
     creds = Credentials.from_service_account_info(
         st.secrets["gcp_service_account"], scopes=scopes
     )
@@ -66,21 +80,243 @@ def get_project_tasks():
     df['row_index'] = df.index + 2 
     return df
 
-# ==========================================
-# 3. Main Dashboard UI
-# ==========================================
-st.title("📊 Project Tracking Dashboard")
+@st.cache_data(ttl=300)
+def get_activity_log():
+    sheet = get_sheet("activity_log")
+    data = sheet.get_all_values()
+    if len(data) <= 1:
+        return pd.DataFrame(columns=["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"])
+    df = pd.DataFrame(data[1:], columns=data[0])
+    while df.shape[1] < 8: df[df.shape[1]] = ""
+    df = df.iloc[:, :8]
+    df.columns = ["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"]
+    df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
+    return df
 
-col1, col2 = st.columns([5, 1])
-with col2:
-    if st.button("🔄 Sync Data", use_container_width=True):
-        get_project_tasks.clear()
-        st.toast("Synced with Google Sheets!")
-        time.sleep(0.5)
-        st.rerun()
-
+# ==========================================
+# 3. Main Application Logic
+# ==========================================
 try:
+    ist_timezone = pytz.timezone('Asia/Kolkata')
+    now = datetime.now(ist_timezone)
+    today_str = now.strftime('%Y-%m-%d')
+
     proj_df = get_project_tasks()
+    log_df = get_activity_log()
+    
+    # Filter for currently running Project Tasks
+    running_tasks = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Notes'].str.strip() == 'Project Tracking')]
+    active_count = len(running_tasks)
+
+    # --- HEADER & SYNC ---
+    col1, col2 = st.columns([5, 1])
+    with col1:
+        st.title("📊 Project Tracking Dashboard")
+    with col2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🔄 Sync Data", use_container_width=True):
+            get_project_tasks.clear()
+            get_activity_log.clear()
+            st.toast("Synced with Google Sheets!")
+            time.sleep(0.5)
+            st.rerun()
+
+    # --- FLOATING ACTIVE BADGE ---
+    if active_count > 0:
+        st.markdown(f"""
+            <div style='position: fixed; bottom: 30px; left: 20px; background-color: #ff4b4b; color: white; padding: 8px 16px; border-radius: 20px; box-shadow: 0px 4px 12px rgba(0,0,0,0.3); font-weight: bold; font-size: 16px; z-index: 9999; pointer-events: none; display: flex; align-items: center; justify-content: center;'>
+                <span style='font-size: 16px; margin-right: 6px; animation: pulse 1.5s infinite;'>⏱️</span> {active_count} Project Running
+            </div>
+        """, unsafe_allow_html=True)
+
+    # ==========================================
+    # SECTION A: LIVE TIME TRACKING
+    # ==========================================
+    pending_projs = pd.DataFrame()
+    if not proj_df.empty:
+        pending_projs = proj_df[proj_df['Status'].str.strip().str.title() != 'Completed']
+
+    with st.container():
+        st.markdown("### ⏱️ Live Time Tracking")
+        st.markdown("---")
+        
+        # 1. RENDER RUNNING PROJECT TASKS
+        if active_count > 0:
+            st.markdown("<div style='margin-bottom: 10px; color: #d84315;'><b>🟢 Currently Running:</b></div>", unsafe_allow_html=True)
+            for idx, active_row in running_tasks.iterrows():
+                sheet_row = idx + 2 
+                active_sub = str(active_row['Sub_Activities'])
+                display_name = active_sub
+                
+                try:
+                    start_dt_str = f"{active_row['Date']} {active_row['Start_Time']}"
+                    dt_naive = datetime.strptime(start_dt_str, "%Y-%m-%d %H:%M")
+                    active_start_time = ist_timezone.localize(dt_naive)
+                    elapsed_time = now - active_start_time
+                    mins_elapsed = int(elapsed_time.total_seconds() // 60)
+                except: mins_elapsed = 0 
+                
+                # --- POMODORO LOGIC & BEEP TRIGGER ---
+                cycle_minute = mins_elapsed % 30
+                pomodoro_count = (mins_elapsed // 30) + 1
+                current_state = "Focus" if cycle_minute < 25 else "Break"
+                task_id = f"task_{sheet_row}"
+                
+                if task_id in st.session_state.pomodoro_state:
+                    if st.session_state.pomodoro_state[task_id] != current_state:
+                        components.html("""
+                            <script>
+                                try {
+                                    var ctx = new (window.AudioContext || window.webkitAudioContext)();
+                                    function playBeep(freq, time, dur) {
+                                        var osc = ctx.createOscillator();
+                                        var gain = ctx.createGain();
+                                        osc.connect(gain);
+                                        gain.connect(ctx.destination);
+                                        osc.frequency.value = freq;
+                                        osc.type = "square";
+                                        gain.gain.setValueAtTime(0.1, time);
+                                        gain.gain.exponentialRampToValueAtTime(0.001, time + dur);
+                                        osc.start(time);
+                                        osc.stop(time + dur);
+                                    }
+                                    playBeep(600, ctx.currentTime, 0.2);
+                                    playBeep(800, ctx.currentTime + 0.2, 0.3);
+                                } catch(e) {}
+                            </script>
+                        """, height=0, width=0)
+                        
+                st.session_state.pomodoro_state[task_id] = current_state
+
+                if current_state == "Focus":
+                    p_state = "🍅 Focus Time"
+                    p_color = "#d84315" # Deep Orange
+                    p_left = 25 - cycle_minute
+                    p_prog = cycle_minute / 25.0
+                else:
+                    p_state = "☕ Break Time"
+                    p_color = "#2e7b32" # Green
+                    p_left = 30 - cycle_minute
+                    p_prog = (cycle_minute - 25) / 5.0
+                
+                st.markdown(f"""
+                <div style='background-color: #f8f9fa; border-left: 5px solid {p_color}; padding: 12px; border-radius: 6px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);'>
+                    <div style='display: flex; justify-content: space-between; align-items: center;'>
+                        <strong style='font-size: 16px; color: #333;'>⏳ {display_name}</strong>
+                        <span style='color: #666; font-size: 14px;'>Total: {mins_elapsed}m</span>
+                    </div>
+                    <div style='margin-top: 8px; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;'>
+                        <span style='color: {p_color}; font-weight: bold; font-size: 14px;'>{p_state} (Cycle {pomodoro_count})</span>
+                        <span style='color: #555; font-size: 13px; font-weight: bold;'>{p_left}m left</span>
+                    </div>
+                    <div style='width: 100%; background-color: #e0e0e0; border-radius: 4px; height: 6px;'>
+                        <div style='width: {p_prog * 100}%; background-color: {p_color}; height: 6px; border-radius: 4px; transition: width 0.5s ease;'></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                raw_task_name = active_sub.split(" (")[0]
+                curr_stat_matches = proj_df[proj_df['Task Name'] == raw_task_name]['Status']
+                curr_stat = curr_stat_matches.values[0].strip().title() if not curr_stat_matches.empty else "In Progress"
+                
+                status_opts = ["In Progress", "Completed", "Not Started"]
+                try:
+                    def_idx = status_opts.index(curr_stat)
+                except ValueError:
+                    def_idx = 0
+                    
+                col_stat, col_stop, col_cancel = st.columns([2, 1, 1])
+                with col_stat:
+                    new_proj_status = st.selectbox("Update Status upon saving:", status_opts, index=def_idx, key=f"pstat_{sheet_row}", label_visibility="collapsed")
+                
+                with col_stop:
+                    if st.button("🛑 SAVE", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
+                        end_time_log = now.time()
+                        log_sheet = get_sheet("activity_log")
+                        log_sheet.update_cell(sheet_row, 3, end_time_log.strftime('%H:%M')) 
+                        log_sheet.update_cell(sheet_row, 4, GS_FORMULA)                   
+                                
+                        if new_proj_status:
+                            p_matches = proj_df[proj_df['Task Name'] == raw_task_name]
+                            if not p_matches.empty:
+                                p_idx = int(p_matches.iloc[0]['row_index'])
+                                psheet = get_sheet("project_tasks")
+                                psheet.update_cell(p_idx, 3, new_proj_status)
+                                get_project_tasks.clear() 
+                                
+                        get_activity_log.clear() 
+                        st.success(f"Saved: {display_name}")
+                        time.sleep(1)
+                        st.rerun()
+
+                with col_cancel:
+                    if st.button("❌ CANCEL", key=f"cancel_{sheet_row}", use_container_width=True):
+                        log_sheet = get_sheet("activity_log")
+                        log_sheet.delete_rows(sheet_row)
+                        get_activity_log.clear() 
+                        st.warning(f"Cancelled: {display_name}")
+                        time.sleep(1)
+                        st.rerun()
+            st.markdown("<br>", unsafe_allow_html=True)
+
+        # 2. START A NEW TASK TIMER
+        if not pending_projs.empty:
+            running_subs = running_tasks['Sub_Activities'].tolist()
+            avail_projs = pending_projs[~pending_projs['Task Name'].isin([x.split(" (")[0] for x in running_subs])]
+            
+            if not avail_projs.empty:
+                st.markdown("<div style='margin-bottom: 5px; color: #0068c9;'><b>🚀 Start working on a Project Task:</b></div>", unsafe_allow_html=True)
+                
+                col_proj, col_task, col_btn = st.columns([2, 2, 1])
+                
+                with col_proj:
+                    unique_projs = sorted(avail_projs['Project Name'].unique().tolist())
+                    selected_project = st.selectbox("Select Project", unique_projs, label_visibility="collapsed", key="live_proj_sel")
+                
+                with col_task:
+                    filtered_tasks = avail_projs[avail_projs['Project Name'] == selected_project]['Task Name'].tolist()
+                    selected_task = st.selectbox("Select Task", filtered_tasks, label_visibility="collapsed", key="live_task_sel")
+
+                with col_btn:
+                    st.markdown(
+                        """
+                        <div id="proj_start_anchor"></div>
+                        <style>
+                        div[data-testid="column"]:nth-of-type(3) div.element-container:has(#proj_start_anchor) + div.element-container button {
+                            background-color: #2e7b32 !important; 
+                            color: white !important;
+                            border: none !important;
+                        }
+                        div[data-testid="column"]:nth-of-type(3) div.element-container:has(#proj_start_anchor) + div.element-container button:hover {
+                            background-color: #1b5e20 !important; 
+                        }
+                        </style>
+                        """,
+                        unsafe_allow_html=True
+                    )
+                    if st.button("▶️ Start Timer", key="start_proj", use_container_width=True):
+                        selected_p_task_full = f"{selected_task} ({selected_project})"
+                        r_idx = int(proj_df[(proj_df['Task Name'] == selected_task) & (proj_df['Project Name'] == selected_project)]['row_index'].values[0])
+                        psheet = get_sheet("project_tasks")
+                        curr_stat = proj_df[(proj_df['Task Name'] == selected_task) & (proj_df['Project Name'] == selected_project)]['Status'].values[0].strip().title()
+                        
+                        if curr_stat == "Not Started":
+                            psheet.update_cell(r_idx, 3, "In Progress")
+                            get_project_tasks.clear() 
+                            
+                        log_sheet = get_sheet("activity_log")
+                        log_sheet.append_row([
+                            today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
+                            "WORK", selected_p_task_full, "", "Project Tracking"
+                        ], value_input_option="USER_ENTERED")
+                        get_activity_log.clear() 
+                        st.rerun()
+
+    st.markdown("<br><br>", unsafe_allow_html=True)
+
+    # ==========================================
+    # SECTION B: DASHBOARD CHARTS & DATA
+    # ==========================================
     status_colors = {"Completed": "#2e7b32", "In Progress": "#0068c9", "Not Started": "#ff9f36"}
     
     if not proj_df.empty:
@@ -96,7 +332,7 @@ try:
                 lambda x: (x['Status'].str.strip().str.title() == 'Completed').sum() / len(x)
             ).reset_index(name='Progress')
             
-            cols = st.columns(4) # Using 4 columns since layout is 'wide'
+            cols = st.columns(4) 
             for i, row in project_stats.iterrows():
                 with cols[i % 4]:
                     percent_complete = int(row['Progress'] * 100)
@@ -142,7 +378,9 @@ try:
         
     st.markdown("---")    
     
-    # --- ADD NEW TASK FORM ---
+    # ==========================================
+    # SECTION C: ADD NEW TASK FORM
+    # ==========================================
     with st.expander("➕ Add New Project Task", expanded=proj_df.empty):
         with st.form("add_project_task", clear_on_submit=True):
             p_task = st.text_input("Task Name")

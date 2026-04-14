@@ -22,7 +22,7 @@ if 'current_move' not in st.session_state: st.session_state.current_move = "BIKE
 if 'retro_time' not in st.session_state: st.session_state.retro_time = get_ist_now().time()
 if 'locked_date' not in st.session_state: st.session_state.locked_date = get_ist_now().date()
 if 'locked_time' not in st.session_state: st.session_state.locked_time = get_ist_now().time()
-if 'last_used_route' not in st.session_state: st.session_state.last_used_route = None # NEW STATE
+if 'last_used_route' not in st.session_state: st.session_state.last_used_route = None
 
 @st.cache_resource
 def init_connection():
@@ -56,6 +56,11 @@ def load_money_data():
 @st.cache_data(ttl=60)
 def load_shopping_data():
     try: return pd.DataFrame(sh.worksheet("SHOPPING_LIST").get_all_records())
+    except: return pd.DataFrame()
+
+@st.cache_data(ttl=60)
+def load_bills_data():
+    try: return pd.DataFrame(sh.worksheet("PAYMENT_CHECKLIST").get_all_records())
     except: return pd.DataFrame()
 
 config_df = load_config()
@@ -140,17 +145,14 @@ def sync_journey_state():
     if 'state_synced' not in st.session_state:
         df_loc = load_location_data()
         if not df_loc.empty:
-            # --- NEW LOGIC: Find the most recent route used from history ---
             recent_route = None
             if 'Remark' in df_loc.columns:
-                # Loop backwards through the remarks to find the last started route
                 for remark in reversed(df_loc['Remark'].tolist()):
                     rem_str = str(remark)
                     if "Started Route:" in rem_str:
                         recent_route = rem_str.split("Started Route:")[-1].strip()
                         break
             st.session_state.last_used_route = recent_route
-            # ----------------------------------------------------------------
 
             last_record = df_loc.iloc[-1].to_dict()
             move_val = str(last_record.get('Move', '')).strip()
@@ -179,7 +181,7 @@ sync_journey_state()
 # ==========================================
 st.title("📱 SK Ecosystem")
 
-tab_money, tab_shopping, tab_location, tab_dash, tab_help = st.tabs(["💰 Money", "🛒 Shopping", "📍 Location", "📊 Dash", "📖 Help"])
+tab_money, tab_shopping, tab_bills, tab_location, tab_dash, tab_help = st.tabs(["💰 Money", "🛒 Shopping", "✅ Bills", "📍 Location", "📊 Dash", "📖 Help"])
 
 current_loc, loc_duration = get_current_location_details()
 current_shop_type = get_shop_type(current_loc) if current_loc else None
@@ -225,10 +227,8 @@ with tab_money:
                     final_entity = "PERS" if chk_pers else ""
                     final_acc = "MB" if chk_mb else ""
                     
-                    # Smart Logic: Inject into TO/FROM only if NOT Home/House
                     final_tf = current_loc if should_inject_tofrom(current_loc) else ""
                     
-                    # 13 Columns now (Date, Time, In, Out, Account, Fund, Entity, Category, SubCat, Particulars, TO_FROM, Location, Remark)
                     row_data = [today_str, time_str, in_val, out_val, final_acc, "", final_entity, "", "", "", final_tf, current_loc or "", "⚠️ INCOMPLETE"]
                     sh.worksheet("MONEY_DATA").append_row(row_data)
                     load_money_data.clear()
@@ -258,7 +258,6 @@ with tab_money:
                     
                     st.markdown(f"**Date:** {row['Date']}{time_disp} | **Amount:** {amt_display} | **Loc:** {row.get('Location', '')}")
                     
-                    # Row 1: Account, Fund, Entity
                     c_r1_1, c_r1_2, c_r1_3 = st.columns(3)
                     with c_r1_1: 
                         acc_opts = get_list("Accounts")
@@ -278,7 +277,6 @@ with tab_money:
                         default_ent_idx = ent_opts.index(curr_ent) if curr_ent in ent_opts else 0
                         i_ent = st.selectbox("Entity", ent_opts, index=default_ent_idx, key=f"en_{idx}")
 
-                    # Row 2: Category, Sub Category, Particulars (DEPENDENT LOGIC)
                     c_r2_1, c_r2_2, c_r2_3 = st.columns(3)
                     with c_r2_1:
                         if 'Map_Entity' in config_df.columns:
@@ -319,7 +317,6 @@ with tab_money:
                             i_part = st.selectbox("Particulars", get_list("Particulars") + ["-- Type New --", "-None-"], key=f"pa_{idx}")
                             if i_part == "-- Type New --": i_part = st.text_input("Type New Particulars", key=f"pa_new_{idx}")
 
-                    # Row 3: TO/FROM, Remark, Save
                     c_r3_1, c_r3_2, c_r3_3 = st.columns([1.5, 1.5, 1])
                     with c_r3_1:
                         tf_opts = get_list("TO_FROM")
@@ -344,14 +341,12 @@ with tab_money:
                                 final_part = "" if i_part == "-None-" else i_part
                                 final_tf = "" if i_tofrom == "-None-" else i_tofrom
                                 
-                                # 13 Columns mapping - Now using editable i_ent!
                                 row_data = [
                                     row['Date'], row.get('Time', ''), row['In'], row['Out'], 
                                     i_acc, i_fund, i_ent, 
                                     final_cat, final_sub, final_part, 
                                     final_tf, row.get('Location', ''), i_rem
                                 ]
-                                # Updates A to M (13 columns)
                                 cells = money_ws.range(f"A{sheet_row}:M{sheet_row}")
                                 for i, val in enumerate(row_data): cells[i].value = str(val)
                                 money_ws.update_cells(cells)
@@ -393,10 +388,8 @@ with tab_money:
                                     today_str = time_now.strftime("%d-%m-%Y")
                                     time_str = time_now.strftime("%H:%M")
                                     
-                                    # Smart Logic: Inject TO/FROM if not Home/House
                                     final_tf = current_loc if should_inject_tofrom(current_loc) else ""
                                     
-                                    # 13 columns
                                     money_row = [today_str, time_str, "", final_cost, str(row.get('Account', '')), str(row.get('Fund', '')), ent, cat, subcat, part_name, final_tf, current_loc, rem]
                                     sh.worksheet("MONEY_DATA").append_row(money_row)
                                     
@@ -483,7 +476,6 @@ with tab_money:
         to_from_opts = ["-- Type New --", "- None -"] + mapped_tofrom
         default_index = 1
         
-        # Inject Location to TO_FROM only if it is NOT Home/House
         if should_inject_tofrom(current_loc):
             if current_loc not in to_from_opts:
                 to_from_opts.insert(2, current_loc)
@@ -511,7 +503,6 @@ with tab_money:
                 st.stop()
                 
             formatted_date = entry_date.strftime("%d-%m-%Y")
-            # 13 columns now
             row_data = [formatted_date, formatted_time, amount_in if amount_in > 0 else "", amount_out if amount_out > 0 else "", account, fund, entity, category, sub_cat, particulars, to_from, current_loc or "", remark]
             sh.worksheet("MONEY_DATA").append_row(row_data)
             load_money_data.clear() 
@@ -521,7 +512,7 @@ with tab_money:
             st.error(f"Failed to save: {e}")
 
 # ==========================================
-# TAB 2: SHOPPING LIST (Planning Form)
+# TAB 2: SHOPPING LIST
 # ==========================================
 with tab_shopping:
     st.header("🛒 Smart Shopping List")
@@ -608,7 +599,109 @@ with tab_shopping:
         else: st.write("You have no pending items!")
 
 # ==========================================
-# TAB 3: LOCATION ENTRY FORM
+# TAB 3: MONTHLY PAYMENT CHECKLIST
+# ==========================================
+with tab_bills:
+    st.header("✅ Monthly Payment Checklist")
+    
+    current_month_str = get_ist_now().strftime("%B %Y")
+    st.subheader(f"🗓️ Tracking for: {current_month_str}")
+    
+    df_bills = load_bills_data()
+    
+    # --- 1. ADD NEW BILL TO CHECKLIST ---
+    with st.expander("➕ Add New Bill to Checklist"):
+        b_col1, b_col2 = st.columns(2)
+        with b_col1:
+            bill_month = st.text_input("Target Month", value=current_month_str)
+            bill_name = st.text_input("Bill Name (e.g., Electricity, Credit Card)")
+            bill_type = st.selectbox("Bill Type", ["SCHOOL", "PERS", "OTHER"])
+        with b_col2:
+            bill_amt = st.number_input("Estimated Amount (₹)", min_value=0.0, step=100.0)
+            bill_due = st.date_input("Due Date", value=st.session_state.locked_date)
+            bill_fund = st.selectbox("Default Fund", get_list("Funds"), key="bill_fund")
+            bill_acc = st.selectbox("Default Account", get_list("Accounts"), key="bill_acc")
+            
+        if st.button("Save to Checklist", use_container_width=True):
+            if bill_name:
+                sh.worksheet("PAYMENT_CHECKLIST").append_row([
+                    bill_month, bill_name, bill_type, bill_amt, bill_due.strftime("%d-%m-%Y"), 
+                    "Pending", bill_fund, bill_acc, ""
+                ])
+                load_bills_data.clear()
+                st.success(f"{bill_name} added for {bill_month}!")
+                st.rerun()
+            else:
+                st.warning("Please enter a Bill Name.")
+
+    st.divider()
+
+    # --- 2. PENDING BILLS & 1-CLICK PAY ---
+    st.subheader("⏳ Pending Payments")
+    if not df_bills.empty and 'Status' in df_bills.columns:
+        pending_bills = df_bills[df_bills['Status'] == 'Pending']
+        
+        if not pending_bills.empty:
+            bills_ws = sh.worksheet("PAYMENT_CHECKLIST")
+            
+            for idx, row in pending_bills.iterrows():
+                sheet_row = idx + 2
+                
+                with st.container(border=True):
+                    c1, c2, c3 = st.columns([2, 1, 1.5])
+                    with c1:
+                        st.write(f"**{row.get('Bill_Name', 'Unknown')}** ({row.get('Type', '')})")
+                        due_status = f"🔴 Due: {row.get('Due_Date', '')}" 
+                        st.caption(f"{due_status} | Fund: {row.get('Fund', '')}")
+                    with c2:
+                        pay_amt = st.number_input(
+                            "Pay Amount", 
+                            value=float(row.get('Est_Amount', 0) if pd.notna(row.get('Est_Amount')) else 0), 
+                            key=f"payamt_{idx}", 
+                            label_visibility="collapsed"
+                        )
+                    with c3:
+                        if st.button("💸 Pay & Log", key=f"paybtn_{idx}", use_container_width=True, type="primary"):
+                            try:
+                                b_name = str(row.get('Bill_Name', ''))
+                                b_type = str(row.get('Type', 'PERS'))
+                                
+                                time_now = get_ist_now()
+                                today_str = time_now.strftime("%d-%m-%Y")
+                                time_str = time_now.strftime("%H:%M")
+                                
+                                match_row = config_df[config_df['Map_Particular'].astype(str).str.strip() == b_name]
+                                cat = str(match_row['Map_Category'].values[0]) if not match_row.empty else "NEEDS"
+                                subcat = str(match_row['Map_SubCat'].values[0]) if not match_row.empty else ""
+                                
+                                loc_val = current_loc or ""
+                                tf_val = loc_val if should_inject_tofrom(loc_val) else ""
+                                
+                                money_row = [
+                                    today_str, time_str, "", pay_amt, 
+                                    str(row.get('Account', '')), str(row.get('Fund', '')), 
+                                    b_type, cat, subcat, b_name, 
+                                    tf_val, loc_val, "Cleared via Bill Checklist"
+                                ]
+                                sh.worksheet("MONEY_DATA").append_row(money_row)
+                                
+                                headers = bills_ws.row_values(1)
+                                bills_ws.update_cell(sheet_row, headers.index('Status') + 1, 'Paid')
+                                bills_ws.update_cell(sheet_row, headers.index('Actual_Paid') + 1, pay_amt)
+                                
+                                load_money_data.clear()
+                                load_bills_data.clear()
+                                st.success(f"Payment for {b_name} logged successfully!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error processing payment: {e}")
+        else:
+            st.info("🎉 All caught up! No pending bills for now.")
+    else:
+        st.info("No bills found. Add one above to get started!")
+
+# ==========================================
+# TAB 4: LOCATION ENTRY FORM
 # ==========================================
 with tab_location:
     if not st.session_state.route_active or st.session_state.get('route_type') == "Dynamic":
@@ -621,14 +714,11 @@ with tab_location:
             if not st.session_state.route_active:
                 d_col1, d_col2 = st.columns(2)
                 with d_col1:
-                    # --- NEW LOGIC: Use the saved 'last_used_route' as the default dropdown index ---
                     default_idx = 0
                     if st.session_state.get('last_used_route') in route_opts:
                         default_idx = route_opts.index(st.session_state.last_used_route)
                         
                     selected_route = st.selectbox("Select Route (Area)", route_opts, index=default_idx, key="dyn_route")
-                    # ---------------------------------------------------------------------------------
-                    
                     dyn_move = st.selectbox("Travel Mode", ["BIKE", "WALK", "BIKE + WALK", "TOTO"], key="dyn_move")
                 with d_col2:
                     people_opts = get_list("People")
@@ -647,7 +737,7 @@ with tab_location:
                         st.session_state.route_active = True
                         st.session_state.route_type = "Dynamic"
                         st.session_state.active_route = selected_route
-                        st.session_state.last_used_route = selected_route # SAVE STATE
+                        st.session_state.last_used_route = selected_route
                         st.session_state.current_move = dyn_move
                         st.session_state.current_people = dyn_people
                         st.rerun()
@@ -819,7 +909,7 @@ with tab_location:
         except Exception as e: st.error(f"Error saving to Google Sheets: {e}")
 
 # ==========================================
-# TAB 4: ADVANCED ERP DASHBOARD
+# TAB 5: ADVANCED ERP DASHBOARD
 # ==========================================
 with tab_dash:
     st.header("📊 Financial Intelligence")
@@ -887,8 +977,8 @@ with tab_dash:
     else: st.info("No financial data available yet.")
 
 # ==========================================
-# TAB 5: INSTRUCTIONS
+# TAB 6: INSTRUCTIONS
 # ==========================================
 with tab_help:
     st.header("📖 ERP Manual")
-    st.write("You MUST manually insert a 'Location' column into your MONEY_DATA Google Sheet right after the 'TO_FROM' column for the new 13-column system to function.")
+    st.write("Ensure your Google Sheet matches the required tab and column structures.")

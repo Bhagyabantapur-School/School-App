@@ -202,7 +202,7 @@ def get_visited_places():
     except Exception as e:
         return pd.DataFrame(columns=["Place", "Purpose"])
 
-# --- NEW PAYMENT CHECKLIST FUNCTION ---
+# --- PAYMENT CHECKLIST FUNCTION ---
 @st.cache_data(ttl=300)
 def get_payment_checklist():
     client = init_connection()
@@ -585,7 +585,7 @@ try:
                     day_str = "Tomorrow!" if days_until == 1 else f"in {days_until} days"
                     st.markdown(f"**{h_row['Date_dt'].strftime('%b %d, %Y')}** - {h_row['Occasion']} *( {day_str} )*")
 
-        # --- UPCOMING PAYMENTS ---
+        # --- DISPLAY ONLY UPCOMING PAYMENTS ---
         if not payment_df.empty:
             def parse_pay_date(d_str):
                 try:
@@ -595,12 +595,14 @@ try:
             
             payment_df['Due_Date_dt'] = payment_df['Due_Date'].apply(parse_pay_date)
             
+            # Filter out anything marked 'Paid' or 'Done'
             pending_payments = payment_df[~payment_df['Status'].str.strip().str.upper().isin(['PAID', 'DONE'])]
             
             upcoming_pays = []
             for _, p_row in pending_payments.iterrows():
                 if pd.notna(p_row['Due_Date_dt']):
                     days_until = (p_row['Due_Date_dt'] - now.date()).days
+                    # Show if due today, tomorrow, or overdue
                     if days_until <= 1:
                         upcoming_pays.append((days_until, p_row))
             
@@ -625,28 +627,6 @@ try:
                             <span style='color: #666; font-size: 13px;'>Fund: {p_row['Fund']} | A/c: {p_row['Account']}</span>
                         </div>
                         """, unsafe_allow_html=True)
-                        
-                        col1, col2 = st.columns([2, 1])
-                        with col1:
-                            actual_amt = st.text_input("Actual Amount Paid", value=p_row['Est_Amount'], key=f"pay_amt_{p_row['row_index']}", label_visibility="collapsed")
-                        with col2:
-                            if st.button("✅ Mark Paid", key=f"pay_btn_{p_row['row_index']}", use_container_width=True):
-                                client = init_connection()
-                                sheet = client.open("sk_money_location").worksheet("PAYMENT_CHECKLIST")
-                                sheet.update_cell(int(p_row['row_index']), 6, "Paid")
-                                sheet.update_cell(int(p_row['row_index']), 9, actual_amt)
-                                
-                                sheet_log = get_sheet("activity_log")
-                                sheet_log.append_row([
-                                    today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
-                                    GS_FORMULA, "WORK", "BILL PAYMENT", "", f"Paid {p_row['Bill_Name']}: ₹{actual_amt}"
-                                ], value_input_option="USER_ENTERED")
-                                
-                                get_payment_checklist.clear()
-                                get_activity_log.clear()
-                                st.success("Payment marked as Paid!")
-                                time.sleep(1)
-                                st.rerun()
 
         if chk_list:
             st.markdown("---")

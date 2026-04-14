@@ -84,7 +84,6 @@ def get_location_logic():
     return logic
 
 def get_current_location_details():
-    """Returns the current location and how long the user has been there."""
     df_loc = load_location_data()
     if not df_loc.empty:
         last_record = df_loc.iloc[-1].to_dict()
@@ -134,7 +133,6 @@ def get_entity_for_place(place_name):
     return "PERS" 
 
 def should_inject_tofrom(loc_name):
-    """Smart filter to block 'HOME' and any place with the word 'House' from TO/FROM field."""
     if not loc_name:
         return False
     loc_lower = str(loc_name).strip().lower()
@@ -610,7 +608,15 @@ with tab_bills:
     st.header("✅ Monthly Payment Checklist")
     
     current_month_str = get_ist_now().strftime("%B %Y")
-    st.subheader(f"🗓️ Tracking for: {current_month_str}")
+    
+    # Generate rolling 12-month options for target dropdowns
+    target_month_opts = []
+    now_dt = get_ist_now()
+    for i in range(12):
+        m = now_dt.month + i
+        y = now_dt.year + (m - 1) // 12
+        m = (m - 1) % 12 + 1
+        target_month_opts.append(date(y, m, 1).strftime("%B %Y"))
     
     df_bills = load_bills_data()
     
@@ -618,7 +624,8 @@ with tab_bills:
     with st.expander("➕ Add New Bill to Checklist"):
         b_col1, b_col2 = st.columns(2)
         with b_col1:
-            bill_month = st.text_input("Target Month", value=current_month_str)
+            default_add_idx = target_month_opts.index(current_month_str) if current_month_str in target_month_opts else 0
+            bill_month = st.selectbox("Target Month", target_month_opts, index=default_add_idx, key="add_mon")
             bill_name = st.text_input("Bill Name (e.g., Electricity, Credit Card)")
             bill_type = st.selectbox("Bill Type", ["SCHOOL", "PERS", "OTHER"])
         with b_col2:
@@ -643,13 +650,28 @@ with tab_bills:
 
     # --- 2. PENDING BILLS & 1-CLICK PAY ---
     st.subheader("⏳ Pending Payments")
+    
+    pending_bills = pd.DataFrame()
     if not df_bills.empty and 'Status' in df_bills.columns:
-        pending_bills = df_bills[df_bills['Status'] == 'Pending']
+        pending_bills = df_bills[df_bills['Status'] == 'Pending'].copy()
         
-        if not pending_bills.empty:
-            bills_ws = sh.worksheet("PAYMENT_CHECKLIST")
+    if not pending_bills.empty:
+        bills_ws = sh.worksheet("PAYMENT_CHECKLIST")
+        import calendar 
+        from datetime import date
+        
+        # Sort pending bills by Month
+        def parse_month(m_str):
+            try: return datetime.strptime(str(m_str), "%B %Y")
+            except: return datetime(1900, 1, 1)
             
-            for idx, row in pending_bills.iterrows():
+        pending_bills['Sort_Date'] = pending_bills['Month'].apply(parse_month)
+        pending_bills = pending_bills.sort_values(['Sort_Date', 'Due_Date'])
+        
+        for month_name, group in pending_bills.groupby('Month', sort=False):
+            st.markdown(f"#### 🗓️ Tracking for: {month_name}")
+            
+            for idx, row in group.iterrows():
                 sheet_row = idx + 2 
                 
                 with st.container(border=True):
@@ -686,10 +708,10 @@ with tab_bills:
                         next_due_date_obj = date(ny, nm, nd)
                     except: pass
                         
-                    curr_month_str = str(row.get('Month', ''))
-                    next_month_str_default = curr_month_str
+                    curr_month_str_bill = str(row.get('Month', ''))
+                    next_month_str_default = curr_month_str_bill
                     try:
-                        mt = datetime.strptime(curr_month_str, "%B %Y")
+                        mt = datetime.strptime(curr_month_str_bill, "%B %Y")
                         nm_m = mt.month + 1 if mt.month < 12 else 1
                         nm_y = mt.year if mt.month < 12 else mt.year + 1
                         next_month_str_default = date(nm_y, nm_m, 1).strftime("%B %Y")
@@ -748,10 +770,8 @@ with tab_bills:
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error processing payment: {e}")
-        else:
-            st.info("🎉 All caught up! No pending bills for now.")
     else:
-        st.info("No bills found. Add one above to get started!")
+        st.info("🎉 All caught up! No pending bills for now.")
 
     # --- 3. PAID BILLS HISTORY & RENEWAL ---
     st.divider()
@@ -768,7 +788,10 @@ with tab_bills:
                 st.markdown("#### 🔁 Renew a Past Bill")
                 st.caption("Manually re-queue a previously paid bill for its next cycle.")
                 
-                past_bill_names = list(paid_bills['Bill_Name'].unique())
+                past_bill_names_all = list(paid_bills['Bill_Name'].unique())
+                pending_names = pending_bills['Bill_Name'].unique() if not pending_bills.empty else []
+                # Only show bills that are NOT currently pending
+                past_bill_names = [b for b in past_bill_names_all if b not in pending_names]
                 
                 if past_bill_names:
                     r_col1, r_col2 = st.columns([1.5, 1])
@@ -788,8 +811,8 @@ with tab_bills:
 
                     rn_col1, rn_col2, rn_col3 = st.columns(3)
                     with rn_col1:
-                        curr_month_str = get_ist_now().strftime("%B %Y")
-                        new_month = st.text_input("Target Month", value=curr_month_str, key="rn_mon")
+                        default_rn_idx = target_month_opts.index(current_month_str) if current_month_str in target_month_opts else 0
+                        new_month = st.selectbox("Target Month", target_month_opts, index=default_rn_idx, key="rn_mon")
                     with rn_col2:
                         new_amt = st.number_input("Est. Amount", value=last_paid_amt, step=100.0, key="rn_amt")
                     with rn_col3:
@@ -806,7 +829,8 @@ with tab_bills:
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error renewing bill: {e}")
-
+                else:
+                    st.success("All your past bills are currently active in the Pending list!")
             else:
                 st.info("No paid bills recorded yet.")
 

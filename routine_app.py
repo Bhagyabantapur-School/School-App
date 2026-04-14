@@ -202,6 +202,27 @@ def get_visited_places():
     except Exception as e:
         return pd.DataFrame(columns=["Place", "Purpose"])
 
+# --- NEW PAYMENT CHECKLIST FUNCTION ---
+@st.cache_data(ttl=300)
+def get_payment_checklist():
+    client = init_connection()
+    try:
+        ss = client.open("sk_money_location")
+        sheet = ss.worksheet("PAYMENT_CHECKLIST")
+    except Exception as e:
+        return pd.DataFrame(columns=["Month", "Bill_Name", "Type", "Est_Amount", "Due_Date", "Status", "Fund", "Account", "Actual_Paid", "row_index"])
+        
+    data = sheet.get_all_values()
+    if len(data) <= 1:
+        return pd.DataFrame(columns=["Month", "Bill_Name", "Type", "Est_Amount", "Due_Date", "Status", "Fund", "Account", "Actual_Paid", "row_index"])
+    
+    df = pd.DataFrame(data[1:], columns=data[0])
+    while df.shape[1] < 9: df[df.shape[1]] = ""
+    df = df.iloc[:, :9]
+    df.columns = ["Month", "Bill_Name", "Type", "Est_Amount", "Due_Date", "Status", "Fund", "Account", "Actual_Paid"]
+    df['row_index'] = df.index + 2
+    return df
+
 def parse_duration_to_minutes(dur_str):
     try:
         h, m = map(int, str(dur_str).strip().split(':'))
@@ -250,6 +271,7 @@ try:
     holidays_df = get_holidays()
     loc_df = get_location_data() 
     visited_places_df = get_visited_places()
+    payment_df = get_payment_checklist()
     
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist_timezone)
@@ -291,6 +313,7 @@ try:
                 get_holidays.clear()
                 get_location_data.clear() 
                 get_visited_places.clear()
+                get_payment_checklist.clear()
                 st.toast("✅ Force Synced with Google Sheets!")
                 time.sleep(0.5)
                 st.rerun()
@@ -561,6 +584,69 @@ try:
                     days_until = (h_row['Date_dt'].date() - now.date()).days
                     day_str = "Tomorrow!" if days_until == 1 else f"in {days_until} days"
                     st.markdown(f"**{h_row['Date_dt'].strftime('%b %d, %Y')}** - {h_row['Occasion']} *( {day_str} )*")
+
+        # --- UPCOMING PAYMENTS ---
+        if not payment_df.empty:
+            def parse_pay_date(d_str):
+                try:
+                    return pd.to_datetime(str(d_str).strip(), dayfirst=True).date()
+                except:
+                    return pd.NaT
+            
+            payment_df['Due_Date_dt'] = payment_df['Due_Date'].apply(parse_pay_date)
+            
+            pending_payments = payment_df[~payment_df['Status'].str.strip().str.upper().isin(['PAID', 'DONE'])]
+            
+            upcoming_pays = []
+            for _, p_row in pending_payments.iterrows():
+                if pd.notna(p_row['Due_Date_dt']):
+                    days_until = (p_row['Due_Date_dt'] - now.date()).days
+                    if days_until <= 1:
+                        upcoming_pays.append((days_until, p_row))
+            
+            if upcoming_pays:
+                upcoming_pays.sort(key=lambda x: x[0])
+                with st.expander(f"💸 Upcoming Payments ({len(upcoming_pays)})", expanded=False):
+                    for days_until, p_row in upcoming_pays:
+                        if days_until == 0:
+                            day_str = "Due Today!"
+                            color = "#ff4b4b"
+                        elif days_until == 1:
+                            day_str = "Due Tomorrow!"
+                            color = "#ff9f36"
+                        else:
+                            day_str = f"Overdue by {abs(days_until)} days!"
+                            color = "#ff4b4b"
+                        
+                        st.markdown(f"""
+                        <div style='padding: 10px; border-left: 4px solid {color}; background-color: #f9f9f9; margin-bottom: 8px; border-radius: 4px;'>
+                            <strong style='color: #333; font-size: 15px;'>{p_row['Bill_Name']} ({p_row['Type']})</strong><br>
+                            <span style='color: {color}; font-weight: bold;'>{day_str}</span> | Est: ₹{p_row['Est_Amount']}<br>
+                            <span style='color: #666; font-size: 13px;'>Fund: {p_row['Fund']} | A/c: {p_row['Account']}</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        col1, col2 = st.columns([2, 1])
+                        with col1:
+                            actual_amt = st.text_input("Actual Amount Paid", value=p_row['Est_Amount'], key=f"pay_amt_{p_row['row_index']}", label_visibility="collapsed")
+                        with col2:
+                            if st.button("✅ Mark Paid", key=f"pay_btn_{p_row['row_index']}", use_container_width=True):
+                                client = init_connection()
+                                sheet = client.open("sk_money_location").worksheet("PAYMENT_CHECKLIST")
+                                sheet.update_cell(int(p_row['row_index']), 6, "Paid")
+                                sheet.update_cell(int(p_row['row_index']), 9, actual_amt)
+                                
+                                sheet_log = get_sheet("activity_log")
+                                sheet_log.append_row([
+                                    today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
+                                    GS_FORMULA, "WORK", "BILL PAYMENT", "", f"Paid {p_row['Bill_Name']}: ₹{actual_amt}"
+                                ], value_input_option="USER_ENTERED")
+                                
+                                get_payment_checklist.clear()
+                                get_activity_log.clear()
+                                st.success("Payment marked as Paid!")
+                                time.sleep(1)
+                                st.rerun()
 
         if chk_list:
             st.markdown("---")

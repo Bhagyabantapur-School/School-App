@@ -643,58 +643,109 @@ with tab_bills:
         
         if not pending_bills.empty:
             bills_ws = sh.worksheet("PAYMENT_CHECKLIST")
+            import calendar 
+            from datetime import date
             
             for idx, row in pending_bills.iterrows():
-                sheet_row = idx + 2
+                sheet_row = idx + 2 
                 
                 with st.container(border=True):
-                    c1, c2, c3 = st.columns([2, 1, 1.5])
+                    c1, c2, c3 = st.columns([2, 1.2, 1.3])
                     with c1:
                         st.write(f"**{row.get('Bill_Name', 'Unknown')}** ({row.get('Type', '')})")
                         due_status = f"🔴 Due: {row.get('Due_Date', '')}" 
                         st.caption(f"{due_status} | Fund: {row.get('Fund', '')}")
                     with c2:
+                        raw_amt = row.get('Est_Amount', 0)
+                        try: safe_amt = float(raw_amt) if str(raw_amt).strip() != "" else 0.0
+                        except (ValueError, TypeError): safe_amt = 0.0
+                            
                         pay_amt = st.number_input(
                             "Pay Amount", 
-                            value=float(row.get('Est_Amount', 0) if pd.notna(row.get('Est_Amount')) else 0), 
+                            value=safe_amt, 
                             key=f"payamt_{idx}", 
                             label_visibility="collapsed"
                         )
+                        auto_renew = st.checkbox("🔁 Auto-Renew", value=True, key=f"renew_{idx}")
+                        
                     with c3:
-                        if st.button("💸 Pay & Log", key=f"paybtn_{idx}", use_container_width=True, type="primary"):
-                            try:
-                                b_name = str(row.get('Bill_Name', ''))
-                                b_type = str(row.get('Type', 'PERS'))
-                                
-                                time_now = get_ist_now()
-                                today_str = time_now.strftime("%d-%m-%Y")
-                                time_str = time_now.strftime("%H:%M")
-                                
-                                match_row = config_df[config_df['Map_Particular'].astype(str).str.strip() == b_name]
-                                cat = str(match_row['Map_Category'].values[0]) if not match_row.empty else "NEEDS"
-                                subcat = str(match_row['Map_SubCat'].values[0]) if not match_row.empty else ""
-                                
-                                loc_val = current_loc or ""
-                                tf_val = loc_val if should_inject_tofrom(loc_val) else ""
-                                
-                                money_row = [
-                                    today_str, time_str, "", pay_amt, 
-                                    str(row.get('Account', '')), str(row.get('Fund', '')), 
-                                    b_type, cat, subcat, b_name, 
-                                    tf_val, loc_val, "Cleared via Bill Checklist"
-                                ]
-                                sh.worksheet("MONEY_DATA").append_row(money_row)
-                                
-                                headers = bills_ws.row_values(1)
-                                bills_ws.update_cell(sheet_row, headers.index('Status') + 1, 'Paid')
-                                bills_ws.update_cell(sheet_row, headers.index('Actual_Paid') + 1, pay_amt)
-                                
-                                load_money_data.clear()
-                                load_bills_data.clear()
-                                st.success(f"Payment for {b_name} logged successfully!")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Error processing payment: {e}")
+                        # Capture button click, but execute logic at the end of the container
+                        pay_clicked = st.button("💸 Pay & Log", key=f"paybtn_{idx}", use_container_width=True, type="primary")
+
+                    # --- PRE-CALCULATE NEXT CYCLE DEFAULTS ---
+                    due_date_str = str(row.get('Due_Date', ''))
+                    next_due_date_obj = st.session_state.locked_date
+                    try:
+                        dt = datetime.strptime(due_date_str, "%d-%m-%Y")
+                        nm = dt.month + 1 if dt.month < 12 else 1
+                        ny = dt.year if dt.month < 12 else dt.year + 1
+                        max_day = calendar.monthrange(ny, nm)[1]
+                        nd = min(dt.day, max_day)
+                        next_due_date_obj = date(ny, nm, nd)
+                    except: pass
+                        
+                    curr_month_str = str(row.get('Month', ''))
+                    next_month_str_default = curr_month_str
+                    try:
+                        mt = datetime.strptime(curr_month_str, "%B %Y")
+                        nm_m = mt.month + 1 if mt.month < 12 else 1
+                        nm_y = mt.year if mt.month < 12 else mt.year + 1
+                        next_month_str_default = date(nm_y, nm_m, 1).strftime("%B %Y")
+                    except: pass
+
+                    rev_month = next_month_str_default
+                    rev_amt = safe_amt
+                    rev_due = next_due_date_obj
+
+                    # --- REVIEW & EDIT EXPANDER ---
+                    if auto_renew:
+                        with st.expander("⚙️ Review Next Cycle Settings", expanded=False):
+                            r_c1, r_c2, r_c3 = st.columns(3)
+                            with r_c1: rev_month = st.text_input("Next Month", value=next_month_str_default, key=f"rmon_{idx}")
+                            with r_c2: rev_amt = st.number_input("Next Est. Amount", value=float(safe_amt), step=100.0, key=f"ramt_{idx}")
+                            with r_c3: rev_due = st.date_input("Next Due Date", value=next_due_date_obj, key=f"rdue_{idx}")
+
+                    # --- EXECUTE LOGIC ON CLICK ---
+                    if pay_clicked:
+                        try:
+                            b_name = str(row.get('Bill_Name', ''))
+                            b_type = str(row.get('Type', 'PERS'))
+                            
+                            time_now = get_ist_now()
+                            today_str = time_now.strftime("%d-%m-%Y")
+                            time_str = time_now.strftime("%H:%M")
+                            
+                            match_row = config_df[config_df['Map_Particular'].astype(str).str.strip() == b_name]
+                            cat = str(match_row['Map_Category'].values[0]) if not match_row.empty else "NEEDS"
+                            subcat = str(match_row['Map_SubCat'].values[0]) if not match_row.empty else ""
+                            
+                            loc_val = current_loc or ""
+                            tf_val = loc_val if should_inject_tofrom(loc_val) else ""
+                            
+                            money_row = [
+                                today_str, time_str, "", pay_amt, 
+                                str(row.get('Account', '')), str(row.get('Fund', '')), 
+                                b_type, cat, subcat, b_name, 
+                                tf_val, loc_val, "Cleared via Bill Checklist"
+                            ]
+                            sh.worksheet("MONEY_DATA").append_row(money_row)
+                            
+                            headers = bills_ws.row_values(1)
+                            bills_ws.update_cell(sheet_row, headers.index('Status') + 1, 'Paid')
+                            bills_ws.update_cell(sheet_row, headers.index('Actual_Paid') + 1, pay_amt)
+                            
+                            if auto_renew:
+                                bills_ws.append_row([
+                                    rev_month, b_name, b_type, rev_amt, rev_due.strftime("%d-%m-%Y"), 
+                                    "Pending", str(row.get('Fund', '')), str(row.get('Account', '')), ""
+                                ])
+
+                            load_money_data.clear()
+                            load_bills_data.clear()
+                            st.success(f"Payment logged! Next bill generated for {rev_month}." if auto_renew else f"Payment logged for {b_name}!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error processing payment: {e}")
         else:
             st.info("🎉 All caught up! No pending bills for now.")
     else:

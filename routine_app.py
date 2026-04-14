@@ -444,10 +444,12 @@ try:
         if all_alert_pays:
             all_alert_pays.sort(key=lambda x: x[0])
             st.markdown("<br>", unsafe_allow_html=True)
-            box_html = "<div style='background-color: #ffebee; border: 2px solid #ef5350; padding: 15px; margin-bottom: 15px; border-radius: 0px;'>"
-            box_html += "<h4 style='color: #c62828; margin-top: 0px; margin-bottom: 15px; text-align: center;'>🚨 Pending Payments</h4>"
             
-            for days_until, p_row in all_alert_pays:
+            # Create a solid red box with white text
+            box_html = "<div style='background-color: #d32f2f; padding: 15px; margin-bottom: 15px; border-radius: 6px; color: white;'>"
+            box_html += "<h4 style='color: white; margin-top: 0px; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.3); padding-bottom: 8px;'>🚨 Pending Payments</h4>"
+            
+            for i, (days_until, p_row) in enumerate(all_alert_pays):
                 if days_until < 0:
                     day_str = f"Overdue by {abs(days_until)} days!"
                 elif days_until == 0:
@@ -455,22 +457,19 @@ try:
                 else:
                     day_str = "Due Tomorrow!"
                     
+                # Only add the bottom dividing line if it is NOT the last item
+                border_bottom = "border-bottom: 1px solid rgba(255,255,255,0.2);" if i < len(all_alert_pays) - 1 else ""
+                pad_bot = "padding-bottom: 10px; margin-bottom: 10px;" if i < len(all_alert_pays) - 1 else "margin-bottom: 0px;"
+                
                 box_html += f"""
-                <div style='margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #ffcdd2;'>
-                    <strong style='color: #b71c1c; font-size: 16px;'>{p_row['Bill_Name']} ({p_row['Type']}) - {day_str}</strong><br>
-                    <span style='color: #333; font-size: 14px;'>Est: ₹{p_row['Est_Amount']} | Fund: {p_row['Fund']} | A/c: {p_row['Account']}</span>
+                <div style='{pad_bot} {border_bottom}'>
+                    <strong style='font-size: 16px;'>{p_row['Bill_Name']} ({p_row['Type']}) - {day_str}</strong><br>
+                    <span style='font-size: 14px; opacity: 0.9;'>Est: ₹{p_row['Est_Amount']} | Fund: {p_row['Fund']} | A/c: {p_row['Account']}</span>
                 </div>
                 """
             box_html += "</div>"
             st.markdown(box_html, unsafe_allow_html=True)
-
-        if next_activity == "FLEX MODE ACTIVE":
-            st.markdown(f"<h4 style='text-align: center; color: #e65100; margin-bottom: 20px; font-weight: 400;'>⚠️ Schedule Paused - Logging Custom Activity</h4>", unsafe_allow_html=True)
-        elif next_activity not in ["NONE", "END OF DAY"]:
-            st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;'>Up Next: <b>{next_activity}</b> at {next_time_str}</h4>", unsafe_allow_html=True)
-        elif next_activity == "END OF DAY":
-            st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;'>Up Next: Schedule Complete</h4>", unsafe_allow_html=True)
-
+            
         # --- SMART HYDRATION TRACKER ---
         st.markdown("---")
         today_water = water_df[water_df['Date'] == today_str]

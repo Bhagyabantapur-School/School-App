@@ -334,9 +334,9 @@ try:
             for _, p_row in pending_payments.iterrows():
                 if pd.notna(p_row['Due_Date_dt']):
                     days_until = (p_row['Due_Date_dt'] - now.date()).days
-                    if days_until <= 1:          # Due Tomorrow, Today, or Overdue
+                    if days_until <= 0:      # Due Today or Overdue (Under Current Activity)
                         urgent_pays.append((days_until, p_row))
-                    elif 1 < days_until <= 3:    # Due in 2 to 3 days
+                    elif days_until == 1:    # Due Tomorrow (In Upcoming list)
                         upcoming_pays.append((days_until, p_row))
 
         holidays_df['Date_dt'] = pd.to_datetime(holidays_df['Date'], dayfirst=True, errors='coerce')
@@ -429,21 +429,18 @@ try:
             else:
                 st.markdown("<p style='text-align: center; color: #ff9f36; font-weight: bold; margin-top: -10px;'>🎉 Running Custom Holiday Schedule</p>", unsafe_allow_html=True)
 
-        # --- URGENT PAYMENTS TEXT (Due Tomorrow / Today / Overdue) ---
+        # --- URGENT PAYMENTS TEXT (Due Today / Overdue) ---
         if urgent_pays:
             urgent_pays.sort(key=lambda x: x[0])
+            st.markdown("<div style='text-align: center; margin-top: 5px; margin-bottom: 10px;'>", unsafe_allow_html=True)
             for days_until, p_row in urgent_pays:
-                if days_until == 1:
-                    day_str = "Due Tomorrow!"
-                    text_color = "#ff9f36" # Orange
-                elif days_until == 0:
-                    day_str = "Due Today!"
-                    text_color = "#ff4b4b" # Red
-                else:
-                    day_str = f"Overdue by {abs(days_until)} days!"
-                    text_color = "#ff4b4b" # Red
-                    
-                st.markdown(f"<p style='text-align: center; color: {text_color}; font-weight: bold; font-size: 1.1rem; margin-top: -10px;'>🚨 {p_row['Bill_Name']} - {day_str}</p>", unsafe_allow_html=True)
+                day_str = "Due Today!" if days_until == 0 else f"Overdue by {abs(days_until)} days!"
+                st.markdown(f"""
+                    <span style='background-color: #ffebee; color: #d32f2f; border: 1px solid #ffcdd2; padding: 4px 12px; border-radius: 15px; font-weight: bold; font-size: 0.95rem; display: inline-block; margin: 2px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);'>
+                        🚨 {p_row['Bill_Name']} ({day_str})
+                    </span>
+                """, unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
 
         if current_activity_start and not flex_on:
             dt_start = datetime.combine(now.date(), current_activity_start)
@@ -459,6 +456,43 @@ try:
             st.markdown(f"<h3 style='text-align: center; color: #555; margin-top: 0px; margin-bottom: 10px; font-weight: 400;'>⏱️ Elapsed: {elapsed_text}</h3>", unsafe_allow_html=True)
         else:
             st.markdown("<div style='margin-bottom: 15px;'></div>", unsafe_allow_html=True)
+            
+        # --- URGENT PAYMENTS INTERACTIVE UI ---
+        if urgent_pays:
+            st.markdown("<br>", unsafe_allow_html=True)
+            for days_until, p_row in urgent_pays:
+                day_str = "Due Today!" if days_until == 0 else f"Overdue by {abs(days_until)} days!"
+                color = "#ff4b4b"
+                st.markdown(f"""
+                <div style='padding: 10px; border-left: 4px solid {color}; background-color: #ffebee; margin-bottom: 8px; border-radius: 4px;'>
+                    <strong style='color: #d32f2f; font-size: 15px;'>🚨 {p_row['Bill_Name']} ({p_row['Type']})</strong><br>
+                    <span style='color: {color}; font-weight: bold;'>{day_str}</span> | Est: ₹{p_row['Est_Amount']}<br>
+                    <span style='color: #666; font-size: 13px;'>Fund: {p_row['Fund']} | A/c: {p_row['Account']}</span>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                col1, col2 = st.columns([2, 1])
+                with col1:
+                    actual_amt = st.text_input("Actual Amount Paid", value=p_row['Est_Amount'], key=f"pay_amt_urg_{p_row['row_index']}", label_visibility="collapsed")
+                with col2:
+                    if st.button("✅ Mark Paid", key=f"pay_btn_urg_{p_row['row_index']}", use_container_width=True):
+                        client = init_connection()
+                        sheet = client.open("sk_money_location").worksheet("PAYMENT_CHECKLIST")
+                        sheet.update_cell(int(p_row['row_index']), 6, "Paid")
+                        sheet.update_cell(int(p_row['row_index']), 9, actual_amt)
+                        
+                        sheet_log = get_sheet("activity_log")
+                        sheet_log.append_row([
+                            today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
+                            GS_FORMULA, "WORK", "BILL PAYMENT", "", f"Paid {p_row['Bill_Name']}: ₹{actual_amt}"
+                        ], value_input_option="USER_ENTERED")
+                        
+                        get_payment_checklist.clear()
+                        get_activity_log.clear()
+                        st.success("Payment marked as Paid!")
+                        time.sleep(1)
+                        st.rerun()
+            st.markdown("<br>", unsafe_allow_html=True)
 
         if next_activity == "FLEX MODE ACTIVE":
             st.markdown(f"<h4 style='text-align: center; color: #e65100; margin-bottom: 20px; font-weight: 400;'>⚠️ Schedule Paused - Logging Custom Activity</h4>", unsafe_allow_html=True)
@@ -621,13 +655,13 @@ try:
                     day_str = "Tomorrow!" if days_until == 1 else f"in {days_until} days"
                     st.markdown(f"**{h_row['Date_dt'].strftime('%b %d, %Y')}** - {h_row['Occasion']} *( {day_str} )*")
 
-        # --- UPCOMING PAYMENTS (Due in 2-3 Days) ---
+        # --- UPCOMING PAYMENTS (Due Tomorrow) ---
         if upcoming_pays:
             upcoming_pays.sort(key=lambda x: x[0])
             with st.expander(f"💸 Upcoming Payments ({len(upcoming_pays)})", expanded=False):
                 for days_until, p_row in upcoming_pays:
-                    day_str = f"Due in {days_until} days!"
-                    color = "#00838f" # Cyan/Teal color
+                    day_str = "Due Tomorrow!"
+                    color = "#ff9f36"
                     
                     st.markdown(f"""
                     <div style='padding: 10px; border-left: 4px solid {color}; background-color: #f9f9f9; margin-bottom: 8px; border-radius: 4px;'>
@@ -636,6 +670,28 @@ try:
                         <span style='color: #666; font-size: 13px;'>Fund: {p_row['Fund']} | A/c: {p_row['Account']}</span>
                     </div>
                     """, unsafe_allow_html=True)
+                    
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        actual_amt = st.text_input("Actual Amount Paid", value=p_row['Est_Amount'], key=f"pay_amt_{p_row['row_index']}", label_visibility="collapsed")
+                    with col2:
+                        if st.button("✅ Mark Paid", key=f"pay_btn_{p_row['row_index']}", use_container_width=True):
+                            client = init_connection()
+                            sheet = client.open("sk_money_location").worksheet("PAYMENT_CHECKLIST")
+                            sheet.update_cell(int(p_row['row_index']), 6, "Paid")
+                            sheet.update_cell(int(p_row['row_index']), 9, actual_amt)
+                            
+                            sheet_log = get_sheet("activity_log")
+                            sheet_log.append_row([
+                                today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
+                                GS_FORMULA, "WORK", "BILL PAYMENT", "", f"Paid {p_row['Bill_Name']}: ₹{actual_amt}"
+                            ], value_input_option="USER_ENTERED")
+                            
+                            get_payment_checklist.clear()
+                            get_activity_log.clear()
+                            st.success("Payment marked as Paid!")
+                            time.sleep(1)
+                            st.rerun()
 
         if chk_list:
             st.markdown("---")

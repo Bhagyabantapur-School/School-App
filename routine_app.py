@@ -461,12 +461,12 @@ try:
                 border_bottom = "border-bottom: 1px solid rgba(255,255,255,0.2);" if i < len(all_alert_pays) - 1 else ""
                 pad_bot = "padding-bottom: 10px; margin-bottom: 10px;" if i < len(all_alert_pays) - 1 else "margin-bottom: 0px;"
                 
-                box_html += f"""
-                <div style='{pad_bot} {border_bottom}'>
-                    <strong style='font-size: 16px;'>{p_row['Bill_Name']} ({p_row['Type']}) - {day_str}</strong><br>
-                    <span style='font-size: 14px; opacity: 0.9;'>Est: ₹{p_row['Est_Amount']} | Fund: {p_row['Fund']} | A/c: {p_row['Account']}</span>
-                </div>
-                """
+                # Build the string without hidden spaces to prevent markdown code-block rendering
+                box_html += f"<div style='{pad_bot} {border_bottom}'>"
+                box_html += f"<strong style='font-size: 16px;'>{p_row['Bill_Name']} ({p_row['Type']}) - {day_str}</strong><br>"
+                box_html += f"<span style='font-size: 14px; opacity: 0.9;'>Est: ₹{p_row['Est_Amount']} | Fund: {p_row['Fund']} | A/c: {p_row['Account']}</span>"
+                box_html += "</div>"
+                
             box_html += "</div>"
             st.markdown(box_html, unsafe_allow_html=True)
             

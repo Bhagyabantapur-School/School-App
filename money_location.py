@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
+import calendar
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -373,7 +374,11 @@ with tab_money:
                             st.write(f"**{row.get('Item', 'Unknown')}**")
                             st.caption(f"Fund: {row.get('Fund', '')} | Acc: {row.get('Account', '')}")
                         with colB:
-                            final_cost = st.number_input("Cost", value=float(row.get('Est_Cost', 0) if pd.notna(row.get('Est_Cost')) else 0), key=f"cost_{idx}", label_visibility="collapsed")
+                            raw_cost = row.get('Est_Cost', 0)
+                            try: safe_cost = float(raw_cost) if str(raw_cost).strip() != "" else 0.0
+                            except (ValueError, TypeError): safe_cost = 0.0
+                            
+                            final_cost = st.number_input("Cost", value=safe_cost, key=f"cost_{idx}", label_visibility="collapsed")
                         with colC:
                             if st.button("💸 Pay & Clear", key=f"pay_{idx}", use_container_width=True, type="primary"):
                                 try:
@@ -643,8 +648,6 @@ with tab_bills:
         
         if not pending_bills.empty:
             bills_ws = sh.worksheet("PAYMENT_CHECKLIST")
-            import calendar 
-            from datetime import date
             
             for idx, row in pending_bills.iterrows():
                 sheet_row = idx + 2 
@@ -669,7 +672,6 @@ with tab_bills:
                         auto_renew = st.checkbox("🔁 Auto-Renew", value=True, key=f"renew_{idx}")
                         
                     with c3:
-                        # Capture button click, but execute logic at the end of the container
                         pay_clicked = st.button("💸 Pay & Log", key=f"paybtn_{idx}", use_container_width=True, type="primary")
 
                     # --- PRE-CALCULATE NEXT CYCLE DEFAULTS ---
@@ -750,6 +752,63 @@ with tab_bills:
             st.info("🎉 All caught up! No pending bills for now.")
     else:
         st.info("No bills found. Add one above to get started!")
+
+    # --- 3. PAID BILLS HISTORY & RENEWAL ---
+    st.divider()
+    with st.expander("📜 View Paid Bills History & Renew"):
+        if not df_bills.empty and 'Status' in df_bills.columns:
+            paid_bills = df_bills[df_bills['Status'] == 'Paid']
+            
+            if not paid_bills.empty:
+                display_cols = ['Month', 'Bill_Name', 'Type', 'Actual_Paid', 'Fund', 'Account']
+                st.dataframe(paid_bills[display_cols], use_container_width=True, hide_index=True)
+                
+                st.divider()
+                
+                st.markdown("#### 🔁 Renew a Past Bill")
+                st.caption("Manually re-queue a previously paid bill for its next cycle.")
+                
+                past_bill_names = list(paid_bills['Bill_Name'].unique())
+                
+                if past_bill_names:
+                    r_col1, r_col2 = st.columns([1.5, 1])
+                    with r_col1:
+                        sel_bill_name = st.selectbox("Select Past Bill", past_bill_names)
+                    with r_col2:
+                        bill_data = paid_bills[paid_bills['Bill_Name'] == sel_bill_name].iloc[-1]
+                        bill_type = bill_data.get('Type', 'PERS')
+                        bill_fund = bill_data.get('Fund', '')
+                        bill_acc = bill_data.get('Account', '')
+                        
+                        raw_last_amt = bill_data.get('Actual_Paid', 0)
+                        try: last_paid_amt = float(raw_last_amt) if str(raw_last_amt).strip() != "" else 0.0
+                        except: last_paid_amt = 0.0
+                        
+                        st.info(f"Type: {bill_type} | Last Paid: ₹{last_paid_amt}")
+
+                    rn_col1, rn_col2, rn_col3 = st.columns(3)
+                    with rn_col1:
+                        curr_month_str = get_ist_now().strftime("%B %Y")
+                        new_month = st.text_input("Target Month", value=curr_month_str, key="rn_mon")
+                    with rn_col2:
+                        new_amt = st.number_input("Est. Amount", value=last_paid_amt, step=100.0, key="rn_amt")
+                    with rn_col3:
+                        new_due = st.date_input("Next Due Date", value=st.session_state.locked_date, key="rn_due")
+
+                    if st.button(f"➕ Add '{sel_bill_name}' back to Pending", type="primary", use_container_width=True):
+                        try:
+                            sh.worksheet("PAYMENT_CHECKLIST").append_row([
+                                new_month, sel_bill_name, bill_type, new_amt, new_due.strftime("%d-%m-%Y"), 
+                                "Pending", bill_fund, bill_acc, ""
+                            ])
+                            load_bills_data.clear()
+                            st.success(f"{sel_bill_name} has been renewed and added to your Pending list!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error renewing bill: {e}")
+
+            else:
+                st.info("No paid bills recorded yet.")
 
 # ==========================================
 # TAB 4: LOCATION ENTRY FORM

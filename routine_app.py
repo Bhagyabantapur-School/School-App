@@ -445,24 +445,26 @@ try:
             all_alert_pays.sort(key=lambda x: x[0])
             st.markdown("<br>", unsafe_allow_html=True)
             
-            # Create a solid red box with white text
-            box_html = "<div style='background-color: #d32f2f; padding: 15px; margin-bottom: 15px; border-radius: 6px; color: white;'>"
-            box_html += "<h4 style='color: white; margin-top: 0px; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.3); padding-bottom: 8px;'>🚨 Pending Payments</h4>"
+            # Outer container with a distinct header color (Blue)
+            box_html = "<div style='background-color: #f8f9fa; border: 1px solid #e0e0e0; padding: 15px; margin-bottom: 15px; border-radius: 8px;'>"
+            box_html += "<h4 style='color: #1e88e5; margin-top: 0px; margin-bottom: 15px; border-bottom: 2px solid #1e88e5; padding-bottom: 8px;'>🚨 Pending Payments</h4>"
             
             for i, (days_until, p_row) in enumerate(all_alert_pays):
+                # Determine background colors based on urgency
                 if days_until < 0:
                     day_str = f"Overdue by {abs(days_until)} days!"
+                    bg_color = "#d32f2f" # Solid Red
                 elif days_until == 0:
                     day_str = "Due Today!"
+                    bg_color = "#ef5350" # Light Red
                 else:
                     day_str = "Due Tomorrow!"
+                    bg_color = "#f57c00" # Orange
                     
-                # Only add the bottom dividing line if it is NOT the last item
-                border_bottom = "border-bottom: 1px solid rgba(255,255,255,0.2);" if i < len(all_alert_pays) - 1 else ""
-                pad_bot = "padding-bottom: 10px; margin-bottom: 10px;" if i < len(all_alert_pays) - 1 else "margin-bottom: 0px;"
+                pad_bot = "margin-bottom: 10px;" if i < len(all_alert_pays) - 1 else "margin-bottom: 0px;"
                 
-                # Build the string without hidden spaces to prevent markdown code-block rendering
-                box_html += f"<div style='{pad_bot} {border_bottom}'>"
+                # Build the item card with the specific background color
+                box_html += f"<div style='background-color: {bg_color}; color: white; padding: 12px; border-radius: 6px; {pad_bot}'>"
                 box_html += f"<strong style='font-size: 16px;'>{p_row['Bill_Name']} ({p_row['Type']}) - {day_str}</strong><br>"
                 box_html += f"<span style='font-size: 14px; opacity: 0.9;'>Est: ₹{p_row['Est_Amount']} | Fund: {p_row['Fund']} | A/c: {p_row['Account']}</span>"
                 box_html += "</div>"

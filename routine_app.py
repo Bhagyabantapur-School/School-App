@@ -222,6 +222,24 @@ def get_payment_checklist():
     df['row_index'] = df.index + 2
     return df
 
+@st.cache_data(ttl=300)
+def get_must_do_tasks():
+    client = init_connection()
+    ss = client.open("MY ROUTINE 2026")
+    try:
+        sheet = ss.worksheet("must_do")
+    except gspread.exceptions.WorksheetNotFound:
+        sheet = ss.add_worksheet(title="must_do", rows="100", cols="2")
+        sheet.append_row(["Main Category", "Task Name"])
+    data = sheet.get_all_values()
+    if len(data) <= 1:
+        return pd.DataFrame(columns=["Main Category", "Task Name"])
+    df = pd.DataFrame(data[1:], columns=data[0])
+    while df.shape[1] < 2: df[df.shape[1]] = ""
+    df = df.iloc[:, :2]
+    df.columns = ["Main Category", "Task Name"]
+    return df
+
 def parse_duration_to_minutes(dur_str):
     try:
         h, m = map(int, str(dur_str).strip().split(':'))
@@ -271,6 +289,7 @@ try:
     loc_df = get_location_data() 
     visited_places_df = get_visited_places()
     payment_df = get_payment_checklist()
+    must_do_df = get_must_do_tasks()
     
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist_timezone)
@@ -313,6 +332,7 @@ try:
                 get_location_data.clear() 
                 get_visited_places.clear()
                 get_payment_checklist.clear()
+                get_must_do_tasks.clear()
                 st.toast("✅ Force Synced with Google Sheets!")
                 time.sleep(0.5)
                 st.rerun()
@@ -440,6 +460,14 @@ try:
         else:
             st.markdown("<div style='margin-bottom: 15px;'></div>", unsafe_allow_html=True)
             
+        # --- NEXT ACTIVITY (MOVED UP FOR VISIBILITY) ---
+        if next_activity == "FLEX MODE ACTIVE":
+            st.markdown(f"<h4 style='text-align: center; color: #e65100; margin-bottom: 20px; font-weight: 400;'>⚠️ Schedule Paused - Logging Custom Activity</h4>", unsafe_allow_html=True)
+        elif next_activity not in ["NONE", "END OF DAY"]:
+            st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;'>Up Next: <b>{next_activity}</b> at {next_time_str}</h4>", unsafe_allow_html=True)
+        elif next_activity == "END OF DAY":
+            st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;'>Up Next: Schedule Complete</h4>", unsafe_allow_html=True)
+            
         # --- ALL ALERT PAYMENTS BLOCK ---
         if all_alert_pays:
             all_alert_pays.sort(key=lambda x: x[0])
@@ -471,7 +499,7 @@ try:
                 
             box_html += "</div>"
             st.markdown(box_html, unsafe_allow_html=True)
-            
+
         # --- SMART HYDRATION TRACKER ---
         st.markdown("---")
         today_water = water_df[water_df['Date'] == today_str]
@@ -625,6 +653,36 @@ try:
                     days_until = (h_row['Date_dt'].date() - now.date()).days
                     day_str = "Tomorrow!" if days_until == 1 else f"in {days_until} days"
                     st.markdown(f"**{h_row['Date_dt'].strftime('%b %d, %Y')}** - {h_row['Occasion']} *( {day_str} )*")
+
+        # --- MUST DO REGULAR TASKS ---
+        if not must_do_df.empty:
+            valid_must_dos = must_do_df[must_do_df['Task Name'].str.strip() != '']
+            if not valid_must_dos.empty:
+                with st.expander(f"⭐ Must Do Tasks ({len(valid_must_dos)})", expanded=False):
+                    st.markdown("<p style='text-align: center; color: #888; font-size: 13px; margin-top:-10px;'>Tap to start tracking immediately</p>", unsafe_allow_html=True)
+                    md_cols = st.columns(2)
+                    
+                    running_subs_upper = [str(x).strip().upper() for x in running_tasks['Sub_Activities'].tolist()]
+                    
+                    for idx, row in valid_must_dos.iterrows():
+                        md_task = str(row['Task Name']).strip()
+                        md_cat = str(row['Main Category']).strip().upper()
+                        if not md_cat: md_cat = "WORK"
+                        
+                        is_running = md_task.upper() in running_subs_upper
+                        
+                        with md_cols[idx % 2]:
+                            if is_running:
+                                st.button(f"⏳ {md_task}", key=f"md_run_{idx}", disabled=True, use_container_width=True)
+                            else:
+                                if st.button(f"▶️ {md_task}", key=f"md_btn_{idx}", use_container_width=True):
+                                    log_sheet = get_sheet("activity_log")
+                                    log_sheet.append_row([
+                                        today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
+                                        md_cat, md_task, "", "Must Do Task"
+                                    ], value_input_option="USER_ENTERED")
+                                    get_activity_log.clear()
+                                    st.rerun()
 
         if chk_list:
             st.markdown("---")

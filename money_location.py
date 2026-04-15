@@ -64,6 +64,11 @@ def load_bills_data():
     try: return pd.DataFrame(sh.worksheet("PAYMENT_CHECKLIST").get_all_records())
     except: return pd.DataFrame()
 
+@st.cache_data(ttl=60)
+def load_cash_data():
+    try: return pd.DataFrame(sh.worksheet("CASH_COUNT").get_all_records())
+    except: return pd.DataFrame()
+
 config_df = load_config()
 
 def get_list(column_name):
@@ -180,7 +185,7 @@ sync_journey_state()
 # ==========================================
 st.title("📱 SK Ecosystem")
 
-tab_money, tab_shopping, tab_bills, tab_location, tab_dash, tab_help = st.tabs(["💰 Money", "🛒 Shopping", "✅ Bills", "📍 Location", "📊 Dash", "📖 Help"])
+tab_money, tab_cash, tab_shopping, tab_bills, tab_location, tab_dash, tab_help = st.tabs(["💰 Money", "💵 Cash", "🛒 Shopping", "✅ Bills", "📍 Location", "📊 Dash", "📖 Help"])
 
 current_loc, loc_duration = get_current_location_details()
 current_shop_type = get_shop_type(current_loc) if current_loc else None
@@ -515,6 +520,93 @@ with tab_money:
             st.error(f"Failed to save: {e}")
 
 # ==========================================
+# TAB 1.5: PHYSICAL CASH COUNT
+# ==========================================
+with tab_cash:
+    st.header("💵 Physical Cash Denomination Count")
+    st.write("Tally your physical cash balance on hand.")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("Specific Denominations")
+        notes_500 = st.number_input("₹500", min_value=0, step=1)
+        notes_200 = st.number_input("₹200", min_value=0, step=1)
+        notes_100 = st.number_input("₹100", min_value=0, step=1)
+        notes_50  = st.number_input("₹50", min_value=0, step=1)
+        notes_20  = st.number_input("₹20", min_value=0, step=1)
+        notes_10  = st.number_input("₹10", min_value=0, step=1)
+        notes_5   = st.number_input("₹5", min_value=0, step=1)
+        notes_2   = st.number_input("₹2", min_value=0, step=1)
+        notes_1   = st.number_input("₹1", min_value=0, step=1)
+
+    with c2:
+        st.subheader("Wallet Selection & Amount")
+        
+        # --- DYNAMIC WALLET DROPDOWN ---
+        df_cash = load_cash_data()
+        existing_wallets = []
+        if not df_cash.empty and 'Wallet_Name' in df_cash.columns:
+            existing_wallets = list(df_cash['Wallet_Name'].dropna().unique())
+            existing_wallets = [str(w).strip() for w in existing_wallets if str(w).strip() != ""]
+        
+        if not existing_wallets: 
+            existing_wallets = ["Main Wallet", "Home Locker"]
+            
+        wallet_choice = st.selectbox("Select Wallet / Storage", existing_wallets + ["-- Add New Wallet --"])
+        if wallet_choice == "-- Add New Wallet --":
+            wallet_name = st.text_input("Type New Wallet Name")
+        else:
+            wallet_name = wallet_choice
+            
+        # --- AMOUNT ---
+        wallet_val = st.number_input("Lump Sum Amount (₹)", min_value=0.0, step=10.0)
+        
+        st.divider()
+        
+        # Calculate the grand total
+        total_cash = (notes_500 * 500) + (notes_200 * 200) + (notes_100 * 100) + \
+                     (notes_50 * 50) + (notes_20 * 20) + (notes_10 * 10) + \
+                     (notes_5 * 5) + (notes_2 * 2) + (notes_1 * 1) + \
+                     wallet_val
+                     
+        st.metric("Total Physical Cash", f"₹ {total_cash:,.2f}")
+        cash_remark = st.text_input("Remark (Optional)")
+        
+        if st.button("💾 Save Cash Count", use_container_width=True, type="primary"):
+            if not wallet_name:
+                st.warning("⚠️ Please specify a Wallet Name.")
+            else:
+                time_now = get_ist_now()
+                today_str = time_now.strftime("%d-%m-%Y")
+                time_str = time_now.strftime("%H:%M")
+                
+                # Map exactly to the 15 columns in the updated Google Sheet
+                row_data = [
+                    today_str, time_str, total_cash, 
+                    notes_500, notes_200, notes_100, notes_50, notes_20, notes_10, 
+                    notes_5, notes_2, notes_1, wallet_name, wallet_val, cash_remark
+                ]
+                try:
+                    sh.worksheet("CASH_COUNT").append_row(row_data)
+                    load_cash_data.clear()
+                    st.success(f"Successfully saved cash count of ₹{total_cash} to {wallet_name}!")
+                    st.rerun() # Forces a refresh so the new wallet appears in the dropdown instantly!
+                except Exception as e:
+                    st.error(f"Error saving to Google Sheets: {e}")
+                
+    st.divider()
+    st.subheader("📜 Recent Cash Counts")
+    if not df_cash.empty:
+        # Optimize the view to show the most important columns for different wallets
+        display_cols = [c for c in ['Date', 'Time', 'Total', 'Wallet_Name', 'Wallet_Amount', 'Remark'] if c in df_cash.columns]
+        if not display_cols: display_cols = df_cash.columns
+        
+        display_df = df_cash[display_cols].tail(10).iloc[::-1]
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No past cash counts found yet.")
+
+# ==========================================
 # TAB 2: SHOPPING LIST
 # ==========================================
 with tab_shopping:
@@ -609,7 +701,6 @@ with tab_bills:
     
     current_month_str = get_ist_now().strftime("%B %Y")
     
-    # Generate rolling 12-month options for target dropdowns
     target_month_opts = []
     now_dt = get_ist_now()
     for i in range(12):
@@ -660,7 +751,6 @@ with tab_bills:
         import calendar 
         from datetime import date
         
-        # Sort pending bills by Month
         def parse_month(m_str):
             try: return datetime.strptime(str(m_str), "%B %Y")
             except: return datetime(1900, 1, 1)

@@ -69,7 +69,9 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 2. Database Connection
+# ==========================================
+# 2. Database Connection & API Optimization
+# ==========================================
 @st.cache_resource
 def init_connection():
     scopes = [
@@ -81,10 +83,24 @@ def init_connection():
     )
     return gspread.authorize(creds)
 
-def get_sheet(tab_name):
+@st.cache_resource
+def get_main_spreadsheet():
+    """Searches for 'MY ROUTINE 2026' once and caches the connection."""
     client = init_connection()
-    return client.open("MY ROUTINE 2026").worksheet(tab_name)
+    return client.open("MY ROUTINE 2026")
 
+@st.cache_resource
+def get_money_spreadsheet():
+    """Searches for 'sk_money_location' once and caches the connection."""
+    client = init_connection()
+    return client.open("sk_money_location")
+
+def get_sheet(tab_name):
+    """Fetches a specific tab from the already-opened main spreadsheet."""
+    ss = get_main_spreadsheet()
+    return ss.worksheet(tab_name)
+
+# --- DATA FETCHING ---
 @st.cache_data(ttl=300) 
 def get_routine_data():
     sheet = get_sheet("routine_master")
@@ -112,8 +128,7 @@ def get_activity_log():
 
 @st.cache_data(ttl=300)
 def get_future_tasks():
-    client = init_connection()
-    ss = client.open("MY ROUTINE 2026")
+    ss = get_main_spreadsheet()
     try:
         sheet = ss.worksheet("future_tasks")
     except gspread.exceptions.WorksheetNotFound:
@@ -131,8 +146,7 @@ def get_future_tasks():
 
 @st.cache_data(ttl=300)
 def get_water_log():
-    client = init_connection()
-    ss = client.open("MY ROUTINE 2026")
+    ss = get_main_spreadsheet()
     try:
         sheet = ss.worksheet("water_log")
     except gspread.exceptions.WorksheetNotFound:
@@ -150,8 +164,7 @@ def get_water_log():
 
 @st.cache_data(ttl=300)
 def get_holidays():
-    client = init_connection()
-    ss = client.open("MY ROUTINE 2026")
+    ss = get_main_spreadsheet()
     try:
         sheet = ss.worksheet("holidays")
     except gspread.exceptions.WorksheetNotFound:
@@ -168,9 +181,8 @@ def get_holidays():
 
 @st.cache_data(ttl=300)
 def get_location_data():
-    client = init_connection()
     try:
-        ss = client.open("sk_money_location")
+        ss = get_money_spreadsheet()
     except Exception as e:
         return pd.DataFrame(columns=["Date", "Time", "Move", "Place", "People", "Remark"])
         
@@ -190,9 +202,8 @@ def get_location_data():
 
 @st.cache_data(ttl=300)
 def get_visited_places():
-    client = init_connection()
     try:
-        ss = client.open("sk_money_location")
+        ss = get_money_spreadsheet()
         sheet = ss.worksheet("VISITED_PLACES")
         data = sheet.get_all_values()
         if len(data) <= 1:
@@ -204,9 +215,8 @@ def get_visited_places():
 
 @st.cache_data(ttl=300)
 def get_payment_checklist():
-    client = init_connection()
     try:
-        ss = client.open("sk_money_location")
+        ss = get_money_spreadsheet()
         sheet = ss.worksheet("PAYMENT_CHECKLIST")
     except Exception as e:
         return pd.DataFrame(columns=["Month", "Bill_Name", "Type", "Est_Amount", "Due_Date", "Status", "Fund", "Account", "Actual_Paid", "row_index"])
@@ -224,8 +234,7 @@ def get_payment_checklist():
 
 @st.cache_data(ttl=300)
 def get_must_do_tasks():
-    client = init_connection()
-    ss = client.open("MY ROUTINE 2026")
+    ss = get_main_spreadsheet()
     try:
         sheet = ss.worksheet("must_do")
     except gspread.exceptions.WorksheetNotFound:
@@ -460,14 +469,14 @@ try:
         else:
             st.markdown("<div style='margin-bottom: 15px;'></div>", unsafe_allow_html=True)
             
-        # --- NEXT ACTIVITY (MOVED UP FOR VISIBILITY) ---
+        # --- NEXT ACTIVITY ---
         if next_activity == "FLEX MODE ACTIVE":
             st.markdown(f"<h4 style='text-align: center; color: #e65100; margin-bottom: 20px; font-weight: 400;'>⚠️ Schedule Paused - Logging Custom Activity</h4>", unsafe_allow_html=True)
         elif next_activity not in ["NONE", "END OF DAY"]:
             st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;'>Up Next: <b>{next_activity}</b> at {next_time_str}</h4>", unsafe_allow_html=True)
         elif next_activity == "END OF DAY":
             st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;'>Up Next: Schedule Complete</h4>", unsafe_allow_html=True)
-            
+
         # --- ALL ALERT PAYMENTS BLOCK ---
         if all_alert_pays:
             all_alert_pays.sort(key=lambda x: x[0])

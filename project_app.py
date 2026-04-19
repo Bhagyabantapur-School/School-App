@@ -81,6 +81,26 @@ def get_project_tasks():
     return df
 
 @st.cache_data(ttl=300)
+def get_sk_sync_tasks():
+    client = init_connection()
+    ss = client.open("MY ROUTINE 2026")
+    try:
+        sheet = ss.worksheet("sk_sync_project")
+    except gspread.exceptions.WorksheetNotFound:
+        sheet = ss.add_worksheet(title="sk_sync_project", rows="100", cols="6")
+        sheet.append_row(["Project Name", "Phase", "Task / Milestone", "Status", "Est. Time", "Actual Time (Mins)"])
+    data = sheet.get_all_values()
+    if len(data) <= 1:
+        return pd.DataFrame(columns=["Project Name", "Phase", "Task / Milestone", "Status", "Est. Time", "Actual Time (Mins)", "row_index"])
+    
+    df = pd.DataFrame(data[1:], columns=data[0])
+    while df.shape[1] < 6: df[df.shape[1]] = ""
+    df = df.iloc[:, :6]
+    df.columns = ["Project Name", "Phase", "Task / Milestone", "Status", "Est. Time", "Actual Time (Mins)"]
+    df['row_index'] = df.index + 2 
+    return df
+
+@st.cache_data(ttl=300)
 def get_activity_log():
     sheet = get_sheet("activity_log")
     data = sheet.get_all_values()
@@ -94,7 +114,72 @@ def get_activity_log():
     return df
 
 # ==========================================
-# 3. Main Application Logic
+# 3. Dedicated SK-Sync Component
+# ==========================================
+def render_sk_sync_tracker(sk_sync_tasks):
+    st.markdown("### 🔄 Project SK-Sync Progress")
+    
+    total_tasks = len(sk_sync_tasks)
+    if total_tasks == 0:
+        st.info("No SK-Sync tasks found. Paste your data into the 'sk_sync_project' tab.")
+        return
+        
+    # Calculate progress
+    completed_tasks = len(sk_sync_tasks[sk_sync_tasks['Status'].str.strip().str.title() == 'Done'])
+    progress_pct = int((completed_tasks / total_tasks) * 100)
+    
+    st.progress(progress_pct / 100.0, text=f"Completion: {progress_pct}% ({completed_tasks}/{total_tasks} Tasks Migrated)")
+    
+    # Identify the next pending task
+    pending = sk_sync_tasks[sk_sync_tasks['Status'].str.strip().str.title() == 'Pending']
+    
+    if not pending.empty:
+        next_task = pending.iloc[0]
+        task_name = next_task['Task / Milestone']
+        est_time = next_task['Est. Time']
+        phase_name = next_task['Phase']
+        sheet_row = int(next_task['row_index'])
+        
+        st.info(f"**🎯 Next Action [{phase_name}]:** {task_name} (~{est_time})")
+        
+        # --- TIME TRACKER & COMPLETION UI ---
+        with st.container(border=True):
+            st.markdown("**⏱️ Session Time Tracker**")
+            col1, col2 = st.columns([1, 1])
+            
+            with col1:
+                actual_minutes = st.number_input("Actual Time Spent (Minutes)", min_value=1, value=45, step=5)
+            
+            with col2:
+                st.markdown("<br>", unsafe_allow_html=True) # Alignment spacing
+                if st.button("✅ Mark Done & Log Time", use_container_width=True, type="primary", key="sksync_done_btn"):
+                    try:
+                        sheet_worksheet = get_sheet("sk_sync_project")
+                        headers = sheet_worksheet.row_values(1)
+                        
+                        status_col = headers.index('Status') + 1
+                        time_col = headers.index('Actual Time (Mins)') + 1
+                        
+                        sheet_worksheet.update_cell(sheet_row, time_col, actual_minutes)
+                        sheet_worksheet.update_cell(sheet_row, status_col, 'Done')
+                        
+                        get_sk_sync_tasks.clear()
+                        st.success(f"Awesome! '{task_name}' completed in {actual_minutes} minutes.")
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to update task: {e}")
+    else:
+        st.success("🎉 Project SK-Sync is 100% Complete! Your ecosystem is fully synced.")
+        
+        # Calculate total time invested
+        if 'Actual Time (Mins)' in sk_sync_tasks.columns:
+            total_minutes = pd.to_numeric(sk_sync_tasks['Actual Time (Mins)'], errors='coerce').fillna(0).sum()
+            hours, mins = divmod(int(total_minutes), 60)
+            st.write(f"**Total Time Invested:** {hours} hours and {mins} minutes.")
+
+# ==========================================
+# 4. Main Application Logic
 # ==========================================
 try:
     ist_timezone = pytz.timezone('Asia/Kolkata')
@@ -103,6 +188,7 @@ try:
 
     proj_df = get_project_tasks()
     log_df = get_activity_log()
+    sksync_df = get_sk_sync_tasks()
     
     # Filter for currently running Project Tasks
     running_tasks = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Notes'].str.strip() == 'Project Tracking')]
@@ -117,6 +203,7 @@ try:
         if st.button("🔄 Sync Data", use_container_width=True):
             get_project_tasks.clear()
             get_activity_log.clear()
+            get_sk_sync_tasks.clear()
             st.toast("Synced with Google Sheets!")
             time.sleep(0.5)
             st.rerun()
@@ -315,7 +402,15 @@ try:
     st.markdown("<br><br>", unsafe_allow_html=True)
 
     # ==========================================
-    # SECTION B: DASHBOARD CHARTS & DATA
+    # SECTION B: SK-SYNC MIGRATION TRACKER
+    # ==========================================
+    with st.container():
+        render_sk_sync_tracker(sksync_df)
+    
+    st.markdown("<br><hr><br>", unsafe_allow_html=True)
+
+    # ==========================================
+    # SECTION C: DASHBOARD CHARTS & DATA
     # ==========================================
     status_colors = {"Completed": "#2e7b32", "In Progress": "#0068c9", "Not Started": "#ff9f36"}
     
@@ -379,7 +474,7 @@ try:
     st.markdown("---")    
     
     # ==========================================
-    # SECTION C: ADD NEW TASK FORM
+    # SECTION D: ADD NEW TASK FORM
     # ==========================================
     with st.expander("➕ Add New Project Task", expanded=proj_df.empty):
         with st.form("add_project_task", clear_on_submit=True):

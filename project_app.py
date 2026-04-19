@@ -116,7 +116,7 @@ def get_activity_log():
 # ==========================================
 # 3. Dedicated SK-Sync Component
 # ==========================================
-def render_sk_sync_tracker(sk_sync_tasks):
+def render_sk_sync_tracker(sk_sync_tasks, today_str, now, gs_formula):
     st.markdown("### 🔄 Project SK-Sync Progress")
     
     total_tasks = len(sk_sync_tasks)
@@ -148,23 +148,24 @@ def render_sk_sync_tracker(sk_sync_tasks):
             col1, col2 = st.columns([1, 1])
             
             with col1:
-                actual_minutes = st.number_input("Actual Time Spent (Minutes)", min_value=1, value=45, step=5)
+                if st.button("▶️ Start Live Timer", use_container_width=True, type="primary", key="sksync_start_btn"):
+                    log_sheet = get_sheet("activity_log")
+                    log_sheet.append_row([
+                        today_str, now.strftime('%H:%M'), "RUNNING", gs_formula,    
+                        "WORK", f"{task_name} (SK-Sync)", "", "SK-Sync Tracking"
+                    ], value_input_option="USER_ENTERED")
+                    get_activity_log.clear() 
+                    st.rerun()
             
             with col2:
-                st.markdown("<br>", unsafe_allow_html=True) # Alignment spacing
-                if st.button("✅ Mark Done & Log Time", use_container_width=True, type="primary", key="sksync_done_btn"):
+                if st.button("✅ Mark Done (Quick Complete)", use_container_width=True, key="sksync_done_btn"):
                     try:
                         sheet_worksheet = get_sheet("sk_sync_project")
                         headers = sheet_worksheet.row_values(1)
-                        
                         status_col = headers.index('Status') + 1
-                        time_col = headers.index('Actual Time (Mins)') + 1
-                        
-                        sheet_worksheet.update_cell(sheet_row, time_col, actual_minutes)
                         sheet_worksheet.update_cell(sheet_row, status_col, 'Done')
-                        
                         get_sk_sync_tasks.clear()
-                        st.success(f"Awesome! '{task_name}' completed in {actual_minutes} minutes.")
+                        st.success(f"Awesome! '{task_name}' marked as Done.")
                         time.sleep(1)
                         st.rerun()
                     except Exception as e:
@@ -190,8 +191,8 @@ try:
     log_df = get_activity_log()
     sksync_df = get_sk_sync_tasks()
     
-    # Filter for currently running Project Tasks
-    running_tasks = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Notes'].str.strip() == 'Project Tracking')]
+    # Filter for currently running Project Tasks (Standard + SK-Sync)
+    running_tasks = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Notes'].str.strip().isin(['Project Tracking', 'SK-Sync Tracking']))]
     active_count = len(running_tasks)
 
     # --- HEADER & SYNC ---
@@ -302,19 +303,27 @@ try:
                 </div>
                 """, unsafe_allow_html=True)
                 
-                raw_task_name = active_sub.split(" (")[0]
-                curr_stat_matches = proj_df[proj_df['Task Name'] == raw_task_name]['Status']
-                curr_stat = curr_stat_matches.values[0].strip().title() if not curr_stat_matches.empty else "In Progress"
+                # Determine if this is an SK-Sync task or Normal Project Task
+                is_sksync = (str(active_row['Notes']).strip() == 'SK-Sync Tracking')
+                raw_task_name = active_sub.split(" (")[0].strip()
                 
-                status_opts = ["In Progress", "Completed", "Not Started"]
-                try:
-                    def_idx = status_opts.index(curr_stat)
-                except ValueError:
-                    def_idx = 0
-                    
                 col_stat, col_stop, col_cancel = st.columns([2, 1, 1])
+                
                 with col_stat:
-                    new_proj_status = st.selectbox("Update Status upon saving:", status_opts, index=def_idx, key=f"pstat_{sheet_row}", label_visibility="collapsed")
+                    if is_sksync:
+                        sk_matches = sksync_df[sksync_df['Task / Milestone'].str.strip() == raw_task_name]
+                        curr_stat = sk_matches.values[0][3].strip().title() if not sk_matches.empty else "Pending"
+                        status_opts = ["Pending", "Done"]
+                        try: def_idx = status_opts.index(curr_stat)
+                        except ValueError: def_idx = 0
+                        new_proj_status = st.selectbox("Update SK-Sync Status:", status_opts, index=def_idx, key=f"pstat_{sheet_row}", label_visibility="collapsed")
+                    else:
+                        curr_stat_matches = proj_df[proj_df['Task Name'] == raw_task_name]['Status']
+                        curr_stat = curr_stat_matches.values[0].strip().title() if not curr_stat_matches.empty else "In Progress"
+                        status_opts = ["In Progress", "Completed", "Not Started"]
+                        try: def_idx = status_opts.index(curr_stat)
+                        except ValueError: def_idx = 0
+                        new_proj_status = st.selectbox("Update Status upon saving:", status_opts, index=def_idx, key=f"pstat_{sheet_row}", label_visibility="collapsed")
                 
                 with col_stop:
                     if st.button("🛑 SAVE", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
@@ -323,7 +332,22 @@ try:
                         log_sheet.update_cell(sheet_row, 3, end_time_log.strftime('%H:%M')) 
                         log_sheet.update_cell(sheet_row, 4, GS_FORMULA)                   
                                 
-                        if new_proj_status:
+                        if is_sksync and new_proj_status:
+                            sk_matches = sksync_df[sksync_df['Task / Milestone'].str.strip() == raw_task_name]
+                            if not sk_matches.empty:
+                                sk_idx = int(sk_matches.iloc[0]['row_index'])
+                                sk_sheet = get_sheet("sk_sync_project")
+                                
+                                sk_sheet.update_cell(sk_idx, 4, new_proj_status)
+                                
+                                existing_mins = pd.to_numeric(sk_matches.iloc[0]['Actual Time (Mins)'], errors='coerce')
+                                if pd.isna(existing_mins): existing_mins = 0
+                                total_mins = int(existing_mins) + mins_elapsed
+                                
+                                sk_sheet.update_cell(sk_idx, 6, total_mins)
+                                get_sk_sync_tasks.clear()
+                                
+                        elif not is_sksync and new_proj_status:
                             p_matches = proj_df[proj_df['Task Name'] == raw_task_name]
                             if not p_matches.empty:
                                 p_idx = int(p_matches.iloc[0]['row_index'])
@@ -405,7 +429,7 @@ try:
     # SECTION B: SK-SYNC MIGRATION TRACKER
     # ==========================================
     with st.container():
-        render_sk_sync_tracker(sksync_df)
+        render_sk_sync_tracker(sksync_df, today_str, now, GS_FORMULA)
     
     st.markdown("<br><hr><br>", unsafe_allow_html=True)
 

@@ -58,19 +58,17 @@ def fetch_team():
 records = fetch_logs()
 team_records = fetch_team()
 
-# Process Duty Logs
 pending_sessions = []
 for index, rec in enumerate(records):
     if rec.get("Start Time") == "Pending":
         pending_sessions.append({"sheet_row": index + 2, "data": rec})
 
-# Process Team Records
 team_list = []
 for index, rec in enumerate(team_records):
     team_list.append({"sheet_row": index + 2, "data": rec})
 
 # --- App Layout: Tabs ---
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "📝 Log", 
     "📅 Sched", 
     "👥 Team", 
@@ -78,7 +76,8 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📖 1st PO Guide",
     "⏳ Timeline",
     "🧮 17C Calc",
-    "🛠️ EVM Solver"
+    "🛠️ EVM Solver",
+    "📑 PDF Index" # NEW TAB
 ])
 
 # === TAB 1: LOG & COMPLETE ===
@@ -231,7 +230,6 @@ with tab3:
 
     st.divider()
     
-    # This is the collapsible form that was accidentally removed!
     with st.expander("➕ Add New Team Member"):
         with st.form("add_officer_form"):
             t_name = st.text_input("Name")
@@ -259,7 +257,6 @@ with tab4:
     
     df = pd.DataFrame(records)
     if not df.empty:
-        # Re-added the cleanup and highlighting logic that was removed!
         def clean_old_durations(val):
             if isinstance(val, str) and 'mins' in val:
                 try:
@@ -309,7 +306,7 @@ with tab5:
         st.markdown("""
         যদি কোনো প্রকৃত ভোটার বুথে এসে দেখেন যে তার নামে আগেই কেউ ভোট দিয়ে চলে গেছে:
         * ১নং পোলিং অফিসার হিসেবে তার পরিচয় নিখুঁতভাবে verify করুন।
-        * তাকে **EVM**-এ ভোট দিতে দেওয়া যাবে না।
+        * তাকে **EVM**-এ ভোট দিতে দেওয়া যাবে ভাত না।
         * Presiding Officer তাকে একটি **Tendered Ballot Paper** (ব্যালট পেপার) দেবেন।
         * এই ভোটারের সই/টিপসই **Form 17B (Register of Tendered Votes)**-তে নিতে হবে, Form 17A-তে নয়।
         """)
@@ -512,3 +509,81 @@ with tab8:
         """)
     elif evm_error == "Select an error...":
         st.info("👆 উপর থেকে আপনার EVM-এর সমস্যাটি নির্বাচন করুন।")
+
+# === TAB 9: PDF INDEX (NEW) ===
+with tab9:
+    st.header("📑 Training Manual Index")
+    st.markdown("আপনার 191-পাতার PDF Training Manual-এর সূচিপত্র। সহজে Page Number খুঁজে বের করার জন্য।")
+    
+    with st.expander("1. বিতরণ কেন্দ্রে কার্যক্রম (DCRC Activities) ➡️ [পৃষ্ঠা 07-27]"):
+        st.markdown("""
+        * **কী আছে:** * Collection of EVM/VVPAT and checking serial numbers.
+        * Checking the Electoral Roll & Marked Copy.
+        * Collection of Statutory/Non-Statutory forms, tags, and seals.
+        """)
+        
+    with st.expander("2. পোলিং স্টেশনে ভোটের আগের দিনে ক্রিয়াকলাপ (Pre-Poll Day Activities) ➡️ [পৃষ্ঠা 28-37]"):
+        st.markdown("""
+        * **কী আছে:**
+        * Setting up the voting compartment.
+        * Displaying notices outside the polling station.
+        * Checking voting materials inside the booth.
+        """)
+
+    with st.expander("3. ভোটকেন্দ্রগুলির চারপাশে আইনশৃঙ্খলা (Law & Order Maintenance) ➡️ [পৃষ্ঠা 38-43]"):
+        st.markdown("""
+        * **কী আছে:**
+        * 100-meter and 200-meter perimeter rules.
+        * Regulating entry into the polling station.
+        * Coordination with Sector Officer and Police.
+        """)
+
+    with st.expander("4. পোলিং স্টেশনে ভোটের দিনে ক্রিয়াকলাপ (Poll Day Activities) ➡️ [পৃষ্ঠা 46-86]"):
+        st.markdown("""
+        * **কী আছে:**
+        * Mock Poll procedures and clearing data (CRITICAL).
+        * Sealing the EVM with Green Paper Seal, Special Tag, etc.
+        * Declaration by Presiding Officer before the commencement of poll.
+        """)
+
+    with st.expander("5. ভোট গ্রহণ প্রক্রিয়া (Voting Process) ➡️ [পৃষ্ঠা 87-109]"):
+        st.markdown("""
+        * **কী আছে:**
+        * Duties of 1st, 2nd, and 3rd Polling Officers.
+        * Voter Identification and checking EPIC/Alternate IDs.
+        * Application of Indelible Ink.
+        * Operating the Control Unit (CU) to issue ballots.
+        """)
+
+    with st.expander("6. কিছু ব্যতিক্রমী / বিশেষ পরিস্থিতি (Exceptional/Special Situations) ➡️ [পৃষ্ঠা 110-132]"):
+        st.markdown("""
+        * **কী আছে:**
+        * Challenged Votes & Tendered Votes.
+        * Voters deciding not to vote (Rule 49-O).
+        * Blind and Infirm Voters.
+        * Test Votes (Rule 49MA) for VVPAT slip complaints.
+        """)
+
+    with st.expander("7. ভোট গ্রহণ সমাপ্তিতে কার্যাদি (Close of Poll Activities) ➡️ [পৃষ্ঠা 133-166]"):
+        st.markdown("""
+        * **কী আছে:**
+        * Distribution of queue slips at 6:00 PM.
+        * Pressing the CLOSE button on the CU.
+        * Packaging and sealing EVM/VVPAT into carrying cases.
+        * Filling out Form 17C and the Presiding Officer's Diary.
+        """)
+
+    with st.expander("8. রিসিভিং সেন্টারে ক্রিয়াকলাপ (RC Activities) ➡️ [পৃষ্ঠা 167-176]"):
+        st.markdown("""
+        * **কী আছে:**
+        * Handing over sealed EVMs and VVPATs.
+        * Submission of Statutory (Green) and Non-Statutory (Yellow) packets.
+        * Final clearance from the Receiving Center.
+        """)
+
+    with st.expander("9. SMS Poll Reporting & ECINET app ➡️ [পৃষ্ঠা 177-178]"):
+        st.markdown("""
+        * **কী আছে:**
+        * Hourly / 2-Hourly SMS reporting formats.
+        * Instructions for using the ECINET mobile application.
+        """)

@@ -5,7 +5,7 @@ st.set_page_config(
     page_title="BPS Digital", 
     page_icon="🏫", 
     layout="wide",
-    initial_sidebar_state="expanded" # Keeps the sidebar open for the school system
+    initial_sidebar_state="expanded" 
 )
 
 # 2. Define each app as a separate page
@@ -19,17 +19,18 @@ school_data_page = st.Page("school_data.py", title="School Data", icon="📊")
 exam_fees_page = st.Page("sch_exam_fees.py", title="Exam & Fees", icon="💰")
 
 # Operations & Reports
+leave_page = st.Page("leave_app.py", title="Leave Management", icon="🗓️")
 distribution_page = st.Page("bps_distribution.py", title="Distributions", icon="🎒")
 returns_page = st.Page("bps_returns.py", title="Returns", icon="📑")
 
-# NEW: Define your Leave Management app
-leave_page = st.Page("leave_app.py", title="Leave Management", icon="🗓️")
+# NEW: Define your Form Manager app
+form_page = st.Page("form_manager.py", title="Form Manager", icon="📋")
 
 # 3. Create the grouped navigation menu
 pg = st.navigation({
     "Student Management": [admission_page, student_profile_page, id_card_page],
     "Academics & Finance": [school_data_page, exam_fees_page],
-    "Operations": [leave_page, distribution_page, returns_page] # Added leave_page here
+    "Operations": [leave_page, distribution_page, returns_page, form_page] # Added form_page here
 })
 
 # 4. Add school branding to the bottom of the sidebar

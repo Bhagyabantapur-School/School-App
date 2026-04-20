@@ -50,14 +50,11 @@ def load_database_data():
         expected_cols = ["Date", "Class", "Section", "Roll", "Name", "Log Type", "Details"]
         
         if len(headers) == 0:
-            # If sheet is completely blank, add headers
             log_ws.append_row(expected_cols)
             df_logs = pd.DataFrame(columns=expected_cols)
         else:
-            # If headers exist, fetch records
             records = log_ws.get_all_records()
             if len(records) == 0:
-                # FIX: If there are headers but NO data rows, force columns to exist
                 df_logs = pd.DataFrame(columns=headers)
             else:
                 df_logs = pd.DataFrame(records)
@@ -111,8 +108,6 @@ def display_student_photo(url):
         except Exception:
             st.image(fallback_image, width=150)
 
-# --- 5. MAIN APP LOGIC ---
-st.title("🎓 BPS Student Profile Dashboard")
 
 # Attempt to load data
 try:
@@ -121,214 +116,292 @@ except Exception as e:
     st.warning("Please configure your Google Sheets connection and secrets to view live data.")
     st.stop()
 
-# --- SIDEBAR: EASY SEARCH ---
-st.sidebar.header("Find Student")
 
-class_list = sorted(df_master['Class'].astype(str).unique().tolist())
-selected_class = st.sidebar.selectbox("1. Select Class", class_list)
+# --- SIDEBAR: NAVIGATION ---
+st.sidebar.title("BPS Digital Dashboard")
+app_mode = st.sidebar.radio("Navigation", ["🎓 Student Profiles", "⚠️ Action Required Tracker"])
+st.sidebar.divider()
 
-if selected_class:
-    filtered_by_class = df_master[df_master['Class'] == selected_class]
-    section_list = sorted(filtered_by_class['Section'].astype(str).unique().tolist())
-    selected_section = st.sidebar.selectbox("2. Select Section", section_list)
-    
-    if selected_section:
-        filtered_by_section = filtered_by_class[filtered_by_class['Section'] == selected_section].copy()
-        
-        # Sort by Roll Number
-        filtered_by_section['Roll_Numeric'] = pd.to_numeric(filtered_by_section['Roll'], errors='coerce')
-        filtered_by_section = filtered_by_section.sort_values(by='Roll_Numeric')
-        
-        # Display Name
-        filtered_by_section['Display_Name'] = filtered_by_section['Name'].astype(str) + " (Roll: " + filtered_by_section['Roll'].astype(str) + ")"
-        
-        student_list = filtered_by_section['Display_Name'].unique().tolist()
-        selected_display_name = st.sidebar.selectbox("3. Select Student", student_list)
+# ==========================================
+# MODE 1: STUDENT PROFILE VIEWER
+# ==========================================
+if app_mode == "🎓 Student Profiles":
+    st.title("🎓 BPS Student Profile")
 
-        if selected_display_name:
-            student_record = filtered_by_section[filtered_by_section['Display_Name'] == selected_display_name]
+    st.sidebar.header("Find Student")
+    class_list = sorted(df_master['Class'].astype(str).unique().tolist())
+    selected_class = st.sidebar.selectbox("1. Select Class", class_list)
+
+    if selected_class:
+        filtered_by_class = df_master[df_master['Class'] == selected_class]
+        section_list = sorted(filtered_by_class['Section'].astype(str).unique().tolist())
+        selected_section = st.sidebar.selectbox("2. Select Section", section_list)
+        
+        if selected_section:
+            filtered_by_section = filtered_by_class[filtered_by_class['Section'] == selected_section].copy()
             
-            if not student_record.empty:
-                student = student_record.iloc[0]
-                
-                selected_name = student['Name']
-                selected_roll = student['Roll']
-                
-                # --- PROFILE HEADER ---
-                st.divider()
-                
-                raw_code = str(student.get('Student Code', 'N/A'))
-                if raw_code.lower() not in ['n/a', 'nan', 'none', '']:
-                    raw_code = raw_code.replace("'", "").split('.')[0]
-                    display_code = raw_code.zfill(14) 
-                else:
-                    display_code = "N/A"
-                
-                # Format Primary Mobile
-                raw_mobile = str(student.get('Mobile', '')).split('.')[0].strip()
-                has_mobile = raw_mobile.isdigit() and len(raw_mobile) >= 10
-                
-                # Format Secondary Mobile
-                raw_sec_mobile = str(student.get('Secondary Mobile', '')).split('.')[0].strip()
-                if raw_sec_mobile.lower() in ['nan', 'none', '']:
-                    has_sec_mobile = False
-                else:
-                    has_sec_mobile = raw_sec_mobile.isdigit() and len(raw_sec_mobile) >= 10
-                
-                head_col1, head_col2 = st.columns([1, 4]) 
+            filtered_by_section['Roll_Numeric'] = pd.to_numeric(filtered_by_section['Roll'], errors='coerce')
+            filtered_by_section = filtered_by_section.sort_values(by='Roll_Numeric')
+            
+            filtered_by_section['Display_Name'] = filtered_by_section['Name'].astype(str) + " (Roll: " + filtered_by_section['Roll'].astype(str) + ")"
+            
+            student_list = filtered_by_section['Display_Name'].unique().tolist()
+            selected_display_name = st.sidebar.selectbox("3. Select Student", student_list)
 
-                with head_col1:
-                    raw_url = student.get('Photo_URL', '')
-                    display_student_photo(raw_url)
-
-                with head_col2:
-                    st.subheader(f"Profile: {student['Name']}")
-                    st.write(f"**Class:** {student['Class']} '{student['Section']}' | **Roll No:** {student['Roll']} | **Student Code:** {display_code}")
-                    st.caption(f"**Parents:** {student.get('Father', 'N/A')} & {student.get('Mother', 'N/A')}")
+            if selected_display_name:
+                student_record = filtered_by_section[filtered_by_section['Display_Name'] == selected_display_name]
+                
+                if not student_record.empty:
+                    student = student_record.iloc[0]
                     
-                    # Direct Call Buttons Logic
-                    if has_mobile and has_sec_mobile:
-                        btn_col1, btn_col2 = st.columns(2)
-                        with btn_col1:
-                            st.link_button(f"📞 Primary: {raw_mobile}", f"tel:+91{raw_mobile}", use_container_width=True)
-                        with btn_col2:
-                            st.link_button(f"📞 Secondary: {raw_sec_mobile}", f"tel:+91{raw_sec_mobile}", use_container_width=True)
-                    elif has_mobile:
-                        st.link_button(f"📞 Call Guardian ({raw_mobile})", f"tel:+91{raw_mobile}")
-                    elif has_sec_mobile:
-                        st.link_button(f"📞 Call Guardian ({raw_sec_mobile})", f"tel:+91{raw_sec_mobile}")
+                    selected_name = student['Name']
+                    selected_roll = student['Roll']
+                    
+                    # --- PROFILE HEADER ---
+                    st.divider()
+                    
+                    raw_code = str(student.get('Student Code', 'N/A'))
+                    if raw_code.lower() not in ['n/a', 'nan', 'none', '']:
+                        raw_code = raw_code.replace("'", "").split('.')[0]
+                        display_code = raw_code.zfill(14) 
                     else:
-                        st.error("📞 No valid mobile number on record.")
-                
-                st.divider()
-                
-                # --- MAIN DATA MODULES ---
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.write("### 📅 Master Attendance")
-                    student_att = df_attendance[
-                        (df_attendance['Class'] == selected_class) & 
-                        (df_attendance['Section'] == selected_section) & 
-                        (df_attendance['Name'] == selected_name) &
-                        (df_attendance['Roll'].astype(str) == str(selected_roll))
-                    ]
+                        display_code = "N/A"
                     
-                    if not student_att.empty:
-                        student_att['Status_Bool'] = student_att['Status'].astype(str).str.lower() == 'true'
-                        days_present = student_att['Status_Bool'].sum()
-                        total_recorded_days = len(student_att)
-                        att_percentage = (days_present / total_recorded_days) * 100 if total_recorded_days > 0 else 0
+                    raw_mobile = str(student.get('Mobile', '')).split('.')[0].strip()
+                    has_mobile = raw_mobile.isdigit() and len(raw_mobile) >= 10
+                    
+                    raw_sec_mobile = str(student.get('Secondary Mobile', '')).split('.')[0].strip()
+                    if raw_sec_mobile.lower() in ['nan', 'none', '']:
+                        has_sec_mobile = False
+                    else:
+                        has_sec_mobile = raw_sec_mobile.isdigit() and len(raw_sec_mobile) >= 10
+                    
+                    head_col1, head_col2 = st.columns([1, 4]) 
+
+                    with head_col1:
+                        raw_url = student.get('Photo_URL', '')
+                        display_student_photo(raw_url)
+
+                    with head_col2:
+                        st.subheader(f"Profile: {student['Name']}")
+                        st.write(f"**Class:** {student['Class']} '{student['Section']}' | **Roll No:** {student['Roll']} | **Student Code:** {display_code}")
+                        st.caption(f"**Parents:** {student.get('Father', 'N/A')} & {student.get('Mother', 'N/A')}")
                         
-                        st.metric("Total Days Present", f"{days_present} / {total_recorded_days}")
-                        st.progress(min(att_percentage / 100, 1.0))
-                        st.caption(f"Current Attendance Rate: {att_percentage:.1f}%")
-                    else:
-                        st.info("No records found.")
-
-                with col2:
-                    st.write("### 🍛 MDM Participation")
-                    student_mdm = df_mdm[
-                        (df_mdm['Class'] == selected_class) & 
-                        (df_mdm['Section'] == selected_section) & 
-                        (df_mdm['Name'] == selected_name) &
-                        (df_mdm['Roll'].astype(str) == str(selected_roll))
-                    ]
-                    
-                    mdm_days = len(student_mdm)
-                    st.metric("Mid-Day Meals Taken", f"{mdm_days} Days")
-                    
-                    if not student_mdm.empty:
-                        st.write("**Recent MDM Activity:**")
-                        recent_mdm = student_mdm.tail(5)[['Date', 'Time']].sort_values(by='Date', ascending=False)
-                        st.dataframe(recent_mdm, hide_index=True, use_container_width=True)
-                    else:
-                        st.info("No MDM entries found.")
-
-                with col3:
-                    st.write("### 📋 Admin & Forms")
-                    student_forms = df_forms[
-                        (df_forms['Class'] == selected_class) & 
-                        (df_forms['Section'] == selected_section) & 
-                        (df_forms['Student Name'] == selected_name) &
-                        (df_forms['Roll'].astype(str) == str(selected_roll))
-                    ]
-                    
-                    if not student_forms.empty:
-                        form_data = student_forms.iloc[0]
-                        status = form_data.get('Return Status', 'Unknown')
-                        if status == 'Complete':
-                            st.success(f"**Form:** {status}")
+                        if has_mobile and has_sec_mobile:
+                            btn_col1, btn_col2 = st.columns(2)
+                            with btn_col1:
+                                st.link_button(f"📞 Primary: {raw_mobile}", f"tel:+91{raw_mobile}", use_container_width=True)
+                            with btn_col2:
+                                st.link_button(f"📞 Secondary: {raw_sec_mobile}", f"tel:+91{raw_sec_mobile}", use_container_width=True)
+                        elif has_mobile:
+                            st.link_button(f"📞 Call Guardian ({raw_mobile})", f"tel:+91{raw_mobile}")
+                        elif has_sec_mobile:
+                            st.link_button(f"📞 Call Guardian ({raw_sec_mobile})", f"tel:+91{raw_sec_mobile}")
                         else:
-                            st.warning(f"**Form:** {status}")
+                            st.error("📞 No valid mobile number on record.")
+                    
+                    st.divider()
+                    
+                    # --- MAIN DATA MODULES ---
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.write("### 📅 Master Attendance")
+                        student_att = df_attendance[
+                            (df_attendance['Class'] == selected_class) & 
+                            (df_attendance['Section'] == selected_section) & 
+                            (df_attendance['Name'] == selected_name) &
+                            (df_attendance['Roll'].astype(str) == str(selected_roll))
+                        ]
+                        
+                        if not student_att.empty:
+                            student_att['Status_Bool'] = student_att['Status'].astype(str).str.lower() == 'true'
+                            days_present = student_att['Status_Bool'].sum()
+                            total_recorded_days = len(student_att)
+                            att_percentage = (days_present / total_recorded_days) * 100 if total_recorded_days > 0 else 0
                             
-                        wa_status = form_data.get('WhatsApp Added', 'No')
-                        if wa_status != 'No':
-                            st.info(f"📱 **WhatsApp:** {wa_status}")
+                            st.metric("Total Days Present", f"{days_present} / {total_recorded_days}")
+                            st.progress(min(att_percentage / 100, 1.0))
+                            st.caption(f"Current Attendance Rate: {att_percentage:.1f}%")
                         else:
-                            st.error("📱 **WhatsApp:** Not Added")
+                            st.info("No records found.")
+
+                    with col2:
+                        st.write("### 🍛 MDM Participation")
+                        student_mdm = df_mdm[
+                            (df_mdm['Class'] == selected_class) & 
+                            (df_mdm['Section'] == selected_section) & 
+                            (df_mdm['Name'] == selected_name) &
+                            (df_mdm['Roll'].astype(str) == str(selected_roll))
+                        ]
+                        
+                        mdm_days = len(student_mdm)
+                        st.metric("Mid-Day Meals Taken", f"{mdm_days} Days")
+                        
+                        if not student_mdm.empty:
+                            st.write("**Recent MDM Activity:**")
+                            recent_mdm = student_mdm.tail(5)[['Date', 'Time']].sort_values(by='Date', ascending=False)
+                            st.dataframe(recent_mdm, hide_index=True, use_container_width=True)
+                        else:
+                            st.info("No MDM entries found.")
+
+                    with col3:
+                        st.write("### 📋 Admin & Forms")
+                        student_forms = df_forms[
+                            (df_forms['Class'] == selected_class) & 
+                            (df_forms['Section'] == selected_section) & 
+                            (df_forms['Student Name'] == selected_name) &
+                            (df_forms['Roll'].astype(str) == str(selected_roll))
+                        ]
+                        
+                        if not student_forms.empty:
+                            form_data = student_forms.iloc[0]
+                            status = form_data.get('Return Status', 'Unknown')
+                            if status == 'Complete':
+                                st.success(f"**Form:** {status}")
+                            else:
+                                st.warning(f"**Form:** {status}")
+                                
+                            wa_status = form_data.get('WhatsApp Added', 'No')
+                            if wa_status != 'No':
+                                st.info(f"📱 **WhatsApp:** {wa_status}")
+                            else:
+                                st.error("📱 **WhatsApp:** Not Added")
+                        else:
+                            st.info("No form records found.")
+
+                    st.divider()
+
+                    # --- ACTIVITY & COMMUNICATION LOG ---
+                    st.write("### 📝 Activity & Communication Log")
+                    
+                    if 'Class' in df_logs.columns and 'Section' in df_logs.columns and 'Name' in df_logs.columns and 'Roll' in df_logs.columns:
+                        student_logs = df_logs[
+                            (df_logs['Class'] == selected_class) & 
+                            (df_logs['Section'] == selected_section) & 
+                            (df_logs['Name'] == selected_name) &
+                            (df_logs['Roll'].astype(str) == str(selected_roll))
+                        ]
                     else:
-                        st.info("No form records found.")
+                        student_logs = pd.DataFrame() 
+                    
+                    if not student_logs.empty:
+                        st.dataframe(student_logs[['Date', 'Log Type', 'Details']], hide_index=True, use_container_width=True)
+                    else:
+                        st.caption("No previous activities logged for this student.")
 
-                st.divider()
-
-                # --- ACTIVITY & COMMUNICATION LOG ---
-                st.write("### 📝 Activity & Communication Log")
-                
-                # Verify columns exist before filtering to prevent KeyErrors
-                if 'Class' in df_logs.columns and 'Section' in df_logs.columns and 'Name' in df_logs.columns and 'Roll' in df_logs.columns:
-                    student_logs = df_logs[
-                        (df_logs['Class'] == selected_class) & 
-                        (df_logs['Section'] == selected_section) & 
-                        (df_logs['Name'] == selected_name) &
-                        (df_logs['Roll'].astype(str) == str(selected_roll))
-                    ]
-                else:
-                    student_logs = pd.DataFrame() # Empty if columns are completely missing
-                
-                if not student_logs.empty:
-                    st.dataframe(student_logs[['Date', 'Log Type', 'Details']], hide_index=True, use_container_width=True)
-                else:
-                    st.caption("No previous activities logged for this student.")
-
-                with st.expander("➕ Add New Log Entry"):
-                    with st.form("log_form", clear_on_submit=True):
-                        log_type = st.selectbox("Log Type", [
-                            "📞 Phone Call Log", 
-                            "📱 WhatsApp Group Update", 
-                            "🤒 Student Illness", 
-                            "⚠️ Discipline/Behavior",
-                            "💬 General Note"
-                        ])
-                        
-                        ist = pytz.timezone('Asia/Kolkata')
-                        today_str = datetime.datetime.now(ist).strftime("%d.%m.%y")
-                        
-                        log_date = st.text_input("Date (DD.MM.YY)", today_str)
-                        log_notes = st.text_area("Details / Notes", placeholder="Enter the details...")
-                        
-                        submitted = st.form_submit_button("Save to 'Students Profile'")
-                        
-                        if submitted:
-                            client = get_gspread_client()
-                            
-                            db_log = client.open("Students Profile")
-                            ws = db_log.sheet1
-                            
-                            if len(ws.row_values(1)) == 0:
-                                ws.append_row(["Date", "Class", "Section", "Roll", "Name", "Log Type", "Details"])
-                            
-                            ws.append_row([
-                                log_date, 
-                                selected_class, 
-                                selected_section, 
-                                selected_roll, 
-                                selected_name, 
-                                log_type, 
-                                log_notes
+                    with st.expander("➕ Add New Log Entry"):
+                        with st.form("log_form", clear_on_submit=True):
+                            log_type = st.selectbox("Log Type", [
+                                "📞 Phone Call Log", 
+                                "📱 WhatsApp Group Update", 
+                                "🤒 Student Illness", 
+                                "⚠️ Discipline/Behavior",
+                                "💬 General Note"
                             ])
                             
-                            # Clear the cache so the new entry shows up instantly
-                            st.cache_data.clear()
-                            st.success("✅ Log saved successfully!")
-                            st.rerun()
+                            ist = pytz.timezone('Asia/Kolkata')
+                            today_str = datetime.datetime.now(ist).strftime("%d.%m.%y")
+                            
+                            log_date = st.text_input("Date (DD.MM.YY)", today_str)
+                            log_notes = st.text_area("Details / Notes", placeholder="Enter the details...")
+                            
+                            submitted = st.form_submit_button("Save to 'Students Profile'")
+                            
+                            if submitted:
+                                client = get_gspread_client()
+                                db_log = client.open("Students Profile")
+                                ws = db_log.sheet1
+                                
+                                if len(ws.row_values(1)) == 0:
+                                    ws.append_row(["Date", "Class", "Section", "Roll", "Name", "Log Type", "Details"])
+                                
+                                ws.append_row([
+                                    log_date, selected_class, selected_section, 
+                                    selected_roll, selected_name, log_type, log_notes
+                                ])
+                                
+                                st.cache_data.clear()
+                                st.success("✅ Log saved successfully!")
+                                st.rerun() 
+
+
+# ==========================================
+# MODE 2: INCOMPLETE DATA TRACKER
+# ==========================================
+elif app_mode == "⚠️ Action Required Tracker":
+    st.title("⚠️ Action Required Tracker")
+    st.write("Review students with missing essential information or pending administrative forms.")
+    st.divider()
+    
+    # Filter by class to save API performance on fetching photos
+    class_list = sorted(df_master['Class'].astype(str).unique().tolist())
+    selected_class_tracker = st.selectbox("Filter Tracking By Class", class_list)
+    
+    if selected_class_tracker:
+        df_class = df_master[df_master['Class'] == selected_class_tracker].copy()
+        
+        # Sort properly by Roll
+        df_class['Roll_Numeric'] = pd.to_numeric(df_class['Roll'], errors='coerce')
+        df_class = df_class.sort_values(by='Roll_Numeric')
+        
+        incomplete_count = 0
+        
+        # Loop through the students in this class
+        for idx, row in df_class.iterrows():
+            missing_items = []
+            
+            # 1. Check Photo
+            photo_val = str(row.get('Photo_URL', ''))
+            if pd.isna(photo_val) or photo_val.strip() == '' or photo_val.lower() == 'nan':
+                missing_items.append("📷 Missing Photograph")
+                
+            # 2. Check Mobile
+            mob = str(row.get('Mobile', '')).split('.')[0].strip()
+            if not mob.isdigit() or len(mob) < 10:
+                missing_items.append("📞 Missing/Invalid Primary Mobile")
+                
+            # 3. Check Student Code
+            code = str(row.get('Student Code', '')).replace("'", "").split('.')[0].strip()
+            if code.lower() in ['nan', 'none', ''] or len(code) < 14:
+                missing_items.append("🆔 Missing Banglar Shiksha Code")
+                
+            # 4. Check Administrative Form Status
+            s_form = df_forms[
+                (df_forms['Class'] == row['Class']) & 
+                (df_forms['Section'] == row['Section']) & 
+                (df_forms['Roll'].astype(str) == str(row['Roll']))
+            ]
+            if not s_form.empty:
+                status = str(s_form.iloc[0].get('Return Status', '')).strip()
+                if status != 'Complete':
+                    missing_items.append(f"📋 Form is {status}")
+            else:
+                missing_items.append("📋 Distribution Form Record Missing")
+                
+            # Render Student if they have ANY missing data
+            if len(missing_items) > 0:
+                incomplete_count += 1
+                with st.container():
+                    t_col1, t_col2, t_col3 = st.columns([1, 2, 2])
+                    
+                    with t_col1:
+                        display_student_photo(photo_val)
+                    
+                    with t_col2:
+                        st.subheader(row['Name'])
+                        st.write(f"Class {row['Class']} '{row['Section']}'")
+                        st.write(f"Roll No: **{row['Roll']}**")
+                    
+                    with t_col3:
+                        st.write("**Data Missing:**")
+                        for item in missing_items:
+                            st.error(item)
+                            
+                st.divider()
+                
+        # Summary Message
+        if incomplete_count == 0:
+            st.success(f"✅ Amazing! All student records for {selected_class_tracker} are 100% complete!")
+        else:
+            st.info(f"Showing {incomplete_count} students with incomplete records in {selected_class_tracker}.")

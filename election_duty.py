@@ -2,13 +2,22 @@ import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
-from datetime import datetime, date, timedelta, time
+from datetime import datetime, date, timedelta
 
 # --- Page Configuration ---
 st.set_page_config(page_title="Election Duty App - Party 116", page_icon="🗳️", layout="centered")
 
+# --- Setup Your Sheet URL Here ---
+SHEET_URL = "https://docs.google.com/spreadsheets/d/YOUR_ACTUAL_SHEET_ID_HERE/edit"
+
 st.title("🗳️ Election Duty: Party 116")
 st.markdown("Schedule, log, manage your team, and track Polling Day.")
+
+# --- Sidebar ---
+with st.sidebar:
+    st.header("🔗 Quick Links")
+    st.link_button("📊 Open Google Sheet", SHEET_URL, use_container_width=True)
+    st.info("Click the button above to view your raw database directly in Google Sheets.")
 
 # --- Google Sheets Authentication ---
 SCOPES = [
@@ -48,55 +57,257 @@ def fetch_team():
 records = fetch_logs()
 team_records = fetch_team()
 
-pending_sessions = [{"sheet_row": i + 2, "data": r} for i, r in enumerate(records) if r.get("Start Time") == "Pending"]
-team_list = [{"sheet_row": i + 2, "data": r} for i, r in enumerate(team_records)]
+pending_sessions = []
+for index, rec in enumerate(records):
+    if rec.get("Start Time") == "Pending":
+        pending_sessions.append({"sheet_row": index + 2, "data": rec})
+
+team_list = []
+for index, rec in enumerate(team_records):
+    team_list.append({"sheet_row": index + 2, "data": rec})
 
 # --- App Layout: Tabs ---
-# ADDED TAB 6 for the Timeline
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📝 Log Session", 
     "📅 Schedule", 
     "👥 Team", 
     "📊 Logs",
     "📖 1st PO Guide",
-    "⏳ Poll Timeline" # NEW TAB
+    "⏳ Poll Timeline"
 ])
 
-# === TABS 1 to 5 (Unchanged from previous version) ===
+# === TAB 1: LOG & COMPLETE ===
 with tab1:
     action_type = st.radio("What would you like to do?", ["Complete a Scheduled Session", "Log a Brand New Session"], horizontal=True)
     st.divider()
-    # ... (Keep all your existing Tab 1 code here) ...
-    st.info("*(Tab 1 code remains the same as your previous version)*")
 
+    if action_type == "Complete a Scheduled Session":
+        if not pending_sessions:
+            st.info("No pending scheduled sessions found.")
+        else:
+            options = {f"{s['data']['Date']} - {s['data']['Activity Type']}": s for s in pending_sessions}
+            selected_str = st.selectbox("📌 Select Pending Session", list(options.keys()))
+            selected_session = options[selected_str]
+            
+            st.write(f"**Original Notes:** {selected_session['data']['Notes / Key Learnings']}")
+            
+            col1, col2 = st.columns(2)
+            with col1: start_time = st.time_input("Start Time", step=60)
+            with col2: end_time = st.time_input("End Time", step=60)
+                
+            updated_notes = st.text_area("Update Notes", value=selected_session['data']['Notes / Key Learnings'])
+            
+            if st.button("✅ Complete Session", type="primary"):
+                log_date = datetime.strptime(selected_session['data']['Date'], "%d-%m-%Y").date()
+                start_dt = datetime.combine(log_date, start_time)
+                end_dt = datetime.combine(log_date, end_time)
+                if end_dt < start_dt: end_dt += timedelta(days=1)
+                    
+                total_minutes = int((end_dt - start_dt).total_seconds() / 60)
+                duration_formatted = f"{total_minutes // 60:02d}h {total_minutes % 60:02d}m"
+                
+                with st.spinner("Updating Google Sheet..."):
+                    try:
+                        sheet_log.update_cell(selected_session['sheet_row'], 2, start_time.strftime("%I:%M %p"))
+                        sheet_log.update_cell(selected_session['sheet_row'], 3, end_time.strftime("%I:%M %p"))
+                        sheet_log.update_cell(selected_session['sheet_row'], 5, duration_formatted)
+                        sheet_log.update_cell(selected_session['sheet_row'], 6, updated_notes)
+                        st.success(f"Successfully completed: logged {duration_formatted}!")
+                        st.cache_data.clear()
+                        st.rerun() 
+                    except Exception as e: st.error(f"Error updating sheet: {e}")
+
+    elif action_type == "Log a Brand New Session":
+        col1, col2, col3 = st.columns(3)
+        with col1: log_date = st.date_input("Date", date.today())
+        with col2: start_time = st.time_input("Start Time", step=60)
+        with col3: end_time = st.time_input("End Time", step=60)
+            
+        activity_selection = st.selectbox("Activity Type", ["PPT Study", "Form 12/12A Practice", "Hands-on Training Review", "EVM Mock Practice", "Other / Custom (Type below)"])
+        custom_activity = ""
+        if activity_selection == "Other / Custom (Type below)":
+            custom_activity = st.text_input("Custom Activity Type")
+        
+        notes = st.text_area("Notes", placeholder="What did you focus on today?")
+        
+        if st.button("Log New Activity", type="primary"):
+            final_activity = custom_activity.strip() if activity_selection == "Other / Custom (Type below)" else activity_selection
+            start_dt = datetime.combine(log_date, start_time)
+            end_dt = datetime.combine(log_date, end_time)
+            if end_dt < start_dt: end_dt += timedelta(days=1)
+            total_minutes = int((end_dt - start_dt).total_seconds() / 60)
+            duration_formatted = f"{total_minutes // 60:02d}h {total_minutes % 60:02d}m"
+            
+            row_data = [log_date.strftime("%d-%m-%Y"), start_time.strftime("%I:%M %p"), end_time.strftime("%I:%M %p"), final_activity, duration_formatted, notes]
+            
+            with st.spinner("Saving..."):
+                try:
+                    sheet_log.append_row(row_data)
+                    st.success("✅ Logged successfully!")
+                    st.cache_data.clear() 
+                except Exception as e: st.error(f"Error: {e}")
+
+# === TAB 2: SCHEDULE FUTURE ===
 with tab2:
     st.subheader("📅 Schedule an Upcoming Training")
-    # ... (Keep all your existing Tab 2 code here) ...
+    future_date = st.date_input("Scheduled Date", date.today() + timedelta(days=1))
+    sched_activity_selection = st.selectbox("Scheduled Activity Type", ["Hands-on Training", "EVM/VVPAT Collection", "Other / Custom (Type below)"])
+    sched_custom_activity = ""
+    if sched_activity_selection == "Other / Custom (Type below)":
+        sched_custom_activity = st.text_input("Custom Activity Type", key="s_cust")
+    sched_notes = st.text_area("Prep Required")
+    
+    if st.button("Save Schedule", type="primary"):
+        final_sched_activity = sched_custom_activity.strip() if sched_activity_selection == "Other / Custom (Type below)" else sched_activity_selection
+        row_data = [future_date.strftime("%d-%m-%Y"), "Pending", "Pending", final_sched_activity, "Pending", sched_notes]
+        with st.spinner("Scheduling..."):
+            try:
+                sheet_log.append_row(row_data)
+                st.success("✅ Scheduled!")
+                st.cache_data.clear() 
+            except Exception as e: st.error(f"Error: {e}")
 
+# === TAB 3: TEAM DASHBOARD ===
 with tab3:
     st.subheader("👥 Polling Team Directory")
-    # ... (Keep all your existing Tab 3 code here) ...
+    
+    if not team_list:
+        st.info("No team members added yet. Add them below!")
+    else:
+        for idx, officer_info in enumerate(team_list):
+            officer = officer_info['data']
+            row_num = officer_info['sheet_row']
+            
+            status = officer.get('Status', 'Active')
+            if not status: status = 'Active'
+                
+            status_icon = "🟢" if status == "Active" else "🔴"
+            status_text = "" if status == "Active" else "(INACTIVE)"
+            
+            with st.expander(f"{status_icon} {idx + 1}. {officer.get('Name', 'Unknown')} - {officer.get('Polling Office Rank', 'Rank N/A')} {status_text}"):
+                st.write(f"**Designation:** {officer.get('Designation', 'N/A')}")
+                st.write(f"**Office Address:** {officer.get('Office Address', 'N/A')}")
+                mobile = officer.get('Mobile Number', 'N/A')
+                st.write(f"**Mobile:** {mobile}")
+                
+                if status == "Active":
+                    st.markdown(f"<a href='tel:{mobile}' style='display: block; text-align: center; padding: 8px; background-color: #4CAF50; color: white; border-radius: 5px; text-decoration: none; margin-bottom: 15px;'>📞 Tap to Dial</a>", unsafe_allow_html=True)
+                    
+                    st.caption("📝 **Log a Conversation**")
+                    call_direction = st.radio("Direction", ["Outgoing (I called them)", "Incoming (They called me)"], key=f"dir_{idx}", horizontal=True)
+                    call_notes = st.text_input("Call Notes", placeholder="What was discussed?", key=f"note_{idx}")
+                    
+                    if st.button("Save Call Record", key=f"btn_{idx}", use_container_width=True):
+                        now = datetime.now()
+                        direction_val = "Incoming" if "Incoming" in call_direction else "Outgoing"
+                        call_data = [now.strftime("%d-%m-%Y"), now.strftime("%I:%M %p"), officer.get('Name'), direction_val, call_notes]
+                        try:
+                            sheet_calls.append_row(call_data)
+                            st.success(f"✅ {direction_val} call logged successfully!")
+                        except Exception as e:
+                            st.error("Failed to log call.")
+                else:
+                    st.error("⚠️ This officer is currently marked as INACTIVE. Call logging is disabled.")
+                
+                st.divider()
+                
+                toggle_text = "🔴 Mark as Inactive (Disable)" if status == "Active" else "🟢 Mark as Active (Enable)"
+                new_status_val = "Inactive" if status == "Active" else "Active"
+                
+                if st.button(toggle_text, key=f"tog_{idx}"):
+                    with st.spinner("Updating status..."):
+                        try:
+                            sheet_team.update_cell(row_num, 6, new_status_val)
+                            st.success(f"Officer status updated to {new_status_val}!")
+                            st.cache_data.clear()
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed to update status: {e}")
 
+    st.divider()
+    
+    with st.expander("➕ Add New Team Member"):
+        with st.form("add_officer_form"):
+            t_name = st.text_input("Name")
+            t_desig = st.text_input("Designation (e.g., Assistant Teacher)")
+            t_rank = st.selectbox("Polling Office Rank", ["Presiding Officer", "1st Polling Officer", "2nd Polling Officer", "3rd Polling Officer", "Sector Officer", "Micro Observer"])
+            t_address = st.text_area("Office Address")
+            t_mobile = st.text_input("Mobile Number")
+            
+            if st.form_submit_button("Save Officer Data"):
+                if t_name and t_mobile:
+                    try:
+                        sheet_team.append_row([t_name, t_desig, t_rank, t_address, t_mobile, "Active"])
+                        st.success(f"{t_name} added to the team!")
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to add officer. Error: {e}")
+                else:
+                    st.warning("Name and Mobile Number are required!")
+
+# === TAB 4: VIEW LOGS ===
 with tab4:
     st.subheader("Your Study History")
-    # ... (Keep all your existing Tab 4 code here) ...
+    if st.button("🔄 Refresh Data"): st.cache_data.clear()
+    df = pd.DataFrame(records)
+    if not df.empty:
+        def clean_old_durations(val):
+            if isinstance(val, str) and 'mins' in val:
+                try:
+                    total_mins = int(val.replace(' mins', '').strip())
+                    return f"{total_mins // 60:02d}h {total_mins % 60:02d}m"
+                except: return val
+            return val
+        if 'Duration' in df.columns: df['Duration'] = df['Duration'].apply(clean_old_durations)
+        def highlight_pending(row):
+            if row.get('Start Time') == 'Pending': return ['background-color: #ffcccc; color: black'] * len(row)
+            return [''] * len(row)
+        styled_df = df.style.apply(highlight_pending, axis=1)
+        st.dataframe(styled_df, use_container_width=True, hide_index=True)
+        st.caption(f"Total entries logged: {len(df)}")
+    else:
+        st.info("No logs found yet.")
 
+# === TAB 5: QUICK REFERENCE ===
 with tab5:
     st.header("📖 1st Polling Officer Guide")
-    # ... (Keep all your existing Tab 5 code here) ...
+    st.markdown("Quick reference for your statutory duties on Polling Day.")
+    
+    with st.expander("📝 1. Marking the Electoral Roll"):
+        st.markdown("""
+        When a voter's identity is verified, mark the **Marked Copy of the Electoral Roll** exactly as follows:
+        * **Male Voter:** Draw a diagonal red line across the voter's box.
+        * **Female Voter:** Draw a diagonal red line **AND** circle the serial number.
+        * **Third Gender Voter:** Draw a diagonal red line **AND** put a star/checkmark next to the serial number.
+        """)
+
+    with st.expander("🪪 2. Approved Alternate ID Documents"):
+        st.markdown("""
+        If a voter does not have their EPIC, they **must** present one of the alternative photo identity documents approved by the ECI. Common alternates include:
+        1. Aadhaar Card
+        2. PAN Card
+        3. Driving License
+        4. Indian Passport
+        5. Passbooks with photograph issued by Bank/Post Office
+        """)
+
+    with st.expander("⚠️ 3. Handling Special Cases (ASD & Challenges)"):
+        st.markdown("""
+        * **ASD (Absent, Shifted, Dead) Voters:** If a voter is on the ASD list, you must verify their identity meticulously. Inform the Presiding Officer immediately. A separate declaration will be taken from them.
+        * **Challenged Votes:** If a polling agent challenges a voter's identity, the challenge happens at your desk. 
+        """)
 
 # === TAB 6: DAY OF POLL TIMELINE (NEW) ===
 with tab6:
     st.header("⏳ Election Day Timeline")
     st.markdown("Your minute-by-minute statutory schedule.")
     
-    # Simulation Slider so you can test the color changes before the actual day!
     st.caption("🔧 **Testing Mode:** Drag the slider to simulate the time of day.")
     simulated_hour = st.slider("Simulate Time (24H Format)", min_value=4, max_value=20, value=7, step=1)
     
     st.divider()
 
-    # Define the statutory ECI Timeline events
     timeline_events = [
         {"time": "05:00 AM", "hour": 5, "title": "Wake Up & Team Prep", "desc": "Ensure all team members are awake. Presiding Officer links EVM components (BU -> VVPAT -> CU). Do NOT switch on CU yet."},
         {"time": "05:30 AM", "hour": 5.5, "title": "Mock Poll Preparation", "desc": "Agents should arrive. Demonstrate empty EVM and empty VVPAT drop box. Switch on CU."},
@@ -113,12 +324,9 @@ with tab6:
         {"time": "07:00 PM", "hour": 19, "title": "Final Sealing & Forms", "desc": "Pack CU, BU, and VVPAT in carrying cases and seal with Address Tags. Complete Form 17C (Part 1) and Presiding Officer's Diary."},
     ]
 
-    # Display the timeline
     for i, event in enumerate(timeline_events):
-        # Determine the "Active" status by checking if the simulated time is right now
         is_active = False
         
-        # Logic to find the current active task block
         if i < len(timeline_events) - 1:
             next_hour = timeline_events[i+1]["hour"]
             if event["hour"] <= simulated_hour < next_hour:
@@ -127,7 +335,6 @@ with tab6:
             if simulated_hour >= event["hour"]:
                 is_active = True
 
-        # Apply CSS styling based on active status
         if is_active:
             st.success(f"### 👉 CURRENT TASK: {event['time']} - {event['title']}")
             st.write(f"**Action Required:** {event['desc']}")

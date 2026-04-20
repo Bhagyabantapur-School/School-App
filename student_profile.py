@@ -337,36 +337,44 @@ elif app_mode == "⚠️ Action Required Tracker":
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        class_list = sorted(df_master['Class'].astype(str).unique().tolist())
-        selected_class_tracker = st.selectbox("1. Filter By Class", class_list)
+        missing_filter_options = [
+            "All Missing Types",
+            "Missing Photograph",
+            "Missing/Invalid Primary Mobile",
+            "Missing Banglar Shiksha Code",
+            "Form Not Complete",
+            "Missing Father Name",
+            "Missing Mother Name"
+        ]
+        selected_missing_filter = st.selectbox("1. Filter By Missing Data", missing_filter_options)
+
+    with col2:
+        class_list = ["All Classes"] + sorted(df_master['Class'].astype(str).unique().tolist())
+        selected_class_tracker = st.selectbox("2. Filter By Class", class_list)
         
-    if selected_class_tracker:
-        df_class_filtered = df_master[df_master['Class'] == selected_class_tracker].copy()
+    if selected_missing_filter and selected_class_tracker:
         
-        with col2:
-            section_list = ["All Sections"] + sorted(df_class_filtered['Section'].astype(str).unique().tolist())
-            selected_section_tracker = st.selectbox("2. Filter By Section", section_list)
-            
+        # Base filter by class
+        if selected_class_tracker == "All Classes":
+            df_class_filtered = df_master.copy()
+        else:
+            df_class_filtered = df_master[df_master['Class'] == selected_class_tracker].copy()
+        
         with col3:
-            missing_filter_options = [
-                "All Missing Types",
-                "Missing Photograph",
-                "Missing/Invalid Primary Mobile",
-                "Missing Banglar Shiksha Code",
-                "Form Not Complete",
-                "Missing Father Name",
-                "Missing Mother Name"
-            ]
-            selected_missing_filter = st.selectbox("3. Filter By Missing Data", missing_filter_options)
-        
-        if selected_section_tracker and selected_missing_filter:
+            section_list = ["All Sections"] + sorted(df_class_filtered['Section'].astype(str).unique().tolist())
+            selected_section_tracker = st.selectbox("3. Filter By Section", section_list)
+            
+        if selected_section_tracker:
+            
+            # Base filter by section
             if selected_section_tracker == "All Sections":
                 df_tracker = df_class_filtered.copy()
             else:
                 df_tracker = df_class_filtered[df_class_filtered['Section'] == selected_section_tracker].copy()
             
+            # Sort properly by Class, Section, and Roll numeric value
             df_tracker['Roll_Numeric'] = pd.to_numeric(df_tracker['Roll'], errors='coerce')
-            df_tracker = df_tracker.sort_values(by='Roll_Numeric')
+            df_tracker = df_tracker.sort_values(by=['Class', 'Section', 'Roll_Numeric'])
             
             incomplete_count = 0
             
@@ -454,7 +462,7 @@ elif app_mode == "⚠️ Action Required Tracker":
                         
                         with t_col2:
                             st.subheader(row['Name'])
-                            st.write(f"Class {row['Class']} '{row['Section']}'")
+                            st.write(f"Class **{row['Class']}** '{row['Section']}'")
                             st.write(f"Roll No: **{row['Roll']}**")
                         
                         with t_col3:
@@ -473,6 +481,8 @@ elif app_mode == "⚠️ Action Required Tracker":
                 filter_text = "" if selected_missing_filter == "All Missing Types" else f" for '{selected_missing_filter}'"
                 st.success(f"✅ Amazing! All student records{filter_text} for the selected group are 100% complete!")
             else:
+                class_display = "All Classes" if selected_class_tracker == "All Classes" else f"Class {selected_class_tracker}"
                 section_display = "All Sections" if selected_section_tracker == "All Sections" else f"Section '{selected_section_tracker}'"
                 filter_text = "incomplete records" if selected_missing_filter == "All Missing Types" else f"'{selected_missing_filter}'"
-                st.info(f"Showing {incomplete_count} students flagged with {filter_text} in Class {selected_class_tracker}, {section_display}.")
+                
+                st.info(f"Showing {incomplete_count} students flagged with {filter_text} in {class_display}, {section_display}.")

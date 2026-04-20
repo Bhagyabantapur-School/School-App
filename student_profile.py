@@ -334,23 +334,37 @@ elif app_mode == "⚠️ Action Required Tracker":
     st.write("Review students with missing essential information or pending administrative forms.")
     st.divider()
     
-    class_list = sorted(df_master['Class'].astype(str).unique().tolist())
-    selected_class_tracker = st.selectbox("1. Filter Tracking By Class", class_list)
+    col1, col2, col3 = st.columns(3)
     
+    with col1:
+        class_list = sorted(df_master['Class'].astype(str).unique().tolist())
+        selected_class_tracker = st.selectbox("1. Filter By Class", class_list)
+        
     if selected_class_tracker:
         df_class_filtered = df_master[df_master['Class'] == selected_class_tracker].copy()
         
-        # Add a Section Dropdown with an "All Sections" option
-        section_list = ["All Sections"] + sorted(df_class_filtered['Section'].astype(str).unique().tolist())
-        selected_section_tracker = st.selectbox("2. Filter By Section", section_list)
+        with col2:
+            section_list = ["All Sections"] + sorted(df_class_filtered['Section'].astype(str).unique().tolist())
+            selected_section_tracker = st.selectbox("2. Filter By Section", section_list)
+            
+        with col3:
+            missing_filter_options = [
+                "All Missing Types",
+                "Missing Photograph",
+                "Missing/Invalid Primary Mobile",
+                "Missing Banglar Shiksha Code",
+                "Form Not Complete",
+                "Missing Father Name",
+                "Missing Mother Name"
+            ]
+            selected_missing_filter = st.selectbox("3. Filter By Missing Data", missing_filter_options)
         
-        if selected_section_tracker:
+        if selected_section_tracker and selected_missing_filter:
             if selected_section_tracker == "All Sections":
                 df_tracker = df_class_filtered.copy()
             else:
                 df_tracker = df_class_filtered[df_class_filtered['Section'] == selected_section_tracker].copy()
             
-            # Sort properly by Roll numeric value
             df_tracker['Roll_Numeric'] = pd.to_numeric(df_tracker['Roll'], errors='coerce')
             df_tracker = df_tracker.sort_values(by='Roll_Numeric')
             
@@ -359,22 +373,45 @@ elif app_mode == "⚠️ Action Required Tracker":
             for idx, row in df_tracker.iterrows():
                 missing_items = []
                 
+                # Check Booleans
+                is_missing_photo = False
+                is_missing_mobile = False
+                is_missing_code = False
+                is_missing_form = False
+                is_missing_father = False
+                is_missing_mother = False
+                
                 # 1. Check Photo
                 photo_val = str(row.get('Photo_URL', ''))
                 if pd.isna(photo_val) or photo_val.strip() == '' or photo_val.lower() == 'nan':
+                    is_missing_photo = True
                     missing_items.append("📷 Missing Photograph")
                     
                 # 2. Check Mobile
                 mob = str(row.get('Mobile', '')).split('.')[0].strip()
                 if not mob.isdigit() or len(mob) < 10:
+                    is_missing_mobile = True
                     missing_items.append("📞 Missing/Invalid Primary Mobile")
                     
                 # 3. Check Student Code
                 code = str(row.get('Student Code', '')).replace("'", "").split('.')[0].strip()
                 if code.lower() in ['nan', 'none', ''] or len(code) < 13:
+                    is_missing_code = True
                     missing_items.append("🆔 Missing Banglar Shiksha Code")
+                
+                # 4. Check Father Name
+                father = str(row.get('Father', '')).strip()
+                if pd.isna(father) or father == '' or father.lower() in ['nan', 'n/a', 'none']:
+                    is_missing_father = True
+                    missing_items.append("👨 Missing Father Name")
+                
+                # 5. Check Mother Name
+                mother = str(row.get('Mother', '')).strip()
+                if pd.isna(mother) or mother == '' or mother.lower() in ['nan', 'n/a', 'none']:
+                    is_missing_mother = True
+                    missing_items.append("👩 Missing Mother Name")
                     
-                # 4. Check Administrative Form Status
+                # 6. Check Administrative Form Status
                 s_form = df_forms[
                     (df_forms['Class'] == row['Class']) & 
                     (df_forms['Section'] == row['Section']) & 
@@ -383,11 +420,31 @@ elif app_mode == "⚠️ Action Required Tracker":
                 if not s_form.empty:
                     status = str(s_form.iloc[0].get('Return Status', '')).strip()
                     if status != 'Complete':
+                        is_missing_form = True
                         missing_items.append(f"📋 Form is {status}")
                 else:
+                    is_missing_form = True
                     missing_items.append("📋 Distribution Form Record Missing")
                     
+                # Evaluate against the selected filter
+                show_student = False
                 if len(missing_items) > 0:
+                    if selected_missing_filter == "All Missing Types":
+                        show_student = True
+                    elif selected_missing_filter == "Missing Photograph" and is_missing_photo:
+                        show_student = True
+                    elif selected_missing_filter == "Missing/Invalid Primary Mobile" and is_missing_mobile:
+                        show_student = True
+                    elif selected_missing_filter == "Missing Banglar Shiksha Code" and is_missing_code:
+                        show_student = True
+                    elif selected_missing_filter == "Missing Father Name" and is_missing_father:
+                        show_student = True
+                    elif selected_missing_filter == "Missing Mother Name" and is_missing_mother:
+                        show_student = True
+                    elif selected_missing_filter == "Form Not Complete" and is_missing_form:
+                        show_student = True
+                
+                if show_student:
                     incomplete_count += 1
                     with st.container():
                         t_col1, t_col2, t_col3 = st.columns([1, 2, 2])
@@ -403,12 +460,19 @@ elif app_mode == "⚠️ Action Required Tracker":
                         with t_col3:
                             st.write("**Data Missing:**")
                             for item in missing_items:
-                                st.error(item)
+                                if selected_missing_filter != "All Missing Types" and selected_missing_filter in item:
+                                    st.error(f"**{item}**") 
+                                elif selected_missing_filter == "All Missing Types":
+                                    st.error(item)
+                                else:
+                                    st.warning(item)
                                 
                     st.divider()
                     
             if incomplete_count == 0:
-                st.success(f"✅ Amazing! All student records for the selected group are 100% complete!")
+                filter_text = "" if selected_missing_filter == "All Missing Types" else f" for '{selected_missing_filter}'"
+                st.success(f"✅ Amazing! All student records{filter_text} for the selected group are 100% complete!")
             else:
                 section_display = "All Sections" if selected_section_tracker == "All Sections" else f"Section '{selected_section_tracker}'"
-                st.info(f"Showing {incomplete_count} students with incomplete records in Class {selected_class_tracker}, {section_display}.")
+                filter_text = "incomplete records" if selected_missing_filter == "All Missing Types" else f"'{selected_missing_filter}'"
+                st.info(f"Showing {incomplete_count} students flagged with {filter_text} in Class {selected_class_tracker}, {section_display}.")

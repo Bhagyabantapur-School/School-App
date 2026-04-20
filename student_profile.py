@@ -334,74 +334,81 @@ elif app_mode == "⚠️ Action Required Tracker":
     st.write("Review students with missing essential information or pending administrative forms.")
     st.divider()
     
-    # Filter by class to save API performance on fetching photos
     class_list = sorted(df_master['Class'].astype(str).unique().tolist())
-    selected_class_tracker = st.selectbox("Filter Tracking By Class", class_list)
+    selected_class_tracker = st.selectbox("1. Filter Tracking By Class", class_list)
     
     if selected_class_tracker:
-        df_class = df_master[df_master['Class'] == selected_class_tracker].copy()
+        df_class_filtered = df_master[df_master['Class'] == selected_class_tracker].copy()
         
-        # Sort properly by Roll
-        df_class['Roll_Numeric'] = pd.to_numeric(df_class['Roll'], errors='coerce')
-        df_class = df_class.sort_values(by='Roll_Numeric')
+        # Add a Section Dropdown with an "All Sections" option
+        section_list = ["All Sections"] + sorted(df_class_filtered['Section'].astype(str).unique().tolist())
+        selected_section_tracker = st.selectbox("2. Filter By Section", section_list)
         
-        incomplete_count = 0
-        
-        # Loop through the students in this class
-        for idx, row in df_class.iterrows():
-            missing_items = []
-            
-            # 1. Check Photo
-            photo_val = str(row.get('Photo_URL', ''))
-            if pd.isna(photo_val) or photo_val.strip() == '' or photo_val.lower() == 'nan':
-                missing_items.append("📷 Missing Photograph")
-                
-            # 2. Check Mobile
-            mob = str(row.get('Mobile', '')).split('.')[0].strip()
-            if not mob.isdigit() or len(mob) < 10:
-                missing_items.append("📞 Missing/Invalid Primary Mobile")
-                
-            # 3. Check Student Code
-            code = str(row.get('Student Code', '')).replace("'", "").split('.')[0].strip()
-            if code.lower() in ['nan', 'none', ''] or len(code) < 14:
-                missing_items.append("🆔 Missing Banglar Shiksha Code")
-                
-            # 4. Check Administrative Form Status
-            s_form = df_forms[
-                (df_forms['Class'] == row['Class']) & 
-                (df_forms['Section'] == row['Section']) & 
-                (df_forms['Roll'].astype(str) == str(row['Roll']))
-            ]
-            if not s_form.empty:
-                status = str(s_form.iloc[0].get('Return Status', '')).strip()
-                if status != 'Complete':
-                    missing_items.append(f"📋 Form is {status}")
+        if selected_section_tracker:
+            if selected_section_tracker == "All Sections":
+                df_tracker = df_class_filtered.copy()
             else:
-                missing_items.append("📋 Distribution Form Record Missing")
+                df_tracker = df_class_filtered[df_class_filtered['Section'] == selected_section_tracker].copy()
+            
+            # Sort properly by Roll numeric value
+            df_tracker['Roll_Numeric'] = pd.to_numeric(df_tracker['Roll'], errors='coerce')
+            df_tracker = df_tracker.sort_values(by='Roll_Numeric')
+            
+            incomplete_count = 0
+            
+            for idx, row in df_tracker.iterrows():
+                missing_items = []
                 
-            # Render Student if they have ANY missing data
-            if len(missing_items) > 0:
-                incomplete_count += 1
-                with st.container():
-                    t_col1, t_col2, t_col3 = st.columns([1, 2, 2])
+                # 1. Check Photo
+                photo_val = str(row.get('Photo_URL', ''))
+                if pd.isna(photo_val) or photo_val.strip() == '' or photo_val.lower() == 'nan':
+                    missing_items.append("📷 Missing Photograph")
                     
-                    with t_col1:
-                        display_student_photo(photo_val)
+                # 2. Check Mobile
+                mob = str(row.get('Mobile', '')).split('.')[0].strip()
+                if not mob.isdigit() or len(mob) < 10:
+                    missing_items.append("📞 Missing/Invalid Primary Mobile")
                     
-                    with t_col2:
-                        st.subheader(row['Name'])
-                        st.write(f"Class {row['Class']} '{row['Section']}'")
-                        st.write(f"Roll No: **{row['Roll']}**")
+                # 3. Check Student Code
+                code = str(row.get('Student Code', '')).replace("'", "").split('.')[0].strip()
+                if code.lower() in ['nan', 'none', ''] or len(code) < 13:
+                    missing_items.append("🆔 Missing Banglar Shiksha Code")
                     
-                    with t_col3:
-                        st.write("**Data Missing:**")
-                        for item in missing_items:
-                            st.error(item)
-                            
-                st.divider()
-                
-        # Summary Message
-        if incomplete_count == 0:
-            st.success(f"✅ Amazing! All student records for {selected_class_tracker} are 100% complete!")
-        else:
-            st.info(f"Showing {incomplete_count} students with incomplete records in {selected_class_tracker}.")
+                # 4. Check Administrative Form Status
+                s_form = df_forms[
+                    (df_forms['Class'] == row['Class']) & 
+                    (df_forms['Section'] == row['Section']) & 
+                    (df_forms['Roll'].astype(str) == str(row['Roll']))
+                ]
+                if not s_form.empty:
+                    status = str(s_form.iloc[0].get('Return Status', '')).strip()
+                    if status != 'Complete':
+                        missing_items.append(f"📋 Form is {status}")
+                else:
+                    missing_items.append("📋 Distribution Form Record Missing")
+                    
+                if len(missing_items) > 0:
+                    incomplete_count += 1
+                    with st.container():
+                        t_col1, t_col2, t_col3 = st.columns([1, 2, 2])
+                        
+                        with t_col1:
+                            display_student_photo(photo_val)
+                        
+                        with t_col2:
+                            st.subheader(row['Name'])
+                            st.write(f"Class {row['Class']} '{row['Section']}'")
+                            st.write(f"Roll No: **{row['Roll']}**")
+                        
+                        with t_col3:
+                            st.write("**Data Missing:**")
+                            for item in missing_items:
+                                st.error(item)
+                                
+                    st.divider()
+                    
+            if incomplete_count == 0:
+                st.success(f"✅ Amazing! All student records for the selected group are 100% complete!")
+            else:
+                section_display = "All Sections" if selected_section_tracker == "All Sections" else f"Section '{selected_section_tracker}'"
+                st.info(f"Showing {incomplete_count} students with incomplete records in Class {selected_class_tracker}, {section_display}.")

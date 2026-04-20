@@ -57,23 +57,18 @@ def fetch_team():
 records = fetch_logs()
 team_records = fetch_team()
 
-pending_sessions = []
-for index, rec in enumerate(records):
-    if rec.get("Start Time") == "Pending":
-        pending_sessions.append({"sheet_row": index + 2, "data": rec})
-
-team_list = []
-for index, rec in enumerate(team_records):
-    team_list.append({"sheet_row": index + 2, "data": rec})
+pending_sessions = [{"sheet_row": i + 2, "data": r} for i, r in enumerate(records) if r.get("Start Time") == "Pending"]
+team_list = [{"sheet_row": i + 2, "data": r} for i, r in enumerate(team_records)]
 
 # --- App Layout: Tabs ---
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📝 Log Session", 
     "📅 Schedule", 
     "👥 Team", 
     "📊 Logs",
     "📖 1st PO Guide",
-    "⏳ Poll Timeline"
+    "⏳ Timeline",
+    "🧮 Form 17C Calc" # NEW TAB
 ])
 
 # === TAB 1: LOG & COMPLETE ===
@@ -298,7 +293,7 @@ with tab5:
         * **Challenged Votes:** If a polling agent challenges a voter's identity, the challenge happens at your desk. 
         """)
 
-# === TAB 6: DAY OF POLL TIMELINE (NEW) ===
+# === TAB 6: DAY OF POLL TIMELINE ===
 with tab6:
     st.header("⏳ Election Day Timeline")
     st.markdown("Your minute-by-minute statutory schedule.")
@@ -341,3 +336,75 @@ with tab6:
         else:
             with st.expander(f"{event['time']} - {event['title']}"):
                 st.write(event['desc'])
+
+# === TAB 7: FORM 17C CALCULATOR (NEW) ===
+with tab7:
+    st.header("🧮 Form 17C Calculator")
+    st.markdown("Ensure your Form 17A register perfectly matches the EVM total before sealing.")
+    
+    st.info("💡 **Instructions:** At the close of poll, enter the final numbers from your booth. The app will verify the math required for Part I of Form 17C.")
+    
+    # Section 1: The Core Numbers
+    st.subheader("1. Base Numbers")
+    col1, col2 = st.columns(2)
+    with col1:
+        total_assigned = st.number_input("Total Electors Assigned to Booth (1)", min_value=0, value=1000, step=1)
+    with col2:
+        form_17a_total = st.number_input("Total entries in Form 17A Register (2)", min_value=0, value=0, step=1)
+        
+    st.divider()
+        
+    # Section 2: Exceptions (Rule 49)
+    st.subheader("2. Exceptions (Voters who didn't press the EVM)")
+    col3, col4 = st.columns(2)
+    with col3:
+        rule_49o = st.number_input("Voters deciding NOT to vote (Rule 49-O) (3)", min_value=0, value=0, step=1, help="They signed the register but refused to press a button.")
+    with col4:
+        rule_49m = st.number_input("Voters NOT ALLOWED to vote (Rule 49-M) (4)", min_value=0, value=0, step=1, help="Presiding Officer stopped them for violating secrecy rules.")
+        
+    st.divider()
+    
+    # Section 3: EVM Data
+    st.subheader("3. Final EVM Reading")
+    actual_evm_total = st.number_input("Total Votes Recorded on EVM Control Unit (6)", min_value=0, value=0, step=1)
+    
+    st.divider()
+
+    # Section 4: Tendered Votes (Separate from EVM)
+    st.subheader("4. Tendered Votes")
+    tendered_votes = st.number_input("Number of Tendered Votes (Ballot Paper)", min_value=0, value=0, step=1)
+    st.caption("*(Note: Tendered votes are cast on paper and do NOT affect the EVM total).*")
+    
+    st.divider()
+
+    # --- THE CALCULATION LOGIC ---
+    expected_evm_total = form_17a_total - rule_49o - rule_49m
+    
+    st.header("📝 Final Form 17C Verification")
+    
+    st.write(f"**Total from Register (17A):** {form_17a_total}")
+    st.write(f"**Minus Exceptions (49-O + 49-M):** - {rule_49o + rule_49m}")
+    st.markdown(f"### Expected EVM Total: **{expected_evm_total}**")
+    st.markdown(f"### Actual EVM Total: **{actual_evm_total}**")
+    
+    # Cross-Check Validation
+    if form_17a_total == 0 and actual_evm_total == 0:
+        st.info("Awaiting final data entry.")
+    elif expected_evm_total == actual_evm_total:
+        st.success("✅ SUCCESS! The Form 17A register PERFECTLY MATCHES the EVM Control Unit.")
+        st.markdown("""
+        **What to write on Form 17C:**
+        * Item 2 (Total in 17A): **{val1}**
+        * Item 3 (Rule 49-O): **{val2}**
+        * Item 4 (Rule 49-M): **{val3}**
+        * Item 6 (Total in EVM): **{val4}**
+        * Item 7 (Does Item 6 tally with Item 2 - Item 3 - Item 4?): **YES**
+        """.format(val1=form_17a_total, val2=rule_49o, val3=rule_49m, val4=actual_evm_total))
+    else:
+        st.error("🚨 MISMATCH DETECTED! Do NOT seal the EVM yet.")
+        diff = abs(expected_evm_total - actual_evm_total)
+        st.write(f"There is a difference of **{diff}** vote(s) between the 17A Register and the EVM.")
+        st.write("**Troubleshooting:**")
+        st.write("1. Check if the 2nd Polling Officer miscounted the Serial Numbers in Form 17A.")
+        st.write("2. Double-check if any Test Votes (Rule 49-MA) were cast, which requires additional adjustments.")
+        st.write("3. Ensure Tendered Votes were NOT accidentally entered into the EVM.")

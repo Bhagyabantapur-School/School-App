@@ -9,7 +9,7 @@ import os
 st.set_page_config(page_title="Election Duty App", page_icon="🗳️", layout="centered")
 
 # --- Setup Your Sheet URL Here ---
-SHEET_URL = "https://docs.google.com/spreadsheets/d/YOUR_ACTUAL_SHEET_ID_HERE/edit"
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1ennsNFWIWfEwqKukv0OPIKF8r7T-oK7yD6kobCRmquc/edit"
 
 # --- Google Sheets Authentication ---
 SCOPES = [

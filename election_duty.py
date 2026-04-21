@@ -3,22 +3,13 @@ import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
 from datetime import datetime, date, timedelta
+import os
 
 # --- Page Configuration ---
-st.set_page_config(page_title="Election Duty App - Party 116", page_icon="🗳️", layout="centered")
+st.set_page_config(page_title="Election Duty App", page_icon="🗳️", layout="centered")
 
 # --- Setup Your Sheet URL Here ---
-# Paste your actual Google Sheet link inside the quotes below!
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1ennsNFWIWfEwqKukv0OPIKF8r7T-oK7yD6kobCRmquc/edit"
-
-st.title("🗳️ Election Duty: Party 116")
-st.markdown("Schedule, log, manage your team, and track Polling Day.")
-
-# --- Sidebar ---
-with st.sidebar:
-    st.header("🔗 Quick Links")
-    st.link_button("📊 Open Google Sheet", SHEET_URL, use_container_width=True)
-    st.info("Click the button above to view your raw database directly in Google Sheets.")
+SHEET_URL = "https://docs.google.com/spreadsheets/d/YOUR_ACTUAL_SHEET_ID_HERE/edit"
 
 # --- Google Sheets Authentication ---
 SCOPES = [
@@ -40,6 +31,19 @@ try:
     sheet_log = spreadsheet.worksheet("Election_Duty_Log")
     sheet_team = spreadsheet.worksheet("Team_Data")
     sheet_calls = spreadsheet.worksheet("Call_Logs")
+    
+    try:
+        sheet_booth = spreadsheet.worksheet("Booth_Data")
+    except:
+        sheet_booth = spreadsheet.add_worksheet(title="Booth_Data", rows="10", cols="10")
+        sheet_booth.append_row(["AC_Name", "PS_No", "PS_Name", "Total", "Male", "Female", "TG"])
+        
+    try:
+        sheet_memory = spreadsheet.worksheet("Memory_Log")
+    except:
+        sheet_memory = spreadsheet.add_worksheet(title="Memory_Log", rows="100", cols="4")
+        sheet_memory.append_row(["Timestamp", "Test Type", "Your Answer", "Result"])
+        
 except Exception as e:
     st.error(f"Failed to connect to Google Sheets. Error: {e}")
     st.stop()
@@ -55,20 +59,45 @@ def fetch_team():
     try: return sheet_team.get_all_records()
     except: return []
 
+@st.cache_data(ttl=60)
+def fetch_booth_data():
+    try: 
+        records = sheet_booth.get_all_records()
+        if records: return records[0]
+        return {}
+    except: return {}
+
 records = fetch_logs()
 team_records = fetch_team()
+booth_data = fetch_booth_data()
 
-pending_sessions = []
-for index, rec in enumerate(records):
-    if rec.get("Start Time") == "Pending":
-        pending_sessions.append({"sheet_row": index + 2, "data": rec})
+pending_sessions = [{"sheet_row": i + 2, "data": r} for i, r in enumerate(records) if r.get("Start Time") == "Pending"]
+team_list = [{"sheet_row": i + 2, "data": r} for i, r in enumerate(team_records)]
 
-team_list = []
-for index, rec in enumerate(team_records):
-    team_list.append({"sheet_row": index + 2, "data": rec})
+if "edit_booth" not in st.session_state:
+    st.session_state.edit_booth = False
+
+# --- NO SIDEBAR: Dynamic App Header & Top Buttons ---
+header_col1, header_col2 = st.columns([3, 1])
+
+with header_col1:
+    if booth_data and booth_data.get("Total", "") != "":
+        st.title(f"🗳️ {booth_data.get('AC_Name', 'AC')} | Booth {booth_data.get('PS_No', '')}")
+        st.markdown(f"**{booth_data.get('PS_Name', 'Polling Station')}**")
+    else:
+        st.title("🗳️ Election Duty App")
+        st.markdown("⚠️ **Please enter your Booth Data in the Dashboard tab below.**")
+
+with header_col2:
+    if os.path.exists("election_logo.png"):
+        st.image("election_logo.png", use_container_width=True)
+    st.link_button("📊 Google Sheet", SHEET_URL, use_container_width=True)
+
+st.divider()
 
 # --- App Layout: Tabs ---
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
+    "🏠 Dashboard", 
     "📝 Log", 
     "📅 Sched", 
     "👥 Team", 
@@ -77,23 +106,72 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "⏳ Timeline",
     "🧮 17C Calc",
     "🛠️ EVM Solver",
-    "📑 PDF Index" # NEW TAB
+    "📑 PDF Index",
+    "🧠 Memory Test"
 ])
 
-# === TAB 1: LOG & COMPLETE ===
+# === TAB 1: DASHBOARD & SETUP ===
 with tab1:
+    st.header("🏢 Booth Details")
+    if booth_data and booth_data.get("Total", "") != "" and not st.session_state.edit_booth:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total Electors", booth_data.get("Total", 0))
+        c2.metric("Male", booth_data.get("Male", 0))
+        c3.metric("Female", booth_data.get("Female", 0))
+        c4.metric("Third Gender", booth_data.get("TG", 0))
+        st.divider()
+        if st.button("✏️ Edit Booth Details"):
+            st.session_state.edit_booth = True
+            st.rerun()
+    else:
+        st.info("Please enter or update your exact booth details from the Electoral Roll.")
+        with st.form("update_booth"):
+            ac = st.text_input("AC Name & No.", value=str(booth_data.get("AC_Name", "")))
+            ps_no = st.text_input("PS No.", value=str(booth_data.get("PS_No", "")))
+            ps_name = st.text_input("PS Name", value=str(booth_data.get("PS_Name", "")))
+            
+            col1, col2, col3, col4 = st.columns(4)
+            val_total = int(booth_data.get("Total", 0)) if booth_data.get("Total") else 0
+            val_male = int(booth_data.get("Male", 0)) if booth_data.get("Male") else 0
+            val_female = int(booth_data.get("Female", 0)) if booth_data.get("Female") else 0
+            val_tg = int(booth_data.get("TG", 0)) if booth_data.get("TG") else 0
+            
+            with col1: total = st.number_input("Total Electors", min_value=0, value=val_total)
+            with col2: male = st.number_input("Male", min_value=0, value=val_male)
+            with col3: female = st.number_input("Female", min_value=0, value=val_female)
+            with col4: tg = st.number_input("Third Gender", min_value=0, value=val_tg)
+            
+            c_btn1, c_btn2 = st.columns([1, 4])
+            with c_btn1: submitted = st.form_submit_button("💾 Save Data", type="primary")
+            with c_btn2:
+                if booth_data and booth_data.get("Total", "") != "":
+                    if st.form_submit_button("❌ Cancel"):
+                        st.session_state.edit_booth = False
+                        st.rerun()
+            
+            if submitted:
+                with st.spinner("Saving Booth Data..."):
+                    try:
+                        sheet_booth.clear()
+                        sheet_booth.append_row(["AC_Name", "PS_No", "PS_Name", "Total", "Male", "Female", "TG"])
+                        sheet_booth.append_row([ac, ps_no, ps_name, total, male, female, tg])
+                        st.session_state.edit_booth = False
+                        st.success("Booth Data Saved Successfully!")
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as e: st.error(f"Error saving data: {e}")
+
+# === TAB 2: LOG & COMPLETE ===
+with tab2:
     action_type = st.radio("What would you like to do?", ["Complete a Scheduled Session", "Log a Brand New Session"], horizontal=True)
     st.divider()
 
     if action_type == "Complete a Scheduled Session":
-        if not pending_sessions:
-            st.info("No pending scheduled sessions found.")
+        if not pending_sessions: st.info("No pending scheduled sessions found.")
         else:
             options = {f"{s['data']['Date']} - {s['data']['Activity Type']}": s for s in pending_sessions}
             selected_str = st.selectbox("📌 Select Pending Session", list(options.keys()))
             selected_session = options[selected_str]
-            
-            st.write(f"**Original Notes:** {selected_session['data']['Notes / Key Learnings']}")
             
             col1, col2 = st.columns(2)
             with col1: start_time = st.time_input("Start Time", step=60)
@@ -106,7 +184,6 @@ with tab1:
                 start_dt = datetime.combine(log_date, start_time)
                 end_dt = datetime.combine(log_date, end_time)
                 if end_dt < start_dt: end_dt += timedelta(days=1)
-                    
                 total_minutes = int((end_dt - start_dt).total_seconds() / 60)
                 duration_formatted = f"{total_minutes // 60:02d}h {total_minutes % 60:02d}m"
                 
@@ -116,10 +193,10 @@ with tab1:
                         sheet_log.update_cell(selected_session['sheet_row'], 3, end_time.strftime("%I:%M %p"))
                         sheet_log.update_cell(selected_session['sheet_row'], 5, duration_formatted)
                         sheet_log.update_cell(selected_session['sheet_row'], 6, updated_notes)
-                        st.success(f"Successfully completed: logged {duration_formatted}!")
+                        st.success("Logged successfully!")
                         st.cache_data.clear()
                         st.rerun() 
-                    except Exception as e: st.error(f"Error updating sheet: {e}")
+                    except Exception as e: st.error(f"Error: {e}")
 
     elif action_type == "Log a Brand New Session":
         col1, col2, col3 = st.columns(3)
@@ -128,462 +205,233 @@ with tab1:
         with col3: end_time = st.time_input("End Time", step=60)
             
         activity_selection = st.selectbox("Activity Type", ["PPT Study", "Form 12/12A Practice", "Hands-on Training Review", "EVM Mock Practice", "Other / Custom (Type below)"])
-        custom_activity = ""
-        if activity_selection == "Other / Custom (Type below)":
-            custom_activity = st.text_input("Custom Activity Type")
-        
+        custom_activity = st.text_input("Custom Activity Type") if activity_selection == "Other / Custom (Type below)" else ""
         notes = st.text_area("Notes", placeholder="What did you focus on today?")
         
         if st.button("Log New Activity", type="primary"):
-            final_activity = custom_activity.strip() if activity_selection == "Other / Custom (Type below)" else activity_selection
+            final_activity = custom_activity.strip() if custom_activity else activity_selection
             start_dt = datetime.combine(log_date, start_time)
             end_dt = datetime.combine(log_date, end_time)
             if end_dt < start_dt: end_dt += timedelta(days=1)
             total_minutes = int((end_dt - start_dt).total_seconds() / 60)
             duration_formatted = f"{total_minutes // 60:02d}h {total_minutes % 60:02d}m"
             
-            row_data = [log_date.strftime("%d-%m-%Y"), start_time.strftime("%I:%M %p"), end_time.strftime("%I:%M %p"), final_activity, duration_formatted, notes]
-            
             with st.spinner("Saving..."):
                 try:
-                    sheet_log.append_row(row_data)
+                    sheet_log.append_row([log_date.strftime("%d-%m-%Y"), start_time.strftime("%I:%M %p"), end_time.strftime("%I:%M %p"), final_activity, duration_formatted, notes])
                     st.success("✅ Logged successfully!")
                     st.cache_data.clear() 
                 except Exception as e: st.error(f"Error: {e}")
 
-# === TAB 2: SCHEDULE FUTURE ===
-with tab2:
+# === TAB 3: SCHEDULE FUTURE ===
+with tab3:
     st.subheader("📅 Schedule an Upcoming Training")
     future_date = st.date_input("Scheduled Date", date.today() + timedelta(days=1))
-    sched_activity_selection = st.selectbox("Scheduled Activity Type", ["Hands-on Training", "EVM/VVPAT Collection", "Other / Custom (Type below)"])
-    sched_custom_activity = ""
-    if sched_activity_selection == "Other / Custom (Type below)":
-        sched_custom_activity = st.text_input("Custom Activity Type", key="s_cust")
+    sched_activity_selection = st.selectbox("Scheduled Activity Type", ["Hands-on Training", "EVM/VVPAT Collection", "Other / Custom"])
+    sched_custom_activity = st.text_input("Custom Activity Type", key="s_cust") if sched_activity_selection == "Other / Custom" else ""
     sched_notes = st.text_area("Prep Required")
     
     if st.button("Save Schedule", type="primary"):
-        final_sched_activity = sched_custom_activity.strip() if sched_activity_selection == "Other / Custom (Type below)" else sched_activity_selection
-        row_data = [future_date.strftime("%d-%m-%Y"), "Pending", "Pending", final_sched_activity, "Pending", sched_notes]
+        final_sched_activity = sched_custom_activity.strip() if sched_custom_activity else sched_activity_selection
         with st.spinner("Scheduling..."):
             try:
-                sheet_log.append_row(row_data)
+                sheet_log.append_row([future_date.strftime("%d-%m-%Y"), "Pending", "Pending", final_sched_activity, "Pending", sched_notes])
                 st.success("✅ Scheduled!")
                 st.cache_data.clear() 
             except Exception as e: st.error(f"Error: {e}")
 
-# === TAB 3: TEAM DASHBOARD ===
-with tab3:
+# === TAB 4: TEAM DASHBOARD ===
+with tab4:
     st.subheader("👥 Polling Team Directory")
-    
-    if not team_list:
-        st.info("No team members added yet. Add them below!")
+    if not team_list: st.info("No team members added yet.")
     else:
         for idx, officer_info in enumerate(team_list):
             officer = officer_info['data']
             row_num = officer_info['sheet_row']
-            
-            status = officer.get('Status', 'Active')
-            if not status: status = 'Active'
-                
-            status_icon = "🟢" if status == "Active" else "🔴"
-            status_text = "" if status == "Active" else "(INACTIVE)"
+            status = officer.get('Status', 'Active') or 'Active'
+            status_icon, status_text = ("🟢", "") if status == "Active" else ("🔴", "(INACTIVE)")
             
             with st.expander(f"{status_icon} {idx + 1}. {officer.get('Name', 'Unknown')} - {officer.get('Polling Office Rank', 'Rank N/A')} {status_text}"):
                 st.write(f"**Designation:** {officer.get('Designation', 'N/A')}")
-                st.write(f"**Office Address:** {officer.get('Office Address', 'N/A')}")
-                mobile = officer.get('Mobile Number', 'N/A')
-                st.write(f"**Mobile:** {mobile}")
-                
+                st.write(f"**Mobile:** {officer.get('Mobile Number', 'N/A')}")
                 if status == "Active":
-                    st.markdown(f"<a href='tel:{mobile}' style='display: block; text-align: center; padding: 8px; background-color: #4CAF50; color: white; border-radius: 5px; text-decoration: none; margin-bottom: 15px;'>📞 Tap to Dial</a>", unsafe_allow_html=True)
-                    
-                    st.caption("📝 **Log a Conversation**")
-                    call_direction = st.radio("Direction", ["Outgoing (I called them)", "Incoming (They called me)"], key=f"dir_{idx}", horizontal=True)
-                    call_notes = st.text_input("Call Notes", placeholder="What was discussed?", key=f"note_{idx}")
-                    
-                    if st.button("Save Call Record", key=f"btn_{idx}", use_container_width=True):
-                        now = datetime.now()
-                        direction_val = "Incoming" if "Incoming" in call_direction else "Outgoing"
-                        call_data = [now.strftime("%d-%m-%Y"), now.strftime("%I:%M %p"), officer.get('Name'), direction_val, call_notes]
-                        try:
-                            sheet_calls.append_row(call_data)
-                            st.success(f"✅ {direction_val} call logged successfully!")
-                        except Exception as e:
-                            st.error("Failed to log call.")
-                else:
-                    st.error("⚠️ This officer is currently marked as INACTIVE. Call logging is disabled.")
-                
-                st.divider()
-                
-                toggle_text = "🔴 Mark as Inactive (Disable)" if status == "Active" else "🟢 Mark as Active (Enable)"
-                new_status_val = "Inactive" if status == "Active" else "Active"
-                
-                if st.button(toggle_text, key=f"tog_{idx}"):
-                    with st.spinner("Updating status..."):
-                        try:
-                            sheet_team.update_cell(row_num, 6, new_status_val)
-                            st.success(f"Officer status updated to {new_status_val}!")
-                            st.cache_data.clear()
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Failed to update status: {e}")
-
+                    st.markdown(f"<a href='tel:{officer.get('Mobile Number', '')}' style='display: block; text-align: center; padding: 8px; background-color: #4CAF50; color: white; border-radius: 5px; text-decoration: none;'>📞 Tap to Dial</a>", unsafe_allow_html=True)
+                    call_dir = st.radio("Direction", ["Outgoing", "Incoming"], key=f"dir_{idx}", horizontal=True)
+                    call_notes = st.text_input("Call Notes", key=f"note_{idx}")
+                    if st.button("Save Call Record", key=f"btn_{idx}"):
+                        sheet_calls.append_row([datetime.now().strftime("%d-%m-%Y"), datetime.now().strftime("%I:%M %p"), officer.get('Name'), call_dir, call_notes])
+                        st.success("✅ Call logged!")
+                if st.button("Toggle Status", key=f"tog_{idx}"):
+                    sheet_team.update_cell(row_num, 6, "Inactive" if status == "Active" else "Active")
+                    st.cache_data.clear()
+                    st.rerun()
     st.divider()
-    
     with st.expander("➕ Add New Team Member"):
         with st.form("add_officer_form"):
             t_name = st.text_input("Name")
-            t_desig = st.text_input("Designation (e.g., Assistant Teacher)")
-            t_rank = st.selectbox("Polling Office Rank", ["Presiding Officer", "1st Polling Officer", "2nd Polling Officer", "3rd Polling Officer", "Sector Officer", "Micro Observer"])
+            t_desig = st.text_input("Designation")
+            t_rank = st.selectbox("Rank", ["Presiding Officer", "1st Polling Officer", "2nd Polling Officer", "3rd Polling Officer", "Sector Officer", "Micro Observer"])
             t_address = st.text_area("Office Address")
             t_mobile = st.text_input("Mobile Number")
-            
             if st.form_submit_button("Save Officer Data"):
                 if t_name and t_mobile:
-                    try:
-                        sheet_team.append_row([t_name, t_desig, t_rank, t_address, t_mobile, "Active"])
-                        st.success(f"{t_name} added to the team!")
-                        st.cache_data.clear()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to add officer. Error: {e}")
-                else:
-                    st.warning("Name and Mobile Number are required!")
+                    sheet_team.append_row([t_name, t_desig, t_rank, t_address, t_mobile, "Active"])
+                    st.success("Added!")
+                    st.cache_data.clear()
+                    st.rerun()
 
-# === TAB 4: VIEW LOGS ===
-with tab4:
+# === TAB 5: VIEW LOGS ===
+with tab5:
     st.subheader("Your Study History")
     if st.button("🔄 Refresh Data"): st.cache_data.clear()
-    
     df = pd.DataFrame(records)
     if not df.empty:
-        def clean_old_durations(val):
-            if isinstance(val, str) and 'mins' in val:
-                try:
-                    total_mins = int(val.replace(' mins', '').strip())
-                    return f"{total_mins // 60:02d}h {total_mins % 60:02d}m"
-                except: return val
-            return val
-            
-        if 'Duration' in df.columns: 
-            df['Duration'] = df['Duration'].apply(clean_old_durations)
-            
-        def highlight_pending(row):
-            if row.get('Start Time') == 'Pending': 
-                return ['background-color: #ffcccc; color: black'] * len(row)
-            return [''] * len(row)
-            
-        styled_df = df.style.apply(highlight_pending, axis=1)
-        st.dataframe(styled_df, use_container_width=True, hide_index=True)
-        st.caption(f"Total entries logged: {len(df)}")
-    else:
-        st.info("No logs found yet.")
+        def highlight_pending(row): return ['background-color: #ffcccc; color: black'] * len(row) if row.get('Start Time') == 'Pending' else [''] * len(row)
+        st.dataframe(df.style.apply(highlight_pending, axis=1), use_container_width=True, hide_index=True)
+    else: st.info("No logs found yet.")
 
-# === TAB 5: 1st PO GUIDE ===
-with tab5:
-    st.header("📖 1st Polling Officer Guide")
-    st.markdown("আপনার Polling Day-এর মূল দায়িত্ব ও নিয়মাবলি (Rules & Regulations).")
-    
-    with st.expander("📝 1. Marking the Electoral Roll (ভোটার তালিকা চিহ্নিতকরণ)"):
-        st.markdown("""
-        ভোটারের পরিচয় (Identity) verify করার পর **Marked Copy of the Electoral Roll**-এ নিচের নিয়মে দাগ দিন:
-        * **Male Voter (পুরুষ):** ভোটারের বক্সের উপর আড়াআড়ি লাল দাগ (Diagonal red line) টানুন।
-        * **Female Voter (মহিলা):** আড়াআড়ি লাল দাগ দিন **এবং** Serial Number-টি গোল (Circle) করুন।
-        * **Third Gender (তৃতীয় লিঙ্গ):** আড়াআড়ি লাল দাগ দিন **এবং** Serial Number-এর পাশে একটি স্টার (*) বা টিক চিহ্ন (✓) দিন।
-        """)
-        st.info("💡 **Pro Tip:** Polling Agent-দের সুবিধার্থে ভোটারের Serial Number এবং নাম স্পষ্ট ও জোরে উচ্চারণ করবেন।")
-
-    with st.expander("🕵️ 2. Test Vote (টেস্ট ভোট) - Rule 49MA"):
-        st.markdown("""
-        যদি কোনো ভোটার দাবি করেন যে তিনি যাকে ভোট দিয়েছেন, **VVPAT**-এ সেই প্রার্থীর Slip প্রিন্ট হয়নি, তবে **Rule 49MA** প্রযোজ্য হবে:
-        * প্রথমে ভোটারের কাছ থেকে একটি লিখিত **Declaration** (Annexure/Form-এর মাধ্যমে) নিতে হবে।
-        * তাকে সতর্ক করতে হবে যে তার দাবি মিথ্যে প্রমাণিত হলে তার বিরুদ্ধে আইনি ব্যবস্থা নেওয়া হতে পারে।
-        * এরপর Polling Agents এবং Presiding Officer-এর সামনে তাকে একটি **Test Vote** দিতে বলা হবে।
-        * **Form 17A (Register of Voters)**-তে এই Test Vote-এর জন্য নতুন একটি Entry করতে হবে এবং 'Remarks' কলামে স্পষ্ট করে **"Rule 49MA"** লিখতে হবে।
-        """)
-
-    with st.expander("📜 3. Tendered Vote (টেন্ডার ভোট)"):
-        st.markdown("""
-        যদি কোনো প্রকৃত ভোটার বুথে এসে দেখেন যে তার নামে আগেই কেউ ভোট দিয়ে চলে গেছে:
-        * ১নং পোলিং অফিসার হিসেবে তার পরিচয় নিখুঁতভাবে verify করুন।
-        * তাকে **EVM**-এ ভোট দিতে দেওয়া যাবে ভাত না।
-        * Presiding Officer তাকে একটি **Tendered Ballot Paper** (ব্যালট পেপার) দেবেন।
-        * এই ভোটারের সই/টিপসই **Form 17B (Register of Tendered Votes)**-তে নিতে হবে, Form 17A-তে নয়।
-        """)
-
-    with st.expander("👤 4. Proxy Voter (প্রক্সি ভোটার) - CSV"):
-        st.markdown("""
-        * **Classified Service Voter (CSV)**-দের ক্ষেত্রে তাদের নিযুক্ত Proxy ভোটার ভোট দিতে পারেন।
-        * Marked Copy-তে আসল ভোটারের নামের পাশে **'CSV'** লেখা থাকবে।
-        * 2nd Polling Officer Proxy ভোটারের ডান হাতের মধ্যমায় (Middle Finger of Right Hand) কালির দাগ (Indelible Ink) লাগাবেন (বাঁ হাতের তর্জনীতে নয়)।
-        """)
-
-    with st.expander("⚠️ 5. ASD, Challenge & EDC"):
-        st.markdown("""
-        * **ASD (Absent, Shifted, Dead):** ভোটারের নাম ASD লিস্টে থাকলে, পরিচয় খুব সতর্কভাবে verify করুন। এদের থেকে একটি আলাদা Declaration নেওয়া হবে।
-        * **Challenged Votes:** কোনো Polling Agent ভোটারের পরিচয় নিয়ে আপত্তি (challenge) জানালে, তা আপনার টেবিলেই হবে। Agent-কে ₹2 challenge fee দিয়ে Presiding Officer-এর কাছে যেতে বলুন। সিদ্ধান্ত না হওয়া পর্যন্ত Electoral Roll-এ দাগ দেবেন না।
-        * **EDC (Election Duty Certificate):** Voter on election duty. Marked copy-তে নাম strike off করা থাকলেও, EDC নিয়ে ভোট দিতে এলে তাদের ভোট দিতে হবে এবং 17A তে Entry হবে।
-        """)
-
-# === TAB 6: TIMELINE ===
+# === TAB 6: 1st PO GUIDE ===
 with tab6:
-    st.header("⏳ Election Day Timeline")
-    st.markdown("Your minute-by-minute statutory schedule.")
+    st.header("📖 1st Polling Officer Guide")
+    with st.expander("📝 1. Marking the Electoral Roll"):
+        st.write("* **Male:** Diagonal red line.\n* **Female:** Diagonal red line AND circle the serial number.\n* **Third Gender:** Diagonal red line AND star/checkmark.")
+    with st.expander("🕵️ 2. Test Vote (Rule 49MA)"):
+        st.write("Take written Declaration. Enter in 17A with Remarks 'Rule 49MA'.")
+    with st.expander("📜 3. Tendered Vote"):
+        st.write("Voter gets Tendered Ballot Paper, signs in Form 17B, NOT 17A.")
+    with st.expander("👤 4. Proxy Voter (CSV)"):
+        st.write("Proxy gets ink on Middle Finger of Right Hand.")
+    with st.expander("⚠️ 5. ASD, Challenge & EDC"):
+        st.write("Thorough identity check for ASD. Challenges happen at your desk. EDC voters allowed if for your booth.")
+
+# === TAB 7: TIMELINE (LIVE) ===
+with tab7:
+    st.header("⏳ Election Day Live Timeline")
+    st.markdown("Your app is automatically tracking the current time to show your exact statutory duty right now.")
     
-    st.caption("🔧 **Testing Mode:** Drag the slider to simulate the time of day.")
-    simulated_hour = st.slider("Simulate Time (24H Format)", min_value=4, max_value=20, value=7, step=1)
+    # Get current time in IST (Indian Standard Time) by adding 5 hours 30 mins to UTC
+    ist_now = datetime.utcnow() + timedelta(hours=5, minutes=30)
+    current_time_str = ist_now.strftime("%I:%M %p")
+    current_hour_fraction = ist_now.hour + (ist_now.minute / 60.0)
     
+    st.info(f"🕒 **Live Current Time (IST):** {current_time_str}")
     st.divider()
 
     timeline_events = [
-        {"time": "05:00 AM", "hour": 5, "title": "Wake Up & Team Prep", "desc": "Ensure all team members are awake. Presiding Officer links EVM components (BU -> VVPAT -> CU). Do NOT switch on CU yet."},
-        {"time": "05:30 AM", "hour": 5.5, "title": "Mock Poll Preparation", "desc": "Agents should arrive. Demonstrate empty EVM and empty VVPAT drop box. Switch on CU."},
-        {"time": "05:45 AM", "hour": 5.75, "title": "Conduct Mock Poll", "desc": "Cast at least 50 votes across all candidates (including NOTA). Ensure agents participate."},
-        {"time": "06:15 AM", "hour": 6.25, "title": "Clear Mock Poll & Seal EVM", "desc": "CRITICAL: Press CLOSE, RESULT, then CLEAR on CU. Remove Mock VVPAT slips, stamp them 'Mock Poll', and seal in black envelope. Seal the EVM with Green Paper Seal, Special Tag, and Address Tags."},
-        {"time": "07:00 AM", "hour": 7, "title": "🟢 ACTUAL POLL COMMENCES", "desc": "Start allowing voters. 1st PO begins identifying voters and marking the Electoral Roll."},
-        {"time": "09:00 AM", "hour": 9, "title": "1st 2-Hourly Report", "desc": "Press 'Total' on CU. Presiding Officer sends 9 AM SMS report."},
-        {"time": "11:00 AM", "hour": 11, "title": "2nd 2-Hourly Report", "desc": "Press 'Total' on CU. Presiding Officer sends 11 AM SMS report."},
-        {"time": "01:00 PM", "hour": 13, "title": "3rd 2-Hourly Report", "desc": "Press 'Total' on CU. Presiding Officer sends 1 PM SMS report. (Take lunch in shifts)."},
-        {"time": "03:00 PM", "hour": 15, "title": "4th 2-Hourly Report", "desc": "Press 'Total' on CU. Presiding Officer sends 3 PM SMS report."},
-        {"time": "05:00 PM", "hour": 17, "title": "5th 2-Hourly Report", "desc": "Press 'Total' on CU. Presiding Officer sends 5 PM SMS report. Check queue outside."},
-        {"time": "06:00 PM", "hour": 18, "title": "Distribute Queue Slips", "desc": "Distribute signed slips to all voters standing in the queue at exactly 6 PM, starting from the LAST person."},
-        {"time": "06:30 PM", "hour": 18.5, "title": "🔴 CLOSE THE POLL", "desc": "After last voter, remove cap and press CLOSE button on CU. Switch off CU. Disconnect cables."},
-        {"time": "07:00 PM", "hour": 19, "title": "Final Sealing & Forms", "desc": "Pack CU, BU, and VVPAT in carrying cases and seal with Address Tags. Complete Form 17C (Part 1) and Presiding Officer's Diary."},
+        {"hour": 0, "time": "Pre 05:00 AM", "title": "Rest/Setup", "desc": "Sleep well or get ready for the day."},
+        {"hour": 5.0, "time": "05:00 AM", "title": "Wake Up & Team Prep", "desc": "Ensure team is awake. PRO links EVM (BU -> VVPAT -> CU). Do NOT switch on CU yet."},
+        {"hour": 5.5, "time": "05:30 AM", "title": "Mock Poll Preparation", "desc": "Agents arrive. Demonstrate empty EVM."},
+        {"hour": 5.75, "time": "05:45 AM", "title": "Conduct Mock Poll", "desc": "Cast at least 50 votes across all candidates."},
+        {"hour": 6.25, "time": "06:15 AM", "title": "Clear Mock Poll & Seal EVM", "desc": "CRITICAL: Press CLOSE, RESULT, then CLEAR. Seal EVM."},
+        {"hour": 7, "time": "07:00 AM", "title": "🟢 ACTUAL POLL COMMENCES", "desc": "Start allowing voters."},
+        {"hour": 9, "time": "09:00 AM", "title": "1st 2-Hourly Report", "desc": "Press 'Total', PRO sends SMS."},
+        {"hour": 11, "time": "11:00 AM", "title": "2nd 2-Hourly Report", "desc": "Press 'Total', PRO sends SMS."},
+        {"hour": 13, "time": "01:00 PM", "title": "3rd 2-Hourly Report", "desc": "Press 'Total', PRO sends SMS."},
+        {"hour": 15, "time": "03:00 PM", "title": "4th 2-Hourly Report", "desc": "Press 'Total', PRO sends SMS."},
+        {"hour": 17, "time": "05:00 PM", "title": "5th 2-Hourly Report", "desc": "Press 'Total', PRO sends SMS."},
+        {"hour": 18, "time": "06:00 PM", "title": "Distribute Queue Slips", "desc": "Starting from the LAST person in line."},
+        {"hour": 18.5, "time": "06:30 PM", "title": "🔴 CLOSE THE POLL", "desc": "Press CLOSE button on CU. Switch off."},
+        {"hour": 19, "time": "07:00 PM", "title": "Final Sealing & Forms", "desc": "Pack CU, BU, VVPAT. Complete Form 17C."}
     ]
-
+    
+    # Determine which event is active right now
     for i, event in enumerate(timeline_events):
         is_active = False
-        
         if i < len(timeline_events) - 1:
             next_hour = timeline_events[i+1]["hour"]
-            if event["hour"] <= simulated_hour < next_hour:
+            if event["hour"] <= current_hour_fraction < next_hour:
                 is_active = True
         else:
-            if simulated_hour >= event["hour"]:
+            if current_hour_fraction >= event["hour"]:
                 is_active = True
 
         if is_active:
-            st.success(f"### 👉 CURRENT TASK: {event['time']} - {event['title']}")
-            st.write(f"**Action Required:** {event['desc']}")
+            st.success(f"### 👉 CURRENT TASK: {event['time']} - {event['title']}\n**Action Required:** {event['desc']}")
         else:
-            with st.expander(f"{event['time']} - {event['title']}"):
-                st.write(event['desc'])
+            with st.expander(f"{event['time']} - {event['title']}"): st.write(event['desc'])
+            
+    if st.button("🔄 Refresh Live Time"):
+        st.rerun()
 
-# === TAB 7: FORM 17C CALCULATOR ===
-with tab7:
-    st.header("🧮 Form 17C Calculator")
-    st.markdown("Ensure your Form 17A register perfectly matches the EVM total before sealing.")
-    
-    st.info("💡 **Instructions:** At the close of poll, enter the final numbers from your booth. The app will verify the math required for Part I of Form 17C.")
-    
-    st.subheader("1. Base Numbers")
-    col1, col2 = st.columns(2)
-    with col1:
-        total_assigned = st.number_input("Total Electors Assigned to Booth (1)", min_value=0, value=1000, step=1)
-    with col2:
-        form_17a_total = st.number_input("Total entries in Form 17A Register (2)", min_value=0, value=0, step=1)
-        
-    st.divider()
-        
-    st.subheader("2. Exceptions (Voters who didn't press the EVM)")
-    col3, col4 = st.columns(2)
-    with col3:
-        rule_49o = st.number_input("Voters deciding NOT to vote (Rule 49-O) (3)", min_value=0, value=0, step=1, help="They signed the register but refused to press a button.")
-    with col4:
-        rule_49m = st.number_input("Voters NOT ALLOWED to vote (Rule 49-M) (4)", min_value=0, value=0, step=1, help="Presiding Officer stopped them for violating secrecy rules.")
-        
-    st.divider()
-    
-    st.subheader("3. Final EVM Reading")
-    actual_evm_total = st.number_input("Total Votes Recorded on EVM Control Unit (6)", min_value=0, value=0, step=1)
-    
-    st.divider()
-
-    st.subheader("4. Tendered Votes")
-    tendered_votes = st.number_input("Number of Tendered Votes (Ballot Paper)", min_value=0, value=0, step=1)
-    st.caption("*(Note: Tendered votes are cast on paper and do NOT affect the EVM total).*")
-    
-    st.divider()
-
-    # --- THE CALCULATION LOGIC ---
-    expected_evm_total = form_17a_total - rule_49o - rule_49m
-    
-    st.header("📝 Final Form 17C Verification")
-    
-    st.write(f"**Total from Register (17A):** {form_17a_total}")
-    st.write(f"**Minus Exceptions (49-O + 49-M):** - {rule_49o + rule_49m}")
-    st.markdown(f"### Expected EVM Total: **{expected_evm_total}**")
-    st.markdown(f"### Actual EVM Total: **{actual_evm_total}**")
-    
-    if form_17a_total == 0 and actual_evm_total == 0:
-        st.info("Awaiting final data entry.")
-    elif expected_evm_total == actual_evm_total:
-        st.success("✅ SUCCESS! The Form 17A register PERFECTLY MATCHES the EVM Control Unit.")
-        st.markdown("""
-        **What to write on Form 17C:**
-        * Item 2 (Total in 17A): **{val1}**
-        * Item 3 (Rule 49-O): **{val2}**
-        * Item 4 (Rule 49-M): **{val3}**
-        * Item 6 (Total in EVM): **{val4}**
-        * Item 7 (Does Item 6 tally with Item 2 - Item 3 - Item 4?): **YES**
-        """.format(val1=form_17a_total, val2=rule_49o, val3=rule_49m, val4=actual_evm_total))
-    else:
-        st.error("🚨 MISMATCH DETECTED! Do NOT seal the EVM yet.")
-        diff = abs(expected_evm_total - actual_evm_total)
-        st.write(f"There is a difference of **{diff}** vote(s) between the 17A Register and the EVM.")
-        st.write("**Troubleshooting:**")
-        st.write("1. Check if the 2nd Polling Officer miscounted the Serial Numbers in Form 17A.")
-        st.write("2. Double-check if any Test Votes (Rule 49-MA) were cast, which requires additional adjustments.")
-        st.write("3. Ensure Tendered Votes were NOT accidentally entered into the EVM.")
-
-# === TAB 8: EVM TROUBLESHOOTER ===
+# === TAB 8: FORM 17C CALCULATOR ===
 with tab8:
-    st.header("🛠️ EVM Troubleshooting (ইভিএম সমস্যা সমাধান)")
-    st.markdown("EVM বা VVPAT-এ কোনো Error Message দেখালে এখান থেকে তার সমাধান (Solution) দেখে নিন।")
+    st.header("🧮 Form 17C Calculator")
+    calc_default_total = int(booth_data.get("Total", 0)) if booth_data.get("Total") else 0
+    c1, c2 = st.columns(2)
+    with c1: total_assigned = st.number_input("Total Electors (1)", value=calc_default_total)
+    with c2: form_17a_total = st.number_input("Form 17A Total (2)", value=0)
+    c3, c4 = st.columns(2)
+    with c3: rule_49o = st.number_input("Refused 49-O (3)", value=0)
+    with c4: rule_49m = st.number_input("Not ALLOWED 49-M (4)", value=0)
+    actual_evm_total = st.number_input("EVM Total (6)", value=0)
     
-    evm_error = st.selectbox("Select EVM/VVPAT Error (সমস্যা নির্বাচন করুন)", [
-        "Select an error...",
-        "1. Link Error / Communication Error",
-        "2. Pressed Error",
-        "3. VVPAT Beeping / Error 2.6",
-        "4. Invalid Error",
-        "5. Low Battery / Replace Power Pack",
-        "6. Close Button Not Working"
-    ])
-
     st.divider()
+    expected_evm_total = form_17a_total - rule_49o - rule_49m
+    st.header("📝 Final Form 17C Verification")
+    st.markdown(f"### Expected EVM Total: **{expected_evm_total}**")
+    if form_17a_total > 0:
+        if expected_evm_total == actual_evm_total: st.success("✅ MATCH! The 17A register perfectly matches the EVM.")
+        else: st.error(f"🚨 MISMATCH! Difference of {abs(expected_evm_total - actual_evm_total)} votes.")
 
-    if "Link Error" in evm_error:
-        st.error("🚨 CU Display: 'LINK ERROR'")
-        st.write("**Solution (সমাধান):**")
-        st.markdown("""
-        1. প্রথমেই Control Unit (CU)-টি **Switch OFF** করুন।
-        2. Cables ঠিকমত কানেক্ট করা আছে কিনা চেক করুন। **(BU এর কেবল VVPAT এ, এবং VVPAT এর কেবল CU তে লাগাতে হবে)**।
-        3. Connector-এর পিনগুলো ঠিক আছে কিনা দেখুন, জোর করে ঢোকাবেন না।
-        4. সব ঠিক থাকলে আবার CU **Switch ON** করুন। সমস্যা না মিটলে Sector Officer-কে জানান।
-        """)
-        
-    elif "Pressed Error" in evm_error:
-        st.error("🚨 CU Display: 'PRESSED ERROR'")
-        st.write("**Solution (সমাধান):**")
-        st.markdown("""
-        1. এর মানে হলো Ballot Unit (BU)-এর কোনো বোতাম (Button) আগে থেকেই আটকে (jam) আছে।
-        2. BU-তে গিয়ে চেক করুন কোনো বোতাম আটকে আছে কিনা, থাকলে তা ধীরে ধীরে ছাড়িয়ে দিন।
-        3. ঠিক না হলে Sector Officer-কে জানিয়ে পুরো BU রিপ্লেস (Replace) করতে হবে।
-        """)
-        
-    elif "VVPAT Beeping" in evm_error:
-        st.error("🚨 VVPAT একটানা Beep শব্দ করছে / Error 2.6")
-        st.write("**Solution (সমাধান):**")
-        st.markdown("""
-        1. VVPAT-এর Paper Roll শেষ হয়ে গেলে বা কাগজ আটকে (Paper Jam) গেলে এই শব্দ হয়।
-        2. **Actual Poll চলাকালীন VVPAT খারাপ হলে, শুধুমাত্র VVPAT পরিবর্তন করতে হবে (EVM বা BU নয়)।**
-        3. পরিবর্তনের সময় Mock Poll করার প্রয়োজন নেই, শুধু একটি Test Vote দিয়ে চেক করতে হবে। Sector Officer-কে অবিলম্বে খবর দিন।
-        """)
-        
-    elif "Invalid Error" in evm_error:
-        st.error("🚨 CU Display: 'INVALID'")
-        st.write("**Solution (সমাধান):**")
-        st.markdown("""
-        1. আপনি ভুল Sequence-এ বোতাম টিপেছেন।
-        2. যেমন: 'Close' বোতাম টেপার আগে যদি 'Result' বোতাম টেপেন, তাহলে এই Error দেখাবে।
-        3. সঠিক Sequence মনে রাখুন: **CLOSE ➡️ RESULT ➡️ CLEAR** (Mock poll-এর সময়)।
-        """)
-        
-    elif "Low Battery" in evm_error:
-        st.error("🚨 CU Display: 'BATTERY LOW'")
-        st.write("**Solution (সমাধান):**")
-        st.markdown("""
-        1. CU **Switch OFF** করুন।
-        2. Presiding Officer-এর কাছে থাকা Extra Battery (Power Pack) দিয়ে CU-এর ব্যাটারি পরিবর্তন করুন।
-        3. এটি করার আগে অবশ্যই Polling Agent-দের উপস্থিতিতে ব্যাটারি কম্পার্টমেন্টের সিল ভাঙতে হবে এবং নতুন সিল লাগাতে হবে (Part-II of PO Report)।
-        """)
-        
-    elif "Close Button Not Working" in evm_error:
-        st.error("🚨 Close Button কাজ করছে না")
-        st.write("**Solution (সমাধান):**")
-        st.markdown("""
-        1. ভোট গ্রহণ শেষে (Close of Poll) যদি Close বোতাম কাজ না করে, চেক করুন 'Busy' ইন্ডিকেটর জ্বলছে কিনা।
-        2. যদি 'Busy' ইন্ডিকেটর জ্বলে থাকে, তার মানে কোনো ভোটারের জন্য Ballot ইস্যু করা আছে কিন্তু সে ভোট দেয়নি।
-        3. BU-তে গিয়ে যেকোনো একটি বোতাম টিপে সেই ব্যালটটি বাতিল/সম্পূর্ণ করুন, এরপর CU-তে 'Close' বোতাম কাজ করবে।
-        """)
-    elif evm_error == "Select an error...":
-        st.info("👆 উপর থেকে আপনার EVM-এর সমস্যাটি নির্বাচন করুন।")
-
-# === TAB 9: PDF INDEX (NEW) ===
+# === TAB 9: EVM TROUBLESHOOTER ===
 with tab9:
+    st.header("🛠️ EVM Troubleshooting")
+    evm_error = st.selectbox("Select Error", ["Select...", "Link Error", "Pressed Error", "VVPAT Beeping", "Invalid Error", "Battery Low", "Close Button Not Working"])
+    if "Link" in evm_error: st.error("Switch OFF CU. Check cables (BU -> VVPAT -> CU). Switch ON.")
+    elif "Pressed" in evm_error: st.error("BU button is jammed. Clear it.")
+    elif "Beeping" in evm_error: st.error("VVPAT paper jam/empty. Replace VVPAT only.")
+    elif "Invalid" in evm_error: st.error("Wrong sequence. Remember: CLOSE -> RESULT -> CLEAR.")
+    elif "Battery" in evm_error: st.error("Switch OFF CU. Replace Power Pack. Seal it.")
+    elif "Close" in evm_error: st.error("Check 'Busy' light. Press any button on BU to clear pending ballot, then press Close.")
+
+# === TAB 10: PDF INDEX ===
+with tab10:
     st.header("📑 Training Manual Index")
-    st.markdown("আপনার 191-পাতার PDF Training Manual-এর সূচিপত্র। সহজে Page Number খুঁজে বের করার জন্য।")
-    
-    with st.expander("1. বিতরণ কেন্দ্রে কার্যক্রম (DCRC Activities) ➡️ [পৃষ্ঠা 07-27]"):
-        st.markdown("""
-        * **কী আছে:** * Collection of EVM/VVPAT and checking serial numbers.
-        * Checking the Electoral Roll & Marked Copy.
-        * Collection of Statutory/Non-Statutory forms, tags, and seals.
-        """)
+    with st.expander("1. DCRC Activities [Pg 07-27]"): st.write("Collection, Checking Electoral Roll.")
+    with st.expander("2. Pre-Poll Day [Pg 28-37]"): st.write("Voting compartment, notices.")
+    with st.expander("4. Poll Day [Pg 46-86]"): st.write("Mock Poll, Sealing EVM.")
+    with st.expander("5. Voting Process [Pg 87-109]"): st.write("Identification, Ink, CU Operation.")
+    with st.expander("6. Exceptional Situations [Pg 110-132]"): st.write("Challenged/Tendered Votes, 49MA.")
+    with st.expander("7. Close of Poll [Pg 133-166]"): st.write("Form 17C, Sealing cases.")
+
+# === TAB 11: MEMORY TEST ===
+with tab11:
+    st.header("🧠 Memorize Your Booth Details")
+    if not booth_data or booth_data.get("AC_Name", "") == "":
+        st.warning("⚠️ Please configure your exact Booth Details in the 'Dashboard' tab first before taking the test.")
+    else:
+        test_type = st.selectbox("What do you want to test?", ["Assembly Constituency (AC)", "Polling Station (PS)"])
+        if test_type == "Assembly Constituency (AC)":
+            st.info("Question: What is your AC Name & Number?")
+            correct_answer = str(booth_data.get("AC_Name", ""))
+        else:
+            st.info(f"Question: What is the Name for Polling Station No. {booth_data.get('PS_No', '')}?")
+            correct_answer = str(booth_data.get("PS_Name", ""))
+            
+        user_guess = st.text_input("Type your answer here:")
         
-    with st.expander("2. পোলিং স্টেশনে ভোটের আগের দিনে ক্রিয়াকলাপ (Pre-Poll Day Activities) ➡️ [পৃষ্ঠা 28-37]"):
-        st.markdown("""
-        * **কী আছে:**
-        * Setting up the voting compartment.
-        * Displaying notices outside the polling station.
-        * Checking voting materials inside the booth.
-        """)
-
-    with st.expander("3. ভোটকেন্দ্রগুলির চারপাশে আইনশৃঙ্খলা (Law & Order Maintenance) ➡️ [পৃষ্ঠা 38-43]"):
-        st.markdown("""
-        * **কী আছে:**
-        * 100-meter and 200-meter perimeter rules.
-        * Regulating entry into the polling station.
-        * Coordination with Sector Officer and Police.
-        """)
-
-    with st.expander("4. পোলিং স্টেশনে ভোটের দিনে ক্রিয়াকলাপ (Poll Day Activities) ➡️ [পৃষ্ঠা 46-86]"):
-        st.markdown("""
-        * **কী আছে:**
-        * Mock Poll procedures and clearing data (CRITICAL).
-        * Sealing the EVM with Green Paper Seal, Special Tag, etc.
-        * Declaration by Presiding Officer before the commencement of poll.
-        """)
-
-    with st.expander("5. ভোট গ্রহণ প্রক্রিয়া (Voting Process) ➡️ [পৃষ্ঠা 87-109]"):
-        st.markdown("""
-        * **কী আছে:**
-        * Duties of 1st, 2nd, and 3rd Polling Officers.
-        * Voter Identification and checking EPIC/Alternate IDs.
-        * Application of Indelible Ink.
-        * Operating the Control Unit (CU) to issue ballots.
-        """)
-
-    with st.expander("6. কিছু ব্যতিক্রমী / বিশেষ পরিস্থিতি (Exceptional/Special Situations) ➡️ [পৃষ্ঠা 110-132]"):
-        st.markdown("""
-        * **কী আছে:**
-        * Challenged Votes & Tendered Votes.
-        * Voters deciding not to vote (Rule 49-O).
-        * Blind and Infirm Voters.
-        * Test Votes (Rule 49MA) for VVPAT slip complaints.
-        """)
-
-    with st.expander("7. ভোট গ্রহণ সমাপ্তিতে কার্যাদি (Close of Poll Activities) ➡️ [পৃষ্ঠা 133-166]"):
-        st.markdown("""
-        * **কী আছে:**
-        * Distribution of queue slips at 6:00 PM.
-        * Pressing the CLOSE button on the CU.
-        * Packaging and sealing EVM/VVPAT into carrying cases.
-        * Filling out Form 17C and the Presiding Officer's Diary.
-        """)
-
-    with st.expander("8. রিসিভিং সেন্টারে ক্রিয়াকলাপ (RC Activities) ➡️ [পৃষ্ঠা 167-176]"):
-        st.markdown("""
-        * **কী আছে:**
-        * Handing over sealed EVMs and VVPATs.
-        * Submission of Statutory (Green) and Non-Statutory (Yellow) packets.
-        * Final clearance from the Receiving Center.
-        """)
-
-    with st.expander("9. SMS Poll Reporting & ECINET app ➡️ [পৃষ্ঠা 177-178]"):
-        st.markdown("""
-        * **কী আছে:**
-        * Hourly / 2-Hourly SMS reporting formats.
-        * Instructions for using the ECINET mobile application.
-        """)
+        if st.button("Submit Answer", type="primary"):
+            if user_guess.strip().lower() == correct_answer.strip().lower():
+                result = "Passed ✅"
+                st.balloons()
+                st.success(f"Excellent! The correct answer is **{correct_answer}**.")
+            else:
+                result = "Failed ❌"
+                st.error(f"Incorrect. The correct answer was **{correct_answer}**. Try again!")
+                
+            with st.spinner("Logging test result..."):
+                try:
+                    timestamp = datetime.now().strftime("%d-%m-%Y %I:%M %p")
+                    sheet_memory.append_row([timestamp, test_type, user_guess.strip(), result])
+                    st.cache_data.clear()
+                except Exception as e: st.error("Could not save the result to Google Sheets.")
+                    
+        st.divider()
+        st.subheader("Your Test History")
+        try:
+            mem_records = sheet_memory.get_all_records()
+            if mem_records:
+                recent_tests = pd.DataFrame(mem_records).iloc[::-1].head(5)
+                st.dataframe(recent_tests, use_container_width=True, hide_index=True)
+            else: st.caption("Take a test to see your results here.")
+        except: st.caption("Unable to load history.")

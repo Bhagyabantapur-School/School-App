@@ -6,10 +6,10 @@ from datetime import datetime, date, timedelta
 import os
 
 # --- Page Configuration ---
-st.set_page_config(page_title="Election Duty App", page_icon="🗳️", layout="centered")
+st.set_page_config(page_title="Election Duty 2026 - Party 116", page_icon="🗳️", layout="centered")
 
 # --- Setup Your Sheet URL Here ---
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1ennsNFWIWfEwqKukv0OPIKF8r7T-oK7yD6kobCRmquc/edit"
+SHEET_URL = "https://docs.google.com/spreadsheets/d/YOUR_ACTUAL_SHEET_ID_HERE/edit"
 
 # --- Google Sheets Authentication ---
 SCOPES = [
@@ -35,8 +35,8 @@ try:
     try:
         sheet_booth = spreadsheet.worksheet("Booth_Data")
     except:
-        sheet_booth = spreadsheet.add_worksheet(title="Booth_Data", rows="10", cols="10")
-        sheet_booth.append_row(["AC_Name", "PS_No", "PS_Name", "Total", "Male", "Female", "TG"])
+        sheet_booth = spreadsheet.add_worksheet(title="Booth_Data", rows="10", cols="15")
+        sheet_booth.append_row(["AC_Name", "PS_No", "PS_Name", "Total", "Male", "Female", "TG", "EDC", "ASD", "Proxy", "PB"])
         
     try:
         sheet_memory = spreadsheet.worksheet("Memory_Log")
@@ -77,21 +77,20 @@ team_list = [{"sheet_row": i + 2, "data": r} for i, r in enumerate(team_records)
 if "edit_booth" not in st.session_state:
     st.session_state.edit_booth = False
 
-# --- NO SIDEBAR: Dynamic App Header & Top Buttons ---
-header_col1, header_col2 = st.columns([3, 1])
+# --- DYNAMIC APP HEADER (Logo and Titles Side-by-Side) ---
+header_col1, header_col2 = st.columns([1, 4], vertical_alignment="center")
 
 with header_col1:
-    if booth_data and booth_data.get("Total", "") != "":
-        st.title(f"🗳️ {booth_data.get('AC_Name', 'AC')} | Booth {booth_data.get('PS_No', '')}")
-        st.markdown(f"**{booth_data.get('PS_Name', 'Polling Station')}**")
-    else:
-        st.title("🗳️ Election Duty App")
-        st.markdown("⚠️ **Please enter your Booth Data in the Dashboard tab below.**")
+    if os.path.exists("election_logo.png"):
+        st.image("election_logo.png", width=80) # Smaller Logo
 
 with header_col2:
-    if os.path.exists("election_logo.png"):
-        st.image("election_logo.png", use_container_width=True)
-    st.link_button("📊 Google Sheet", SHEET_URL, use_container_width=True)
+    st.title("🗳️ Election Duty 2026")
+    st.markdown("### Party No. 116")
+    if booth_data and booth_data.get("Total", "") != "":
+        st.caption(f"**{booth_data.get('AC_Name', 'AC')} | Booth {booth_data.get('PS_No', '')} - {booth_data.get('PS_Name', 'Polling Station')}**")
+    else:
+        st.caption("⚠️ **Please enter your Booth Data in the Dashboard tab below.**")
 
 st.divider()
 
@@ -114,33 +113,58 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
 with tab1:
     st.header("🏢 Booth Details")
     if booth_data and booth_data.get("Total", "") != "" and not st.session_state.edit_booth:
+        # View Mode
+        st.subheader("General Electors")
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Electors", booth_data.get("Total", 0))
+        c1.metric("Total", booth_data.get("Total", 0))
         c2.metric("Male", booth_data.get("Male", 0))
         c3.metric("Female", booth_data.get("Female", 0))
         c4.metric("Third Gender", booth_data.get("TG", 0))
+        
+        st.subheader("Special Voters")
+        c5, c6, c7, c8 = st.columns(4)
+        c5.metric("EDC", booth_data.get("EDC", 0))
+        c6.metric("ASD", booth_data.get("ASD", 0))
+        c7.metric("Proxy (CSV)", booth_data.get("Proxy", 0))
+        c8.metric("Postal Ballot", booth_data.get("PB", 0))
+        
         st.divider()
         if st.button("✏️ Edit Booth Details"):
             st.session_state.edit_booth = True
             st.rerun()
     else:
+        # Edit / Entry Mode
         st.info("Please enter or update your exact booth details from the Electoral Roll.")
         with st.form("update_booth"):
             ac = st.text_input("AC Name & No.", value=str(booth_data.get("AC_Name", "")))
             ps_no = st.text_input("PS No.", value=str(booth_data.get("PS_No", "")))
             ps_name = st.text_input("PS Name", value=str(booth_data.get("PS_Name", "")))
             
+            st.markdown("#### General Electors")
             col1, col2, col3, col4 = st.columns(4)
             val_total = int(booth_data.get("Total", 0)) if booth_data.get("Total") else 0
             val_male = int(booth_data.get("Male", 0)) if booth_data.get("Male") else 0
             val_female = int(booth_data.get("Female", 0)) if booth_data.get("Female") else 0
             val_tg = int(booth_data.get("TG", 0)) if booth_data.get("TG") else 0
             
-            with col1: total = st.number_input("Total Electors", min_value=0, value=val_total)
+            with col1: total = st.number_input("Total", min_value=0, value=val_total)
             with col2: male = st.number_input("Male", min_value=0, value=val_male)
             with col3: female = st.number_input("Female", min_value=0, value=val_female)
-            with col4: tg = st.number_input("Third Gender", min_value=0, value=val_tg)
+            with col4: tg = st.number_input("TG", min_value=0, value=val_tg)
             
+            st.markdown("#### Special Voters (From Marked Copy)")
+            col5, col6, col7, col8 = st.columns(4)
+            val_edc = int(booth_data.get("EDC", 0)) if booth_data.get("EDC") else 0
+            val_asd = int(booth_data.get("ASD", 0)) if booth_data.get("ASD") else 0
+            val_proxy = int(booth_data.get("Proxy", 0)) if booth_data.get("Proxy") else 0
+            val_pb = int(booth_data.get("PB", 0)) if booth_data.get("PB") else 0
+            
+            with col5: edc = st.number_input("EDC Voters", min_value=0, value=val_edc)
+            with col6: asd = st.number_input("ASD Voters", min_value=0, value=val_asd)
+            with col7: proxy = st.number_input("Proxy (CSV)", min_value=0, value=val_proxy)
+            with col8: pb = st.number_input("Postal Ballot", min_value=0, value=val_pb)
+            
+            st.divider()
             c_btn1, c_btn2 = st.columns([1, 4])
             with c_btn1: submitted = st.form_submit_button("💾 Save Data", type="primary")
             with c_btn2:
@@ -153,8 +177,8 @@ with tab1:
                 with st.spinner("Saving Booth Data..."):
                     try:
                         sheet_booth.clear()
-                        sheet_booth.append_row(["AC_Name", "PS_No", "PS_Name", "Total", "Male", "Female", "TG"])
-                        sheet_booth.append_row([ac, ps_no, ps_name, total, male, female, tg])
+                        sheet_booth.append_row(["AC_Name", "PS_No", "PS_Name", "Total", "Male", "Female", "TG", "EDC", "ASD", "Proxy", "PB"])
+                        sheet_booth.append_row([ac, ps_no, ps_name, total, male, female, tg, edc, asd, proxy, pb])
                         st.session_state.edit_booth = False
                         st.success("Booth Data Saved Successfully!")
                         st.cache_data.clear()
@@ -290,7 +314,7 @@ with tab5:
         st.dataframe(df.style.apply(highlight_pending, axis=1), use_container_width=True, hide_index=True)
     else: st.info("No logs found yet.")
 
-# === TAB 6: 1st PO GUIDE (FULL RESTORED) ===
+# === TAB 6: 1st PO GUIDE ===
 with tab6:
     st.header("📖 1st Polling Officer Guide")
     st.markdown("আপনার Polling Day-এর মূল দায়িত্ব ও নিয়মাবলি (Rules & Regulations).")
@@ -337,7 +361,6 @@ with tab7:
     st.header("⏳ Election Day Live Timeline")
     st.markdown("Your app is automatically tracking the current time to show your exact statutory duty right now.")
     
-    # Get current time in IST (Indian Standard Time) by adding 5 hours 30 mins to UTC
     ist_now = datetime.utcnow() + timedelta(hours=5, minutes=30)
     current_time_str = ist_now.strftime("%I:%M %p")
     current_hour_fraction = ist_now.hour + (ist_now.minute / 60.0)
@@ -400,7 +423,7 @@ with tab8:
         if expected_evm_total == actual_evm_total: st.success("✅ MATCH! The 17A register perfectly matches the EVM.")
         else: st.error(f"🚨 MISMATCH! Difference of {abs(expected_evm_total - actual_evm_total)} votes.")
 
-# === TAB 9: EVM TROUBLESHOOTER (FULL RESTORED) ===
+# === TAB 9: EVM TROUBLESHOOTER ===
 with tab9:
     st.header("🛠️ EVM Troubleshooting (ইভিএম সমস্যা সমাধান)")
     st.markdown("EVM বা VVPAT-এ কোনো Error Message দেখালে এখান থেকে তার সমাধান (Solution) দেখে নিন।")
@@ -418,129 +441,44 @@ with tab9:
 
     if "Link Error" in evm_error:
         st.error("🚨 CU Display: 'LINK ERROR'")
-        st.write("**Solution (সমাধান):**")
-        st.markdown("""
-        1. প্রথমেই Control Unit (CU)-টি **Switch OFF** করুন।
-        2. Cables ঠিকমত কানেক্ট করা আছে কিনা চেক করুন। **(BU এর কেবল VVPAT এ, এবং VVPAT এর কেবল CU তে লাগাতে হবে)**।
-        3. Connector-এর পিনগুলো ঠিক আছে কিনা দেখুন, জোর করে ঢোকাবেন না।
-        4. সব ঠিক থাকলে আবার CU **Switch ON** করুন। সমস্যা না মিটলে Sector Officer-কে জানান।
-        """)
-        
+        st.write("**Solution (সমাধান):** প্রথমেই Control Unit (CU)-টি **Switch OFF** করুন। Cables ঠিকমত কানেক্ট করা আছে কিনা চেক করুন। **(BU এর কেবল VVPAT এ, এবং VVPAT এর কেবল CU তে লাগাতে হবে)**। সব ঠিক থাকলে আবার CU **Switch ON** করুন।")
     elif "Pressed Error" in evm_error:
         st.error("🚨 CU Display: 'PRESSED ERROR'")
-        st.write("**Solution (সমাধান):**")
-        st.markdown("""
-        1. এর মানে হলো Ballot Unit (BU)-এর কোনো বোতাম (Button) আগে থেকেই আটকে (jam) আছে।
-        2. BU-তে গিয়ে চেক করুন কোনো বোতাম আটকে আছে কিনা, থাকলে তা ধীরে ধীরে ছাড়িয়ে দিন।
-        3. ঠিক না হলে Sector Officer-কে জানিয়ে পুরো BU রিপ্লেস (Replace) করতে হবে।
-        """)
-        
+        st.write("**Solution (সমাধান):** এর মানে হলো Ballot Unit (BU)-এর কোনো বোতাম (Button) আগে থেকেই আটকে (jam) আছে। BU-তে গিয়ে চেক করুন কোনো বোতাম আটকে আছে কিনা, থাকলে তা ধীরে ধীরে ছাড়িয়ে দিন।")
     elif "VVPAT Beeping" in evm_error:
         st.error("🚨 VVPAT একটানা Beep শব্দ করছে / Error 2.6")
-        st.write("**Solution (সমাধান):**")
-        st.markdown("""
-        1. VVPAT-এর Paper Roll শেষ হয়ে গেলে বা কাগজ আটকে (Paper Jam) গেলে এই শব্দ হয়।
-        2. **Actual Poll চলাকালীন VVPAT খারাপ হলে, শুধুমাত্র VVPAT পরিবর্তন করতে হবে (EVM বা BU নয়)।**
-        3. পরিবর্তনের সময় Mock Poll করার প্রয়োজন নেই, শুধু একটি Test Vote দিয়ে চেক করতে হবে। Sector Officer-কে অবিলম্বে খবর দিন।
-        """)
-        
+        st.write("**Solution (সমাধান):** VVPAT-এর Paper Roll শেষ হয়ে গেলে বা কাগজ আটকে গেলে এই শব্দ হয়। **Actual Poll চলাকালীন VVPAT খারাপ হলে, শুধুমাত্র VVPAT পরিবর্তন করতে হবে (EVM বা BU নয়)।**")
     elif "Invalid Error" in evm_error:
         st.error("🚨 CU Display: 'INVALID'")
-        st.write("**Solution (সমাধান):**")
-        st.markdown("""
-        1. আপনি ভুল Sequence-এ বোতাম টিপেছেন।
-        2. যেমন: 'Close' বোতাম টেপার আগে যদি 'Result' বোতাম টেপেন, তাহলে এই Error দেখাবে।
-        3. সঠিক Sequence মনে রাখুন: **CLOSE ➡️ RESULT ➡️ CLEAR** (Mock poll-এর সময়)।
-        """)
-        
+        st.write("**Solution (সমাধান):** আপনি ভুল Sequence-এ বোতাম টিপেছেন। সঠিক Sequence মনে রাখুন: **CLOSE ➡️ RESULT ➡️ CLEAR** (Mock poll-এর সময়)।")
     elif "Low Battery" in evm_error:
         st.error("🚨 CU Display: 'BATTERY LOW'")
-        st.write("**Solution (সমাধান):**")
-        st.markdown("""
-        1. CU **Switch OFF** করুন।
-        2. Presiding Officer-এর কাছে থাকা Extra Battery (Power Pack) দিয়ে CU-এর ব্যাটারি পরিবর্তন করুন।
-        3. এটি করার আগে অবশ্যই Polling Agent-দের উপস্থিতিতে ব্যাটারি কম্পার্টমেন্টের সিল ভাঙতে হবে এবং নতুন সিল লাগাতে হবে (Part-II of PO Report)।
-        """)
-        
+        st.write("**Solution (সমাধান):** CU **Switch OFF** করুন। Presiding Officer-এর কাছে থাকা Extra Battery (Power Pack) দিয়ে CU-এর ব্যাটারি পরিবর্তন করুন।")
     elif "Close Button Not Working" in evm_error:
         st.error("🚨 Close Button কাজ করছে না")
-        st.write("**Solution (সমাধান):**")
-        st.markdown("""
-        1. ভোট গ্রহণ শেষে (Close of Poll) যদি Close বোতাম কাজ না করে, চেক করুন 'Busy' ইন্ডিকেটর জ্বলছে কিনা।
-        2. যদি 'Busy' ইন্ডিকেটর জ্বলে থাকে, তার মানে কোনো ভোটারের জন্য Ballot ইস্যু করা আছে কিন্তু সে ভোট দেয়নি।
-        3. BU-তে গিয়ে যেকোনো একটি বোতাম টিপে সেই ব্যালটটি বাতিল/সম্পূর্ণ করুন, এরপর CU-তে 'Close' বোতাম কাজ করবে।
-        """)
+        st.write("**Solution (সমাধান):** ভোট গ্রহণ শেষে যদি Close বোতাম কাজ না করে, চেক করুন 'Busy' ইন্ডিকেটর জ্বলছে কিনা। BU-তে গিয়ে যেকোনো একটি বোতাম টিপে সেই ব্যালটটি বাতিল/সম্পূর্ণ করুন, এরপর CU-তে 'Close' বোতাম কাজ করবে।")
 
-# === TAB 10: PDF INDEX (FULL RESTORED) ===
+# === TAB 10: PDF INDEX ===
 with tab10:
     st.header("📑 Training Manual Index")
     st.markdown("আপনার 191-পাতার PDF Training Manual-এর সূচিপত্র। সহজে Page Number খুঁজে বের করার জন্য।")
     
     with st.expander("1. বিতরণ কেন্দ্রে কার্যক্রম (DCRC Activities) ➡️ [পৃষ্ঠা 07-27]"):
-        st.markdown("""
-        * **কী আছে:** * Collection of EVM/VVPAT and checking serial numbers.
-        * Checking the Electoral Roll & Marked Copy.
-        * Collection of Statutory/Non-Statutory forms, tags, and seals.
-        """)
-        
+        st.markdown("* Collection of EVM/VVPAT and checking serial numbers.\n* Checking the Electoral Roll & Marked Copy.\n* Collection of Statutory/Non-Statutory forms, tags, and seals.")
     with st.expander("2. পোলিং স্টেশনে ভোটের আগের দিনে ক্রিয়াকলাপ (Pre-Poll Day) ➡️ [পৃষ্ঠা 28-37]"):
-        st.markdown("""
-        * **কী আছে:**
-        * Setting up the voting compartment.
-        * Displaying notices outside the polling station.
-        * Checking voting materials inside the booth.
-        """)
-
+        st.markdown("* Setting up the voting compartment.\n* Displaying notices outside the polling station.\n* Checking voting materials inside the booth.")
     with st.expander("3. ভোটকেন্দ্রগুলির চারপাশে আইনশৃঙ্খলা (Law & Order) ➡️ [পৃষ্ঠা 38-43]"):
-        st.markdown("""
-        * **কী আছে:**
-        * 100-meter and 200-meter perimeter rules.
-        * Regulating entry into the polling station.
-        * Coordination with Sector Officer and Police.
-        """)
-
+        st.markdown("* 100-meter and 200-meter perimeter rules.\n* Regulating entry into the polling station.")
     with st.expander("4. পোলিং স্টেশনে ভোটের দিনে ক্রিয়াকলাপ (Poll Day) ➡️ [পৃষ্ঠা 46-86]"):
-        st.markdown("""
-        * **কী আছে:**
-        * Mock Poll procedures and clearing data (CRITICAL).
-        * Sealing the EVM with Green Paper Seal, Special Tag, etc.
-        * Declaration by Presiding Officer before the commencement of poll.
-        """)
-
+        st.markdown("* Mock Poll procedures and clearing data (CRITICAL).\n* Sealing the EVM with Green Paper Seal, Special Tag, etc.")
     with st.expander("5. ভোট গ্রহণ প্রক্রিয়া (Voting Process) ➡️ [পৃষ্ঠা 87-109]"):
-        st.markdown("""
-        * **কী আছে:**
-        * Duties of 1st, 2nd, and 3rd Polling Officers.
-        * Voter Identification and checking EPIC/Alternate IDs.
-        * Application of Indelible Ink.
-        * Operating the Control Unit (CU) to issue ballots.
-        """)
-
+        st.markdown("* Duties of 1st, 2nd, and 3rd Polling Officers.\n* Voter Identification and checking EPIC/Alternate IDs.\n* Application of Indelible Ink.\n* Operating the Control Unit (CU).")
     with st.expander("6. কিছু ব্যতিক্রমী / বিশেষ পরিস্থিতি (Exceptional Situations) ➡️ [পৃষ্ঠা 110-132]"):
-        st.markdown("""
-        * **কী আছে:**
-        * Challenged Votes & Tendered Votes.
-        * Voters deciding not to vote (Rule 49-O).
-        * Blind and Infirm Voters.
-        * Test Votes (Rule 49MA) for VVPAT slip complaints.
-        """)
-
+        st.markdown("* Challenged Votes & Tendered Votes.\n* Voters deciding not to vote (Rule 49-O).\n* Test Votes (Rule 49MA).")
     with st.expander("7. ভোট গ্রহণ সমাপ্তিতে কার্যাদি (Close of Poll) ➡️ [পৃষ্ঠা 133-166]"):
-        st.markdown("""
-        * **কী আছে:**
-        * Distribution of queue slips at 6:00 PM.
-        * Pressing the CLOSE button on the CU.
-        * Packaging and sealing EVM/VVPAT into carrying cases.
-        * Filling out Form 17C and the Presiding Officer's Diary.
-        """)
-
+        st.markdown("* Distribution of queue slips at 6:00 PM.\n* Pressing the CLOSE button on the CU.\n* Filling out Form 17C and the Presiding Officer's Diary.")
     with st.expander("8. রিসিভিং সেন্টারে ক্রিয়াকলাপ (RC Activities) ➡️ [পৃষ্ঠা 167-176]"):
-        st.markdown("""
-        * **কী আছে:**
-        * Handing over sealed EVMs and VVPATs.
-        * Submission of Statutory (Green) and Non-Statutory (Yellow) packets.
-        * Final clearance from the Receiving Center.
-        """)
+        st.markdown("* Handing over sealed EVMs and VVPATs.\n* Submission of Statutory (Green) and Non-Statutory (Yellow) packets.")
 
 # === TAB 11: MEMORY TEST ===
 with tab11:

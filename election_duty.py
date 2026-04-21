@@ -290,19 +290,47 @@ with tab5:
         st.dataframe(df.style.apply(highlight_pending, axis=1), use_container_width=True, hide_index=True)
     else: st.info("No logs found yet.")
 
-# === TAB 6: 1st PO GUIDE ===
+# === TAB 6: 1st PO GUIDE (FULL RESTORED) ===
 with tab6:
     st.header("📖 1st Polling Officer Guide")
-    with st.expander("📝 1. Marking the Electoral Roll"):
-        st.write("* **Male:** Diagonal red line.\n* **Female:** Diagonal red line AND circle the serial number.\n* **Third Gender:** Diagonal red line AND star/checkmark.")
-    with st.expander("🕵️ 2. Test Vote (Rule 49MA)"):
-        st.write("Take written Declaration. Enter in 17A with Remarks 'Rule 49MA'.")
-    with st.expander("📜 3. Tendered Vote"):
-        st.write("Voter gets Tendered Ballot Paper, signs in Form 17B, NOT 17A.")
-    with st.expander("👤 4. Proxy Voter (CSV)"):
-        st.write("Proxy gets ink on Middle Finger of Right Hand.")
+    st.markdown("আপনার Polling Day-এর মূল দায়িত্ব ও নিয়মাবলি (Rules & Regulations).")
+    
+    with st.expander("📝 1. Marking the Electoral Roll (ভোটার তালিকা চিহ্নিতকরণ)"):
+        st.markdown("""
+        ভোটারের পরিচয় (Identity) verify করার পর **Marked Copy of the Electoral Roll**-এ নিচের নিয়মে দাগ দিন:
+        * **Male Voter (পুরুষ):** ভোটারের বক্সের উপর আড়াআড়ি লাল দাগ (Diagonal red line) টানুন।
+        * **Female Voter (মহিলা):** আড়াআড়ি লাল দাগ দিন **এবং** Serial Number-টি গোল (Circle) করুন।
+        * **Third Gender (তৃতীয় লিঙ্গ):** আড়াআড়ি লাল দাগ দিন **এবং** Serial Number-এর পাশে একটি স্টার (*) বা টিক চিহ্ন (✓) দিন।
+        """)
+
+    with st.expander("🕵️ 2. Test Vote (টেস্ট ভোট) - Rule 49MA"):
+        st.markdown("""
+        যদি কোনো ভোটার দাবি করেন যে তিনি যাকে ভোট দিয়েছেন, **VVPAT**-এ সেই প্রার্থীর Slip প্রিন্ট হয়নি, তবে **Rule 49MA** প্রযোজ্য হবে:
+        * প্রথমে ভোটারের কাছ থেকে একটি লিখিত **Declaration** (Annexure/Form-এর মাধ্যমে) নিতে হবে।
+        * **Form 17A (Register of Voters)**-তে এই Test Vote-এর জন্য নতুন একটি Entry করতে হবে এবং 'Remarks' কলামে স্পষ্ট করে **"Rule 49MA"** লিখতে হবে।
+        """)
+
+    with st.expander("📜 3. Tendered Vote (টেন্ডার ভোট)"):
+        st.markdown("""
+        যদি কোনো প্রকৃত ভোটার বুথে এসে দেখেন যে তার নামে আগেই কেউ ভোট দিয়ে চলে গেছে:
+        * তাকে **EVM**-এ ভোট দিতে দেওয়া যাবে না।
+        * Presiding Officer তাকে একটি **Tendered Ballot Paper** (ব্যালট পেপার) দেবেন।
+        * এই ভোটারের সই/টিপসই **Form 17B (Register of Tendered Votes)**-তে নিতে হবে, Form 17A-তে নয়।
+        """)
+
+    with st.expander("👤 4. Proxy Voter (প্রক্সি ভোটার) - CSV"):
+        st.markdown("""
+        * **Classified Service Voter (CSV)**-দের ক্ষেত্রে তাদের নিযুক্ত Proxy ভোটার ভোট দিতে পারেন।
+        * Marked Copy-তে আসল ভোটারের নামের পাশে **'CSV'** লেখা থাকবে।
+        * 2nd Polling Officer Proxy ভোটারের ডান হাতের মধ্যমায় (Middle Finger of Right Hand) কালির দাগ (Indelible Ink) লাগাবেন (বাঁ হাতের তর্জনীতে নয়)।
+        """)
+
     with st.expander("⚠️ 5. ASD, Challenge & EDC"):
-        st.write("Thorough identity check for ASD. Challenges happen at your desk. EDC voters allowed if for your booth.")
+        st.markdown("""
+        * **ASD (Absent, Shifted, Dead):** ভোটারের নাম ASD লিস্টে থাকলে, পরিচয় খুব সতর্কভাবে verify করুন। এদের থেকে একটি আলাদা Declaration নেওয়া হবে।
+        * **Challenged Votes:** কোনো Polling Agent ভোটারের পরিচয় নিয়ে আপত্তি (challenge) জানালে, তা আপনার টেবিলেই হবে। Agent-কে ₹2 challenge fee দিয়ে Presiding Officer-এর কাছে যেতে বলুন। সিদ্ধান্ত না হওয়া পর্যন্ত Electoral Roll-এ দাগ দেবেন না।
+        * **EDC (Election Duty Certificate):** Voter on election duty. Marked copy-তে নাম strike off করা থাকলেও, EDC নিয়ে ভোট দিতে এলে তাদের ভোট দিতে হবে এবং 17A তে Entry হবে।
+        """)
 
 # === TAB 7: TIMELINE (LIVE) ===
 with tab7:
@@ -334,7 +362,6 @@ with tab7:
         {"hour": 19, "time": "07:00 PM", "title": "Final Sealing & Forms", "desc": "Pack CU, BU, VVPAT. Complete Form 17C."}
     ]
     
-    # Determine which event is active right now
     for i, event in enumerate(timeline_events):
         is_active = False
         if i < len(timeline_events) - 1:
@@ -373,26 +400,147 @@ with tab8:
         if expected_evm_total == actual_evm_total: st.success("✅ MATCH! The 17A register perfectly matches the EVM.")
         else: st.error(f"🚨 MISMATCH! Difference of {abs(expected_evm_total - actual_evm_total)} votes.")
 
-# === TAB 9: EVM TROUBLESHOOTER ===
+# === TAB 9: EVM TROUBLESHOOTER (FULL RESTORED) ===
 with tab9:
-    st.header("🛠️ EVM Troubleshooting")
-    evm_error = st.selectbox("Select Error", ["Select...", "Link Error", "Pressed Error", "VVPAT Beeping", "Invalid Error", "Battery Low", "Close Button Not Working"])
-    if "Link" in evm_error: st.error("Switch OFF CU. Check cables (BU -> VVPAT -> CU). Switch ON.")
-    elif "Pressed" in evm_error: st.error("BU button is jammed. Clear it.")
-    elif "Beeping" in evm_error: st.error("VVPAT paper jam/empty. Replace VVPAT only.")
-    elif "Invalid" in evm_error: st.error("Wrong sequence. Remember: CLOSE -> RESULT -> CLEAR.")
-    elif "Battery" in evm_error: st.error("Switch OFF CU. Replace Power Pack. Seal it.")
-    elif "Close" in evm_error: st.error("Check 'Busy' light. Press any button on BU to clear pending ballot, then press Close.")
+    st.header("🛠️ EVM Troubleshooting (ইভিএম সমস্যা সমাধান)")
+    st.markdown("EVM বা VVPAT-এ কোনো Error Message দেখালে এখান থেকে তার সমাধান (Solution) দেখে নিন।")
+    
+    evm_error = st.selectbox("Select EVM/VVPAT Error (সমস্যা নির্বাচন করুন)", [
+        "Select an error...",
+        "1. Link Error / Communication Error",
+        "2. Pressed Error",
+        "3. VVPAT Beeping / Error 2.6",
+        "4. Invalid Error",
+        "5. Low Battery / Replace Power Pack",
+        "6. Close Button Not Working"
+    ])
+    st.divider()
 
-# === TAB 10: PDF INDEX ===
+    if "Link Error" in evm_error:
+        st.error("🚨 CU Display: 'LINK ERROR'")
+        st.write("**Solution (সমাধান):**")
+        st.markdown("""
+        1. প্রথমেই Control Unit (CU)-টি **Switch OFF** করুন।
+        2. Cables ঠিকমত কানেক্ট করা আছে কিনা চেক করুন। **(BU এর কেবল VVPAT এ, এবং VVPAT এর কেবল CU তে লাগাতে হবে)**।
+        3. Connector-এর পিনগুলো ঠিক আছে কিনা দেখুন, জোর করে ঢোকাবেন না।
+        4. সব ঠিক থাকলে আবার CU **Switch ON** করুন। সমস্যা না মিটলে Sector Officer-কে জানান।
+        """)
+        
+    elif "Pressed Error" in evm_error:
+        st.error("🚨 CU Display: 'PRESSED ERROR'")
+        st.write("**Solution (সমাধান):**")
+        st.markdown("""
+        1. এর মানে হলো Ballot Unit (BU)-এর কোনো বোতাম (Button) আগে থেকেই আটকে (jam) আছে।
+        2. BU-তে গিয়ে চেক করুন কোনো বোতাম আটকে আছে কিনা, থাকলে তা ধীরে ধীরে ছাড়িয়ে দিন।
+        3. ঠিক না হলে Sector Officer-কে জানিয়ে পুরো BU রিপ্লেস (Replace) করতে হবে।
+        """)
+        
+    elif "VVPAT Beeping" in evm_error:
+        st.error("🚨 VVPAT একটানা Beep শব্দ করছে / Error 2.6")
+        st.write("**Solution (সমাধান):**")
+        st.markdown("""
+        1. VVPAT-এর Paper Roll শেষ হয়ে গেলে বা কাগজ আটকে (Paper Jam) গেলে এই শব্দ হয়।
+        2. **Actual Poll চলাকালীন VVPAT খারাপ হলে, শুধুমাত্র VVPAT পরিবর্তন করতে হবে (EVM বা BU নয়)।**
+        3. পরিবর্তনের সময় Mock Poll করার প্রয়োজন নেই, শুধু একটি Test Vote দিয়ে চেক করতে হবে। Sector Officer-কে অবিলম্বে খবর দিন।
+        """)
+        
+    elif "Invalid Error" in evm_error:
+        st.error("🚨 CU Display: 'INVALID'")
+        st.write("**Solution (সমাধান):**")
+        st.markdown("""
+        1. আপনি ভুল Sequence-এ বোতাম টিপেছেন।
+        2. যেমন: 'Close' বোতাম টেপার আগে যদি 'Result' বোতাম টেপেন, তাহলে এই Error দেখাবে।
+        3. সঠিক Sequence মনে রাখুন: **CLOSE ➡️ RESULT ➡️ CLEAR** (Mock poll-এর সময়)।
+        """)
+        
+    elif "Low Battery" in evm_error:
+        st.error("🚨 CU Display: 'BATTERY LOW'")
+        st.write("**Solution (সমাধান):**")
+        st.markdown("""
+        1. CU **Switch OFF** করুন।
+        2. Presiding Officer-এর কাছে থাকা Extra Battery (Power Pack) দিয়ে CU-এর ব্যাটারি পরিবর্তন করুন।
+        3. এটি করার আগে অবশ্যই Polling Agent-দের উপস্থিতিতে ব্যাটারি কম্পার্টমেন্টের সিল ভাঙতে হবে এবং নতুন সিল লাগাতে হবে (Part-II of PO Report)।
+        """)
+        
+    elif "Close Button Not Working" in evm_error:
+        st.error("🚨 Close Button কাজ করছে না")
+        st.write("**Solution (সমাধান):**")
+        st.markdown("""
+        1. ভোট গ্রহণ শেষে (Close of Poll) যদি Close বোতাম কাজ না করে, চেক করুন 'Busy' ইন্ডিকেটর জ্বলছে কিনা।
+        2. যদি 'Busy' ইন্ডিকেটর জ্বলে থাকে, তার মানে কোনো ভোটারের জন্য Ballot ইস্যু করা আছে কিন্তু সে ভোট দেয়নি।
+        3. BU-তে গিয়ে যেকোনো একটি বোতাম টিপে সেই ব্যালটটি বাতিল/সম্পূর্ণ করুন, এরপর CU-তে 'Close' বোতাম কাজ করবে।
+        """)
+
+# === TAB 10: PDF INDEX (FULL RESTORED) ===
 with tab10:
     st.header("📑 Training Manual Index")
-    with st.expander("1. DCRC Activities [Pg 07-27]"): st.write("Collection, Checking Electoral Roll.")
-    with st.expander("2. Pre-Poll Day [Pg 28-37]"): st.write("Voting compartment, notices.")
-    with st.expander("4. Poll Day [Pg 46-86]"): st.write("Mock Poll, Sealing EVM.")
-    with st.expander("5. Voting Process [Pg 87-109]"): st.write("Identification, Ink, CU Operation.")
-    with st.expander("6. Exceptional Situations [Pg 110-132]"): st.write("Challenged/Tendered Votes, 49MA.")
-    with st.expander("7. Close of Poll [Pg 133-166]"): st.write("Form 17C, Sealing cases.")
+    st.markdown("আপনার 191-পাতার PDF Training Manual-এর সূচিপত্র। সহজে Page Number খুঁজে বের করার জন্য।")
+    
+    with st.expander("1. বিতরণ কেন্দ্রে কার্যক্রম (DCRC Activities) ➡️ [পৃষ্ঠা 07-27]"):
+        st.markdown("""
+        * **কী আছে:** * Collection of EVM/VVPAT and checking serial numbers.
+        * Checking the Electoral Roll & Marked Copy.
+        * Collection of Statutory/Non-Statutory forms, tags, and seals.
+        """)
+        
+    with st.expander("2. পোলিং স্টেশনে ভোটের আগের দিনে ক্রিয়াকলাপ (Pre-Poll Day) ➡️ [পৃষ্ঠা 28-37]"):
+        st.markdown("""
+        * **কী আছে:**
+        * Setting up the voting compartment.
+        * Displaying notices outside the polling station.
+        * Checking voting materials inside the booth.
+        """)
+
+    with st.expander("3. ভোটকেন্দ্রগুলির চারপাশে আইনশৃঙ্খলা (Law & Order) ➡️ [পৃষ্ঠা 38-43]"):
+        st.markdown("""
+        * **কী আছে:**
+        * 100-meter and 200-meter perimeter rules.
+        * Regulating entry into the polling station.
+        * Coordination with Sector Officer and Police.
+        """)
+
+    with st.expander("4. পোলিং স্টেশনে ভোটের দিনে ক্রিয়াকলাপ (Poll Day) ➡️ [পৃষ্ঠা 46-86]"):
+        st.markdown("""
+        * **কী আছে:**
+        * Mock Poll procedures and clearing data (CRITICAL).
+        * Sealing the EVM with Green Paper Seal, Special Tag, etc.
+        * Declaration by Presiding Officer before the commencement of poll.
+        """)
+
+    with st.expander("5. ভোট গ্রহণ প্রক্রিয়া (Voting Process) ➡️ [পৃষ্ঠা 87-109]"):
+        st.markdown("""
+        * **কী আছে:**
+        * Duties of 1st, 2nd, and 3rd Polling Officers.
+        * Voter Identification and checking EPIC/Alternate IDs.
+        * Application of Indelible Ink.
+        * Operating the Control Unit (CU) to issue ballots.
+        """)
+
+    with st.expander("6. কিছু ব্যতিক্রমী / বিশেষ পরিস্থিতি (Exceptional Situations) ➡️ [পৃষ্ঠা 110-132]"):
+        st.markdown("""
+        * **কী আছে:**
+        * Challenged Votes & Tendered Votes.
+        * Voters deciding not to vote (Rule 49-O).
+        * Blind and Infirm Voters.
+        * Test Votes (Rule 49MA) for VVPAT slip complaints.
+        """)
+
+    with st.expander("7. ভোট গ্রহণ সমাপ্তিতে কার্যাদি (Close of Poll) ➡️ [পৃষ্ঠা 133-166]"):
+        st.markdown("""
+        * **কী আছে:**
+        * Distribution of queue slips at 6:00 PM.
+        * Pressing the CLOSE button on the CU.
+        * Packaging and sealing EVM/VVPAT into carrying cases.
+        * Filling out Form 17C and the Presiding Officer's Diary.
+        """)
+
+    with st.expander("8. রিসিভিং সেন্টারে ক্রিয়াকলাপ (RC Activities) ➡️ [পৃষ্ঠা 167-176]"):
+        st.markdown("""
+        * **কী আছে:**
+        * Handing over sealed EVMs and VVPATs.
+        * Submission of Statutory (Green) and Non-Statutory (Yellow) packets.
+        * Final clearance from the Receiving Center.
+        """)
 
 # === TAB 11: MEMORY TEST ===
 with tab11:

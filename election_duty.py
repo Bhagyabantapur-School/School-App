@@ -50,12 +50,12 @@ try:
         sheet_17c = spreadsheet.add_worksheet(title="Form_17C", rows="10", cols="10")
         sheet_17c.append_row(["Total_Assigned", "Form_17A", "Rule_49O", "Rule_49M", "Test_Votes", "EVM_Total", "Tendered"])
         
-    # New Sheet for Live Turnout Data
+    # Updated Sheet for Continuous Live Turnout Data
     try:
         sheet_turnout = spreadsheet.worksheet("Turnout_Data")
     except:
-        sheet_turnout = spreadsheet.add_worksheet(title="Turnout_Data", rows="10", cols="10")
-        sheet_turnout.append_row(["Last_Updated", "Male", "Female", "TG", "EDC", "ASD", "Proxy", "PB"])
+        sheet_turnout = spreadsheet.add_worksheet(title="Turnout_Data", rows="100", cols="10")
+        sheet_turnout.append_row(["Time_Block", "Timestamp", "Male", "Female", "TG", "Total_Cast", "EDC", "ASD", "Proxy", "PB"])
         
     try:
         sheet_memory = spreadsheet.worksheet("Memory_Log")
@@ -95,21 +95,23 @@ def fetch_17c_data():
     except: return {}
 
 @st.cache_data(ttl=60)
-def fetch_turnout_data():
-    try: 
-        records = sheet_turnout.get_all_records()
-        if records: return records[0]
-        return {}
-    except: return {}
+def fetch_turnout_records():
+    try: return sheet_turnout.get_all_records()
+    except: return []
 
 records = fetch_logs()
 team_records = fetch_team()
 booth_data = fetch_booth_data()
 data_17c = fetch_17c_data()
-turnout_data = fetch_turnout_data()
+turnout_records = fetch_turnout_records()
 
 pending_sessions = [{"sheet_row": i + 2, "data": r} for i, r in enumerate(records) if r.get("Start Time") == "Pending"]
 team_list = [{"sheet_row": i + 2, "data": r} for i, r in enumerate(team_records)]
+
+# Get the most recent turnout data for the form defaults
+latest_turnout = {}
+if turnout_records:
+    latest_turnout = turnout_records[-1] # Get the last row
 
 # --- Session States for Edit Modes ---
 if "edit_booth" not in st.session_state: st.session_state.edit_booth = False
@@ -368,62 +370,56 @@ with tab7:
     
     st.info(f"🕒 **Live Current Time (IST):** {current_time_str}")
     
-    # ---------------- LIVE TURNOUT LOGGING ----------------
+    # ---------------- CONTINUOUS LIVE TURNOUT LOGGING ----------------
     st.divider()
-    st.subheader("📊 Record Live Voting Data")
-    st.markdown("Log the number of votes cast so far. This helps PRO send the 2-hourly SMS reports.")
+    st.subheader("📊 Record Live Voting Data (Turnout)")
+    st.markdown("Log the current vote count for SMS reporting. Every entry is saved as a history log.")
     
-    if turnout_data and "Last_Updated" in turnout_data and not st.session_state.edit_turnout:
-        st.success(f"Last updated at: {turnout_data.get('Last_Updated', 'N/A')}")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Male Cast", turnout_data.get("Male", 0))
-        c2.metric("Female Cast", turnout_data.get("Female", 0))
-        c3.metric("TG Cast", turnout_data.get("TG", 0))
-        c4.metric("Total Cast", int(turnout_data.get("Male", 0)) + int(turnout_data.get("Female", 0)) + int(turnout_data.get("TG", 0)))
-        
-        c5, c6, c7, c8 = st.columns(4)
-        c5.metric("EDC Cast", turnout_data.get("EDC", 0))
-        c6.metric("ASD Cast", turnout_data.get("ASD", 0))
-        c7.metric("Proxy Cast", turnout_data.get("Proxy", 0))
-        c8.metric("PB Received", turnout_data.get("PB", 0))
-        
-        if st.button("✏️ Update Turnout Numbers"):
-            st.session_state.edit_turnout = True
-            st.rerun()
-    else:
-        with st.form("update_turnout"):
-            st.markdown("Enter total votes cast **up to this exact time**:")
+    if not st.session_state.edit_turnout:
+        with st.form("new_turnout_entry"):
+            time_block = st.selectbox("Select Time Block for SMS", ["09:00 AM", "11:00 AM", "01:00 PM", "03:00 PM", "05:00 PM", "06:00 PM", "End of Poll (Final)"])
+            
+            st.markdown("Enter total cumulative votes cast **up to this time block**:")
             col1, col2, col3 = st.columns(3)
-            with col1: t_male = st.number_input("Male Votes", min_value=0, value=int(turnout_data.get("Male", 0) if turnout_data.get("Male") else 0))
-            with col2: t_female = st.number_input("Female Votes", min_value=0, value=int(turnout_data.get("Female", 0) if turnout_data.get("Female") else 0))
-            with col3: t_tg = st.number_input("TG Votes", min_value=0, value=int(turnout_data.get("TG", 0) if turnout_data.get("TG") else 0))
+            with col1: t_male = st.number_input("Male Votes", min_value=0, value=int(latest_turnout.get("Male", 0) if latest_turnout else 0))
+            with col2: t_female = st.number_input("Female Votes", min_value=0, value=int(latest_turnout.get("Female", 0) if latest_turnout else 0))
+            with col3: t_tg = st.number_input("TG Votes", min_value=0, value=int(latest_turnout.get("TG", 0) if latest_turnout else 0))
             
             st.markdown("Special Categories (If any):")
             col4, col5, col6, col7 = st.columns(4)
-            with col4: t_edc = st.number_input("EDC Cast", min_value=0, value=int(turnout_data.get("EDC", 0) if turnout_data.get("EDC") else 0))
-            with col5: t_asd = st.number_input("ASD Cast", min_value=0, value=int(turnout_data.get("ASD", 0) if turnout_data.get("ASD") else 0))
-            with col6: t_proxy = st.number_input("Proxy Cast", min_value=0, value=int(turnout_data.get("Proxy", 0) if turnout_data.get("Proxy") else 0))
-            with col7: t_pb = st.number_input("PB Recv.", min_value=0, value=int(turnout_data.get("PB", 0) if turnout_data.get("PB") else 0))
+            with col4: t_edc = st.number_input("EDC Cast", min_value=0, value=int(latest_turnout.get("EDC", 0) if latest_turnout else 0))
+            with col5: t_asd = st.number_input("ASD Cast", min_value=0, value=int(latest_turnout.get("ASD", 0) if latest_turnout else 0))
+            with col6: t_proxy = st.number_input("Proxy Cast", min_value=0, value=int(latest_turnout.get("Proxy", 0) if latest_turnout else 0))
+            with col7: t_pb = st.number_input("PB Recv.", min_value=0, value=int(latest_turnout.get("PB", 0) if latest_turnout else 0))
             
-            c_btn1, c_btn2 = st.columns([1, 4])
-            with c_btn1: submit_turnout = st.form_submit_button("💾 Save Turnout", type="primary")
-            with c_btn2:
-                if turnout_data and "Last_Updated" in turnout_data:
-                    if st.form_submit_button("❌ Cancel"):
-                        st.session_state.edit_turnout = False
-                        st.rerun()
+            submit_turnout = st.form_submit_button("💾 Save Turnout Log", type="primary")
             
             if submit_turnout:
-                with st.spinner("Saving Data..."):
+                with st.spinner("Recording Data..."):
                     try:
-                        sheet_turnout.clear()
-                        sheet_turnout.append_row(["Last_Updated", "Male", "Female", "TG", "EDC", "ASD", "Proxy", "PB"])
-                        sheet_turnout.append_row([get_ist_now().strftime("%I:%M %p"), t_male, t_female, t_tg, t_edc, t_asd, t_proxy, t_pb])
-                        st.session_state.edit_turnout = False
-                        st.success("Turnout Saved!")
+                        total_cast = t_male + t_female + t_tg
+                        exact_timestamp = get_ist_now().strftime("%I:%M %p")
+                        sheet_turnout.append_row([time_block, exact_timestamp, t_male, t_female, t_tg, total_cast, t_edc, t_asd, t_proxy, t_pb])
+                        st.success(f"Turnout for {time_block} Recorded Successfully!")
                         st.cache_data.clear()
                         st.rerun()
                     except Exception as e: st.error(f"Error saving: {e}")
+                    
+        # Display the Historical Log
+        if turnout_records:
+            st.markdown("#### 📜 Turnout History Log")
+            df_turnout = pd.DataFrame(turnout_records)
+            st.dataframe(df_turnout[["Time_Block", "Timestamp", "Total_Cast", "Male", "Female", "TG"]], use_container_width=True, hide_index=True)
+            
+            if st.button("🗑️ Delete Last Entry"):
+                try:
+                    last_row_index = len(turnout_records) + 1 # +1 because row 1 is header
+                    sheet_turnout.delete_rows(last_row_index)
+                    st.success("Last entry deleted.")
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e: st.error("Failed to delete.")
+
     # -------------------------------------------------------------------
 
     st.divider()
@@ -559,7 +555,7 @@ with tab9:
         st.error("🚨 CU Display: 'BATTERY LOW'")
         st.write("**Solution (সমাধান):** CU **Switch OFF** করুন। Presiding Officer-এর কাছে থাকা Extra Battery (Power Pack) দিয়ে CU-এর ব্যাটারি পরিবর্তন করুন।")
     elif "Close Button Not Working" in evm_error:
-        st.error("🚨 Close Button কাজ করছে না")
+        st.error("🚨 Close Button কাজ করছে গান্ধ করছে না")
         st.write("**Solution (সমাধান):** ভোট গ্রহণ শেষে যদি Close বোতাম কাজ না করে, চেক করুন 'Busy' ইন্ডিকেটর জ্বলছে কিনা। BU-তে গিয়ে যেকোনো একটি বোতাম টিপে সেই ব্যালটটি বাতিল/সম্পূর্ণ করুন, এরপর CU-তে 'Close' বোতাম কাজ করবে।")
 
 # === TAB 10: PDF INDEX ===
@@ -583,16 +579,8 @@ with tab10:
         st.markdown("* Distribution of queue slips at 6:00 PM.\n* Pressing the CLOSE button on the CU.\n* Filling out Form 17C and the Presiding Officer's Diary.")
     with st.expander("8. রিসিভিং সেন্টারে ক্রিয়াকলাপ (RC Activities) ➡️ [পৃষ্ঠা 167-176]"):
         st.markdown("* Handing over sealed EVMs and VVPATs.\n* Submission of Statutory (Green) and Non-Statutory (Yellow) packets.")
-    
-    # ---------------- NEW EXPANDER ADDED ----------------
     with st.expander("9. SMS Poll Reporting ও ECINET App ➡️ [পৃষ্ঠা 177-191]"):
-        st.markdown("""
-        * **কী আছে:**
-        * Presiding Officer-এর SMS পাঠানোর Format এবং Schedule (যেমন: Mok, 9am, 11am, 1pm ইত্যাদি)।
-        * প্রতি ২ ঘণ্টা অন্তর ভোটের হার (Turnout) SMS-এর মাধ্যমে জানানো।
-        * ECINET App ইনস্টল, লগইন এবং ডেটা এন্ট্রি করার সম্পূর্ণ নিয়ম।
-        * পোলিং সংক্রান্ত বিভিন্ন Helpline Number এবং Troubleshooting গাইড।
-        """)
+        st.markdown("* Presiding Officer's SMS formatting and sending schedule.\n* 2-Hourly turnout reporting via SMS.\n* ECINET app installation and usage guidelines.\n* Helpline numbers and troubleshooting for reporting.")
 
 # === TAB 11: MEMORY TEST ===
 with tab11:

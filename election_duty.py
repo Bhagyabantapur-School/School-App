@@ -7,7 +7,6 @@ import os
 
 # --- Helper Function for Indian Standard Time (IST) ---
 def get_ist_now():
-    # Adds 5 hours and 30 minutes to UTC to get accurate Indian time
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
 # --- Page Configuration ---
@@ -37,11 +36,26 @@ try:
     sheet_team = spreadsheet.worksheet("Team_Data")
     sheet_calls = spreadsheet.worksheet("Call_Logs")
     
+    # Existing Booth Data Sheet
     try:
         sheet_booth = spreadsheet.worksheet("Booth_Data")
     except:
         sheet_booth = spreadsheet.add_worksheet(title="Booth_Data", rows="10", cols="15")
         sheet_booth.append_row(["AC_Name", "PS_No", "PS_Name", "Total", "Male", "Female", "TG", "EDC", "ASD", "Proxy", "PB"])
+    
+    # New Sheet for Form 17C Data
+    try:
+        sheet_17c = spreadsheet.worksheet("Form_17C")
+    except:
+        sheet_17c = spreadsheet.add_worksheet(title="Form_17C", rows="10", cols="10")
+        sheet_17c.append_row(["Total_Assigned", "Form_17A", "Rule_49O", "Rule_49M", "Test_Votes", "EVM_Total", "Tendered"])
+        
+    # New Sheet for Live Turnout Data
+    try:
+        sheet_turnout = spreadsheet.worksheet("Turnout_Data")
+    except:
+        sheet_turnout = spreadsheet.add_worksheet(title="Turnout_Data", rows="10", cols="10")
+        sheet_turnout.append_row(["Last_Updated", "Male", "Female", "TG", "EDC", "ASD", "Proxy", "PB"])
         
     try:
         sheet_memory = spreadsheet.worksheet("Memory_Log")
@@ -72,17 +86,37 @@ def fetch_booth_data():
         return {}
     except: return {}
 
+@st.cache_data(ttl=60)
+def fetch_17c_data():
+    try: 
+        records = sheet_17c.get_all_records()
+        if records: return records[0]
+        return {}
+    except: return {}
+
+@st.cache_data(ttl=60)
+def fetch_turnout_data():
+    try: 
+        records = sheet_turnout.get_all_records()
+        if records: return records[0]
+        return {}
+    except: return {}
+
 records = fetch_logs()
 team_records = fetch_team()
 booth_data = fetch_booth_data()
+data_17c = fetch_17c_data()
+turnout_data = fetch_turnout_data()
 
 pending_sessions = [{"sheet_row": i + 2, "data": r} for i, r in enumerate(records) if r.get("Start Time") == "Pending"]
 team_list = [{"sheet_row": i + 2, "data": r} for i, r in enumerate(team_records)]
 
-if "edit_booth" not in st.session_state:
-    st.session_state.edit_booth = False
+# --- Session States for Edit Modes ---
+if "edit_booth" not in st.session_state: st.session_state.edit_booth = False
+if "edit_17c" not in st.session_state: st.session_state.edit_17c = False
+if "edit_turnout" not in st.session_state: st.session_state.edit_turnout = False
 
-# --- DYNAMIC APP HEADER (Logo and Titles Side-by-Side) ---
+# --- DYNAMIC APP HEADER ---
 header_col1, header_col2 = st.columns([1, 4], vertical_alignment="center")
 
 with header_col1:
@@ -145,27 +179,17 @@ with tab1:
             
             st.markdown("#### General Electors")
             col1, col2, col3, col4 = st.columns(4)
-            val_total = int(booth_data.get("Total", 0)) if booth_data.get("Total") else 0
-            val_male = int(booth_data.get("Male", 0)) if booth_data.get("Male") else 0
-            val_female = int(booth_data.get("Female", 0)) if booth_data.get("Female") else 0
-            val_tg = int(booth_data.get("TG", 0)) if booth_data.get("TG") else 0
-            
-            with col1: total = st.number_input("Total", min_value=0, value=val_total)
-            with col2: male = st.number_input("Male", min_value=0, value=val_male)
-            with col3: female = st.number_input("Female", min_value=0, value=val_female)
-            with col4: tg = st.number_input("TG", min_value=0, value=val_tg)
+            with col1: total = st.number_input("Total", min_value=0, value=int(booth_data.get("Total", 0) if booth_data.get("Total") else 0))
+            with col2: male = st.number_input("Male", min_value=0, value=int(booth_data.get("Male", 0) if booth_data.get("Male") else 0))
+            with col3: female = st.number_input("Female", min_value=0, value=int(booth_data.get("Female", 0) if booth_data.get("Female") else 0))
+            with col4: tg = st.number_input("TG", min_value=0, value=int(booth_data.get("TG", 0) if booth_data.get("TG") else 0))
             
             st.markdown("#### Special Voters (From Marked Copy)")
             col5, col6, col7, col8 = st.columns(4)
-            val_edc = int(booth_data.get("EDC", 0)) if booth_data.get("EDC") else 0
-            val_asd = int(booth_data.get("ASD", 0)) if booth_data.get("ASD") else 0
-            val_proxy = int(booth_data.get("Proxy", 0)) if booth_data.get("Proxy") else 0
-            val_pb = int(booth_data.get("PB", 0)) if booth_data.get("PB") else 0
-            
-            with col5: edc = st.number_input("EDC Voters", min_value=0, value=val_edc)
-            with col6: asd = st.number_input("ASD Voters", min_value=0, value=val_asd)
-            with col7: proxy = st.number_input("Proxy (CSV)", min_value=0, value=val_proxy)
-            with col8: pb = st.number_input("Postal Ballot", min_value=0, value=val_pb)
+            with col5: edc = st.number_input("EDC Voters", min_value=0, value=int(booth_data.get("EDC", 0) if booth_data.get("EDC") else 0))
+            with col6: asd = st.number_input("ASD Voters", min_value=0, value=int(booth_data.get("ASD", 0) if booth_data.get("ASD") else 0))
+            with col7: proxy = st.number_input("Proxy (CSV)", min_value=0, value=int(booth_data.get("Proxy", 0) if booth_data.get("Proxy") else 0))
+            with col8: pb = st.number_input("Postal Ballot", min_value=0, value=int(booth_data.get("PB", 0) if booth_data.get("PB") else 0))
             
             st.divider()
             c_btn1, c_btn2 = st.columns([1, 4])
@@ -227,7 +251,6 @@ with tab2:
 
     elif action_type == "Log a Brand New Session":
         col1, col2, col3 = st.columns(3)
-        # UPDATED: Use IST for default date
         with col1: log_date = st.date_input("Date", get_ist_now().date())
         with col2: start_time = st.time_input("Start Time", step=60)
         with col3: end_time = st.time_input("End Time", step=60)
@@ -254,7 +277,6 @@ with tab2:
 # === TAB 3: SCHEDULE FUTURE ===
 with tab3:
     st.subheader("📅 Schedule an Upcoming Training")
-    # UPDATED: Use IST for future default date
     future_date = st.date_input("Scheduled Date", get_ist_now().date() + timedelta(days=1))
     sched_activity_selection = st.selectbox("Scheduled Activity Type", ["Hands-on Training", "EVM/VVPAT Collection", "Other / Custom"])
     sched_custom_activity = st.text_input("Custom Activity Type", key="s_cust") if sched_activity_selection == "Other / Custom" else ""
@@ -288,7 +310,6 @@ with tab4:
                     call_dir = st.radio("Direction", ["Outgoing", "Incoming"], key=f"dir_{idx}", horizontal=True)
                     call_notes = st.text_input("Call Notes", key=f"note_{idx}")
                     if st.button("Save Call Record", key=f"btn_{idx}"):
-                        # UPDATED: Use IST for call logs
                         ist_time = get_ist_now()
                         sheet_calls.append_row([ist_time.strftime("%d-%m-%Y"), ist_time.strftime("%I:%M %p"), officer.get('Name'), call_dir, call_notes])
                         st.success("✅ Call logged!")
@@ -337,19 +358,75 @@ with tab6:
     with st.expander("⚠️ 5. ASD, Challenge & EDC"):
         st.markdown("* **ASD:** পরিচয় খুব সতর্কভাবে verify করুন।\n* **Challenged Votes:** Agent-কে ₹2 challenge fee দিয়ে Presiding Officer-এর কাছে যেতে বলুন।\n* **EDC:** Marked copy-তে নাম strike off করা থাকলেও, EDC নিয়ে ভোট দিতে এলে তাদের ভোট দিতে হবে এবং 17A তে Entry হবে।")
 
-# === TAB 7: TIMELINE (LIVE) ===
+# === TAB 7: TIMELINE & LIVE VOTING RECORD ===
 with tab7:
     st.header("⏳ Election Day Live Timeline")
-    st.markdown("Your app is automatically tracking the current time to show your exact statutory duty right now.")
     
-    # UPDATED: Use the centralized IST function
     ist_now = get_ist_now()
     current_time_str = ist_now.strftime("%I:%M %p")
     current_hour_fraction = ist_now.hour + (ist_now.minute / 60.0)
     
     st.info(f"🕒 **Live Current Time (IST):** {current_time_str}")
+    
+    # ---------------- NEW FEATURE: LIVE TURNOUT LOGGING ----------------
     st.divider()
+    st.subheader("📊 Record Live Voting Data")
+    st.markdown("Log the number of votes cast so far. This helps PRO send the 2-hourly SMS reports.")
+    
+    if turnout_data and "Last_Updated" in turnout_data and not st.session_state.edit_turnout:
+        st.success(f"Last updated at: {turnout_data.get('Last_Updated', 'N/A')}")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Male Cast", turnout_data.get("Male", 0))
+        c2.metric("Female Cast", turnout_data.get("Female", 0))
+        c3.metric("TG Cast", turnout_data.get("TG", 0))
+        c4.metric("Total Cast", int(turnout_data.get("Male", 0)) + int(turnout_data.get("Female", 0)) + int(turnout_data.get("TG", 0)))
+        
+        c5, c6, c7, c8 = st.columns(4)
+        c5.metric("EDC Cast", turnout_data.get("EDC", 0))
+        c6.metric("ASD Cast", turnout_data.get("ASD", 0))
+        c7.metric("Proxy Cast", turnout_data.get("Proxy", 0))
+        c8.metric("PB Received", turnout_data.get("PB", 0))
+        
+        if st.button("✏️ Update Turnout Numbers"):
+            st.session_state.edit_turnout = True
+            st.rerun()
+    else:
+        with st.form("update_turnout"):
+            st.markdown("Enter total votes cast **up to this exact time**:")
+            col1, col2, col3 = st.columns(3)
+            with col1: t_male = st.number_input("Male Votes", min_value=0, value=int(turnout_data.get("Male", 0) if turnout_data.get("Male") else 0))
+            with col2: t_female = st.number_input("Female Votes", min_value=0, value=int(turnout_data.get("Female", 0) if turnout_data.get("Female") else 0))
+            with col3: t_tg = st.number_input("TG Votes", min_value=0, value=int(turnout_data.get("TG", 0) if turnout_data.get("TG") else 0))
+            
+            st.markdown("Special Categories (If any):")
+            col4, col5, col6, col7 = st.columns(4)
+            with col4: t_edc = st.number_input("EDC Cast", min_value=0, value=int(turnout_data.get("EDC", 0) if turnout_data.get("EDC") else 0))
+            with col5: t_asd = st.number_input("ASD Cast", min_value=0, value=int(turnout_data.get("ASD", 0) if turnout_data.get("ASD") else 0))
+            with col6: t_proxy = st.number_input("Proxy Cast", min_value=0, value=int(turnout_data.get("Proxy", 0) if turnout_data.get("Proxy") else 0))
+            with col7: t_pb = st.number_input("PB Recv.", min_value=0, value=int(turnout_data.get("PB", 0) if turnout_data.get("PB") else 0))
+            
+            c_btn1, c_btn2 = st.columns([1, 4])
+            with c_btn1: submit_turnout = st.form_submit_button("💾 Save Turnout", type="primary")
+            with c_btn2:
+                if turnout_data and "Last_Updated" in turnout_data:
+                    if st.form_submit_button("❌ Cancel"):
+                        st.session_state.edit_turnout = False
+                        st.rerun()
+            
+            if submit_turnout:
+                with st.spinner("Saving Data..."):
+                    try:
+                        sheet_turnout.clear()
+                        sheet_turnout.append_row(["Last_Updated", "Male", "Female", "TG", "EDC", "ASD", "Proxy", "PB"])
+                        sheet_turnout.append_row([get_ist_now().strftime("%I:%M %p"), t_male, t_female, t_tg, t_edc, t_asd, t_proxy, t_pb])
+                        st.session_state.edit_turnout = False
+                        st.success("Turnout Saved!")
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as e: st.error(f"Error saving: {e}")
+    # -------------------------------------------------------------------
 
+    st.divider()
     timeline_events = [
         {"hour": 0, "time": "Pre 05:00 AM", "title": "Rest/Setup", "desc": "Sleep well or get ready for the day."},
         {"hour": 5.0, "time": "05:00 AM", "title": "Wake Up & Team Prep", "desc": "Ensure team is awake. PRO links EVM (BU -> VVPAT -> CU). Do NOT switch on CU yet."},
@@ -382,53 +459,74 @@ with tab7:
         else:
             with st.expander(f"{event['time']} - {event['title']}"): st.write(event['desc'])
             
-    if st.button("🔄 Refresh Live Time"):
-        st.rerun()
+    if st.button("🔄 Refresh Live Time"): st.rerun()
 
-# === TAB 8: FORM 17C CALCULATOR ===
+# === TAB 8: FORM 17C CALCULATOR (NOW WITH SAVE & EDIT) ===
 with tab8:
     st.header("🧮 Form 17C Calculator")
-    st.markdown("আপনার আপলোড করা Form 17C-এর আসল কাঠামোর ওপর ভিত্তি করে তৈরি।")
     
-    calc_default_total = int(booth_data.get("Total", 0)) if booth_data.get("Total") else 0
-    
-    total_assigned = st.number_input("1. Total number of electors assigned to the Polling Station", min_value=0, value=calc_default_total, step=1)
-    form_17a_total = st.number_input("2. Total number of voters as entered in the Register for Voters (Form 17A)", min_value=0, value=0, step=1)
-    rule_49o = st.number_input("3. Number of voters deciding not to record votes/ refused to vote (Rule 49-O)", min_value=0, value=0, step=1)
-    rule_49m = st.number_input("4. Number of voters not allowed to vote under Rule 49M", min_value=0, value=0, step=1)
-    
-    st.markdown("**5. Test votes recorded under Rule 49MA(d) required to be deducted:**")
-    test_votes = st.number_input("(a) Total number of test votes to be deducted", min_value=0, value=0, step=1)
-    if test_votes > 0:
-        st.text_input("Sl. No.(s) of elector(s) in Form 17A", placeholder="e.g., 17, 200")
-        st.info("💡 Candidate-wise breakdown (Sl. No., Name, No. of votes) must be written in the physical form (5b).")
-
-    actual_evm_total = st.number_input("6. Total number of votes recorded as per voting machine", min_value=0, value=0, step=1)
-    
-    st.divider()
-    expected_evm_total = form_17a_total - rule_49o - rule_49m
-    
-    st.header("📝 Item 7: Verification (Tally)")
-    st.markdown(f"**Expected EVM Total (Item 2 - Item 3 - Item 4):** {form_17a_total} - {rule_49o} - {rule_49m} = **{expected_evm_total}**")
-    st.markdown(f"**Actual EVM Total (Item 6):** **{actual_evm_total}**")
-    
-    if form_17a_total > 0:
-        if expected_evm_total == actual_evm_total:
-            st.success("✅ TALLIED! (Yes, it tallies)")
-            st.caption("Note: Test votes (Item 5) are inside the EVM and do NOT cause a mismatch here. They are deducted later by the EC during counting.")
-        else:
-            st.error(f"🚨 DISCREPANCY NOTICED! Difference of {abs(expected_evm_total - actual_evm_total)} votes.")
-
-    st.divider()
-    st.markdown("**8 & 9. Tendered Ballot Papers**")
-    tendered_issued = st.number_input("8. Number of voters to whom tendered ballot papers were issued under rule 49P", min_value=0, value=0, step=1)
-    
-    if tendered_issued > 0:
-        st.caption("9. Number of tendered ballot papers tracking:")
-        col1, col2, col3 = st.columns(3)
-        with col1: st.text_input("Received for use (Total)", placeholder="e.g. 20")
-        with col2: st.text_input("Issued to electors (Total)", value=str(tendered_issued))
-        with col3: st.text_input("Not used and returned (Total)")
+    if data_17c and "Form_17A" in data_17c and not st.session_state.edit_17c:
+        # --- VIEW MODE ---
+        st.success("✅ Form 17C Data is Safely Saved in Google Sheets.")
+        
+        st.write(f"**1. Total number of electors assigned:** {data_17c.get('Total_Assigned')}")
+        st.write(f"**2. Total number of voters in Form 17A:** {data_17c.get('Form_17A')}")
+        st.write(f"**3. Refused to vote (Rule 49-O):** {data_17c.get('Rule_49O')}")
+        st.write(f"**4. Not allowed to vote (Rule 49M):** {data_17c.get('Rule_49M')}")
+        st.write(f"**5. Test votes (Rule 49MA):** {data_17c.get('Test_Votes')}")
+        st.write(f"**6. EVM Total:** {data_17c.get('EVM_Total')}")
+        st.write(f"**8. Tendered Issued:** {data_17c.get('Tendered')}")
+        
+        expected = int(data_17c.get('Form_17A')) - int(data_17c.get('Rule_49O')) - int(data_17c.get('Rule_49M'))
+        actual = int(data_17c.get('EVM_Total'))
+        
+        st.divider()
+        st.markdown(f"### Expected EVM Total: **{expected}**")
+        st.markdown(f"### Actual EVM Total: **{actual}**")
+        if expected == actual: st.success("✅ TALLIES CORRECTLY.")
+        else: st.error("🚨 DISCREPANCY NOTICED!")
+        
+        if st.button("✏️ Edit 17C Data"):
+            st.session_state.edit_17c = True
+            st.rerun()
+            
+    else:
+        # --- EDIT / ENTRY MODE ---
+        st.info("Fill out the Form 17C details to verify the tally. This data will be saved permanently.")
+        
+        calc_default_total = int(booth_data.get("Total", 0)) if booth_data.get("Total") else 0
+        if data_17c and "Total_Assigned" in data_17c:
+             calc_default_total = int(data_17c.get("Total_Assigned"))
+             
+        with st.form("form_17c_save"):
+            total_assigned = st.number_input("1. Total number of electors assigned to the Polling Station", min_value=0, value=calc_default_total, step=1)
+            form_17a_total = st.number_input("2. Total number of voters as entered in the Register for Voters (Form 17A)", min_value=0, value=int(data_17c.get("Form_17A", 0) if data_17c else 0), step=1)
+            rule_49o = st.number_input("3. Number of voters deciding not to record votes/ refused to vote (Rule 49-O)", min_value=0, value=int(data_17c.get("Rule_49O", 0) if data_17c else 0), step=1)
+            rule_49m = st.number_input("4. Number of voters not allowed to vote under Rule 49M", min_value=0, value=int(data_17c.get("Rule_49M", 0) if data_17c else 0), step=1)
+            test_votes = st.number_input("5(a). Total number of test votes to be deducted (Rule 49MA)", min_value=0, value=int(data_17c.get("Test_Votes", 0) if data_17c else 0), step=1)
+            actual_evm_total = st.number_input("6. Total number of votes recorded as per voting machine", min_value=0, value=int(data_17c.get("EVM_Total", 0) if data_17c else 0), step=1)
+            tendered_issued = st.number_input("8. Number of voters to whom tendered ballot papers were issued", min_value=0, value=int(data_17c.get("Tendered", 0) if data_17c else 0), step=1)
+            
+            st.divider()
+            c_btn1, c_btn2 = st.columns([1, 4])
+            with c_btn1: submit_17c = st.form_submit_button("💾 Save 17C Data", type="primary")
+            with c_btn2:
+                if data_17c and "Form_17A" in data_17c:
+                    if st.form_submit_button("❌ Cancel"):
+                        st.session_state.edit_17c = False
+                        st.rerun()
+                        
+            if submit_17c:
+                with st.spinner("Saving Form 17C Data..."):
+                    try:
+                        sheet_17c.clear()
+                        sheet_17c.append_row(["Total_Assigned", "Form_17A", "Rule_49O", "Rule_49M", "Test_Votes", "EVM_Total", "Tendered"])
+                        sheet_17c.append_row([total_assigned, form_17a_total, rule_49o, rule_49m, test_votes, actual_evm_total, tendered_issued])
+                        st.session_state.edit_17c = False
+                        st.success("Form 17C Data Saved Successfully!")
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as e: st.error(f"Error saving data: {e}")
 
 # === TAB 9: EVM TROUBLESHOOTER ===
 with tab9:
@@ -513,7 +611,6 @@ with tab11:
                 
             with st.spinner("Logging test result..."):
                 try:
-                    # UPDATED: Use IST for memory test timestamps
                     timestamp = get_ist_now().strftime("%d-%m-%Y %I:%M %p")
                     sheet_memory.append_row([timestamp, test_type, user_guess.strip(), result])
                     st.cache_data.clear()

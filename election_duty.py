@@ -135,7 +135,6 @@ with header_col2:
 st.divider()
 
 # --- App Layout: Tabs ---
-# Added Tab 12 for Final Summary
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12 = st.tabs([
     "🏠 Dashboard", 
     "📝 Log", 
@@ -406,7 +405,7 @@ with tab7:
                         st.rerun()
                     except Exception as e: st.error(f"Error saving: {e}")
                     
-        # --- ROBUST DISPLAY OF THE HISTORICAL LOG (DUPLICATES HIDDEN + COLORED) ---
+        # --- ROBUST DISPLAY OF THE HISTORICAL LOG (WITH ALL DATA COLUMNS) ---
         if turnout_records:
             st.markdown("#### 📜 Turnout History Log")
             df_turnout = pd.DataFrame(turnout_records)
@@ -422,7 +421,8 @@ with tab7:
                     bg_color = color_map.get(row["Time_Block"], "#ffffff")
                     return [f"background-color: {bg_color}; color: #000000; font-weight: bold;"] * len(row)
                 
-                expected_cols = ["Time_Block", "Timestamp", "Total_Cast", "Male", "Female", "TG"]
+                # UPDATED: Now includes EDC, ASD, Proxy, PB in the table view
+                expected_cols = ["Time_Block", "Timestamp", "Total_Cast", "Male", "Female", "TG", "EDC", "ASD", "Proxy", "PB"]
                 available_cols = [col for col in expected_cols if col in df_turnout.columns]
                 
                 if available_cols:
@@ -642,7 +642,7 @@ with tab11:
             else: st.caption("Take a test to see your results here.")
         except: st.caption("Unable to load history.")
 
-# === TAB 12: FINAL SUMMARY (NEW) ===
+# === TAB 12: FINAL SUMMARY ===
 with tab12:
     st.header("📋 Comprehensive Election Summary")
     st.markdown("A consolidated overview of all your recorded data.")
@@ -660,19 +660,29 @@ with tab12:
         c1.metric("AC & PS", f"{booth_data.get('AC_Name')} | {booth_data.get('PS_No')}")
         c2.metric("Total Assigned", booth_data.get("Total"))
         special_total = int(booth_data.get("EDC", 0)) + int(booth_data.get("ASD", 0)) + int(booth_data.get("Proxy", 0)) + int(booth_data.get("PB", 0))
-        c3.metric("Special Voters", special_total)
+        c3.metric("Special Voters (Total)", special_total)
     else:
         st.warning("Booth data not set. Please update the Dashboard.")
 
-    # 2. Turnout Summary
+    # 2. Turnout Summary (UPDATED WITH ALL FIELDS)
     st.subheader("📊 2. Final Voting Turnout")
     if turnout_records:
         latest = turnout_records[-1]
+        st.success(f"Latest Update: {latest.get('Time_Block', 'N/A')} ({latest.get('Timestamp', 'N/A')})")
+        
+        st.markdown("#### General Votes Cast")
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Time Block", latest.get("Time_Block", "N/A"))
-        c2.metric("Total Cast", latest.get("Total_Cast", 0))
-        c3.metric("Male", latest.get("Male", 0))
-        c4.metric("Female", latest.get("Female", 0))
+        c1.metric("Total Cast", latest.get("Total_Cast", 0))
+        c2.metric("Male", latest.get("Male", 0))
+        c3.metric("Female", latest.get("Female", 0))
+        c4.metric("TG", latest.get("TG", 0))
+        
+        st.markdown("#### Special Categories Cast/Received")
+        c5, c6, c7, c8 = st.columns(4)
+        c5.metric("EDC", latest.get("EDC", 0))
+        c6.metric("ASD", latest.get("ASD", 0))
+        c7.metric("Proxy (CSV)", latest.get("Proxy", 0))
+        c8.metric("Postal Ballot", latest.get("PB", 0))
     else:
         st.warning("No turnout data recorded yet. Please update the Timeline tab.")
 

@@ -82,7 +82,7 @@ header_col1, header_col2 = st.columns([1, 4], vertical_alignment="center")
 
 with header_col1:
     if os.path.exists("election_logo.png"):
-        st.image("election_logo.png", width=80) # Smaller Logo
+        st.image("election_logo.png", width=80)
 
 with header_col2:
     st.title("🗳️ Election Duty 2026")
@@ -113,7 +113,6 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
 with tab1:
     st.header("🏢 Booth Details")
     if booth_data and booth_data.get("Total", "") != "" and not st.session_state.edit_booth:
-        # View Mode
         st.subheader("General Electors")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Total", booth_data.get("Total", 0))
@@ -133,7 +132,6 @@ with tab1:
             st.session_state.edit_booth = True
             st.rerun()
     else:
-        # Edit / Entry Mode
         st.info("Please enter or update your exact booth details from the Electoral Roll.")
         with st.form("update_booth"):
             ac = st.text_input("AC Name & No.", value=str(booth_data.get("AC_Name", "")))
@@ -319,42 +317,16 @@ with tab6:
     st.header("📖 1st Polling Officer Guide")
     st.markdown("আপনার Polling Day-এর মূল দায়িত্ব ও নিয়মাবলি (Rules & Regulations).")
     
-    with st.expander("📝 1. Marking the Electoral Roll (ভোটার তালিকা চিহ্নিতকরণ)"):
-        st.markdown("""
-        ভোটারের পরিচয় (Identity) verify করার পর **Marked Copy of the Electoral Roll**-এ নিচের নিয়মে দাগ দিন:
-        * **Male Voter (পুরুষ):** ভোটারের বক্সের উপর আড়াআড়ি লাল দাগ (Diagonal red line) টানুন।
-        * **Female Voter (মহিলা):** আড়াআড়ি লাল দাগ দিন **এবং** Serial Number-টি গোল (Circle) করুন।
-        * **Third Gender (তৃতীয় লিঙ্গ):** আড়াআড়ি লাল দাগ দিন **এবং** Serial Number-এর পাশে একটি স্টার (*) বা টিক চিহ্ন (✓) দিন।
-        """)
-
-    with st.expander("🕵️ 2. Test Vote (টেস্ট ভোট) - Rule 49MA"):
-        st.markdown("""
-        যদি কোনো ভোটার দাবি করেন যে তিনি যাকে ভোট দিয়েছেন, **VVPAT**-এ সেই প্রার্থীর Slip প্রিন্ট হয়নি, তবে **Rule 49MA** প্রযোজ্য হবে:
-        * প্রথমে ভোটারের কাছ থেকে একটি লিখিত **Declaration** (Annexure/Form-এর মাধ্যমে) নিতে হবে।
-        * **Form 17A (Register of Voters)**-তে এই Test Vote-এর জন্য নতুন একটি Entry করতে হবে এবং 'Remarks' কলামে স্পষ্ট করে **"Rule 49MA"** লিখতে হবে।
-        """)
-
-    with st.expander("📜 3. Tendered Vote (টেন্ডার ভোট)"):
-        st.markdown("""
-        যদি কোনো প্রকৃত ভোটার বুথে এসে দেখেন যে তার নামে আগেই কেউ ভোট দিয়ে চলে গেছে:
-        * তাকে **EVM**-এ ভোট দিতে দেওয়া যাবে না।
-        * Presiding Officer তাকে একটি **Tendered Ballot Paper** (ব্যালট পেপার) দেবেন।
-        * এই ভোটারের সই/টিপসই **Form 17B (Register of Tendered Votes)**-তে নিতে হবে, Form 17A-তে নয়।
-        """)
-
-    with st.expander("👤 4. Proxy Voter (প্রক্সি ভোটার) - CSV"):
-        st.markdown("""
-        * **Classified Service Voter (CSV)**-দের ক্ষেত্রে তাদের নিযুক্ত Proxy ভোটার ভোট দিতে পারেন।
-        * Marked Copy-তে আসল ভোটারের নামের পাশে **'CSV'** লেখা থাকবে।
-        * 2nd Polling Officer Proxy ভোটারের ডান হাতের মধ্যমায় (Middle Finger of Right Hand) কালির দাগ (Indelible Ink) লাগাবেন (বাঁ হাতের তর্জনীতে নয়)।
-        """)
-
+    with st.expander("📝 1. Marking the Electoral Roll"):
+        st.markdown("* **Male Voter (পুরুষ):** ভোটারের বক্সের উপর আড়াআড়ি লাল দাগ (Diagonal red line) টানুন।\n* **Female Voter (মহিলা):** আড়াআড়ি লাল দাগ দিন **এবং** Serial Number-টি গোল (Circle) করুন।\n* **Third Gender (তৃতীয় লিঙ্গ):** আড়াআড়ি লাল দাগ দিন **এবং** Serial Number-এর পাশে একটি স্টার (*) বা টিক চিহ্ন (✓) দিন।")
+    with st.expander("🕵️ 2. Test Vote (Rule 49MA)"):
+        st.markdown("প্রথমে ভোটারের কাছ থেকে একটি লিখিত **Declaration** নিতে হবে। **Form 17A**-তে এই Test Vote-এর জন্য নতুন একটি Entry করতে হবে এবং 'Remarks' কলামে **'Rule 49MA'** লিখতে হবে।")
+    with st.expander("📜 3. Tendered Vote"):
+        st.markdown("তাকে **EVM**-এ ভোট দিতে দেওয়া যাবে না। Presiding Officer তাকে একটি **Tendered Ballot Paper** দেবেন। এই ভোটারের সই/টিপসই **Form 17B**-তে নিতে হবে, Form 17A-তে নয়।")
+    with st.expander("👤 4. Proxy Voter (CSV)"):
+        st.markdown("**Classified Service Voter (CSV)**-দের ক্ষেত্রে Proxy ভোটার ভোট দিতে পারেন। 2nd Polling Officer Proxy ভোটারের ডান হাতের মধ্যমায় (Middle Finger of Right Hand) কালির দাগ লাগাবেন।")
     with st.expander("⚠️ 5. ASD, Challenge & EDC"):
-        st.markdown("""
-        * **ASD (Absent, Shifted, Dead):** ভোটারের নাম ASD লিস্টে থাকলে, পরিচয় খুব সতর্কভাবে verify করুন। এদের থেকে একটি আলাদা Declaration নেওয়া হবে।
-        * **Challenged Votes:** কোনো Polling Agent ভোটারের পরিচয় নিয়ে আপত্তি (challenge) জানালে, তা আপনার টেবিলেই হবে। Agent-কে ₹2 challenge fee দিয়ে Presiding Officer-এর কাছে যেতে বলুন। সিদ্ধান্ত না হওয়া পর্যন্ত Electoral Roll-এ দাগ দেবেন না।
-        * **EDC (Election Duty Certificate):** Voter on election duty. Marked copy-তে নাম strike off করা থাকলেও, EDC নিয়ে ভোট দিতে এলে তাদের ভোট দিতে হবে এবং 17A তে Entry হবে।
-        """)
+        st.markdown("* **ASD:** পরিচয় খুব সতর্কভাবে verify করুন।\n* **Challenged Votes:** Agent-কে ₹2 challenge fee দিয়ে Presiding Officer-এর কাছে যেতে বলুন।\n* **EDC:** Marked copy-তে নাম strike off করা থাকলেও, EDC নিয়ে ভোট দিতে এলে তাদের ভোট দিতে হবে এবং 17A তে Entry হবে।")
 
 # === TAB 7: TIMELINE (LIVE) ===
 with tab7:
@@ -403,30 +375,54 @@ with tab7:
     if st.button("🔄 Refresh Live Time"):
         st.rerun()
 
-# === TAB 8: FORM 17C CALCULATOR ===
+# === TAB 8: FORM 17C CALCULATOR (UPDATED TO MATCH IMAGES) ===
 with tab8:
     st.header("🧮 Form 17C Calculator")
+    st.markdown("আপনার আপলোড করা Form 17C-এর আসল কাঠামোর ওপর ভিত্তি করে তৈরি।")
+    
     calc_default_total = int(booth_data.get("Total", 0)) if booth_data.get("Total") else 0
-    c1, c2 = st.columns(2)
-    with c1: total_assigned = st.number_input("Total Electors (1)", value=calc_default_total)
-    with c2: form_17a_total = st.number_input("Form 17A Total (2)", value=0)
-    c3, c4 = st.columns(2)
-    with c3: rule_49o = st.number_input("Refused 49-O (3)", value=0)
-    with c4: rule_49m = st.number_input("Not ALLOWED 49-M (4)", value=0)
-    actual_evm_total = st.number_input("EVM Total (6)", value=0)
+    
+    total_assigned = st.number_input("1. Total number of electors assigned to the Polling Station", min_value=0, value=calc_default_total, step=1)
+    form_17a_total = st.number_input("2. Total number of voters as entered in the Register for Voters (Form 17A)", min_value=0, value=0, step=1)
+    rule_49o = st.number_input("3. Number of voters deciding not to record votes/ refused to vote (Rule 49-O)", min_value=0, value=0, step=1)
+    rule_49m = st.number_input("4. Number of voters not allowed to vote under Rule 49M", min_value=0, value=0, step=1)
+    
+    st.markdown("**5. Test votes recorded under Rule 49MA(d) required to be deducted:**")
+    test_votes = st.number_input("(a) Total number of test votes to be deducted", min_value=0, value=0, step=1)
+    if test_votes > 0:
+        st.text_input("Sl. No.(s) of elector(s) in Form 17A", placeholder="e.g., 17, 200")
+        st.info("💡 Candidate-wise breakdown (Sl. No., Name, No. of votes) must be written in the physical form (5b).")
+
+    actual_evm_total = st.number_input("6. Total number of votes recorded as per voting machine", min_value=0, value=0, step=1)
     
     st.divider()
     expected_evm_total = form_17a_total - rule_49o - rule_49m
-    st.header("📝 Final Form 17C Verification")
-    st.markdown(f"### Expected EVM Total: **{expected_evm_total}**")
+    
+    st.header("📝 Item 7: Verification (Tally)")
+    st.markdown(f"**Expected EVM Total (Item 2 - Item 3 - Item 4):** {form_17a_total} - {rule_49o} - {rule_49m} = **{expected_evm_total}**")
+    st.markdown(f"**Actual EVM Total (Item 6):** **{actual_evm_total}**")
+    
     if form_17a_total > 0:
-        if expected_evm_total == actual_evm_total: st.success("✅ MATCH! The 17A register perfectly matches the EVM.")
-        else: st.error(f"🚨 MISMATCH! Difference of {abs(expected_evm_total - actual_evm_total)} votes.")
+        if expected_evm_total == actual_evm_total:
+            st.success("✅ TALLIED! (Yes, it tallies)")
+            st.caption("Note: Test votes (Item 5) are inside the EVM and do NOT cause a mismatch here. They are deducted later by the EC during counting.")
+        else:
+            st.error(f"🚨 DISCREPANCY NOTICED! Difference of {abs(expected_evm_total - actual_evm_total)} votes.")
+
+    st.divider()
+    st.markdown("**8 & 9. Tendered Ballot Papers**")
+    tendered_issued = st.number_input("8. Number of voters to whom tendered ballot papers were issued under rule 49P", min_value=0, value=0, step=1)
+    
+    if tendered_issued > 0:
+        st.caption("9. Number of tendered ballot papers tracking:")
+        col1, col2, col3 = st.columns(3)
+        with col1: st.text_input("Received for use (Total)", placeholder="e.g. 20")
+        with col2: st.text_input("Issued to electors (Total)", value=str(tendered_issued))
+        with col3: st.text_input("Not used and returned (Total)")
 
 # === TAB 9: EVM TROUBLESHOOTER ===
 with tab9:
     st.header("🛠️ EVM Troubleshooting (ইভিএম সমস্যা সমাধান)")
-    st.markdown("EVM বা VVPAT-এ কোনো Error Message দেখালে এখান থেকে তার সমাধান (Solution) দেখে নিন।")
     
     evm_error = st.selectbox("Select EVM/VVPAT Error (সমস্যা নির্বাচন করুন)", [
         "Select an error...",

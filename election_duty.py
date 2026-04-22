@@ -5,6 +5,11 @@ import pandas as pd
 from datetime import datetime, date, timedelta
 import os
 
+# --- Helper Function for Indian Standard Time (IST) ---
+def get_ist_now():
+    # Adds 5 hours and 30 minutes to UTC to get accurate Indian time
+    return datetime.utcnow() + timedelta(hours=5, minutes=30)
+
 # --- Page Configuration ---
 st.set_page_config(page_title="Election Duty 2026 - Party 116", page_icon="🗳️", layout="centered")
 
@@ -222,7 +227,8 @@ with tab2:
 
     elif action_type == "Log a Brand New Session":
         col1, col2, col3 = st.columns(3)
-        with col1: log_date = st.date_input("Date", date.today())
+        # UPDATED: Use IST for default date
+        with col1: log_date = st.date_input("Date", get_ist_now().date())
         with col2: start_time = st.time_input("Start Time", step=60)
         with col3: end_time = st.time_input("End Time", step=60)
             
@@ -248,7 +254,8 @@ with tab2:
 # === TAB 3: SCHEDULE FUTURE ===
 with tab3:
     st.subheader("📅 Schedule an Upcoming Training")
-    future_date = st.date_input("Scheduled Date", date.today() + timedelta(days=1))
+    # UPDATED: Use IST for future default date
+    future_date = st.date_input("Scheduled Date", get_ist_now().date() + timedelta(days=1))
     sched_activity_selection = st.selectbox("Scheduled Activity Type", ["Hands-on Training", "EVM/VVPAT Collection", "Other / Custom"])
     sched_custom_activity = st.text_input("Custom Activity Type", key="s_cust") if sched_activity_selection == "Other / Custom" else ""
     sched_notes = st.text_area("Prep Required")
@@ -281,7 +288,9 @@ with tab4:
                     call_dir = st.radio("Direction", ["Outgoing", "Incoming"], key=f"dir_{idx}", horizontal=True)
                     call_notes = st.text_input("Call Notes", key=f"note_{idx}")
                     if st.button("Save Call Record", key=f"btn_{idx}"):
-                        sheet_calls.append_row([datetime.now().strftime("%d-%m-%Y"), datetime.now().strftime("%I:%M %p"), officer.get('Name'), call_dir, call_notes])
+                        # UPDATED: Use IST for call logs
+                        ist_time = get_ist_now()
+                        sheet_calls.append_row([ist_time.strftime("%d-%m-%Y"), ist_time.strftime("%I:%M %p"), officer.get('Name'), call_dir, call_notes])
                         st.success("✅ Call logged!")
                 if st.button("Toggle Status", key=f"tog_{idx}"):
                     sheet_team.update_cell(row_num, 6, "Inactive" if status == "Active" else "Active")
@@ -333,7 +342,8 @@ with tab7:
     st.header("⏳ Election Day Live Timeline")
     st.markdown("Your app is automatically tracking the current time to show your exact statutory duty right now.")
     
-    ist_now = datetime.utcnow() + timedelta(hours=5, minutes=30)
+    # UPDATED: Use the centralized IST function
+    ist_now = get_ist_now()
     current_time_str = ist_now.strftime("%I:%M %p")
     current_hour_fraction = ist_now.hour + (ist_now.minute / 60.0)
     
@@ -375,7 +385,7 @@ with tab7:
     if st.button("🔄 Refresh Live Time"):
         st.rerun()
 
-# === TAB 8: FORM 17C CALCULATOR (UPDATED TO MATCH IMAGES) ===
+# === TAB 8: FORM 17C CALCULATOR ===
 with tab8:
     st.header("🧮 Form 17C Calculator")
     st.markdown("আপনার আপলোড করা Form 17C-এর আসল কাঠামোর ওপর ভিত্তি করে তৈরি।")
@@ -503,7 +513,8 @@ with tab11:
                 
             with st.spinner("Logging test result..."):
                 try:
-                    timestamp = datetime.now().strftime("%d-%m-%Y %I:%M %p")
+                    # UPDATED: Use IST for memory test timestamps
+                    timestamp = get_ist_now().strftime("%d-%m-%Y %I:%M %p")
                     sheet_memory.append_row([timestamp, test_type, user_guess.strip(), result])
                     st.cache_data.clear()
                 except Exception as e: st.error("Could not save the result to Google Sheets.")

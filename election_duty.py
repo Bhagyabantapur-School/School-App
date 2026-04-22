@@ -43,7 +43,7 @@ try:
         sheet_booth = spreadsheet.add_worksheet(title="Booth_Data", rows="10", cols="15")
         sheet_booth.append_row(["AC_Name", "PS_No", "PS_Name", "Total", "Male", "Female", "TG", "EDC", "ASD", "Proxy", "PB"])
     
-    # New Sheet for Form 17C Data
+    # Form 17C Data
     try:
         sheet_17c = spreadsheet.worksheet("Form_17C")
     except:
@@ -108,10 +108,9 @@ turnout_records = fetch_turnout_records()
 pending_sessions = [{"sheet_row": i + 2, "data": r} for i, r in enumerate(records) if r.get("Start Time") == "Pending"]
 team_list = [{"sheet_row": i + 2, "data": r} for i, r in enumerate(team_records)]
 
-# Get the most recent turnout data for the form defaults
 latest_turnout = {}
 if turnout_records:
-    latest_turnout = turnout_records[-1] # Get the last row
+    latest_turnout = turnout_records[-1]
 
 # --- Session States for Edit Modes ---
 if "edit_booth" not in st.session_state: st.session_state.edit_booth = False
@@ -405,11 +404,20 @@ with tab7:
                         st.rerun()
                     except Exception as e: st.error(f"Error saving: {e}")
                     
-        # Display the Historical Log
+        # --- ROBUST DISPLAY OF THE HISTORICAL LOG ---
         if turnout_records:
             st.markdown("#### 📜 Turnout History Log")
             df_turnout = pd.DataFrame(turnout_records)
-            st.dataframe(df_turnout[["Time_Block", "Timestamp", "Total_Cast", "Male", "Female", "TG"]], use_container_width=True, hide_index=True)
+            
+            # Safe column selection to avoid KeyError if headers mismatch
+            expected_cols = ["Time_Block", "Timestamp", "Total_Cast", "Male", "Female", "TG"]
+            available_cols = [col for col in expected_cols if col in df_turnout.columns]
+            
+            if available_cols:
+                st.dataframe(df_turnout[available_cols], use_container_width=True, hide_index=True)
+            else:
+                # Fallback to show whatever is in the sheet if it's completely different
+                st.dataframe(df_turnout, use_container_width=True, hide_index=True)
             
             if st.button("🗑️ Delete Last Entry"):
                 try:
@@ -457,14 +465,12 @@ with tab7:
             
     if st.button("🔄 Refresh Live Time"): st.rerun()
 
-# === TAB 8: FORM 17C CALCULATOR (NOW WITH SAVE & EDIT) ===
+# === TAB 8: FORM 17C CALCULATOR ===
 with tab8:
     st.header("🧮 Form 17C Calculator")
     
     if data_17c and "Form_17A" in data_17c and not st.session_state.edit_17c:
-        # --- VIEW MODE ---
         st.success("✅ Form 17C Data is Safely Saved in Google Sheets.")
-        
         st.write(f"**1. Total number of electors assigned:** {data_17c.get('Total_Assigned')}")
         st.write(f"**2. Total number of voters in Form 17A:** {data_17c.get('Form_17A')}")
         st.write(f"**3. Refused to vote (Rule 49-O):** {data_17c.get('Rule_49O')}")
@@ -487,9 +493,7 @@ with tab8:
             st.rerun()
             
     else:
-        # --- EDIT / ENTRY MODE ---
         st.info("Fill out the Form 17C details to verify the tally. This data will be saved permanently.")
-        
         calc_default_total = int(booth_data.get("Total", 0)) if booth_data.get("Total") else 0
         if data_17c and "Total_Assigned" in data_17c:
              calc_default_total = int(data_17c.get("Total_Assigned"))
@@ -555,7 +559,7 @@ with tab9:
         st.error("🚨 CU Display: 'BATTERY LOW'")
         st.write("**Solution (সমাধান):** CU **Switch OFF** করুন। Presiding Officer-এর কাছে থাকা Extra Battery (Power Pack) দিয়ে CU-এর ব্যাটারি পরিবর্তন করুন।")
     elif "Close Button Not Working" in evm_error:
-        st.error("🚨 Close Button কাজ করছে গান্ধ করছে না")
+        st.error("🚨 Close Button কাজ করছে না")
         st.write("**Solution (সমাধান):** ভোট গ্রহণ শেষে যদি Close বোতাম কাজ না করে, চেক করুন 'Busy' ইন্ডিকেটর জ্বলছে কিনা। BU-তে গিয়ে যেকোনো একটি বোতাম টিপে সেই ব্যালটটি বাতিল/সম্পূর্ণ করুন, এরপর CU-তে 'Close' বোতাম কাজ করবে।")
 
 # === TAB 10: PDF INDEX ===

@@ -404,22 +404,43 @@ with tab7:
                         st.rerun()
                     except Exception as e: st.error(f"Error saving: {e}")
                     
-        # --- ROBUST DISPLAY OF THE HISTORICAL LOG ---
+        # --- ROBUST DISPLAY OF THE HISTORICAL LOG (DUPLICATES HIDDEN + COLORED) ---
         if turnout_records:
             st.markdown("#### 📜 Turnout History Log")
             df_turnout = pd.DataFrame(turnout_records)
             
-            # Safe column selection to avoid KeyError if headers mismatch
-            expected_cols = ["Time_Block", "Timestamp", "Total_Cast", "Male", "Female", "TG"]
-            available_cols = [col for col in expected_cols if col in df_turnout.columns]
-            
-            if available_cols:
-                st.dataframe(df_turnout[available_cols], use_container_width=True, hide_index=True)
+            if "Time_Block" in df_turnout.columns:
+                # 1. Keep only the most recent entry for each Time Block
+                df_turnout = df_turnout.drop_duplicates(subset=["Time_Block"], keep="last")
+                
+                # 2. Color Map for different time blocks
+                color_map = {
+                    "09:00 AM": "#e3f2fd", # Light Blue
+                    "11:00 AM": "#e8f5e9", # Light Green
+                    "01:00 PM": "#fff8e1", # Light Yellow
+                    "03:00 PM": "#fce4ec", # Light Pink
+                    "05:00 PM": "#f3e5f5", # Light Purple
+                    "06:00 PM": "#fff3e0", # Light Orange
+                    "End of Poll (Final)": "#eeeeee" # Light Gray
+                }
+                
+                def highlight_blocks(row):
+                    bg_color = color_map.get(row["Time_Block"], "#ffffff")
+                    return [f"background-color: {bg_color}; color: #000000; font-weight: bold;"] * len(row)
+                
+                expected_cols = ["Time_Block", "Timestamp", "Total_Cast", "Male", "Female", "TG"]
+                available_cols = [col for col in expected_cols if col in df_turnout.columns]
+                
+                if available_cols:
+                    styled_df = df_turnout[available_cols].style.apply(highlight_blocks, axis=1)
+                    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+                else:
+                    st.dataframe(df_turnout, use_container_width=True, hide_index=True)
             else:
-                # Fallback to show whatever is in the sheet if it's completely different
                 st.dataframe(df_turnout, use_container_width=True, hide_index=True)
             
-            if st.button("🗑️ Delete Last Entry"):
+            # Delete button removes the absolute last record from the actual Google Sheet
+            if st.button("🗑️ Delete Last Entry (From Sheet)"):
                 try:
                     last_row_index = len(turnout_records) + 1 # +1 because row 1 is header
                     sheet_turnout.delete_rows(last_row_index)

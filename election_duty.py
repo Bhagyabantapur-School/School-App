@@ -368,7 +368,7 @@ with tab7:
     
     st.info(f"🕒 **Live Current Time (IST):** {current_time_str}")
     
-    # ---------------- NEW FEATURE: LIVE TURNOUT LOGGING ----------------
+    # ---------------- LIVE TURNOUT LOGGING ----------------
     st.divider()
     st.subheader("📊 Record Live Voting Data")
     st.markdown("Log the number of votes cast so far. This helps PRO send the 2-hourly SMS reports.")
@@ -583,6 +583,16 @@ with tab10:
         st.markdown("* Distribution of queue slips at 6:00 PM.\n* Pressing the CLOSE button on the CU.\n* Filling out Form 17C and the Presiding Officer's Diary.")
     with st.expander("8. রিসিভিং সেন্টারে ক্রিয়াকলাপ (RC Activities) ➡️ [পৃষ্ঠা 167-176]"):
         st.markdown("* Handing over sealed EVMs and VVPATs.\n* Submission of Statutory (Green) and Non-Statutory (Yellow) packets.")
+    
+    # ---------------- NEW EXPANDER ADDED ----------------
+    with st.expander("9. SMS Poll Reporting ও ECINET App ➡️ [পৃষ্ঠা 177-191]"):
+        st.markdown("""
+        * **কী আছে:**
+        * Presiding Officer-এর SMS পাঠানোর Format এবং Schedule (যেমন: Mok, 9am, 11am, 1pm ইত্যাদি)।
+        * প্রতি ২ ঘণ্টা অন্তর ভোটের হার (Turnout) SMS-এর মাধ্যমে জানানো।
+        * ECINET App ইনস্টল, লগইন এবং ডেটা এন্ট্রি করার সম্পূর্ণ নিয়ম।
+        * পোলিং সংক্রান্ত বিভিন্ন Helpline Number এবং Troubleshooting গাইড।
+        """)
 
 # === TAB 11: MEMORY TEST ===
 with tab11:

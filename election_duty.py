@@ -15,70 +15,75 @@ st.set_page_config(page_title="Election Duty 2026 - Party 116", page_icon="🗳�
 # --- Setup Your Sheet URL Here ---
 SHEET_URL = "https://docs.google.com/spreadsheets/d/YOUR_ACTUAL_SHEET_ID_HERE/edit"
 
-# --- Google Sheets Authentication ---
+# --- Google Sheets Authentication & Caching (OPTIMIZED) ---
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
 
 @st.cache_resource
-def get_gsheets_client():
+def get_google_sheets():
     creds = Credentials.from_service_account_info(
         st.secrets["gcp_service_account"], 
         scopes=SCOPES
     )
-    return gspread.authorize(creds)
+    client = gspread.authorize(creds)
+    spreadsheet = client.open("Election_Duty_Log")
+    
+    # Store all worksheet objects in a dictionary so they are fetched only ONCE
+    sheets = {}
+    sheets['log'] = spreadsheet.worksheet("Election_Duty_Log")
+    sheets['team'] = spreadsheet.worksheet("Team_Data")
+    sheets['calls'] = spreadsheet.worksheet("Call_Logs")
+    
+    # Auto-create logic safely inside the resource cache
+    try: sheets['booth'] = spreadsheet.worksheet("Booth_Data")
+    except: 
+        sheets['booth'] = spreadsheet.add_worksheet(title="Booth_Data", rows="10", cols="15")
+        sheets['booth'].append_row(["AC_Name", "PS_No", "PS_Name", "Total", "Male", "Female", "TG", "EDC", "ASD", "Proxy", "PB"])
+        
+    try: sheets['17c'] = spreadsheet.worksheet("Form_17C")
+    except: 
+        sheets['17c'] = spreadsheet.add_worksheet(title="Form_17C", rows="10", cols="10")
+        sheets['17c'].append_row(["Total_Assigned", "Form_17A", "Rule_49O", "Rule_49M", "Test_Votes", "EVM_Total", "Tendered"])
+        
+    try: sheets['turnout'] = spreadsheet.worksheet("Turnout_Data")
+    except: 
+        sheets['turnout'] = spreadsheet.add_worksheet(title="Turnout_Data", rows="100", cols="10")
+        sheets['turnout'].append_row(["Time_Block", "Timestamp", "Male", "Female", "TG", "Total_Cast", "EDC", "ASD", "Proxy", "PB"])
+        
+    try: sheets['memory'] = spreadsheet.worksheet("Memory_Log")
+    except: 
+        sheets['memory'] = spreadsheet.add_worksheet(title="Memory_Log", rows="100", cols="4")
+        sheets['memory'].append_row(["Timestamp", "Test Type", "Your Answer", "Result"])
+        
+    return sheets
 
 try:
-    client = get_gsheets_client()
-    spreadsheet = client.open("Election_Duty_Log")
-    sheet_log = spreadsheet.worksheet("Election_Duty_Log")
-    sheet_team = spreadsheet.worksheet("Team_Data")
-    sheet_calls = spreadsheet.worksheet("Call_Logs")
-    
-    # Existing Booth Data Sheet
-    try:
-        sheet_booth = spreadsheet.worksheet("Booth_Data")
-    except:
-        sheet_booth = spreadsheet.add_worksheet(title="Booth_Data", rows="10", cols="15")
-        sheet_booth.append_row(["AC_Name", "PS_No", "PS_Name", "Total", "Male", "Female", "TG", "EDC", "ASD", "Proxy", "PB"])
-    
-    # Form 17C Data
-    try:
-        sheet_17c = spreadsheet.worksheet("Form_17C")
-    except:
-        sheet_17c = spreadsheet.add_worksheet(title="Form_17C", rows="10", cols="10")
-        sheet_17c.append_row(["Total_Assigned", "Form_17A", "Rule_49O", "Rule_49M", "Test_Votes", "EVM_Total", "Tendered"])
-        
-    # Updated Sheet for Continuous Live Turnout Data
-    try:
-        sheet_turnout = spreadsheet.worksheet("Turnout_Data")
-    except:
-        sheet_turnout = spreadsheet.add_worksheet(title="Turnout_Data", rows="100", cols="10")
-        sheet_turnout.append_row(["Time_Block", "Timestamp", "Male", "Female", "TG", "Total_Cast", "EDC", "ASD", "Proxy", "PB"])
-        
-    try:
-        sheet_memory = spreadsheet.worksheet("Memory_Log")
-    except:
-        sheet_memory = spreadsheet.add_worksheet(title="Memory_Log", rows="100", cols="4")
-        sheet_memory.append_row(["Timestamp", "Test Type", "Your Answer", "Result"])
-        
+    sheets = get_google_sheets()
+    sheet_log = sheets['log']
+    sheet_team = sheets['team']
+    sheet_calls = sheets['calls']
+    sheet_booth = sheets['booth']
+    sheet_17c = sheets['17c']
+    sheet_turnout = sheets['turnout']
+    sheet_memory = sheets['memory']
 except Exception as e:
-    st.error(f"Failed to connect to Google Sheets. Error: {e}")
+    st.error(f"Failed to connect to Google Sheets. Check your credentials! Error: {e}")
     st.stop()
 
-# --- Data Fetching Logic ---
-@st.cache_data(ttl=60) 
+# --- Data Fetching Logic (OPTIMIZED WITH 5 MIN TTL) ---
+@st.cache_data(ttl=300) 
 def fetch_logs():
     try: return sheet_log.get_all_records()
     except: return []
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def fetch_team():
     try: return sheet_team.get_all_records()
     except: return []
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def fetch_booth_data():
     try: 
         records = sheet_booth.get_all_records()
@@ -86,7 +91,7 @@ def fetch_booth_data():
         return {}
     except: return {}
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def fetch_17c_data():
     try: 
         records = sheet_17c.get_all_records()
@@ -94,9 +99,14 @@ def fetch_17c_data():
         return {}
     except: return {}
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def fetch_turnout_records():
     try: return sheet_turnout.get_all_records()
+    except: return []
+
+@st.cache_data(ttl=300)
+def fetch_memory_logs():
+    try: return sheet_memory.get_all_records()
     except: return []
 
 records = fetch_logs()
@@ -104,6 +114,7 @@ team_records = fetch_team()
 booth_data = fetch_booth_data()
 data_17c = fetch_17c_data()
 turnout_records = fetch_turnout_records()
+memory_records = fetch_memory_logs()
 
 pending_sessions = [{"sheet_row": i + 2, "data": r} for i, r in enumerate(records) if r.get("Start Time") == "Pending"]
 team_list = [{"sheet_row": i + 2, "data": r} for i, r in enumerate(team_records)]
@@ -210,7 +221,7 @@ with tab1:
                         sheet_booth.append_row([ac, ps_no, ps_name, total, male, female, tg, edc, asd, proxy, pb])
                         st.session_state.edit_booth = False
                         st.success("Booth Data Saved Successfully!")
-                        st.cache_data.clear()
+                        fetch_booth_data.clear() 
                         st.rerun()
                     except Exception as e: st.error(f"Error saving data: {e}")
 
@@ -247,7 +258,7 @@ with tab2:
                         sheet_log.update_cell(selected_session['sheet_row'], 5, duration_formatted)
                         sheet_log.update_cell(selected_session['sheet_row'], 6, updated_notes)
                         st.success("Logged successfully!")
-                        st.cache_data.clear()
+                        fetch_logs.clear() 
                         st.rerun() 
                     except Exception as e: st.error(f"Error: {e}")
 
@@ -273,7 +284,7 @@ with tab2:
                 try:
                     sheet_log.append_row([log_date.strftime("%d-%m-%Y"), start_time.strftime("%I:%M %p"), end_time.strftime("%I:%M %p"), final_activity, duration_formatted, notes])
                     st.success("✅ Logged successfully!")
-                    st.cache_data.clear() 
+                    fetch_logs.clear() 
                 except Exception as e: st.error(f"Error: {e}")
 
 # === TAB 3: SCHEDULE FUTURE ===
@@ -290,7 +301,7 @@ with tab3:
             try:
                 sheet_log.append_row([future_date.strftime("%d-%m-%Y"), "Pending", "Pending", final_sched_activity, "Pending", sched_notes])
                 st.success("✅ Scheduled!")
-                st.cache_data.clear() 
+                fetch_logs.clear() 
             except Exception as e: st.error(f"Error: {e}")
 
 # === TAB 4: TEAM DASHBOARD ===
@@ -317,7 +328,7 @@ with tab4:
                         st.success("✅ Call logged!")
                 if st.button("Toggle Status", key=f"tog_{idx}"):
                     sheet_team.update_cell(row_num, 6, "Inactive" if status == "Active" else "Active")
-                    st.cache_data.clear()
+                    fetch_team.clear() 
                     st.rerun()
     st.divider()
     with st.expander("➕ Add New Team Member"):
@@ -331,13 +342,15 @@ with tab4:
                 if t_name and t_mobile:
                     sheet_team.append_row([t_name, t_desig, t_rank, t_address, t_mobile, "Active"])
                     st.success("Added!")
-                    st.cache_data.clear()
+                    fetch_team.clear() 
                     st.rerun()
 
 # === TAB 5: VIEW LOGS ===
 with tab5:
     st.subheader("Your Study History")
-    if st.button("🔄 Refresh Data"): st.cache_data.clear()
+    if st.button("🔄 Refresh Data"): 
+        st.cache_data.clear()
+        st.rerun()
     df = pd.DataFrame(records)
     if not df.empty:
         def highlight_pending(row): return ['background-color: #ffcccc; color: black'] * len(row) if row.get('Start Time') == 'Pending' else [''] * len(row)
@@ -401,11 +414,20 @@ with tab7:
                         exact_timestamp = get_ist_now().strftime("%I:%M %p")
                         sheet_turnout.append_row([time_block, exact_timestamp, t_male, t_female, t_tg, total_cast, t_edc, t_asd, t_proxy, t_pb])
                         st.success(f"Turnout for {time_block} Recorded Successfully!")
-                        st.cache_data.clear()
+                        fetch_turnout_records.clear() 
                         st.rerun()
                     except Exception as e: st.error(f"Error saving: {e}")
+        
+        # --- NEW PLACEMENT: REFRESH BUTTON BETWEEN FORM AND TABLE ---
+        st.write("") # Small gap
+        col_r1, col_r2, col_r3 = st.columns([1, 2, 1])
+        with col_r2:
+            if st.button("🔄 Refresh & Sync Data", use_container_width=True):
+                fetch_turnout_records.clear()
+                st.rerun()
+        st.write("") # Small gap
                     
-        # --- ROBUST DISPLAY OF THE HISTORICAL LOG (WITH ALL DATA COLUMNS) ---
+        # --- ROBUST DISPLAY OF THE HISTORICAL LOG ---
         if turnout_records:
             st.markdown("#### 📜 Turnout History Log")
             df_turnout = pd.DataFrame(turnout_records)
@@ -421,7 +443,6 @@ with tab7:
                     bg_color = color_map.get(row["Time_Block"], "#ffffff")
                     return [f"background-color: {bg_color}; color: #000000; font-weight: bold;"] * len(row)
                 
-                # UPDATED: Now includes EDC, ASD, Proxy, PB in the table view
                 expected_cols = ["Time_Block", "Timestamp", "Total_Cast", "Male", "Female", "TG", "EDC", "ASD", "Proxy", "PB"]
                 available_cols = [col for col in expected_cols if col in df_turnout.columns]
                 
@@ -438,7 +459,7 @@ with tab7:
                     last_row_index = len(turnout_records) + 1 
                     sheet_turnout.delete_rows(last_row_index)
                     st.success("Last entry deleted.")
-                    st.cache_data.clear()
+                    fetch_turnout_records.clear() 
                     st.rerun()
                 except Exception as e: st.error("Failed to delete.")
 
@@ -476,8 +497,6 @@ with tab7:
             st.success(f"### 👉 CURRENT TASK: {event['time']} - {event['title']}\n**Action Required:** {event['desc']}")
         else:
             with st.expander(f"{event['time']} - {event['title']}"): st.write(event['desc'])
-            
-    if st.button("🔄 Refresh Live Time"): st.rerun()
 
 # === TAB 8: FORM 17C CALCULATOR ===
 with tab8:
@@ -538,7 +557,7 @@ with tab8:
                         sheet_17c.append_row([total_assigned, form_17a_total, rule_49o, rule_49m, test_votes, actual_evm_total, tendered_issued])
                         st.session_state.edit_17c = False
                         st.success("Form 17C Data Saved Successfully!")
-                        st.cache_data.clear()
+                        fetch_17c_data.clear() 
                         st.rerun()
                     except Exception as e: st.error(f"Error saving data: {e}")
 
@@ -629,15 +648,14 @@ with tab11:
                 try:
                     timestamp = get_ist_now().strftime("%d-%m-%Y %I:%M %p")
                     sheet_memory.append_row([timestamp, test_type, user_guess.strip(), result])
-                    st.cache_data.clear()
+                    fetch_memory_logs.clear() 
                 except Exception as e: st.error("Could not save the result to Google Sheets.")
                     
         st.divider()
         st.subheader("Your Test History")
         try:
-            mem_records = sheet_memory.get_all_records()
-            if mem_records:
-                recent_tests = pd.DataFrame(mem_records).iloc[::-1].head(5)
+            if memory_records:
+                recent_tests = pd.DataFrame(memory_records).iloc[::-1].head(5)
                 st.dataframe(recent_tests, use_container_width=True, hide_index=True)
             else: st.caption("Take a test to see your results here.")
         except: st.caption("Unable to load history.")
@@ -653,7 +671,6 @@ with tab12:
         
     st.divider()
     
-    # 1. Booth Summary
     st.subheader("🏢 1. Booth Overview")
     if booth_data and booth_data.get("Total", "") != "":
         c1, c2, c3 = st.columns(3)
@@ -664,7 +681,6 @@ with tab12:
     else:
         st.warning("Booth data not set. Please update the Dashboard.")
 
-    # 2. Turnout Summary (UPDATED WITH ALL FIELDS)
     st.subheader("📊 2. Final Voting Turnout")
     if turnout_records:
         latest = turnout_records[-1]
@@ -686,7 +702,6 @@ with tab12:
     else:
         st.warning("No turnout data recorded yet. Please update the Timeline tab.")
 
-    # 3. Form 17C Summary
     st.subheader("🧮 3. Form 17C Status")
     if data_17c and "Form_17A" in data_17c:
         expected = int(data_17c.get('Form_17A', 0)) - int(data_17c.get('Rule_49O', 0)) - int(data_17c.get('Rule_49M', 0))
@@ -701,7 +716,6 @@ with tab12:
     else:
         st.warning("Form 17C data not saved yet.")
 
-    # 4. Team & Study Summary
     st.subheader("👥 4. Team & Preparation")
     c1, c2 = st.columns(2)
     c1.metric("Team Members Registered", len(team_list))

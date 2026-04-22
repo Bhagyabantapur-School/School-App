@@ -135,7 +135,8 @@ with header_col2:
 st.divider()
 
 # --- App Layout: Tabs ---
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
+# Added Tab 12 for Final Summary
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12 = st.tabs([
     "🏠 Dashboard", 
     "📝 Log", 
     "📅 Sched", 
@@ -146,7 +147,8 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
     "🧮 17C Calc",
     "🛠️ EVM Solver",
     "📑 PDF Index",
-    "🧠 Memory Test"
+    "🧠 Memory Test",
+    "📋 Final Summary"
 ])
 
 # === TAB 1: DASHBOARD & SETUP ===
@@ -410,20 +412,12 @@ with tab7:
             df_turnout = pd.DataFrame(turnout_records)
             
             if "Time_Block" in df_turnout.columns:
-                # 1. Keep only the most recent entry for each Time Block
                 df_turnout = df_turnout.drop_duplicates(subset=["Time_Block"], keep="last")
-                
-                # 2. Color Map for different time blocks
                 color_map = {
-                    "09:00 AM": "#e3f2fd", # Light Blue
-                    "11:00 AM": "#e8f5e9", # Light Green
-                    "01:00 PM": "#fff8e1", # Light Yellow
-                    "03:00 PM": "#fce4ec", # Light Pink
-                    "05:00 PM": "#f3e5f5", # Light Purple
-                    "06:00 PM": "#fff3e0", # Light Orange
-                    "End of Poll (Final)": "#eeeeee" # Light Gray
+                    "09:00 AM": "#e3f2fd", "11:00 AM": "#e8f5e9", "01:00 PM": "#fff8e1", 
+                    "03:00 PM": "#fce4ec", "05:00 PM": "#f3e5f5", "06:00 PM": "#fff3e0", 
+                    "End of Poll (Final)": "#eeeeee"
                 }
-                
                 def highlight_blocks(row):
                     bg_color = color_map.get(row["Time_Block"], "#ffffff")
                     return [f"background-color: {bg_color}; color: #000000; font-weight: bold;"] * len(row)
@@ -439,10 +433,9 @@ with tab7:
             else:
                 st.dataframe(df_turnout, use_container_width=True, hide_index=True)
             
-            # Delete button removes the absolute last record from the actual Google Sheet
             if st.button("🗑️ Delete Last Entry (From Sheet)"):
                 try:
-                    last_row_index = len(turnout_records) + 1 # +1 because row 1 is header
+                    last_row_index = len(turnout_records) + 1 
                     sheet_turnout.delete_rows(last_row_index)
                     st.success("Last entry deleted.")
                     st.cache_data.clear()
@@ -648,3 +641,70 @@ with tab11:
                 st.dataframe(recent_tests, use_container_width=True, hide_index=True)
             else: st.caption("Take a test to see your results here.")
         except: st.caption("Unable to load history.")
+
+# === TAB 12: FINAL SUMMARY (NEW) ===
+with tab12:
+    st.header("📋 Comprehensive Election Summary")
+    st.markdown("A consolidated overview of all your recorded data.")
+    
+    if st.button("🔄 Refresh All Data", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+        
+    st.divider()
+    
+    # 1. Booth Summary
+    st.subheader("🏢 1. Booth Overview")
+    if booth_data and booth_data.get("Total", "") != "":
+        c1, c2, c3 = st.columns(3)
+        c1.metric("AC & PS", f"{booth_data.get('AC_Name')} | {booth_data.get('PS_No')}")
+        c2.metric("Total Assigned", booth_data.get("Total"))
+        special_total = int(booth_data.get("EDC", 0)) + int(booth_data.get("ASD", 0)) + int(booth_data.get("Proxy", 0)) + int(booth_data.get("PB", 0))
+        c3.metric("Special Voters", special_total)
+    else:
+        st.warning("Booth data not set. Please update the Dashboard.")
+
+    # 2. Turnout Summary
+    st.subheader("📊 2. Final Voting Turnout")
+    if turnout_records:
+        latest = turnout_records[-1]
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Time Block", latest.get("Time_Block", "N/A"))
+        c2.metric("Total Cast", latest.get("Total_Cast", 0))
+        c3.metric("Male", latest.get("Male", 0))
+        c4.metric("Female", latest.get("Female", 0))
+    else:
+        st.warning("No turnout data recorded yet. Please update the Timeline tab.")
+
+    # 3. Form 17C Summary
+    st.subheader("🧮 3. Form 17C Status")
+    if data_17c and "Form_17A" in data_17c:
+        expected = int(data_17c.get('Form_17A', 0)) - int(data_17c.get('Rule_49O', 0)) - int(data_17c.get('Rule_49M', 0))
+        actual = int(data_17c.get('EVM_Total', 0))
+        c1, c2, c3 = st.columns(3)
+        c1.metric("17A Register Total", data_17c.get("Form_17A", 0))
+        c2.metric("EVM Control Unit", actual)
+        if expected == actual:
+            c3.success("✅ EVM MATCHES 17A")
+        else:
+            c3.error(f"🚨 MISMATCH ({abs(expected - actual)})")
+    else:
+        st.warning("Form 17C data not saved yet.")
+
+    # 4. Team & Study Summary
+    st.subheader("👥 4. Team & Preparation")
+    c1, c2 = st.columns(2)
+    c1.metric("Team Members Registered", len(team_list))
+    
+    total_mins = 0
+    for r in records:
+        dur = str(r.get("Duration", ""))
+        if "h" in dur and "m" in dur:
+            try:
+                parts = dur.split("h")
+                h = int(parts[0].strip())
+                m = int(parts[1].replace("m", "").strip())
+                total_mins += (h * 60) + m
+            except:
+                pass
+    c2.metric("Total Study Time Logged", f"{total_mins // 60}h {total_mins % 60}m")

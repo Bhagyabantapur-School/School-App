@@ -663,14 +663,28 @@ with tab_cash:
                 
     st.divider()
     st.subheader("📜 Recent Cash Counts")
+    
     if not df_cash.empty:
-        display_cols = ['Date', 'Time', 'Total', 'Wallet_Name', 'Wallet_Amount', 'Remark']
-        valid_cols = [c for c in display_cols if c in df_cash.columns]
-        if not valid_cols: 
-            valid_cols = df_cash.columns
+        # 1. FIX: Vigorously strip all hidden spaces from Google Sheet headers
+        df_cash.columns = [str(c).strip() for c in df_cash.columns]
         
-        display_df = df_cash[valid_cols].tail(10).iloc[::-1]
+        # 2. Select the columns to display
+        desired_cols = ['Date', 'Time', 'Total', 'Wallet_Name', 'Wallet_Amount', 'Remark']
+        display_cols = [c for c in desired_cols if c in df_cash.columns]
+        
+        # Fallback if none match
+        if not display_cols: 
+            display_cols = df_cash.columns
+            
+        display_df = df_cash[display_cols].tail(10).iloc[::-1]
         st.dataframe(display_df, use_container_width=True, hide_index=True)
+        
+        # --- DIAGNOSTIC MODE ---
+        # If Date STILL isn't showing, this line will reveal exactly what your sheet's column is actually named.
+        if 'Date' not in df_cash.columns:
+            st.error(f"⚠️ 'Date' column not found! The app currently sees these columns: {list(df_cash.columns)}")
+            st.info("Please check cell A1 in the CASH_COUNT tab of your Google Sheet to ensure it is named exactly 'Date'.")
+            
     else:
         st.info("No past cash counts found yet.")
 # ==========================================

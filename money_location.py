@@ -528,9 +528,9 @@ with tab_cash:
 
     df_cash = load_cash_data()
     
-    # Strip accidental spaces from Google Sheet headers to prevent missing columns
+    # FIX: Vigorously strip all hidden spaces from Google Sheet headers
     if not df_cash.empty:
-        df_cash.columns = df_cash.columns.str.strip()
+        df_cash.columns = [str(c).strip() for c in df_cash.columns]
 
     # --- 1. WALLET SELECTION ---
     st.subheader("Wallet Selection")
@@ -584,7 +584,6 @@ with tab_cash:
     st.divider()
 
     # --- 3. DENOMINATIONS & CALCULATION ---
-    # Split into 3 columns: Notes, Coins, and Totals for better organization
     c_notes, c_coins, c_totals = st.columns([1, 1, 1.5])
     
     with c_notes:
@@ -618,8 +617,7 @@ with tab_cash:
         
         st.markdown("### Breakdown")
         
-        # Custom color-coded metric boxes using HTML/CSS
-        # Green for Notes, Orange for Coins (using rgba for Light/Dark mode compatibility)
+        # Custom color-coded metric boxes
         html_metrics = f"""
         <div style="display: flex; gap: 10px; margin-bottom: 15px;">
             <div style="flex: 1; background-color: rgba(76, 175, 80, 0.15); padding: 10px; border-radius: 8px; border-left: 5px solid #4caf50;">
@@ -663,30 +661,24 @@ with tab_cash:
                 
     st.divider()
     st.subheader("📜 Recent Cash Counts")
-    
     if not df_cash.empty:
-        # 1. FIX: Vigorously strip all hidden spaces from Google Sheet headers
-        df_cash.columns = [str(c).strip() for c in df_cash.columns]
-        
-        # 2. Select the columns to display
+        # Cross-check desired columns against cleaned sheet columns
         desired_cols = ['Date', 'Time', 'Total', 'Wallet_Name', 'Wallet_Amount', 'Remark']
         display_cols = [c for c in desired_cols if c in df_cash.columns]
         
-        # Fallback if none match
         if not display_cols: 
             display_cols = df_cash.columns
             
         display_df = df_cash[display_cols].tail(10).iloc[::-1]
         st.dataframe(display_df, use_container_width=True, hide_index=True)
         
-        # --- DIAGNOSTIC MODE ---
-        # If Date STILL isn't showing, this line will reveal exactly what your sheet's column is actually named.
+        # Diagnostic check: If Date STILL isn't showing, it will warn you
         if 'Date' not in df_cash.columns:
             st.error(f"⚠️ 'Date' column not found! The app currently sees these columns: {list(df_cash.columns)}")
             st.info("Please check cell A1 in the CASH_COUNT tab of your Google Sheet to ensure it is named exactly 'Date'.")
-            
     else:
         st.info("No past cash counts found yet.")
+
 # ==========================================
 # TAB 2: SHOPPING LIST
 # ==========================================

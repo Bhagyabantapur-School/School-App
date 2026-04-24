@@ -528,7 +528,7 @@ with tab_cash:
 
     df_cash = load_cash_data()
 
-    # --- 1. WALLET SELECTION (Moved to Top) ---
+    # --- 1. WALLET SELECTION ---
     st.subheader("Wallet Selection")
     existing_wallets = []
     if not df_cash.empty and 'Wallet_Name' in df_cash.columns:
@@ -545,38 +545,39 @@ with tab_cash:
         wallet_name = wallet_choice
 
     # --- 2. FETCH PREVIOUS DATA FOR SELECTED WALLET ---
-    # Default everything to 0
-    last_notes = {500: 0, 200: 0, 100: 0, 50: 0, 20: 0, 10: 0, 5: 0, 2: 0, 1: 0}
+    last_notes = {
+        '500': 0, '200': 0, '100': 0, '50': 0, '20': 0, 
+        '10_Note': 0, '10_Coin': 0, '5': 0, '2': 0, '1': 0
+    }
     last_wallet_amt = 0.0
 
     if not df_cash.empty and wallet_name and wallet_name in existing_wallets:
-        # Filter rows for the chosen wallet
+        # Filter for the chosen wallet
         wallet_history = df_cash[df_cash['Wallet_Name'].astype(str).str.strip() == wallet_name]
         if not wallet_history.empty:
-            last_entry = wallet_history.iloc[-1] # Get the most recent entry
+            last_entry = wallet_history.iloc[-1] 
             
-            # Helper function to safely extract values from the row
-            def get_prev_val(col_idx, col_name, is_float=False):
-                val = 0
-                if col_name in df_cash.columns: val = last_entry[col_name]
-                elif len(df_cash.columns) > col_idx: val = last_entry.iloc[col_idx]
-                
+            # Safe extraction function relying on column names
+            def get_prev_val(col_name, is_float=False):
                 try:
-                    return float(val) if is_float else int(val)
+                    if col_name in df_cash.columns:
+                        val = last_entry[col_name]
+                        return float(val) if is_float else int(val)
                 except (ValueError, TypeError):
-                    return 0.0 if is_float else 0
+                    pass
+                return 0.0 if is_float else 0
 
-            # Pull previous data based on expected column names or strict sheet index
-            last_notes[500] = get_prev_val(3, '₹500')
-            last_notes[200] = get_prev_val(4, '₹200')
-            last_notes[100] = get_prev_val(5, '₹100')
-            last_notes[50]  = get_prev_val(6, '₹50')
-            last_notes[20]  = get_prev_val(7, '₹20')
-            last_notes[10]  = get_prev_val(8, '₹10')
-            last_notes[5]   = get_prev_val(9, '₹5')
-            last_notes[2]   = get_prev_val(10, '₹2')
-            last_notes[1]   = get_prev_val(11, '₹1')
-            last_wallet_amt = get_prev_val(13, 'Wallet_Amount', is_float=True)
+            last_notes['500'] = get_prev_val('₹500')
+            last_notes['200'] = get_prev_val('₹200')
+            last_notes['100'] = get_prev_val('₹100')
+            last_notes['50']  = get_prev_val('₹50')
+            last_notes['20']  = get_prev_val('₹20')
+            last_notes['10_Note'] = get_prev_val('₹10_Note')
+            last_notes['10_Coin'] = get_prev_val('₹10_Coin')
+            last_notes['5']   = get_prev_val('₹5')
+            last_notes['2']   = get_prev_val('₹2')
+            last_notes['1']   = get_prev_val('₹1')
+            last_wallet_amt   = get_prev_val('Wallet_Amount', is_float=True)
 
     st.divider()
 
@@ -584,30 +585,43 @@ with tab_cash:
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("Specific Denominations")
-        # Added value parameter to auto-populate previous data
-        notes_500 = st.number_input("₹500", min_value=0, step=1, value=last_notes[500])
-        notes_200 = st.number_input("₹200", min_value=0, step=1, value=last_notes[200])
-        notes_100 = st.number_input("₹100", min_value=0, step=1, value=last_notes[100])
-        notes_50  = st.number_input("₹50", min_value=0, step=1, value=last_notes[50])
-        notes_20  = st.number_input("₹20", min_value=0, step=1, value=last_notes[20])
-        notes_10  = st.number_input("₹10", min_value=0, step=1, value=last_notes[10])
-        notes_5   = st.number_input("₹5", min_value=0, step=1, value=last_notes[5])
-        notes_2   = st.number_input("₹2", min_value=0, step=1, value=last_notes[2])
-        notes_1   = st.number_input("₹1", min_value=0, step=1, value=last_notes[1])
+        notes_500 = st.number_input("₹500", min_value=0, step=1, value=last_notes['500'])
+        notes_200 = st.number_input("₹200", min_value=0, step=1, value=last_notes['200'])
+        notes_100 = st.number_input("₹100", min_value=0, step=1, value=last_notes['100'])
+        notes_50  = st.number_input("₹50", min_value=0, step=1, value=last_notes['50'])
+        notes_20  = st.number_input("₹20", min_value=0, step=1, value=last_notes['20'])
+        
+        notes_10  = st.number_input("₹10 (Note)", min_value=0, step=1, value=last_notes['10_Note']) 
+        coins_10  = st.number_input("₹10 (Coin)", min_value=0, step=1, value=last_notes['10_Coin']) 
+        
+        notes_5   = st.number_input("₹5", min_value=0, step=1, value=last_notes['5'])
+        notes_2   = st.number_input("₹2", min_value=0, step=1, value=last_notes['2'])
+        notes_1   = st.number_input("₹1", min_value=0, step=1, value=last_notes['1'])
 
     with c2:
-        st.subheader("Additional / Lump Sum")
+        st.subheader("Additional & Totals")
         wallet_val = st.number_input("Lump Sum Amount (₹)", min_value=0.0, step=10.0, value=float(last_wallet_amt))
         
         st.divider()
         
-        # Calculate the grand total
-        total_cash = (notes_500 * 500) + (notes_200 * 200) + (notes_100 * 100) + \
-                     (notes_50 * 50) + (notes_20 * 20) + (notes_10 * 10) + \
-                     (notes_5 * 5) + (notes_2 * 2) + (notes_1 * 1) + \
-                     wallet_val
-                     
-        st.metric("Total Physical Cash", f"₹ {total_cash:,.2f}")
+        # Calculate subtotals
+        total_notes = (notes_500 * 500) + (notes_200 * 200) + (notes_100 * 100) + \
+                      (notes_50 * 50) + (notes_20 * 20) + (notes_10 * 10)
+                      
+        total_coins = (coins_10 * 10) + (notes_5 * 5) + (notes_2 * 2) + (notes_1 * 1)
+        
+        # Overall total
+        total_cash = total_notes + total_coins + wallet_val
+        
+        st.markdown("### Breakdown")
+        
+        # Displaying the calculated totals nicely
+        col_t1, col_t2 = st.columns(2)
+        col_t1.metric("Total Notes", f"₹ {total_notes:,.2f}")
+        col_t2.metric("Total Coins", f"₹ {total_coins:,.2f}")
+        
+        st.metric("Overall Physical Cash", f"₹ {total_cash:,.2f}")
+        
         cash_remark = st.text_input("Remark (Optional)")
         
         if st.button("💾 Save Cash Count", use_container_width=True, type="primary"):
@@ -618,32 +632,38 @@ with tab_cash:
                 today_str = time_now.strftime("%d-%m-%Y")
                 time_str = time_now.strftime("%H:%M")
                 
-                # Map exactly to the 15 columns in the updated Google Sheet
+                # Matches the 16 columns of the new sheet structure exactly
                 row_data = [
                     today_str, time_str, total_cash, 
-                    notes_500, notes_200, notes_100, notes_50, notes_20, notes_10, 
-                    notes_5, notes_2, notes_1, wallet_name, wallet_val, cash_remark
+                    notes_500, notes_200, notes_100, notes_50, notes_20, 
+                    notes_10, coins_10,  
+                    notes_5, notes_2, notes_1, 
+                    wallet_name, wallet_val, cash_remark
                 ]
                 try:
                     sh.worksheet("CASH_COUNT").append_row(row_data)
                     load_cash_data.clear()
                     st.success(f"Successfully saved cash count of ₹{total_cash} to {wallet_name}!")
-                    st.rerun() # Forces a refresh so the new wallet appears in the dropdown instantly!
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Error saving to Google Sheets: {e}")
                 
     st.divider()
     st.subheader("📜 Recent Cash Counts")
     if not df_cash.empty:
-        # Optimize the view to show the most important columns for different wallets
-        display_cols = [c for c in ['Date', 'Time', 'Total', 'Wallet_Name', 'Wallet_Amount', 'Remark'] if c in df_cash.columns]
-        if not display_cols: display_cols = df_cash.columns
+        # Explicitly requesting 'Date' in the list of columns to show
+        display_cols = ['Date', 'Time', 'Total', 'Wallet_Name', 'Wallet_Amount', 'Remark']
         
-        display_df = df_cash[display_cols].tail(10).iloc[::-1]
+        # Cross-check to only display columns that actually exist in the fetched sheet
+        valid_cols = [c for c in display_cols if c in df_cash.columns]
+        
+        if not valid_cols: 
+            valid_cols = df_cash.columns
+        
+        display_df = df_cash[valid_cols].tail(10).iloc[::-1]
         st.dataframe(display_df, use_container_width=True, hide_index=True)
     else:
-        st.info("No past cash counts found yet.")
-# ==========================================
+        st.info("No past cash counts found yet.")# ==========================================
 # TAB 2: SHOPPING LIST
 # ==========================================
 with tab_shopping:

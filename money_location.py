@@ -526,40 +526,78 @@ with tab_cash:
     st.header("💵 Physical Cash Denomination Count")
     st.write("Tally your physical cash balance on hand.")
 
+    df_cash = load_cash_data()
+
+    # --- 1. WALLET SELECTION (Moved to Top) ---
+    st.subheader("Wallet Selection")
+    existing_wallets = []
+    if not df_cash.empty and 'Wallet_Name' in df_cash.columns:
+        existing_wallets = list(df_cash['Wallet_Name'].dropna().unique())
+        existing_wallets = [str(w).strip() for w in existing_wallets if str(w).strip() != ""]
+    
+    if not existing_wallets: 
+        existing_wallets = ["Main Wallet", "Home Locker"]
+        
+    wallet_choice = st.selectbox("Select Wallet / Storage", existing_wallets + ["-- Add New Wallet --"])
+    if wallet_choice == "-- Add New Wallet --":
+        wallet_name = st.text_input("Type New Wallet Name")
+    else:
+        wallet_name = wallet_choice
+
+    # --- 2. FETCH PREVIOUS DATA FOR SELECTED WALLET ---
+    # Default everything to 0
+    last_notes = {500: 0, 200: 0, 100: 0, 50: 0, 20: 0, 10: 0, 5: 0, 2: 0, 1: 0}
+    last_wallet_amt = 0.0
+
+    if not df_cash.empty and wallet_name and wallet_name in existing_wallets:
+        # Filter rows for the chosen wallet
+        wallet_history = df_cash[df_cash['Wallet_Name'].astype(str).str.strip() == wallet_name]
+        if not wallet_history.empty:
+            last_entry = wallet_history.iloc[-1] # Get the most recent entry
+            
+            # Helper function to safely extract values from the row
+            def get_prev_val(col_idx, col_name, is_float=False):
+                val = 0
+                if col_name in df_cash.columns: val = last_entry[col_name]
+                elif len(df_cash.columns) > col_idx: val = last_entry.iloc[col_idx]
+                
+                try:
+                    return float(val) if is_float else int(val)
+                except (ValueError, TypeError):
+                    return 0.0 if is_float else 0
+
+            # Pull previous data based on expected column names or strict sheet index
+            last_notes[500] = get_prev_val(3, '₹500')
+            last_notes[200] = get_prev_val(4, '₹200')
+            last_notes[100] = get_prev_val(5, '₹100')
+            last_notes[50]  = get_prev_val(6, '₹50')
+            last_notes[20]  = get_prev_val(7, '₹20')
+            last_notes[10]  = get_prev_val(8, '₹10')
+            last_notes[5]   = get_prev_val(9, '₹5')
+            last_notes[2]   = get_prev_val(10, '₹2')
+            last_notes[1]   = get_prev_val(11, '₹1')
+            last_wallet_amt = get_prev_val(13, 'Wallet_Amount', is_float=True)
+
+    st.divider()
+
+    # --- 3. DENOMINATIONS & CALCULATION ---
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("Specific Denominations")
-        notes_500 = st.number_input("₹500", min_value=0, step=1)
-        notes_200 = st.number_input("₹200", min_value=0, step=1)
-        notes_100 = st.number_input("₹100", min_value=0, step=1)
-        notes_50  = st.number_input("₹50", min_value=0, step=1)
-        notes_20  = st.number_input("₹20", min_value=0, step=1)
-        notes_10  = st.number_input("₹10", min_value=0, step=1)
-        notes_5   = st.number_input("₹5", min_value=0, step=1)
-        notes_2   = st.number_input("₹2", min_value=0, step=1)
-        notes_1   = st.number_input("₹1", min_value=0, step=1)
+        # Added value parameter to auto-populate previous data
+        notes_500 = st.number_input("₹500", min_value=0, step=1, value=last_notes[500])
+        notes_200 = st.number_input("₹200", min_value=0, step=1, value=last_notes[200])
+        notes_100 = st.number_input("₹100", min_value=0, step=1, value=last_notes[100])
+        notes_50  = st.number_input("₹50", min_value=0, step=1, value=last_notes[50])
+        notes_20  = st.number_input("₹20", min_value=0, step=1, value=last_notes[20])
+        notes_10  = st.number_input("₹10", min_value=0, step=1, value=last_notes[10])
+        notes_5   = st.number_input("₹5", min_value=0, step=1, value=last_notes[5])
+        notes_2   = st.number_input("₹2", min_value=0, step=1, value=last_notes[2])
+        notes_1   = st.number_input("₹1", min_value=0, step=1, value=last_notes[1])
 
     with c2:
-        st.subheader("Wallet Selection & Amount")
-        
-        # --- DYNAMIC WALLET DROPDOWN ---
-        df_cash = load_cash_data()
-        existing_wallets = []
-        if not df_cash.empty and 'Wallet_Name' in df_cash.columns:
-            existing_wallets = list(df_cash['Wallet_Name'].dropna().unique())
-            existing_wallets = [str(w).strip() for w in existing_wallets if str(w).strip() != ""]
-        
-        if not existing_wallets: 
-            existing_wallets = ["Main Wallet", "Home Locker"]
-            
-        wallet_choice = st.selectbox("Select Wallet / Storage", existing_wallets + ["-- Add New Wallet --"])
-        if wallet_choice == "-- Add New Wallet --":
-            wallet_name = st.text_input("Type New Wallet Name")
-        else:
-            wallet_name = wallet_choice
-            
-        # --- AMOUNT ---
-        wallet_val = st.number_input("Lump Sum Amount (₹)", min_value=0.0, step=10.0)
+        st.subheader("Additional / Lump Sum")
+        wallet_val = st.number_input("Lump Sum Amount (₹)", min_value=0.0, step=10.0, value=float(last_wallet_amt))
         
         st.divider()
         
@@ -605,7 +643,6 @@ with tab_cash:
         st.dataframe(display_df, use_container_width=True, hide_index=True)
     else:
         st.info("No past cash counts found yet.")
-
 # ==========================================
 # TAB 2: SHOPPING LIST
 # ==========================================

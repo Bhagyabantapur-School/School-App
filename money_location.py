@@ -527,6 +527,10 @@ with tab_cash:
     st.write("Tally your physical cash balance on hand.")
 
     df_cash = load_cash_data()
+    
+    # Strip accidental spaces from Google Sheet headers to prevent missing columns
+    if not df_cash.empty:
+        df_cash.columns = df_cash.columns.str.strip()
 
     # --- 1. WALLET SELECTION ---
     st.subheader("Wallet Selection")
@@ -552,12 +556,10 @@ with tab_cash:
     last_wallet_amt = 0.0
 
     if not df_cash.empty and wallet_name and wallet_name in existing_wallets:
-        # Filter for the chosen wallet
         wallet_history = df_cash[df_cash['Wallet_Name'].astype(str).str.strip() == wallet_name]
         if not wallet_history.empty:
             last_entry = wallet_history.iloc[-1] 
             
-            # Safe extraction function relying on column names
             def get_prev_val(col_name, is_float=False):
                 try:
                     if col_name in df_cash.columns:
@@ -582,24 +584,27 @@ with tab_cash:
     st.divider()
 
     # --- 3. DENOMINATIONS & CALCULATION ---
-    c1, c2 = st.columns(2)
-    with c1:
-        st.subheader("Specific Denominations")
+    # Split into 3 columns: Notes, Coins, and Totals for better organization
+    c_notes, c_coins, c_totals = st.columns([1, 1, 1.5])
+    
+    with c_notes:
+        st.markdown("#### 💵 :green[Notes Entry]")
         notes_500 = st.number_input("₹500", min_value=0, step=1, value=last_notes['500'])
         notes_200 = st.number_input("₹200", min_value=0, step=1, value=last_notes['200'])
         notes_100 = st.number_input("₹100", min_value=0, step=1, value=last_notes['100'])
         notes_50  = st.number_input("₹50", min_value=0, step=1, value=last_notes['50'])
         notes_20  = st.number_input("₹20", min_value=0, step=1, value=last_notes['20'])
-        
         notes_10  = st.number_input("₹10 (Note)", min_value=0, step=1, value=last_notes['10_Note']) 
+
+    with c_coins:
+        st.markdown("#### 🪙 :orange[Coins Entry]")
         coins_10  = st.number_input("₹10 (Coin)", min_value=0, step=1, value=last_notes['10_Coin']) 
-        
         notes_5   = st.number_input("₹5", min_value=0, step=1, value=last_notes['5'])
         notes_2   = st.number_input("₹2", min_value=0, step=1, value=last_notes['2'])
         notes_1   = st.number_input("₹1", min_value=0, step=1, value=last_notes['1'])
 
-    with c2:
-        st.subheader("Additional & Totals")
+    with c_totals:
+        st.markdown("#### 🧾 Additional & Action")
         wallet_val = st.number_input("Lump Sum Amount (₹)", min_value=0.0, step=10.0, value=float(last_wallet_amt))
         
         st.divider()
@@ -609,16 +614,25 @@ with tab_cash:
                       (notes_50 * 50) + (notes_20 * 20) + (notes_10 * 10)
                       
         total_coins = (coins_10 * 10) + (notes_5 * 5) + (notes_2 * 2) + (notes_1 * 1)
-        
-        # Overall total
         total_cash = total_notes + total_coins + wallet_val
         
         st.markdown("### Breakdown")
         
-        # Displaying the calculated totals nicely
-        col_t1, col_t2 = st.columns(2)
-        col_t1.metric("Total Notes", f"₹ {total_notes:,.2f}")
-        col_t2.metric("Total Coins", f"₹ {total_coins:,.2f}")
+        # Custom color-coded metric boxes using HTML/CSS
+        # Green for Notes, Orange for Coins (using rgba for Light/Dark mode compatibility)
+        html_metrics = f"""
+        <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+            <div style="flex: 1; background-color: rgba(76, 175, 80, 0.15); padding: 10px; border-radius: 8px; border-left: 5px solid #4caf50;">
+                <p style="margin:0px; font-size:14px; font-weight: bold; color: #4caf50;">💵 Total Notes</p>
+                <h3 style="margin:0px; padding-top: 5px;">₹ {total_notes:,.2f}</h3>
+            </div>
+            <div style="flex: 1; background-color: rgba(255, 152, 0, 0.15); padding: 10px; border-radius: 8px; border-left: 5px solid #ff9800;">
+                <p style="margin:0px; font-size:14px; font-weight: bold; color: #ff9800;">🪙 Total Coins</p>
+                <h3 style="margin:0px; padding-top: 5px;">₹ {total_coins:,.2f}</h3>
+            </div>
+        </div>
+        """
+        st.markdown(html_metrics, unsafe_allow_html=True)
         
         st.metric("Overall Physical Cash", f"₹ {total_cash:,.2f}")
         
@@ -632,7 +646,6 @@ with tab_cash:
                 today_str = time_now.strftime("%d-%m-%Y")
                 time_str = time_now.strftime("%H:%M")
                 
-                # Matches the 16 columns of the new sheet structure exactly
                 row_data = [
                     today_str, time_str, total_cash, 
                     notes_500, notes_200, notes_100, notes_50, notes_20, 
@@ -651,19 +664,16 @@ with tab_cash:
     st.divider()
     st.subheader("📜 Recent Cash Counts")
     if not df_cash.empty:
-        # Explicitly requesting 'Date' in the list of columns to show
         display_cols = ['Date', 'Time', 'Total', 'Wallet_Name', 'Wallet_Amount', 'Remark']
-        
-        # Cross-check to only display columns that actually exist in the fetched sheet
         valid_cols = [c for c in display_cols if c in df_cash.columns]
-        
         if not valid_cols: 
             valid_cols = df_cash.columns
         
         display_df = df_cash[valid_cols].tail(10).iloc[::-1]
         st.dataframe(display_df, use_container_width=True, hide_index=True)
     else:
-        st.info("No past cash counts found yet.")# ==========================================
+        st.info("No past cash counts found yet.")
+# ==========================================
 # TAB 2: SHOPPING LIST
 # ==========================================
 with tab_shopping:

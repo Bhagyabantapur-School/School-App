@@ -603,7 +603,7 @@ with tab_cash:
         notes_1   = st.number_input("₹1", min_value=0, step=1, value=last_notes['1'])
 
     with c_totals:
-        st.markdown("#### 🧾 Additional & Action")
+        st.markdown("#### 🧾 Additional & Totals")
         wallet_val = st.number_input("Lump Sum Amount (₹)", min_value=0.0, step=10.0, value=float(last_wallet_amt))
         
         st.divider()
@@ -631,54 +631,40 @@ with tab_cash:
         </div>
         """
         st.markdown(html_metrics, unsafe_allow_html=True)
-        
-        st.metric("Overall Physical Cash", f"₹ {total_cash:,.2f}")
 
-    # --- 4. RECONCILE WITH LEDGER (ACC) ---
+    # --- 4. AUTOMATIC LEDGER RECONCILIATION ---
     st.divider()
-    st.subheader("⚖️ Reconcile with Ledger (Acc)")
+    st.markdown("### ⚖️ Final Ledger Comparison")
     
-    # Fetch live money data to calculate Account balances
+    # Fetch live money data to calculate Account balance for the SELECTED WALLET
     df_money = load_money_data()
-    account_balances = {}
+    ledger_bal = 0.0
     
-    if not df_money.empty and 'Account' in df_money.columns:
+    if not df_money.empty and 'Account' in df_money.columns and wallet_name:
         df_m_clean = df_money[df_money['Remark'] != '⚠️ INCOMPLETE'].copy()
         df_m_clean['In'] = pd.to_numeric(df_m_clean['In'].replace('', 0), errors='coerce').fillna(0)
         df_m_clean['Out'] = pd.to_numeric(df_m_clean['Out'].replace('', 0), errors='coerce').fillna(0)
         
-        # Group by Account to get net balance (Sum of IN - Sum of OUT)
-        acc_summary = df_m_clean.groupby('Account').agg({'In': 'sum', 'Out': 'sum'}).reset_index()
-        acc_summary['Balance'] = acc_summary['In'] - acc_summary['Out']
-        account_balances = dict(zip(acc_summary['Account'], acc_summary['Balance']))
-    
-    # Filter out empty account names
-    valid_accounts = [acc for acc in account_balances.keys() if str(acc).strip() != ""]
-    
-    col_recon1, col_recon2 = st.columns([1, 2])
-    with col_recon1:
-        compare_acc = st.selectbox("Select Ledger Account", ["-- Select Account --"] + valid_accounts)
+        # Filter ledger strictly for the name chosen in "Wallet Selection"
+        wallet_ledger = df_m_clean[df_m_clean['Account'].astype(str).str.strip() == wallet_name]
+        ledger_bal = wallet_ledger['In'].sum() - wallet_ledger['Out'].sum()
         
-    with col_recon2:
-        if compare_acc != "-- Select Account --":
-            ledger_bal = account_balances.get(compare_acc, 0.0)
-            difference = total_cash - ledger_bal
-            
-            rec_c1, rec_c2, rec_c3 = st.columns(3)
-            rec_c1.metric("Physical Counted", f"₹ {total_cash:,.2f}")
-            rec_c2.metric(f"Ledger ({compare_acc})", f"₹ {ledger_bal:,.2f}")
-            
-            # Determine status label and visual behavior
-            if difference == 0:
-                diff_label = "✅ Perfectly Balanced"
-            elif difference > 0:
-                diff_label = "⚠️ Surplus (Extra Cash)"
-            else:
-                diff_label = "🔻 Shortage (Missing Cash)"
-                
-            rec_c3.metric(diff_label, f"₹ {abs(difference):,.2f}", delta=float(difference))
-        else:
-            st.info("Select an account to see the difference between your physical cash and the app's ledger.")
+    difference = total_cash - ledger_bal
+    
+    if difference == 0:
+        diff_label = "✅ Perfectly Balanced"
+    elif difference > 0:
+        diff_label = "⚠️ Surplus (Extra Cash)"
+    else:
+        diff_label = "🔻 Shortage (Missing Cash)"
+        
+    rec_c1, rec_c2, rec_c3 = st.columns(3)
+    rec_c1.metric("Physical Counted", f"₹ {total_cash:,.2f}")
+    
+    # It dynamically shows whatever wallet name you selected at the top!
+    display_name = wallet_name if wallet_name else "Selected Wallet"
+    rec_c2.metric(f"Ledger Balance ({display_name})", f"₹ {ledger_bal:,.2f}")
+    rec_c3.metric(diff_label, f"₹ {abs(difference):,.2f}", delta=float(difference))
 
     # --- 5. SAVE BUTTON ---
     st.divider()
@@ -724,7 +710,6 @@ with tab_cash:
         st.dataframe(display_df, use_container_width=True, hide_index=True)
     else:
         st.info("No past cash counts found yet.")
-
 # ==========================================
 # TAB 2: SHOPPING LIST
 # ==========================================

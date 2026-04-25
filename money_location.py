@@ -528,7 +528,7 @@ with tab_cash:
 
     df_cash = load_cash_data()
     
-    # FIX: Vigorously strip all hidden spaces from Google Sheet headers
+    # Strip accidental spaces from Google Sheet headers to prevent missing columns
     if not df_cash.empty:
         df_cash.columns = [str(c).strip() for c in df_cash.columns]
 
@@ -633,9 +633,60 @@ with tab_cash:
         st.markdown(html_metrics, unsafe_allow_html=True)
         
         st.metric("Overall Physical Cash", f"₹ {total_cash:,.2f}")
+
+    # --- 4. RECONCILE WITH LEDGER (ACC) ---
+    st.divider()
+    st.subheader("⚖️ Reconcile with Ledger (Acc)")
+    
+    # Fetch live money data to calculate Account balances
+    df_money = load_money_data()
+    account_balances = {}
+    
+    if not df_money.empty and 'Account' in df_money.columns:
+        df_m_clean = df_money[df_money['Remark'] != '⚠️ INCOMPLETE'].copy()
+        df_m_clean['In'] = pd.to_numeric(df_m_clean['In'].replace('', 0), errors='coerce').fillna(0)
+        df_m_clean['Out'] = pd.to_numeric(df_m_clean['Out'].replace('', 0), errors='coerce').fillna(0)
         
+        # Group by Account to get net balance (Sum of IN - Sum of OUT)
+        acc_summary = df_m_clean.groupby('Account').agg({'In': 'sum', 'Out': 'sum'}).reset_index()
+        acc_summary['Balance'] = acc_summary['In'] - acc_summary['Out']
+        account_balances = dict(zip(acc_summary['Account'], acc_summary['Balance']))
+    
+    # Filter out empty account names
+    valid_accounts = [acc for acc in account_balances.keys() if str(acc).strip() != ""]
+    
+    col_recon1, col_recon2 = st.columns([1, 2])
+    with col_recon1:
+        compare_acc = st.selectbox("Select Ledger Account", ["-- Select Account --"] + valid_accounts)
+        
+    with col_recon2:
+        if compare_acc != "-- Select Account --":
+            ledger_bal = account_balances.get(compare_acc, 0.0)
+            difference = total_cash - ledger_bal
+            
+            rec_c1, rec_c2, rec_c3 = st.columns(3)
+            rec_c1.metric("Physical Counted", f"₹ {total_cash:,.2f}")
+            rec_c2.metric(f"Ledger ({compare_acc})", f"₹ {ledger_bal:,.2f}")
+            
+            # Determine status label and visual behavior
+            if difference == 0:
+                diff_label = "✅ Perfectly Balanced"
+            elif difference > 0:
+                diff_label = "⚠️ Surplus (Extra Cash)"
+            else:
+                diff_label = "🔻 Shortage (Missing Cash)"
+                
+            rec_c3.metric(diff_label, f"₹ {abs(difference):,.2f}", delta=float(difference))
+        else:
+            st.info("Select an account to see the difference between your physical cash and the app's ledger.")
+
+    # --- 5. SAVE BUTTON ---
+    st.divider()
+    c_rem, c_btn = st.columns([2, 1])
+    with c_rem:
         cash_remark = st.text_input("Remark (Optional)")
-        
+    with c_btn:
+        st.markdown("<br>", unsafe_allow_html=True)
         if st.button("💾 Save Cash Count", use_container_width=True, type="primary"):
             if not wallet_name:
                 st.warning("⚠️ Please specify a Wallet Name.")
@@ -659,10 +710,10 @@ with tab_cash:
                 except Exception as e:
                     st.error(f"Error saving to Google Sheets: {e}")
                 
+    # --- 6. RECENT HISTORY ---
     st.divider()
     st.subheader("📜 Recent Cash Counts")
     if not df_cash.empty:
-        # Cross-check desired columns against cleaned sheet columns
         desired_cols = ['Date', 'Time', 'Total', 'Wallet_Name', 'Wallet_Amount', 'Remark']
         display_cols = [c for c in desired_cols if c in df_cash.columns]
         
@@ -671,11 +722,6 @@ with tab_cash:
             
         display_df = df_cash[display_cols].tail(10).iloc[::-1]
         st.dataframe(display_df, use_container_width=True, hide_index=True)
-        
-        # Diagnostic check: If Date STILL isn't showing, it will warn you
-        if 'Date' not in df_cash.columns:
-            st.error(f"⚠️ 'Date' column not found! The app currently sees these columns: {list(df_cash.columns)}")
-            st.info("Please check cell A1 in the CASH_COUNT tab of your Google Sheet to ensure it is named exactly 'Date'.")
     else:
         st.info("No past cash counts found yet.")
 

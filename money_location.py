@@ -642,8 +642,10 @@ with tab_cash:
     
     if not df_money.empty and 'Account' in df_money.columns and wallet_name:
         df_m_clean = df_money[df_money['Remark'] != '⚠️ INCOMPLETE'].copy()
-        df_m_clean['In'] = pd.to_numeric(df_m_clean['In'].replace('', 0), errors='coerce').fillna(0)
-        df_m_clean['Out'] = pd.to_numeric(df_m_clean['Out'].replace('', 0), errors='coerce').fillna(0)
+        
+        # FIX: Strip commas and spaces from numbers so Python doesn't turn "15,000" into 0!
+        df_m_clean['In'] = pd.to_numeric(df_m_clean['In'].astype(str).str.replace(',', '').str.strip(), errors='coerce').fillna(0)
+        df_m_clean['Out'] = pd.to_numeric(df_m_clean['Out'].astype(str).str.replace(',', '').str.strip(), errors='coerce').fillna(0)
         
         # Filter ledger strictly for the name chosen in "Wallet Selection"
         wallet_ledger = df_m_clean[df_m_clean['Account'].astype(str).str.strip() == wallet_name]
@@ -661,11 +663,10 @@ with tab_cash:
     rec_c1, rec_c2, rec_c3 = st.columns(3)
     rec_c1.metric("Physical Counted", f"₹ {total_cash:,.2f}")
     
-    # It dynamically shows whatever wallet name you selected at the top!
     display_name = wallet_name if wallet_name else "Selected Wallet"
     rec_c2.metric(f"Ledger Balance ({display_name})", f"₹ {ledger_bal:,.2f}")
     rec_c3.metric(diff_label, f"₹ {abs(difference):,.2f}", delta=float(difference))
-
+    
     # --- 5. SAVE BUTTON ---
     st.divider()
     c_rem, c_btn = st.columns([2, 1])

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import pytz
 import time
 import plotly.express as px
+import calendar # <-- NEW: Added calendar import for the month selector
 
 # --- Master Google Sheets Formula for Duration ---
 GS_FORMULA = '=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm"), ""))'
@@ -119,6 +120,14 @@ def get_activity_log():
 def render_sk_sync_tracker(sk_sync_tasks, today_str, now, gs_formula):
     st.markdown("### 🔄 Project SK-Sync Progress")
     
+    # --- NEW: Target Month & Year Selectors ---
+    col_m, col_y = st.columns(2)
+    with col_m:
+        selected_month = st.selectbox("Target Data Month", list(calendar.month_name)[1:], key="sksync_target_month")
+    with col_y:
+        selected_year = st.selectbox("Target Data Year", [2021, 2022, 2023, 2024, 2025, 2026], index=0, key="sksync_target_year")
+    st.markdown("---")
+    
     total_tasks = len(sk_sync_tasks)
     if total_tasks == 0:
         st.info("No SK-Sync tasks found. Paste your data into the 'sk_sync_project' tab.")
@@ -140,7 +149,7 @@ def render_sk_sync_tracker(sk_sync_tasks, today_str, now, gs_formula):
         phase_name = next_task['Phase']
         sheet_row = int(next_task['row_index'])
         
-        st.info(f"**🎯 Next Action [{phase_name}]:** {task_name} (~{est_time})")
+        st.info(f"**🎯 Next Action [{phase_name}]:** {task_name} (~{est_time}) for {selected_month} {selected_year}")
         
         # --- TIME TRACKER & COMPLETION UI ---
         with st.container(border=True):
@@ -150,9 +159,14 @@ def render_sk_sync_tracker(sk_sync_tasks, today_str, now, gs_formula):
             with col1:
                 if st.button("▶️ Start Live Timer", use_container_width=True, type="primary", key="sksync_start_btn"):
                     log_sheet = get_sheet("activity_log")
+                    
+                    # NEW: Injects the specific month and year into your sub-activity log!
+                    # Formatted to keep your raw task matching perfectly intact later
+                    detailed_task_log = f"{task_name} (SK-Sync: {selected_month} {selected_year})"
+                    
                     log_sheet.append_row([
                         today_str, now.strftime('%H:%M'), "RUNNING", gs_formula,    
-                        "WORK", f"{task_name} (SK-Sync)", "", "SK-Sync Tracking"
+                        "WORK", detailed_task_log, "", "SK-Sync Tracking"
                     ], value_input_option="USER_ENTERED")
                     get_activity_log.clear() 
                     st.rerun()

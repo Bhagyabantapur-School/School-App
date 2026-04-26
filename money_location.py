@@ -711,6 +711,95 @@ with tab_cash:
         st.dataframe(display_df, use_container_width=True, hide_index=True)
     else:
         st.info("No past cash counts found yet.")
+
+# ==========================================
+    # --- 7. MASTER ACCOUNT RECONCILIATION ---
+    # ==========================================
+    st.divider()
+    st.header("🏦 Master Account Reconciliation")
+    st.write("Review all your balances at a glance. Edit the 'Actual Balance' if it differs from the Ledger, then click the button to auto-adjust.")
+    
+    # 1. Fetch live Ledger Balances for all accounts
+    df_money = load_money_data()
+    ledger_balances = {}
+    
+    if not df_money.empty and 'Account' in df_money.columns:
+        df_m_clean = df_money[df_money['Remark'] != '⚠️ INCOMPLETE'].copy()
+        
+        # Strip commas to ensure accurate math
+        df_m_clean['In'] = pd.to_numeric(df_m_clean['In'].astype(str).str.replace(',', '').str.strip(), errors='coerce').fillna(0)
+        df_m_clean['Out'] = pd.to_numeric(df_m_clean['Out'].astype(str).str.replace(',', '').str.strip(), errors='coerce').fillna(0)
+        
+        # Calculate net balances per account
+        acc_summary = df_m_clean.groupby('Account').agg({'In': 'sum', 'Out': 'sum'}).reset_index()
+        acc_summary['Balance'] = acc_summary['In'] - acc_summary['Out']
+        ledger_balances = dict(zip(acc_summary['Account'], acc_summary['Balance']))
+
+    # 2. Get list of all accounts (Configured + Any active in ledger)
+    acc_opts = get_list("Accounts")
+    all_accounts = list(dict.fromkeys(acc_opts + list(ledger_balances.keys())))
+    all_accounts = [a for a in all_accounts if str(a).strip() != ""]
+
+    # 3. Build the Table UI
+    st.markdown("---")
+    h1, h2, h3, h4 = st.columns([1.5, 1, 1.2, 1.3])
+    h1.markdown("**Account Name**")
+    h2.markdown("**Ledger Balance**")
+    h3.markdown("**Actual Balance**")
+    h4.markdown("**Status / Action**")
+    st.markdown("---")
+
+    # Iterate and build a row for each account
+    for idx, acc in enumerate(all_accounts):
+        l_bal = float(ledger_balances.get(acc, 0.0))
+        
+        c1, c2, c3, c4 = st.columns([1.5, 1, 1.2, 1.3])
+        
+        # Display Account and current app logic balance
+        c1.write(f"**{acc}**")
+        c2.write(f"₹ {l_bal:,.2f}")
+        
+        # Input field defaults to ledger balance. 
+        # If the user changes it, the Streamlit app instantly recalculates the row.
+        actual_bal = c3.number_input(
+            f"Actual {acc}", 
+            value=l_bal, 
+            step=100.0, 
+            key=f"act_bal_{idx}", 
+            label_visibility="collapsed"
+        )
+        
+        difference = actual_bal - l_bal
+        
+        with c4:
+            if difference == 0:
+                st.markdown("✅ Synced")
+            else:
+                # Button shows exactly what adjustment will be made (e.g., +500 or -200)
+                btn_label = f"⚡ Adjust (₹{difference:+,.2f})"
+                if st.button(btn_label, key=f"adj_btn_{idx}", type="primary"):
+                    try:
+                        time_now = get_ist_now()
+                        today_str = time_now.strftime("%d-%m-%Y")
+                        time_str = time_now.strftime("%H:%M")
+                        
+                        adj_in = abs(difference) if difference > 0 else ""
+                        adj_out = abs(difference) if difference < 0 else ""
+                        
+                        row_data = [
+                            today_str, time_str, adj_in, adj_out, 
+                            acc, "Salary", "PERS", "System Adjustment", 
+                            "Ledger Correction", f"Pre-Sync {acc} Balance", 
+                            "", "", "Temporary adjustment pending SK-Sync migration"
+                        ]
+                        
+                        sh.worksheet("MONEY_DATA").append_row(row_data)
+                        load_money_data.clear()
+                        st.success(f"Successfully adjusted {acc}!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error applying adjustment: {e}")
+                        
 # ==========================================
 # TAB 2: SHOPPING LIST
 # ==========================================

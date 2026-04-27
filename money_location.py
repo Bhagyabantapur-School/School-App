@@ -185,7 +185,7 @@ def sync_journey_state():
             last_record = df_loc.iloc[-1].to_dict()
             move_val = str(last_record.get('Move', '')).strip()
             
-            # MEMORY: Always sync companions from your last record, even if stationary
+            # MEMORY: Always sync companions from your last record
             st.session_state.current_people = str(last_record.get('People', 'I'))
             
             if move_val not in ["", "- Stationary -", "nan"]:
@@ -1159,7 +1159,6 @@ with tab_location:
                     if base_fare > 0:
                         st.info(f"🧮 **Auto-Fare:** {actual_adults} Adult + {child_tix} Child/Half = **₹{calc_fare}**")
                         
-                    # Remove the key so it dynamically forces update whenever calc_fare updates
                     fare_amt = st.number_input("Total Fare Amount (₹)", min_value=0.0, step=5.0, value=float(calc_fare))
                     
                     acc_opts = get_list("Accounts")
@@ -1280,9 +1279,15 @@ with tab_location:
                     else:
                         try:
                             time_now = get_ist_now()
+                            
+                            # --- SMART ARRIVAL OVERRIDE FOR SUBORNO DROP-OFF ---
+                            arr_remark = "Logged Arrival"
+                            if dyn_place == "Girishmore Bus Stop" and "Suborno" in active_p:
+                                arr_remark = "Waiting for School Bus"
+                                
                             sh.worksheet("LOCATION_DATA").append_row([
                                 time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), 
-                                "- Stationary -", dyn_place, active_p, "Logged Arrival"
+                                "- Stationary -", dyn_place, active_p, arr_remark
                             ])
                             load_location_data.clear()
                             st.session_state.route_active = False 
@@ -1355,7 +1360,12 @@ with tab_location:
                                 arrival_people = "I"
                                 sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_b, travel_mode, "", arrival_people, "Retroactive transit"])
                         
-                        sh.worksheet("LOCATION_DATA").append_row([today_str, time_now.strftime("%H:%M"), "- Stationary -", express_place, arrival_people, ""])
+                        # --- SMART ARRIVAL OVERRIDE FOR EXPRESS ROUTE ---
+                        arr_remark_exp = ""
+                        if express_place == "Girishmore Bus Stop" and "Suborno" in arrival_people:
+                            arr_remark_exp = "Waiting for School Bus"
+                            
+                        sh.worksheet("LOCATION_DATA").append_row([today_str, time_now.strftime("%H:%M"), "- Stationary -", express_place, arrival_people, arr_remark_exp])
                         load_location_data.clear()
                         st.session_state.route_active = False
                         st.session_state.route_type = None
@@ -1374,6 +1384,22 @@ with tab_location:
         </style>
     """, unsafe_allow_html=True)
     
+    # --- CONTEXT AWARE BUTTON: SUBORNO BOARDED BUS ---
+    if current_loc == "Girishmore Bus Stop" and "Suborno" in st.session_state.current_people and not st.session_state.route_active:
+        if st.button("🚌 Suborno Boarded Bus", use_container_width=True, type="primary"):
+            try:
+                time_now = get_ist_now()
+                today_str = time_now.strftime("%d.%m.%y")
+                time_str = time_now.strftime("%H:%M")
+                sh.worksheet("LOCATION_DATA").append_row([
+                    today_str, time_str, "- Stationary -", "Girishmore Bus Stop", "I", "Suborno boarded bus to school"
+                ])
+                st.session_state.current_people = "I"
+                load_location_data.clear()
+                st.success(f"Logged Suborno boarding bus at {time_str}. You are now traveling alone.")
+                st.rerun()
+            except Exception as e: st.error(f"Error: {e}")
+    
     if st.button("🏠 Arrived HOME Now", use_container_width=True):
         try:
             time_now = get_ist_now()
@@ -1382,6 +1408,7 @@ with tab_location:
             sh.worksheet("LOCATION_DATA").append_row([today_str, time_str, "- Stationary -", "HOME", "I", "Quick Home Log"])
             st.session_state.route_active = False
             st.session_state.route_type = None
+            st.session_state.current_people = "I"
             load_location_data.clear()
             st.success(f"Welcome Home! Logged at {time_str}")
             st.rerun()

@@ -107,7 +107,6 @@ def get_transit_rules():
                 if p1 and p2 and mode and mode.lower() not in ['nan', '']:
                     try: f_val = float(fare) if fare and fare.lower() not in ['nan', ''] else 0.0
                     except: f_val = 0.0
-                    # frozenset makes A->B identical to B->A 
                     key = frozenset([p1, p2])
                     rules[key] = {'mode': mode, 'fare': f_val}
     return rules
@@ -186,10 +185,12 @@ def sync_journey_state():
             last_record = df_loc.iloc[-1].to_dict()
             move_val = str(last_record.get('Move', '')).strip()
             
+            # MEMORY: Always sync companions from your last record, even if stationary
+            st.session_state.current_people = str(last_record.get('People', 'I'))
+            
             if move_val not in ["", "- Stationary -", "nan"]:
                 st.session_state.route_active = True
                 st.session_state.current_move = move_val
-                st.session_state.current_people = str(last_record.get('People', 'I'))
                 
                 rem = str(last_record.get('Remark', ''))
                 if "Started Route:" in rem:
@@ -1120,7 +1121,8 @@ with tab_location:
                     transit_rules = get_transit_rules()
                     current_pair = frozenset([str(current_loc).strip(), str(dyn_next_stop).strip()]) if current_loc else None
                     
-                    pre_mode = "BIKE"
+                    # If it's a complex (doesn't end with "route"), default to WALK
+                    pre_mode = "WALK" if not is_sequential else "BIKE"
                     base_fare = 0.0
                     
                     if current_pair in transit_rules:
@@ -1141,20 +1143,24 @@ with tab_location:
                     people_opts = get_list("People")
                     if not people_opts: people_opts = ["I"]
                     if "I" not in people_opts: people_opts.insert(0, "I")
-                    dyn_people = st.selectbox("Companions", people_opts, index=people_opts.index("I"), key="dyn_people")
+                    
+                    # REMEMBER COMPANIONS
+                    default_people_idx = people_opts.index(st.session_state.current_people) if st.session_state.current_people in people_opts else 0
+                    dyn_people = st.selectbox("Companions", people_opts, index=default_people_idx, key="dyn_people")
                     
                     # AUTO COMPANION TICKETS CALCULATION
-                    guessed_adults = len([p for p in dyn_people.split(',') if p.strip()]) if dyn_people != "I" else 1
+                    total_people = len([p for p in dyn_people.split(',') if p.strip()]) if dyn_people != "I" else 1
                     
-                    tix1, tix2 = st.columns(2)
-                    with tix1:
-                        adult_tix = st.number_input("Adult Fares", min_value=0, value=guessed_adults, step=1, key="dyn_adult")
-                    with tix2:
-                        child_tix = st.number_input("Child/Half Fares", min_value=0, value=0, step=1, key="dyn_child")
+                    child_tix = st.number_input("Child/Half Fares (Included in Companions)", min_value=0, max_value=total_people, value=0, step=1, key="dyn_child")
+                    
+                    actual_adults = total_people - child_tix
+                    calc_fare = (actual_adults * base_fare) + (child_tix * (base_fare / 2))
+                    
+                    if base_fare > 0:
+                        st.info(f"🧮 **Auto-Fare:** {actual_adults} Adult + {child_tix} Child/Half = **₹{calc_fare}**")
                         
-                    calc_fare = (adult_tix * base_fare) + (child_tix * (base_fare / 2))
-                    
-                    fare_amt = st.number_input("Total Fare Amount (₹)", min_value=0.0, step=5.0, value=float(calc_fare), key="dyn_fare")
+                    # Remove the key so it dynamically forces update whenever calc_fare updates
+                    fare_amt = st.number_input("Total Fare Amount (₹)", min_value=0.0, step=5.0, value=float(calc_fare))
                     
                     acc_opts = get_list("Accounts")
                     default_acc_idx = acc_opts.index("MB") if "MB" in acc_opts else 0
@@ -1296,7 +1302,10 @@ with tab_location:
                     people_opts = get_list("People")
                     if not people_opts: people_opts = ["I", "I, BKP, TKM", "I, TKM"]
                     if "I" not in people_opts: people_opts.insert(0, "I")
-                    express_people = st.selectbox("Companions", people_opts, index=people_opts.index("I"), key="exp_people")
+                    
+                    # REMEMBER COMPANIONS
+                    default_people_idx = people_opts.index(st.session_state.current_people) if st.session_state.current_people in people_opts else 0
+                    express_people = st.selectbox("Companions", people_opts, index=default_people_idx, key="exp_people")
                     
                 if st.button("🟢 Start Express Journey", use_container_width=True):
                     try:
@@ -1350,7 +1359,6 @@ with tab_location:
                         load_location_data.clear()
                         st.session_state.route_active = False
                         st.session_state.route_type = None
-                        st.session_state.current_people = "I"
                         st.session_state.retro_time = get_ist_now().time()
                         st.rerun()
                     except Exception as e: st.error(f"Error: {e}")
@@ -1374,7 +1382,6 @@ with tab_location:
             sh.worksheet("LOCATION_DATA").append_row([today_str, time_str, "- Stationary -", "HOME", "I", "Quick Home Log"])
             st.session_state.route_active = False
             st.session_state.route_type = None
-            st.session_state.current_people = "I"
             load_location_data.clear()
             st.success(f"Welcome Home! Logged at {time_str}")
             st.rerun()
@@ -1405,7 +1412,9 @@ with tab_location:
     manual_people_opts = get_list("People")
     if not manual_people_opts: manual_people_opts = ["I"]
     if "I" not in manual_people_opts: manual_people_opts.insert(0, "I")
-    people = st.selectbox("People", manual_people_opts, index=manual_people_opts.index("I"))
+    
+    default_manual_people = manual_people_opts.index(st.session_state.current_people) if st.session_state.current_people in manual_people_opts else 0
+    people = st.selectbox("People", manual_people_opts, index=default_manual_people)
     loc_remark = st.text_input("Location Remark (Optional)")
     
     if st.button("💾 Save Manual Entry", use_container_width=True):

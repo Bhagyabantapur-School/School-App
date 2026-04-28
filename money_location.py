@@ -91,24 +91,28 @@ def get_location_logic():
 
 def get_transit_rules():
     rules = {}
-    if all(col in config_df.columns for col in ['Area', 'Specific_Place', 'Def_Mode', 'Def_Fare']):
+    if 'Area' in config_df.columns and 'Specific_Place' in config_df.columns and 'Def_Mode' in config_df.columns:
+        has_fare = 'Def_Fare' in config_df.columns
         grouped = config_df.groupby('Area')
         for area, group in grouped:
             places = group['Specific_Place'].tolist()
             modes = group['Def_Mode'].tolist()
-            fares = group['Def_Fare'].tolist()
+            fares = group['Def_Fare'].tolist() if has_fare else ["0"] * len(places)
             
             for i in range(len(places) - 1):
                 p1 = str(places[i]).strip()
                 p2 = str(places[i+1]).strip()
-                mode = str(modes[i]).strip()
+                mode = str(modes[i]).strip().upper()
                 fare = str(fares[i]).strip()
                 
-                if p1 and p2 and mode and mode.lower() not in ['nan', '']:
-                    try: f_val = float(fare) if fare and fare.lower() not in ['nan', ''] else 0.0
-                    except: f_val = 0.0
-                    key = frozenset([p1, p2])
-                    rules[key] = {'mode': mode, 'fare': f_val}
+                if p1 and p2:
+                    rule_mode = mode if mode and mode not in ['NAN', 'NONE'] else None
+                    try: rule_fare = float(fare) if fare.lower() not in ['nan', '', 'none'] else 0.0
+                    except: rule_fare = 0.0
+                    
+                    if rule_mode or rule_fare > 0:
+                        key = frozenset([p1, p2])
+                        rules[key] = {'mode': rule_mode, 'fare': rule_fare}
     return rules
 
 def get_current_location_details():
@@ -117,7 +121,7 @@ def get_current_location_details():
         last_record = df_loc.iloc[-1].to_dict()
         move_val = str(last_record.get('Move', '')).strip()
         if move_val in ["", "- Stationary -", "nan"]:
-            loc = str(last_record.get('Place', ''))
+            loc = str(last_record.get('Place', '')).strip()
             date_str = str(last_record.get('Date', ''))
             time_str = str(last_record.get('Time', ''))
             duration_str = ""
@@ -213,13 +217,11 @@ if check_midnight_rollover():
 def get_home_occupants(arriving_people_str):
     time_now = get_ist_now()
     
-    # RULE: After 14:00, Suborno is back. Force full roster.
     if time_now.hour >= 14:
         return "I Baso, Suborno, Mother"
         
     df_loc = load_location_data()
     
-    # Parse incoming strings, treating "I Baso" as "I" and "Baso" for math logic
     safe_arriving_str = arriving_people_str.replace('I Baso', 'I, Baso')
     arriving_people = set([p.strip() for p in safe_arriving_str.split(',') if p.strip()])
     
@@ -255,7 +257,6 @@ def get_home_occupants(arriving_people_str):
         
     ordered_home = [p for p in order if p in now_home] + [p for p in now_home if p not in order]
     
-    # Format exactly as requested (no comma between I and Baso)
     return ", ".join(ordered_home).replace("I, Baso", "I Baso")
 
 def sync_journey_state():
@@ -275,7 +276,6 @@ def sync_journey_state():
             last_record = df_loc.iloc[-1].to_dict()
             move_val = str(last_record.get('Move', '')).strip()
             
-            # MEMORY: Always sync companions from your last record
             st.session_state.current_people = str(last_record.get('People', 'I'))
             
             if move_val not in ["", "- Stationary -", "nan"]:
@@ -1216,7 +1216,8 @@ with tab_location:
                     base_fare = 0.0
                     
                     if current_pair in transit_rules:
-                        pre_mode = transit_rules[current_pair]['mode']
+                        if transit_rules[current_pair]['mode']:
+                            pre_mode = transit_rules[current_pair]['mode']
                         base_fare = transit_rules[current_pair]['fare']
 
                     move_options = ["BIKE", "WALK", "BIKE + WALK", "TOTO", "AUTO", "BUS"]

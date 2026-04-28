@@ -182,7 +182,6 @@ def check_midnight_rollover():
             today_dt = time_now.date()
             
             if last_dt < today_dt:
-                # App detects a day change!
                 last_move = str(last_record.get('Move', ''))
                 last_place = str(last_record.get('Place', ''))
                 last_people = str(last_record.get('People', 'I'))
@@ -190,7 +189,6 @@ def check_midnight_rollover():
                 days_diff = (today_dt - last_dt).days
                 rows_to_add = []
                 
-                # Fill in 00:00 for every missing day to keep timeline flawless
                 for i in range(1, days_diff + 1):
                     missing_date = last_dt + timedelta(days=i)
                     missing_date_str = missing_date.strftime("%d.%m.%y")
@@ -201,14 +199,64 @@ def check_midnight_rollover():
                 if rows_to_add:
                     sh.worksheet("LOCATION_DATA").append_rows(rows_to_add)
                     load_location_data.clear()
-                    return True # Indicates rollover happened so we can rerun
+                    return True 
         except Exception as e:
-            pass # Failsafe if date format is corrupted
+            pass 
     return False
 
-# Trigger rollover check on every app interaction
 if check_midnight_rollover():
     st.rerun()
+
+# ==========================================
+# DYNAMIC HOME ROSTER ENGINE
+# ==========================================
+def get_home_occupants(arriving_people_str):
+    time_now = get_ist_now()
+    
+    # RULE: After 14:00, Suborno is back. Force full roster.
+    if time_now.hour >= 14:
+        return "I Baso, Suborno, Mother"
+        
+    df_loc = load_location_data()
+    
+    # Parse incoming strings, treating "I Baso" as "I" and "Baso" for math logic
+    safe_arriving_str = arriving_people_str.replace('I Baso', 'I, Baso')
+    arriving_people = set([p.strip() for p in safe_arriving_str.split(',') if p.strip()])
+    
+    order = ["I", "Baso", "Suborno", "Mother"]
+    
+    if df_loc.empty:
+        now_home = arriving_people.union({"Baso", "Suborno", "Mother"})
+        ordered_home = [p for p in order if p in now_home] + [p for p in now_home if p not in order]
+        return ", ".join(ordered_home).replace("I, Baso", "I Baso")
+
+    last_home_idx = -1
+    for i in range(len(df_loc)-1, -1, -1):
+        if str(df_loc.iloc[i].get('Place', '')).strip() == 'HOME' and str(df_loc.iloc[i].get('Move', '')).strip() == '- Stationary -':
+            last_home_idx = i
+            break
+
+    if last_home_idx != -1:
+        past_home_str = str(df_loc.iloc[last_home_idx].get('People', ''))
+        safe_past_str = past_home_str.replace('I Baso', 'I, Baso')
+        past_home_people = set([p.strip() for p in safe_past_str.split(',') if p.strip()])
+
+        if last_home_idx < len(df_loc) - 1:
+            depart_str = str(df_loc.iloc[last_home_idx + 1].get('People', ''))
+            safe_depart_str = depart_str.replace('I Baso', 'I, Baso')
+            depart_people = set([p.strip() for p in safe_depart_str.split(',') if p.strip()])
+            
+            stayed_home = past_home_people - depart_people
+            now_home = stayed_home.union(arriving_people)
+        else:
+            now_home = past_home_people.union(arriving_people)
+    else:
+        now_home = arriving_people.union({"Baso", "Suborno", "Mother"})
+        
+    ordered_home = [p for p in order if p in now_home] + [p for p in now_home if p not in order]
+    
+    # Format exactly as requested (no comma between I and Baso)
+    return ", ".join(ordered_home).replace("I, Baso", "I Baso")
 
 def sync_journey_state():
     if 'state_synced' not in st.session_state:
@@ -1191,7 +1239,7 @@ with tab_location:
                     dyn_people = st.selectbox("Companions", people_opts, index=default_people_idx, key="dyn_people")
                     
                     # AUTO COMPANION TICKETS CALCULATION
-                    total_people = len([p for p in dyn_people.split(',') if p.strip()]) if dyn_people != "I" else 1
+                    total_people = len([p for p in dyn_people.replace('I Baso', 'I, Baso').split(',') if p.strip()]) if dyn_people != "I" else 1
                     
                     child_tix = st.number_input("Child/Half Fares (Included in Companions)", min_value=0, max_value=total_people, value=0, step=1, key="dyn_child")
                     
@@ -1322,14 +1370,18 @@ with tab_location:
                         try:
                             time_now = get_ist_now()
                             
-                            # --- SMART ARRIVAL OVERRIDE FOR SUBORNO DROP-OFF ---
                             arr_remark = "Logged Arrival"
+                            final_arr_people = active_p
+                            
+                            # SMART OVERRIDES
                             if dyn_place == "Girishmore Bus Stop" and "Suborno" in active_p:
                                 arr_remark = "Waiting for School Bus"
+                            elif dyn_place == "HOME":
+                                final_arr_people = get_home_occupants(active_p)
                                 
                             sh.worksheet("LOCATION_DATA").append_row([
                                 time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), 
-                                "- Stationary -", dyn_place, active_p, arr_remark
+                                "- Stationary -", dyn_place, final_arr_people, arr_remark
                             ])
                             load_location_data.clear()
                             st.session_state.route_active = False 
@@ -1402,12 +1454,16 @@ with tab_location:
                                 arrival_people = "I"
                                 sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_b, travel_mode, "", arrival_people, "Retroactive transit"])
                         
-                        # --- SMART ARRIVAL OVERRIDE FOR EXPRESS ROUTE ---
+                        # --- SMART ARRIVAL OVERRIDES ---
                         arr_remark_exp = ""
+                        final_arr_people = arrival_people
+                        
                         if express_place == "Girishmore Bus Stop" and "Suborno" in arrival_people:
                             arr_remark_exp = "Waiting for School Bus"
+                        elif express_place == "HOME":
+                            final_arr_people = get_home_occupants(arrival_people)
                             
-                        sh.worksheet("LOCATION_DATA").append_row([today_str, time_now.strftime("%H:%M"), "- Stationary -", express_place, arrival_people, arr_remark_exp])
+                        sh.worksheet("LOCATION_DATA").append_row([today_str, time_now.strftime("%H:%M"), "- Stationary -", express_place, final_arr_people, arr_remark_exp])
                         load_location_data.clear()
                         st.session_state.route_active = False
                         st.session_state.route_type = None
@@ -1447,7 +1503,10 @@ with tab_location:
             time_now = get_ist_now()
             today_str = time_now.strftime("%d.%m.%y")
             time_str = time_now.strftime("%H:%M")
-            sh.worksheet("LOCATION_DATA").append_row([today_str, time_str, "- Stationary -", "HOME", "I", "Quick Home Log"])
+            
+            final_arr_people = get_home_occupants(st.session_state.current_people)
+            
+            sh.worksheet("LOCATION_DATA").append_row([today_str, time_str, "- Stationary -", "HOME", final_arr_people, "Quick Home Log"])
             st.session_state.route_active = False
             st.session_state.route_type = None
             st.session_state.current_people = "I"

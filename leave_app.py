@@ -182,7 +182,7 @@ with tab1:
         
         with col1:
             applicant_name = st.selectbox("Select Teacher Name", TEACHER_LIST)
-            designation = st.selectbox("Designation", ["A.T", "H.T"])
+            # Removed the Designation dropdown here
             leave_type = st.selectbox("Type of Leave", ["Casual Leave", "Medical Leave", "Commuted Leave"])
             app_date = st.date_input("Date of Leave Application", value=date.today())
             
@@ -209,6 +209,9 @@ with tab1:
         submitted_leave = st.form_submit_button("Generate Leave Application & Log to DB", type="primary")
 
     if submitted_leave and calculated_days > 0:
+        # --- AUTO-DETECT DESIGNATION ---
+        designation = "H.T" if applicant_name == "SUKHAMAY KISKU" else "A.T"
+        
         status_val = "Pending" if "Yes" in joining_status else "Not Required"
         
         row_to_insert = [
@@ -242,23 +245,19 @@ with tab2:
     st.subheader("Generate & Print Joining Letters")
     
     if len(all_data) > 1:
-        # Toggle to show only pending or all leaves
         view_filter = st.radio("Filter Leaves:", ["Show Pending Only", "Show All Leaves (Includes Not Required / Printed)"], horizontal=True)
         
         available_leaves = []
         
-        # Start at 2 because row 1 is the header (gspread uses 1-based indexing)
         for i, row in enumerate(all_data[1:], start=2): 
-            while len(row) < 9: # Pad older legacy data rows
+            while len(row) < 9:
                 row.append("")
                 
             status = row[8] if row[8] else "Legacy/Unknown"
             
-            # Apply filter
             if view_filter == "Show Pending Only" and status != "Pending":
                 continue
                 
-            # Create a clean label for the dropdown
             label = f"{row[1]} - {row[2]} ({row[4]} to {row[5]}) | Status: {status}"
             
             available_leaves.append({
@@ -275,7 +274,6 @@ with tab2:
             else:
                 st.info("No leave records found.")
         else:
-            # Create a dictionary mapping the label to the data dictionary
             options = {l["label"]: l for l in available_leaves}
             selected_key = st.selectbox("Select a leave record to generate its Joining Letter:", list(options.keys()))
             selected_leave = options[selected_key]
@@ -283,7 +281,6 @@ with tab2:
             with st.form("confirm_joining_form"):
                 st.write(f"**Confirm Details for {selected_leave['teacher']}**")
                 
-                # Auto-calculate the default joining date based on 'To Date'
                 try:
                     to_date_obj = datetime.strptime(selected_leave['to_date'], "%d-%m-%Y").date()
                     default_join = to_date_obj + timedelta(days=1)
@@ -295,14 +292,12 @@ with tab2:
                 submit_join = st.form_submit_button("Generate Joining Letter & Mark as Printed", type="primary")
             
             if submit_join:
-                # 1. Generate the PDF first
                 join_pdf = create_joining_pdf(
                     selected_leave['teacher'], selected_leave['designation'], selected_leave['leave_type'],
                     selected_leave['days'], selected_leave['from_date'], selected_leave['to_date'],
                     selected_leave['reason'], j_date.strftime("%d-%m-%Y")
                 )
                 
-                # 2. Update the status in the Google Sheet
                 try:
                     sheet.update_cell(selected_leave['row_index'], 9, "Printed")
                     st.success(f"✅ Status successfully updated to 'Printed' in the database.")
@@ -327,13 +322,11 @@ with tab3:
     st.subheader("Database Log & Letter Status")
     
     if len(all_data) > 1:
-        # Prepare data for the dataframe
         display_data = []
         for row in all_data[1:]:
             while len(row) < 9:
                 row.append("")
             
-            # Label legacy rows
             if row[8] == "":
                 row[8] = "Legacy/Unknown"
                 
@@ -345,7 +338,6 @@ with tab3:
             
         df = pd.DataFrame(display_data)
         
-        # Color code the status column for easy reading
         def color_status(val):
             color = 'green' if val == 'Printed' else 'orange' if val == 'Pending' else 'gray'
             return f'color: {color}'

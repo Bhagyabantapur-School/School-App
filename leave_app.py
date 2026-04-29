@@ -42,7 +42,6 @@ with st.form("leave_form"):
         app_date = st.date_input("Date of Application", value=date.today())
 
     # --- AUTO CALCULATE DAYS ---
-    # It adds 1 to make the date range inclusive
     calculated_days = (end_date - start_date).days + 1
     
     if calculated_days < 1:
@@ -75,33 +74,59 @@ def create_pdf(name, desig, l_type, n_days, start, end, rsn, app_dt):
     pdf.set_font("Arial", size=12)
     pdf.ln(6)
     
-    pdf.cell(0, 6, txt="Respected Sir/Ma'am,", ln=1)
+    # Changed to Madam
+    pdf.cell(0, 6, txt="Respected Sir/Madam,", ln=1)
     pdf.ln(4)
     
-    # Updated School Details
-    body = (f"Most respectfully I beg to state that I am {name}, {desig} of "
-            f"Bhagyabantapur Primary School, Vill:- Bhagyabantapur, P.O.- Khanjanchak. "
-            f"\n\nI could not attend school on & from {start} to {end} on account of my {rsn}. "
-            f"\n\nI request you to grant my {l_type} for those days and consider my prayer to sanction leave and oblige.")
-    pdf.multi_cell(0, 6, txt=body)
+    # Indentation string (8 spaces acting as a tab)
+    indent = "        "
+    
+    # Body Paragraphs
+    body1 = (f"{indent}Most respectfully I beg to state that I am {name}, {desig} of "
+             f"Bhagyabantapur Primary School, Vill:- Bhagyabantapur, P.O.- Khanjanchak.")
+    pdf.multi_cell(0, 6, txt=body1)
+    pdf.ln(2)
+    
+    body2 = f"{indent}I could not attend school on & from {start} to {end} on account of my {rsn}."
+    pdf.multi_cell(0, 6, txt=body2)
+    pdf.ln(2)
+    
+    body3 = f"{indent}I request you to grant my {l_type} for those days and consider my prayer to sanction leave and oblige."
+    pdf.multi_cell(0, 6, txt=body3)
     pdf.ln(6)
-    pdf.cell(0, 6, txt="Expecting your kind-hearted co-operation.", ln=1)
+    
+    pdf.cell(0, 6, txt=f"{indent}Expecting your kind-hearted co-operation.", ln=1)
     pdf.ln(4)
-    pdf.cell(0, 6, txt="Thanking you.", ln=1)
+    pdf.cell(0, 6, txt=f"{indent}Thanking you.", ln=1)
     pdf.ln(15)
     
-    # Footer
+    # Footer Formatting
     y_pos = pdf.get_y()
-    pdf.set_x(20)
-    pdf.cell(80, 6, txt="Place: Khanjanchak")
-    pdf.set_x(110)
-    pdf.cell(80, 6, txt="Yours Faithfully,", ln=1)
-    pdf.set_x(20)
-    pdf.cell(80, 6, txt=f"Date: {app_dt}")
-    pdf.set_x(110)
-    pdf.cell(80, 15, txt="", ln=1) 
-    pdf.set_x(110)
-    pdf.cell(80, 6, txt=f"{name}", ln=1)
+    
+    # Left Side: Place & Date
+    pdf.set_xy(20, y_pos)
+    pdf.cell(60, 6, txt="Place: Khanjanchak")
+    
+    pdf.set_xy(20, y_pos + 6)
+    pdf.cell(60, 6, txt=f"Date: {app_dt}")
+    
+    # Right Side: Signature Block
+    pdf.set_xy(125, y_pos)
+    pdf.cell(65, 6, txt="Yours Faithfully,", ln=1)
+    
+    # Drop down for physical signature space
+    pdf.set_xy(125, y_pos + 25)
+    pdf.cell(65, 6, txt=f"{name}", ln=1)
+    
+    # Print Designation, School Name, and Address strictly below the Name
+    pdf.set_x(125)
+    pdf.cell(65, 6, txt=f"{desig}", ln=1)
+    
+    pdf.set_x(125)
+    pdf.cell(65, 6, txt="Bhagyabantapur Primary School", ln=1)
+    
+    pdf.set_x(125)
+    pdf.cell(65, 6, txt="Vill:- Bhagyabantapur, P.O.- Khanjanchak", ln=1)
     
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         pdf.output(tmp.name)

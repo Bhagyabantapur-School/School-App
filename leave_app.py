@@ -68,13 +68,13 @@ def create_pdf(name, desig, l_type, n_days, start, end, rsn, app_dt):
     pdf.cell(0, 6, txt="Through The Proper Channel.", ln=1)
     pdf.ln(6)
     
-    # Subject
+    # Subject (Centered)
     pdf.set_font("Arial", style='B', size=12)
-    pdf.cell(0, 6, txt=f"Subject: Prayer for {l_type} for {n_days} days.", ln=1)
+    pdf.cell(0, 6, txt=f"Subject: Prayer for {l_type} for {n_days} days.", ln=1, align='C')
     pdf.set_font("Arial", size=12)
     pdf.ln(6)
     
-    # Changed to Madam
+    # Salutation
     pdf.cell(0, 6, txt="Respected Sir/Madam,", ln=1)
     pdf.ln(4)
     
@@ -105,28 +105,32 @@ def create_pdf(name, desig, l_type, n_days, start, end, rsn, app_dt):
     
     # Left Side: Place & Date
     pdf.set_xy(20, y_pos)
-    pdf.cell(60, 6, txt="Place: Khanjanchak")
+    pdf.cell(60, 6, txt="Place: Bhagyabantapur")
     
     pdf.set_xy(20, y_pos + 6)
     pdf.cell(60, 6, txt=f"Date: {app_dt}")
     
-    # Right Side: Signature Block
-    pdf.set_xy(125, y_pos)
-    pdf.cell(65, 6, txt="Yours Faithfully,", ln=1)
+    # Right Side: Signature Block (Horizontally Centered within its block)
+    # Using a slightly wider block (75mm) to accommodate the long address
+    sig_x = 115
+    sig_w = 75
+    
+    pdf.set_xy(sig_x, y_pos)
+    pdf.cell(sig_w, 6, txt="Yours Faithfully,", ln=1, align='C')
     
     # Drop down for physical signature space
-    pdf.set_xy(125, y_pos + 25)
-    pdf.cell(65, 6, txt=f"{name}", ln=1)
+    pdf.set_xy(sig_x, y_pos + 25)
+    pdf.cell(sig_w, 6, txt=f"{name}", ln=1, align='C')
     
-    # Print Designation, School Name, and Address strictly below the Name
-    pdf.set_x(125)
-    pdf.cell(65, 6, txt=f"{desig}", ln=1)
+    # Print Designation, School Name, and Address centered underneath each other
+    pdf.set_x(sig_x)
+    pdf.cell(sig_w, 6, txt=f"{desig}", ln=1, align='C')
     
-    pdf.set_x(125)
-    pdf.cell(65, 6, txt="Bhagyabantapur Primary School", ln=1)
+    pdf.set_x(sig_x)
+    pdf.cell(sig_w, 6, txt="Bhagyabantapur Primary School", ln=1, align='C')
     
-    pdf.set_x(125)
-    pdf.cell(65, 6, txt="Vill:- Bhagyabantapur, P.O.- Khanjanchak", ln=1)
+    pdf.set_x(sig_x)
+    pdf.cell(sig_w, 6, txt="Vill:- Bhagyabantapur, P.O.- Khanjanchak", ln=1, align='C')
     
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         pdf.output(tmp.name)

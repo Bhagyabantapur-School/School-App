@@ -28,7 +28,6 @@ with st.form("leave_form"):
         applicant_name = st.selectbox("Select Teacher Name", TEACHER_LIST)
         designation = st.selectbox("Designation", ["A.T", "H.T"])
         leave_type = st.selectbox("Type of Leave", ["Casual Leave", "Medical Leave", "Commuted Leave"])
-        num_days = st.number_input("Number of Days", min_value=1, step=1)
         
     with col2:
         start_date = st.date_input("From Date")
@@ -41,6 +40,16 @@ with st.form("leave_form"):
             reason = reason_type
             
         app_date = st.date_input("Date of Application", value=date.today())
+
+    # --- AUTO CALCULATE DAYS ---
+    # It adds 1 to make the date range inclusive
+    calculated_days = (end_date - start_date).days + 1
+    
+    if calculated_days < 1:
+        st.error("⚠️ 'To Date' cannot be before 'From Date'.")
+        calculated_days = 0
+    else:
+        st.info(f"📅 Total Duration: {calculated_days} days")
 
     submitted = st.form_submit_button("Generate & Log Leave", type="primary")
 
@@ -69,9 +78,9 @@ def create_pdf(name, desig, l_type, n_days, start, end, rsn, app_dt):
     pdf.cell(0, 6, txt="Respected Sir/Ma'am,", ln=1)
     pdf.ln(4)
     
-    # Body
+    # Updated School Details
     body = (f"Most respectfully I beg to state that I am {name}, {desig} of "
-            f"Khanjanchak Dhananjoy Primary School. P.O- Khanjanchak under Haldia Circle. "
+            f"Bhagyabantapur Primary School, Vill:- Bhagyabantapur, P.O.- Khanjanchak. "
             f"\n\nI could not attend school on & from {start} to {end} on account of my {rsn}. "
             f"\n\nI request you to grant my {l_type} for those days and consider my prayer to sanction leave and oblige.")
     pdf.multi_cell(0, 6, txt=body)
@@ -90,7 +99,7 @@ def create_pdf(name, desig, l_type, n_days, start, end, rsn, app_dt):
     pdf.set_x(20)
     pdf.cell(80, 6, txt=f"Date: {app_dt}")
     pdf.set_x(110)
-    pdf.cell(80, 15, txt="", ln=1) # Space for sign
+    pdf.cell(80, 15, txt="", ln=1) 
     pdf.set_x(110)
     pdf.cell(80, 6, txt=f"{name}", ln=1)
     
@@ -101,54 +110,43 @@ def create_pdf(name, desig, l_type, n_days, start, end, rsn, app_dt):
     os.remove(tmp.name)
     return pdf_bytes
 
-if submitted:
-    # 1. Log to Google Sheets using gspread (No URL needed)
+if submitted and calculated_days > 0:
+    # Log to Google Sheets
     try:
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        
-        # Fetch secrets exactly as formatted in your secrets.toml
+        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds_dict = dict(st.secrets["gcp_service_account"])
         credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         client = gspread.authorize(credentials)
         
-        # Open the spreadsheet by its name
         doc = client.open("Leaves")
-        
-        # Try to open a tab named "Leaves", fallback to the first tab if not found
         try:
             sheet = doc.worksheet("Leaves")
         except gspread.exceptions.WorksheetNotFound:
             sheet = doc.sheet1
         
-        # Prepare the row data
         row_to_insert = [
             app_date.strftime("%d-%m-%Y"),
             applicant_name,
             leave_type,
-            num_days,
+            calculated_days,
             start_date.strftime("%d-%m-%Y"),
             end_date.strftime("%d-%m-%Y"),
             reason
         ]
         
-        # Append the row
         sheet.append_row(row_to_insert)
         st.success("📊 Leave successfully logged to Google Sheets.")
         
     except Exception as e:
-        st.error(f"⚠️ Google Sheet log failed. Ensure the file is named 'Leaves' and shared with the service account. Error: {e}")
+        st.error(f"⚠️ Google Sheet log failed: {e}")
 
-    # 2. PDF Generation
-    pdf_file = create_pdf(applicant_name, designation, leave_type, num_days, 
+    # PDF Generation
+    pdf_file = create_pdf(applicant_name, designation, leave_type, calculated_days, 
                           start_date.strftime("%d-%m-%Y"), end_date.strftime("%d-%m-%Y"), 
                           reason, app_date.strftime("%d-%m-%Y"))
     
-    st.success(f"✅ Leave application for {applicant_name} is ready to download!")
+    st.success(f"✅ Leave application ready for download!")
     
-    # Download Button
     st.download_button(
         label="📥 Download A4 PDF for Print",
         data=pdf_file,

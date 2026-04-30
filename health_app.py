@@ -39,13 +39,12 @@ st.markdown("""
         100% { transform: scale(0.95); opacity: 0.9; }
     }
     
-    /* Custom Styling for Expanders in Summary */
-    .streamlit-expanderHeader {
-        font-size: 16px !important;
-        font-weight: 600 !important;
-        color: #2e7b32 !important;
-        background-color: #f1f8e9 !important;
-        border-radius: 8px !important;
+    /* Hide the default triangle arrow on custom HTML expanders */
+    details > summary {
+      list-style: none;
+    }
+    details > summary::-webkit-details-marker {
+      display: none;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -191,7 +190,7 @@ try:
     with col2:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🔄 Sync Data", use_container_width=True):
-            st.cache_data.clear() # Fix 1: Completely wipes cache to pull freshest manual edits from Sheets
+            st.cache_data.clear() # Fully clears cache to fetch newest Google Sheet edits
             st.toast("Synced with Google Sheets!")
             time.sleep(0.5)
             st.rerun()
@@ -301,7 +300,6 @@ try:
                             if "[Drop:" in param:
                                 clean_param = param.split("[Drop:")[0].strip()
                                 options_raw = param.split("[Drop:")[1].split("]")[0]
-                                # Fix 4: Force "-- Select --" as the default option
                                 options = ["-- Select --"] + [o.strip() for o in options_raw.split(",")]
                                 param_values[param] = st.selectbox(clean_param, options, key=f"live_param_{idx}_{param}")
                             elif "[Check]" in param:
@@ -409,7 +407,6 @@ try:
                 m_base_headers = ["Date", "Start_Time", "End_Time", "Duration"]
                 m_custom_params = [h for h in m_headers if h not in m_base_headers]
                 
-                # Fix 3: Custom scrolling/typing inputs for HH and MM
                 hours_opts = [f"{i:02d}" for i in range(24)]
                 mins_opts = [f"{i:02d}" for i in range(60)]
                 curr_h = clean_now.strftime('%H')
@@ -436,7 +433,6 @@ try:
                             if "[Drop:" in param:
                                 clean_param = param.split("[Drop:")[0].strip()
                                 options_raw = param.split("[Drop:")[1].split("]")[0]
-                                # Fix 4: Mandatory Check format
                                 options = ["-- Select --"] + [o.strip() for o in options_raw.split(",")]
                                 m_param_values[param] = st.selectbox(clean_param, options, key=f"man_param_{param}")
                             elif "[Check]" in param:
@@ -487,44 +483,64 @@ try:
             with tab_summary:
                 st.markdown("<div style='margin-bottom: 5px; color: #555;'><b>📊 Today's Health Overview:</b></div>", unsafe_allow_html=True)
                 
-                today_logs = log_df[(log_df['Date'] == today_str) & (log_df['End_Time'] != 'RUNNING') & (log_df['Activity'] == 'HEALTH')].copy()
+                st.markdown("#### ✅ Completed Today")
                 
-                if not today_logs.empty:
-                    today_logs['Total_Minutes'] = today_logs['Duration'].apply(parse_duration_to_minutes)
+                # Fetch directly from Health_log categories so it perfectly syncs with manual Google Sheet edits
+                today_completed_categories = []
+                html_cards = []
+                
+                for cat in health_categories:
+                    cat_df = get_health_category_data(cat)
+                    if cat_df.empty: continue
                     
-                    st.markdown("#### ✅ Completed Today")
-                    
-                    # Fix 2: Group activities and create Expandable session counts
-                    for cat_name, group in today_logs.groupby('Sub_Activities'):
-                        cat_name = str(cat_name).strip().upper()
-                        if cat_name == '': continue
+                    # Filter for only today's data directly from the specific category sheet
+                    today_data = cat_df[cat_df['Date'] == today_str].copy()
+                    if not today_data.empty:
+                        today_completed_categories.append(cat.upper())
                         
-                        session_count = len(group)
-                        total_mins = group['Total_Minutes'].sum()
+                        today_data['Total_Minutes'] = today_data['Duration'].apply(parse_duration_to_minutes)
+                        total_mins = today_data['Total_Minutes'].sum()
+                        session_count = len(today_data)
                         
                         hours, remainder_mins = divmod(total_mins, 60)
                         dur_display = f"{int(hours)}h {int(remainder_mins)}m" if hours > 0 else f"{int(remainder_mins)}m"
                         
-                        session_str = f"({session_count})" if session_count > 1 else "(1)"
-                        expander_title = f"🏃 {cat_name} {session_str} — ⏱️ {dur_display}"
+                        # Gather all individual session details to display when expanded
+                        sessions_html = ""
+                        if session_count > 0:
+                            for _, row in today_data.iterrows():
+                                sessions_html += f"&bull; <b>{row['Start_Time']} to {row['End_Time']}</b> <em>({row['Duration']})</em><br>"
                         
-                        # Native Streamlit expander handles the click-to-expand UI flawlessly
-                        with st.expander(expander_title):
-                            for _, row in group.iterrows():
-                                st.markdown(f"**{row['Start_Time']} to {row['End_Time']}** *(Duration: {row['Duration']})*")
+                        session_badge = f"<span style='font-weight: normal; font-size: 13px; opacity: 0.8; margin-left: 8px;'>{session_count} Sessions</span>" if session_count > 1 else ""
+                        
+                        # Beautiful HTML <details> Expandable Card
+                        box_html = f"""
+                        <details style='background: linear-gradient(to right, #e8f5e9, #f1f8e9); padding: 6px 14px; border-radius: 8px; border-left: 6px solid #4caf50; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 8px; cursor: pointer;'>
+                            <summary style='display: flex; justify-content: space-between; align-items: center; outline: none;'>
+                                <div style='display: flex; align-items: center;'>
+                                    <span style='font-size: 16px; font-weight: bold; color: #2e7b32; letter-spacing: 0.5px;'>{cat.upper()}</span>
+                                    {session_badge}
+                                </div>
+                                <span style='font-size: 14px; color: #1b5e20; font-weight: 600; background-color: rgba(255,255,255,0.6); padding: 2px 8px; border-radius: 10px;'>⏱️ {dur_display}</span>
+                            </summary>
+                            <div style='margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(46, 123, 50, 0.2); font-size: 14px; color: #444; line-height: 1.5;'>
+                                {sessions_html}
+                            </div>
+                        </details>
+                        """
+                        html_cards.append(box_html)
+                
+                if html_cards:
+                    st.markdown("".join(html_cards), unsafe_allow_html=True)
                 else:
                     st.info("No health activities logged yet today.")
 
                 st.markdown("<br>", unsafe_allow_html=True)
                 
-                # 2. Analyze Missing Tasks (Needs Attention)
+                # Analyze Missing Tasks (Needs Attention)
                 st.markdown("#### ⚠️ Needs Attention (Not Done Today)")
                 
-                done_today = []
-                if not today_logs.empty:
-                    done_today = [str(x).strip().upper() for x in today_logs['Sub_Activities'].unique() if str(x).strip() != '']
-                
-                missing_cats = [c for c in health_categories if c.upper() not in done_today]
+                missing_cats = [c for c in health_categories if c.upper() not in today_completed_categories]
                 
                 if missing_cats:
                     for cat in missing_cats:
@@ -534,7 +550,7 @@ try:
                     st.success("Amazing! You've touched on every single health category today.")
 
                 # ==========================================
-                # 3. HEALTH LOG CONFIGURATION (Inside Summary Tab)
+                # HEALTH LOG CONFIGURATION (Inside Summary Tab)
                 # ==========================================
                 st.markdown("<br><hr><br>", unsafe_allow_html=True)
                 st.markdown("### ⚙️ Health Log Configuration")

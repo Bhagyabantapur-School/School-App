@@ -507,11 +507,12 @@ try:
                                             
                                     if is_num_col:
                                         f_val = int(total_val) if total_val.is_integer() else round(total_val, 2)
-                                        param_summaries.append(f"**{clean_param_name}:** {f_val}")
+                                        # Now using HTML <b> tags for bolding instead of markdown asterisks
+                                        param_summaries.append(f"<b>{clean_param_name}:</b> {f_val}")
                                     elif text_vals:
-                                        # Only show unique text values if there are multiple entries
                                         unique_text = list(dict.fromkeys(text_vals))
-                                        param_summaries.append(f"**{clean_param_name}:** {', '.join(unique_text)}")
+                                        # Now using HTML <b> tags for bolding instead of markdown asterisks
+                                        param_summaries.append(f"<b>{clean_param_name}:</b> {', '.join(unique_text)}")
                         
                         # Build parameter HTML block if parameters exist
                         param_html = ""

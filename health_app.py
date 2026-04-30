@@ -485,7 +485,6 @@ try:
                 
                 st.markdown("#### ✅ Completed Today")
                 
-                # Fetch directly from Health_log categories so it perfectly syncs with manual Google Sheet edits
                 today_completed_categories = []
                 html_cards = []
                 
@@ -493,7 +492,6 @@ try:
                     cat_df = get_health_category_data(cat)
                     if cat_df.empty: continue
                     
-                    # Filter for only today's data directly from the specific category sheet
                     today_data = cat_df[cat_df['Date'] == today_str].copy()
                     if not today_data.empty:
                         today_completed_categories.append(cat.upper())
@@ -505,15 +503,19 @@ try:
                         hours, remainder_mins = divmod(total_mins, 60)
                         dur_display = f"{int(hours)}h {int(remainder_mins)}m" if hours > 0 else f"{int(remainder_mins)}m"
                         
-                        # Gather all individual session details to display when expanded
                         sessions_html = ""
                         if session_count > 0:
                             for _, row in today_data.iterrows():
-                                sessions_html += f"&bull; <b>{row['Start_Time']} to {row['End_Time']}</b> <em>({row['Duration']})</em><br>"
+                                # FIX: Used flexbox to push duration to the right and removed parenthesis
+                                sessions_html += f"""
+                                <div style='display: flex; justify-content: space-between; margin-bottom: 4px;'>
+                                    <span>&bull; <b>{row['Start_Time']} to {row['End_Time']}</b></span>
+                                    <em style='color: #666; font-style: italic;'>{row['Duration']}</em>
+                                </div>
+                                """
                         
                         session_badge = f"<span style='font-weight: normal; font-size: 13px; opacity: 0.8; margin-left: 8px;'>{session_count} Sessions</span>" if session_count > 1 else ""
                         
-                        # Beautiful HTML <details> Expandable Card
                         box_html = f"""
                         <details style='background: linear-gradient(to right, #e8f5e9, #f1f8e9); padding: 6px 14px; border-radius: 8px; border-left: 6px solid #4caf50; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 8px; cursor: pointer;'>
                             <summary style='display: flex; justify-content: space-between; align-items: center; outline: none;'>

@@ -38,6 +38,15 @@ st.markdown("""
         50% { transform: scale(1.1); opacity: 1; }
         100% { transform: scale(0.95); opacity: 0.9; }
     }
+    
+    /* Custom Styling for Expanders in Summary */
+    .streamlit-expanderHeader {
+        font-size: 16px !important;
+        font-weight: 600 !important;
+        color: #2e7b32 !important;
+        background-color: #f1f8e9 !important;
+        border-radius: 8px !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -182,10 +191,7 @@ try:
     with col2:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🔄 Sync Data", use_container_width=True):
-            get_activity_log.clear()
-            get_health_categories.clear()
-            get_health_category_headers.clear()
-            get_health_category_data.clear()
+            st.cache_data.clear() # Fix 1: Completely wipes cache to pull freshest manual edits from Sheets
             st.toast("Synced with Google Sheets!")
             time.sleep(0.5)
             st.rerun()
@@ -284,7 +290,6 @@ try:
                 st.markdown("**Log Session Details:**")
                 headers = get_health_category_headers(display_name)
                 
-                # Base headers that are auto-filled
                 base_headers = ["Date", "Start_Time", "End_Time", "Duration"]
                 custom_params = [h for h in headers if h not in base_headers]
                 
@@ -296,7 +301,8 @@ try:
                             if "[Drop:" in param:
                                 clean_param = param.split("[Drop:")[0].strip()
                                 options_raw = param.split("[Drop:")[1].split("]")[0]
-                                options = [o.strip() for o in options_raw.split(",")]
+                                # Fix 4: Force "-- Select --" as the default option
+                                options = ["-- Select --"] + [o.strip() for o in options_raw.split(",")]
                                 param_values[param] = st.selectbox(clean_param, options, key=f"live_param_{idx}_{param}")
                             elif "[Check]" in param:
                                 clean_param = param.split("[Check]")[0].strip()
@@ -308,43 +314,46 @@ try:
                 col_stop, col_cancel = st.columns([1, 1])
                 with col_stop:
                     if st.button("🛑 SAVE & LOG", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
-                        end_time_log = now.time()
                         
-                        # 1. Update Main Activity Log
-                        main_ss = get_main_spreadsheet()
-                        log_sheet = main_ss.worksheet("activity_log")
-                        log_sheet.update_cell(sheet_row, 3, end_time_log.strftime('%H:%M')) 
-                        log_sheet.update_cell(sheet_row, 4, GS_FORMULA)                   
-                        
-                        # 2. Add Detailed Log to Specific Health Tab
-                        health_ss = get_health_spreadsheet()
-                        try:
-                            target_sheet = health_ss.worksheet(display_name)
+                        # Validate Dropdowns before saving
+                        has_missing = any(v == "-- Select --" for v in param_values.values())
+                        if has_missing:
+                            st.error("⚠️ Please select a valid option for all dropdown parameters before saving!")
+                        else:
+                            end_time_log = now.time()
                             
-                            row_data = []
-                            for h in headers:
-                                if h == "Date": row_data.append(today_str)
-                                elif h == "Start_Time": row_data.append(active_row['Start_Time'])
-                                elif h == "End_Time": row_data.append(end_time_log.strftime('%H:%M'))
-                                elif h == "Duration": row_data.append(GS_FORMULA)
-                                else: row_data.append(param_values.get(h, ""))
+                            main_ss = get_main_spreadsheet()
+                            log_sheet = main_ss.worksheet("activity_log")
+                            log_sheet.update_cell(sheet_row, 3, end_time_log.strftime('%H:%M')) 
+                            log_sheet.update_cell(sheet_row, 4, GS_FORMULA)                   
+                            
+                            health_ss = get_health_spreadsheet()
+                            try:
+                                target_sheet = health_ss.worksheet(display_name)
                                 
-                            target_sheet.append_row(row_data, value_input_option="USER_ENTERED")
-                            
-                            get_activity_log.clear() 
-                            get_health_category_data.clear() # Clear cache to refresh summary
-                            st.success(f"Saved: Detailed log added to '{display_name}' tab!")
-                            time.sleep(1)
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Failed to log details to Health_log: {e}")
+                                row_data = []
+                                for h in headers:
+                                    if h == "Date": row_data.append(today_str)
+                                    elif h == "Start_Time": row_data.append(active_row['Start_Time'])
+                                    elif h == "End_Time": row_data.append(end_time_log.strftime('%H:%M'))
+                                    elif h == "Duration": row_data.append(GS_FORMULA)
+                                    else: row_data.append(param_values.get(h, ""))
+                                    
+                                target_sheet.append_row(row_data, value_input_option="USER_ENTERED")
+                                
+                                st.cache_data.clear() 
+                                st.success(f"Saved: Detailed log added to '{display_name}' tab!")
+                                time.sleep(1)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed to log details to Health_log: {e}")
 
                 with col_cancel:
                     if st.button("❌ CANCEL", key=f"cancel_{sheet_row}", use_container_width=True):
                         main_ss = get_main_spreadsheet()
                         log_sheet = main_ss.worksheet("activity_log")
                         log_sheet.delete_rows(sheet_row)
-                        get_activity_log.clear() 
+                        st.cache_data.clear() 
                         st.warning(f"Cancelled: {display_name}")
                         time.sleep(1)
                         st.rerun()
@@ -387,7 +396,7 @@ try:
                             "HEALTH", selected_cat_live, "", "Tracked via Health App Timer"
                         ], value_input_option="USER_ENTERED")
                         
-                        get_activity_log.clear() 
+                        st.cache_data.clear() 
                         st.rerun()
 
             # --- MANUAL LOG TAB ---
@@ -400,10 +409,23 @@ try:
                 m_base_headers = ["Date", "Start_Time", "End_Time", "Duration"]
                 m_custom_params = [h for h in m_headers if h not in m_base_headers]
                 
-                col_md, col_ms, col_me = st.columns([2, 1, 1])
-                with col_md: m_date = st.date_input("Date", value=now.date(), key="manual_date")
-                with col_ms: m_start = st.time_input("Start Time", value=clean_now, key="manual_start")
-                with col_me: m_end = st.time_input("End Time", value=clean_now, key="manual_end")
+                # Fix 3: Custom scrolling/typing inputs for HH and MM
+                hours_opts = [f"{i:02d}" for i in range(24)]
+                mins_opts = [f"{i:02d}" for i in range(60)]
+                curr_h = clean_now.strftime('%H')
+                curr_m = clean_now.strftime('%M')
+                
+                col_md, col_sh, col_sm, col_eh, col_em = st.columns([2, 1, 1, 1, 1])
+                with col_md: 
+                    m_date = st.date_input("Date", value=now.date(), key="manual_date")
+                with col_sh: 
+                    m_start_h = st.selectbox("Start HH", hours_opts, index=hours_opts.index(curr_h), key="man_sh")
+                with col_sm: 
+                    m_start_m = st.selectbox("Start MM", mins_opts, index=mins_opts.index(curr_m), key="man_sm")
+                with col_eh: 
+                    m_end_h = st.selectbox("End HH", hours_opts, index=hours_opts.index(curr_h), key="man_eh")
+                with col_em: 
+                    m_end_m = st.selectbox("End MM", mins_opts, index=mins_opts.index(curr_m), key="man_em")
                 
                 m_param_values = {}
                 if m_custom_params:
@@ -414,7 +436,8 @@ try:
                             if "[Drop:" in param:
                                 clean_param = param.split("[Drop:")[0].strip()
                                 options_raw = param.split("[Drop:")[1].split("]")[0]
-                                options = [o.strip() for o in options_raw.split(",")]
+                                # Fix 4: Mandatory Check format
+                                options = ["-- Select --"] + [o.strip() for o in options_raw.split(",")]
                                 m_param_values[param] = st.selectbox(clean_param, options, key=f"man_param_{param}")
                             elif "[Check]" in param:
                                 clean_param = param.split("[Check]")[0].strip()
@@ -424,71 +447,71 @@ try:
                                 m_param_values[param] = st.text_input(param, key=f"man_param_{param}")
                                 
                 if st.button("💾 Save Manual Log", use_container_width=True, type="primary"):
-                    start_str_m = m_start.strftime('%H:%M')
-                    end_str_m = m_end.strftime('%H:%M')
-                    date_str_m = m_date.strftime('%Y-%m-%d')
                     
-                    main_ss = get_main_spreadsheet()
-                    log_sheet = main_ss.worksheet("activity_log")
-                    log_sheet.append_row([
-                        date_str_m, start_str_m, end_str_m, GS_FORMULA,    
-                        "HEALTH", selected_cat_manual, "", "Manually logged via Health App"
-                    ], value_input_option="USER_ENTERED")
-                    
-                    health_ss = get_health_spreadsheet()
-                    try:
-                        target_sheet = health_ss.worksheet(selected_cat_manual)
-                        row_data = []
-                        for h in m_headers:
-                            if h == "Date": row_data.append(date_str_m)
-                            elif h == "Start_Time": row_data.append(start_str_m)
-                            elif h == "End_Time": row_data.append(end_str_m)
-                            elif h == "Duration": row_data.append(GS_FORMULA)
-                            else: row_data.append(m_param_values.get(h, ""))
-                            
-                        target_sheet.append_row(row_data, value_input_option="USER_ENTERED")
+                    has_missing = any(v == "-- Select --" for v in m_param_values.values())
+                    if has_missing:
+                        st.error("⚠️ Please select a valid option for all dropdown parameters before saving!")
+                    else:
+                        start_str_m = f"{m_start_h}:{m_start_m}"
+                        end_str_m = f"{m_end_h}:{m_end_m}"
+                        date_str_m = m_date.strftime('%Y-%m-%d')
                         
-                        get_activity_log.clear() 
-                        get_health_category_data.clear() 
-                        st.success(f"Saved: Detailed log added to '{selected_cat_manual}' tab!")
-                        time.sleep(1.5)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to log details to Health_log: {e}")
+                        main_ss = get_main_spreadsheet()
+                        log_sheet = main_ss.worksheet("activity_log")
+                        log_sheet.append_row([
+                            date_str_m, start_str_m, end_str_m, GS_FORMULA,    
+                            "HEALTH", selected_cat_manual, "", "Manually logged via Health App"
+                        ], value_input_option="USER_ENTERED")
+                        
+                        health_ss = get_health_spreadsheet()
+                        try:
+                            target_sheet = health_ss.worksheet(selected_cat_manual)
+                            row_data = []
+                            for h in m_headers:
+                                if h == "Date": row_data.append(date_str_m)
+                                elif h == "Start_Time": row_data.append(start_str_m)
+                                elif h == "End_Time": row_data.append(end_str_m)
+                                elif h == "Duration": row_data.append(GS_FORMULA)
+                                else: row_data.append(m_param_values.get(h, ""))
+                                
+                            target_sheet.append_row(row_data, value_input_option="USER_ENTERED")
+                            
+                            st.cache_data.clear() 
+                            st.success(f"Saved: Detailed log added to '{selected_cat_manual}' tab!")
+                            time.sleep(1.5)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed to log details to Health_log: {e}")
 
             # --- SUMMARY & INSIGHTS TAB ---
             with tab_summary:
                 st.markdown("<div style='margin-bottom: 5px; color: #555;'><b>📊 Today's Health Overview:</b></div>", unsafe_allow_html=True)
                 
-                # 1. Analyze Today's Completed Tasks from Main Log
                 today_logs = log_df[(log_df['Date'] == today_str) & (log_df['End_Time'] != 'RUNNING') & (log_df['Activity'] == 'HEALTH')].copy()
                 
                 if not today_logs.empty:
                     today_logs['Total_Minutes'] = today_logs['Duration'].apply(parse_duration_to_minutes)
-                    summary = today_logs.groupby('Sub_Activities')['Total_Minutes'].sum().reset_index()
-                    
-                    # Ensure we don't process empty Sub_Activities created by accident
-                    summary = summary[summary['Sub_Activities'].str.strip() != '']
                     
                     st.markdown("#### ✅ Completed Today")
                     
-                    for _, row in summary.iterrows():
-                        cat_name = str(row['Sub_Activities']).strip().upper()
-                        total_mins = row['Total_Minutes']
+                    # Fix 2: Group activities and create Expandable session counts
+                    for cat_name, group in today_logs.groupby('Sub_Activities'):
+                        cat_name = str(cat_name).strip().upper()
+                        if cat_name == '': continue
+                        
+                        session_count = len(group)
+                        total_mins = group['Total_Minutes'].sum()
                         
                         hours, remainder_mins = divmod(total_mins, 60)
                         dur_display = f"{int(hours)}h {int(remainder_mins)}m" if hours > 0 else f"{int(remainder_mins)}m"
                         
-                        # Render Sleek, Compact Box without Parameters
-                        box_html = f"""
-                        <div style='background: linear-gradient(to right, #e8f5e9, #f1f8e9); padding: 6px 14px; border-radius: 8px; border-left: 6px solid #4caf50; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 8px;'>
-                            <div style='display: flex; justify-content: space-between; align-items: center;'>
-                                <span style='font-size: 16px; font-weight: bold; color: #2e7b32; letter-spacing: 0.5px;'>{cat_name}</span>
-                                <span style='font-size: 14px; color: #1b5e20; font-weight: 600; background-color: rgba(255,255,255,0.6); padding: 2px 8px; border-radius: 10px;'>⏱️ {dur_display}</span>
-                            </div>
-                        </div>
-                        """
-                        st.markdown(box_html, unsafe_allow_html=True)
+                        session_str = f"({session_count})" if session_count > 1 else "(1)"
+                        expander_title = f"🏃 {cat_name} {session_str} — ⏱️ {dur_display}"
+                        
+                        # Native Streamlit expander handles the click-to-expand UI flawlessly
+                        with st.expander(expander_title):
+                            for _, row in group.iterrows():
+                                st.markdown(f"**{row['Start_Time']} to {row['End_Time']}** *(Duration: {row['Duration']})*")
                 else:
                     st.info("No health activities logged yet today.")
 
@@ -556,8 +579,7 @@ try:
                                     try:
                                         new_sheet = health_ss.add_worksheet(title=new_cat_name.strip(), rows="1000", cols=str(max(len(headers), 5)))
                                         new_sheet.append_row(headers)
-                                        get_health_categories.clear()
-                                        get_health_category_headers.clear()
+                                        st.cache_data.clear()
                                         st.success(f"Success! '{new_cat_name}' tab created in Health_log.")
                                         time.sleep(1)
                                         st.rerun()
@@ -685,8 +707,7 @@ try:
                                 try:
                                     new_sheet = health_ss.add_worksheet(title=new_cat_name.strip(), rows="1000", cols=str(max(len(headers), 5)))
                                     new_sheet.append_row(headers)
-                                    get_health_categories.clear()
-                                    get_health_category_headers.clear()
+                                    st.cache_data.clear()
                                     st.success(f"Success! '{new_cat_name}' tab created in Health_log.")
                                     time.sleep(1)
                                     st.rerun()

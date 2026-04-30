@@ -70,13 +70,43 @@ def load_cash_data():
     try: return pd.DataFrame(sh.worksheet("CASH_COUNT").get_all_records())
     except: return pd.DataFrame()
 
+@st.cache_data(ttl=60)
+def load_bike_data():
+    try: return pd.DataFrame(sh.worksheet("BIKE_LOG").get_all_records())
+    except: return pd.DataFrame()
+
 config_df = load_config()
+
+# --- SMART ACCOUNT PARSER ---
+ACCOUNT_HEADERS = [
+    "A. Cash:", "B. Bank Accounts:", "C. Credit Cards:", 
+    "D. Digital Wallet:", "E. Loan:", "F. Members:"
+]
 
 def get_list(column_name):
     if column_name in config_df.columns:
         raw_list = [str(val).strip() for val in config_df[column_name].dropna().tolist() if str(val).strip() != ""]
         return list(dict.fromkeys(raw_list))
     return []
+
+def get_clean_accounts():
+    raw = get_list("Accounts")
+    return [a for a in raw if a not in ACCOUNT_HEADERS]
+
+def get_cash_wallets():
+    raw = get_list("Accounts")
+    wallets = []
+    in_cash = False
+    for a in raw:
+        if a == "A. Cash:":
+            in_cash = True
+            continue
+        elif a in ACCOUNT_HEADERS:
+            in_cash = False
+            
+        if in_cash and a.strip():
+            wallets.append(a.strip())
+    return wallets
 
 def get_location_logic():
     logic = {}
@@ -358,6 +388,51 @@ with tab_money:
         
         st.caption(f"Logged under App Location: {current_loc or 'Unknown'}")
 
+    # --- BIKE REFUEL EXPANDER ---
+    with st.expander("🏍️ Quick Log: Bike Refuel & Auto-Mileage"):
+        df_bike = load_bike_data()
+        last_odo = 0
+        if not df_bike.empty and 'Odometer' in df_bike.columns:
+            last_odo = int(df_bike.iloc[-1]['Odometer'])
+            
+        b_col1, b_col2, b_col3 = st.columns(3)
+        with b_col1: b_odo = st.number_input("Current Odometer", min_value=last_odo, value=last_odo, step=1)
+        with b_col2: b_litres = st.number_input("Petrol (Litres)", min_value=0.0, step=0.1)
+        with b_col3: b_cost = st.number_input("Total Cost (₹)", min_value=0.0, step=10.0)
+        
+        b_acc_col1, b_acc_col2 = st.columns(2)
+        with b_acc_col1: b_acc = st.selectbox("Paid From", get_clean_accounts(), key="bike_pay_acc")
+        with b_acc_col2: 
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("⛽ Save Refuel Log", use_container_width=True, type="primary"):
+                if b_odo > last_odo and b_litres > 0 and b_cost > 0:
+                    try:
+                        time_now = get_ist_now()
+                        date_str = time_now.strftime("%d-%m-%Y")
+                        time_str = time_now.strftime("%H:%M")
+                        
+                        # 1. Log to BIKE_LOG
+                        sh.worksheet("BIKE_LOG").append_row([date_str, time_str, b_odo, b_litres, b_cost])
+                        
+                        # 2. Automatically log to MONEY_DATA
+                        tf_val = current_loc if should_inject_tofrom(current_loc) else "Petrol Pump"
+                        sh.worksheet("MONEY_DATA").append_row([
+                            date_str, time_str, "", b_cost, b_acc, "Salary", "PERS", "NEEDS", 
+                            "Transport", "Petrol", tf_val, current_loc or "", f"Odo: {b_odo}"
+                        ])
+                        
+                        load_bike_data.clear()
+                        load_money_data.clear()
+                        st.success("⛽ Refuel Logged! Mileage updated in Dashboard.")
+                        st.rerun()
+                    except Exception as e:
+                        if "WorksheetNotFound" in str(e):
+                            st.error("⚠️ Error: Please create a sheet tab named 'BIKE_LOG' first!")
+                        else:
+                            st.error(f"Error: {e}")
+                else:
+                    st.warning("⚠️ Ensure Odometer is higher than last time, and Litres/Cost are greater than 0.")
+
     st.divider()
 
     df_money = load_money_data()
@@ -378,7 +453,7 @@ with tab_money:
                     
                     c_r1_1, c_r1_2, c_r1_3 = st.columns(3)
                     with c_r1_1: 
-                        acc_opts = get_list("Accounts")
+                        acc_opts = get_clean_accounts()
                         default_acc = acc_opts.index(row.get('Account', '')) if row.get('Account', '') in acc_opts else 0
                         i_acc = st.selectbox("Account", acc_opts, index=default_acc, key=f"ac_{idx}")
                     with c_r1_2: 
@@ -538,7 +613,7 @@ with tab_money:
     
     col1, col2 = st.columns(2)
     with col1:
-        account = st.selectbox("Account (Physical)", get_list("Accounts"))
+        account = st.selectbox("Account (Physical)", get_clean_accounts())
         fund = st.selectbox("Fund (Virtual Source)", get_list("Funds"))
         
         mapped_entities = []
@@ -644,15 +719,20 @@ with tab_cash:
         df_cash.columns = [str(c).strip() for c in df_cash.columns]
 
     st.subheader("Wallet Selection")
+    
+    # DYNAMIC CASH WALLET LIST
+    cash_wallets = get_cash_wallets()
+    
     existing_wallets = []
     if not df_cash.empty and 'Wallet_Name' in df_cash.columns:
         existing_wallets = list(df_cash['Wallet_Name'].dropna().unique())
         existing_wallets = [str(w).strip() for w in existing_wallets if str(w).strip() != ""]
     
-    if not existing_wallets: 
-        existing_wallets = ["Main Wallet", "Home Locker"]
+    combined_wallets = list(dict.fromkeys(cash_wallets + existing_wallets))
+    if not combined_wallets: 
+        combined_wallets = ["Main Wallet", "Home Locker"]
         
-    wallet_choice = st.selectbox("Select Wallet / Storage", existing_wallets + ["-- Add New Wallet --"])
+    wallet_choice = st.selectbox("Select Wallet / Storage", combined_wallets + ["-- Add New Wallet --"])
     if wallet_choice == "-- Add New Wallet --":
         wallet_name = st.text_input("Type New Wallet Name")
     else:
@@ -792,9 +872,17 @@ with tab_cash:
         acc_summary['Balance'] = acc_summary['In'] - acc_summary['Out']
         ledger_balances = dict(zip(acc_summary['Account'], acc_summary['Balance']))
 
-    acc_opts = get_list("Accounts")
+    # EXTRACT LATEST CASH COUNTS
+    latest_cash_counts = {}
+    if not df_cash.empty and 'Wallet_Name' in df_cash.columns and 'Total' in df_cash.columns:
+        last_counts = df_cash.drop_duplicates(subset=['Wallet_Name'], keep='last')
+        for _, row in last_counts.iterrows():
+            try: latest_cash_counts[str(row['Wallet_Name']).strip()] = float(row['Total'])
+            except: pass
+
+    acc_opts = get_clean_accounts()
     all_accounts = list(dict.fromkeys(acc_opts + list(ledger_balances.keys())))
-    all_accounts = [a for a in all_accounts if str(a).strip() != ""]
+    all_accounts = [a for a in all_accounts if str(a).strip() != "" and a not in ACCOUNT_HEADERS]
 
     st.markdown("---")
     h1, h2, h3, h4 = st.columns([1.5, 1, 1.2, 1.3])
@@ -806,12 +894,16 @@ with tab_cash:
 
     for idx, acc in enumerate(all_accounts):
         l_bal = float(ledger_balances.get(acc, 0.0))
+        
+        # SMART DEFAULT: IF WE HAVE A CASH COUNT, USE IT AS THE DEFAULT ACTUAL BALANCE
+        default_act_bal = latest_cash_counts.get(acc, l_bal)
+        
         c1, c2, c3, c4 = st.columns([1.5, 1, 1.2, 1.3])
         c1.write(f"**{acc}**")
         c2.write(f"₹ {l_bal:,.2f}")
         
         actual_bal = c3.number_input(
-            f"Actual {acc}", value=l_bal, step=100.0, key=f"act_bal_{idx}", label_visibility="collapsed"
+            f"Actual {acc}", value=float(default_act_bal), step=100.0, key=f"act_bal_{idx}", label_visibility="collapsed"
         )
         
         difference = actual_bal - l_bal
@@ -900,7 +992,7 @@ with tab_shopping:
             
         est_cost = st.number_input("Estimated Cost per item (₹)", min_value=0.0, step=10.0, key="plan_cost")
         fund = st.selectbox("Fund to use", get_list("Funds"), key="plan_fund")
-        account = st.selectbox("Account to use", get_list("Accounts"), key="plan_acc")
+        account = st.selectbox("Account to use", get_clean_accounts(), key="plan_acc")
         
     if st.button("➕ Add All to Pending List", use_container_width=True):
         all_items = selected_items + [i.strip() for i in custom_items_str.split(',') if i.strip()]
@@ -954,7 +1046,7 @@ with tab_bills:
             bill_amt = st.number_input("Estimated Amount (₹)", min_value=0.0, step=100.0)
             bill_due = st.date_input("Due Date", value=st.session_state.locked_date)
             bill_fund = st.selectbox("Default Fund", get_list("Funds"), key="bill_fund")
-            bill_acc = st.selectbox("Default Account", get_list("Accounts"), key="bill_acc")
+            bill_acc = st.selectbox("Default Account", get_clean_accounts(), key="bill_acc")
             
         if st.button("Save to Checklist", use_container_width=True):
             if bill_name:
@@ -1252,7 +1344,7 @@ with tab_location:
                         
                     fare_amt = st.number_input("Total Fare Amount (₹)", min_value=0.0, step=5.0, value=float(calc_fare))
                     
-                    acc_opts = get_list("Accounts")
+                    acc_opts = get_clean_accounts()
                     default_acc_idx = acc_opts.index("MB") if "MB" in acc_opts else 0
                     fare_acc = st.selectbox("Pay From", acc_opts, index=default_acc_idx, key="dyn_fare_acc")
                 
@@ -1568,6 +1660,36 @@ with tab_location:
 # ==========================================
 with tab_dash:
     st.header("📊 Financial Intelligence")
+    
+    # --- BIKE MILEAGE ANALYTICS ---
+    df_bike = load_bike_data()
+    if not df_bike.empty and len(df_bike) > 1:
+        st.subheader("🏍️ Bike Mileage Analytics")
+        try:
+            df_b = df_bike.copy()
+            df_b['Odometer'] = pd.to_numeric(df_b['Odometer'])
+            df_b['Litres'] = pd.to_numeric(df_b['Litres'])
+            
+            # Calculate distance covered since LAST log and divide by LAST log's litres
+            df_b['Prev_Odo'] = df_b['Odometer'].shift(1)
+            df_b['Prev_Litres'] = df_b['Litres'].shift(1)
+            df_b['Distance_Covered'] = df_b['Odometer'] - df_b['Prev_Odo']
+            df_b['Mileage'] = df_b['Distance_Covered'] / df_b['Prev_Litres']
+            
+            latest_mileage = df_b.iloc[-1]['Mileage']
+            total_dist = df_b.iloc[-1]['Odometer'] - df_b.iloc[0]['Odometer']
+            
+            c_m1, c_m2 = st.columns(2)
+            c_m1.metric("Latest Bike Mileage", f"{latest_mileage:.1f} km/L")
+            c_m2.metric("Total Tracked Distance", f"{total_dist} km")
+            
+            fig_mileage = px.line(df_b.dropna(), x='Date', y='Mileage', markers=True, title="Mileage Trend Over Time", color_discrete_sequence=['#ff9800'])
+            st.plotly_chart(fig_mileage, use_container_width=True)
+            st.divider()
+        except Exception as e:
+            st.caption(f"Waiting for more data to display mileage chart... ({e})")
+            st.divider()
+    
     df_money = load_money_data()
     if not df_money.empty:
         df_money_clean = df_money[df_money['Remark'] != '⚠️ INCOMPLETE'].copy()

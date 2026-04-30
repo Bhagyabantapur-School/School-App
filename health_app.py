@@ -81,12 +81,12 @@ def get_activity_log():
 
 @st.cache_data(ttl=60)
 def get_health_categories():
-    """Fetches all tab names from the Health_log spreadsheet"""
+    """Fetches all tab names from the Health_log spreadsheet, filtering out specific utility tabs."""
     try:
         ss = get_health_spreadsheet()
         worksheets = ss.worksheets()
-        # Return all tab names except default 'Sheet1' if it's empty and unused
-        tabs = [ws.title for ws in worksheets if ws.title != 'Sheet1']
+        # Filter out 'Sheet1' and 'Update'
+        tabs = [ws.title for ws in worksheets if ws.title not in ['Sheet1', 'Update']]
         return tabs
     except Exception as e:
         st.error(f"Error connecting to Health_log: {e}")
@@ -102,6 +102,60 @@ def get_health_category_headers(category_name):
         return headers
     except Exception:
         return []
+
+@st.cache_data(ttl=60)
+def get_health_category_data(category_name):
+    """Fetches all data for a specific health category to aggregate parameters"""
+    try:
+        ss = get_health_spreadsheet()
+        sheet = ss.worksheet(category_name)
+        data = sheet.get_all_values()
+        if len(data) <= 1:
+            return pd.DataFrame()
+        df = pd.DataFrame(data[1:], columns=data[0])
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+def parse_duration_to_minutes(dur_str):
+    """Helper to convert H:MM strings to integer minutes"""
+    try:
+        h, m = map(int, str(dur_str).strip().split(':'))
+        return (h * 60) + m
+    except: 
+        return 0
+
+def get_last_done_str(item_name, log_df, now, col_name='Sub_Activities'):
+    """Helper to find the last time a specific sub-activity was logged"""
+    completed_logs = log_df[log_df['End_Time'] != 'RUNNING']
+    matches = completed_logs[completed_logs[col_name].astype(str).str.strip().str.upper() == item_name.upper()]
+    if matches.empty: return "Never"
+    
+    max_dt = None
+    for _, r in matches.iterrows():
+        try:
+            dt_str = f"{r['Date']} {r['End_Time']}"
+            dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+            if max_dt is None or dt > max_dt: max_dt = dt
+        except: continue
+        
+    if not max_dt: return "Never"
+    
+    now_naive = now.replace(tzinfo=None)
+    diff = now_naive - max_dt
+    
+    if diff.days > 0: return f"{diff.days}d ago"
+    elif diff.seconds >= 3600: return f"{diff.seconds // 3600}h ago"
+    elif diff.seconds >= 60: return f"{diff.seconds // 60}m ago"
+    else: return "Just now"
+
+def is_numeric(val):
+    """Helper to check if a string represents a number (for parameter aggregation)"""
+    try:
+        float(val)
+        return True
+    except ValueError:
+        return False
 
 # ==========================================
 # 3. Main Application Logic
@@ -129,6 +183,7 @@ try:
             get_activity_log.clear()
             get_health_categories.clear()
             get_health_category_headers.clear()
+            get_health_category_data.clear()
             st.toast("Synced with Google Sheets!")
             time.sleep(0.5)
             st.rerun()
@@ -142,10 +197,10 @@ try:
         """, unsafe_allow_html=True)
 
     # ==========================================
-    # SECTION A: LIVE TIME TRACKING & MANUAL LOG
+    # SECTION A: LIVE TIME TRACKING, MANUAL LOG, & SUMMARY
     # ==========================================
     with st.container():
-        st.markdown("### ⏱️ Session Tracking")
+        st.markdown("### ⏱️ Session Tracking & Insights")
         st.markdown("---")
         
         # 1. RENDER RUNNING HEALTH TASKS (If any exist)
@@ -236,8 +291,6 @@ try:
                     cols = st.columns(min(len(custom_params), 4))
                     for i, param in enumerate(custom_params):
                         with cols[i % 4]:
-                            # Parse expected type based on bracket hints in header if any 
-                            # e.g., "Music [Yes/No]"
                             if "[Drop:" in param:
                                 clean_param = param.split("[Drop:")[0].strip()
                                 options_raw = param.split("[Drop:")[1].split("]")[0]
@@ -266,7 +319,6 @@ try:
                         try:
                             target_sheet = health_ss.worksheet(display_name)
                             
-                            # Construct the row data based on headers
                             row_data = []
                             for h in headers:
                                 if h == "Date": row_data.append(today_str)
@@ -278,6 +330,7 @@ try:
                             target_sheet.append_row(row_data, value_input_option="USER_ENTERED")
                             
                             get_activity_log.clear() 
+                            get_health_category_data.clear() # Clear cache to refresh summary
                             st.success(f"Saved: Detailed log added to '{display_name}' tab!")
                             time.sleep(1)
                             st.rerun()
@@ -295,9 +348,9 @@ try:
                         st.rerun()
             st.markdown("<br>", unsafe_allow_html=True)
 
-        # 2. START OR LOG A NEW HEALTH SESSION
+        # 2. TABBED INTERFACE (Live, Manual, Summary)
         if health_categories and active_count == 0:
-            tab_live, tab_manual = st.tabs(["⏱️ Live Timer", "📝 Manual Log"])
+            tab_live, tab_manual, tab_summary = st.tabs(["⏱️ Live Timer", "📝 Manual Log", "📈 Summary & Insights"])
             
             # --- LIVE TIMER TAB ---
             with tab_live:
@@ -399,11 +452,93 @@ try:
                         target_sheet.append_row(row_data, value_input_option="USER_ENTERED")
                         
                         get_activity_log.clear() 
+                        get_health_category_data.clear() # Clear cache to refresh summary
                         st.success(f"Saved: Detailed log added to '{selected_cat_manual}' tab!")
                         time.sleep(1.5)
                         st.rerun()
                     except Exception as e:
                         st.error(f"Failed to log details to Health_log: {e}")
+
+            # --- SUMMARY & INSIGHTS TAB ---
+            with tab_summary:
+                st.markdown("<div style='margin-bottom: 5px; color: #555;'><b>📊 Today's Health Overview:</b></div>", unsafe_allow_html=True)
+                
+                # 1. Analyze Today's Completed Tasks from Main Log
+                today_logs = log_df[(log_df['Date'] == today_str) & (log_df['End_Time'] != 'RUNNING') & (log_df['Activity'] == 'HEALTH')].copy()
+                
+                if not today_logs.empty:
+                    today_logs['Total_Minutes'] = today_logs['Duration'].apply(parse_duration_to_minutes)
+                    
+                    # Group by the Sub_Activity (which holds our health categories like YOGA, MEDITATION)
+                    summary = today_logs.groupby('Sub_Activities')['Total_Minutes'].sum().reset_index()
+                    
+                    st.markdown("#### ✅ Completed Today")
+                    
+                    # For each completed category, dig into the specific Health_log tab to aggregate parameters
+                    for _, row in summary.iterrows():
+                        cat_name = str(row['Sub_Activities']).strip().upper()
+                        total_mins = row['Total_Minutes']
+                        
+                        # Build the display string
+                        hours, remainder_mins = divmod(total_mins, 60)
+                        dur_display = f"{int(hours)}h {int(remainder_mins)}m" if hours > 0 else f"{int(remainder_mins)}m"
+                        
+                        display_string = f"**{cat_name}** — ⏱️ {dur_display}"
+                        
+                        # Fetch the detailed tab data to aggregate numeric parameters
+                        cat_df = get_health_category_data(cat_name)
+                        if not cat_df.empty:
+                            # Filter the detailed data for today
+                            cat_today = cat_df[cat_df['Date'] == today_str]
+                            if not cat_today.empty:
+                                # Find columns that might be numeric (skip base headers)
+                                m_base_headers = ["Date", "Start_Time", "End_Time", "Duration"]
+                                custom_params = [c for c in cat_df.columns if c not in m_base_headers]
+                                
+                                param_summaries = []
+                                for param in custom_params:
+                                    # Clean parameter name for display
+                                    clean_param_name = param.split("[")[0].strip()
+                                    
+                                    # Try to sum numeric values
+                                    total_val = 0
+                                    is_num_col = False
+                                    for val in cat_today[param]:
+                                        if is_numeric(val):
+                                            total_val += float(val)
+                                            is_num_col = True
+                                            
+                                    if is_num_col:
+                                        # Format sum (remove .0 if it's an integer)
+                                        f_val = int(total_val) if total_val.is_integer() else round(total_val, 2)
+                                        param_summaries.append(f"{clean_param_name}: {f_val}")
+                                
+                                if param_summaries:
+                                    display_string += f" &nbsp;|&nbsp; 📊 {' / '.join(param_summaries)}"
+                        
+                        st.markdown(f"<div style='background-color:#e8f5e9; padding:10px; border-radius:5px; margin-bottom:8px; border-left: 4px solid #4caf50;'>{display_string}</div>", unsafe_allow_html=True)
+                else:
+                    st.info("No health activities logged yet today.")
+
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                # 2. Analyze Missing Tasks (Needs Attention)
+                st.markdown("#### ⚠️ Needs Attention (Not Done Today)")
+                
+                # Get the list of activities done today (empty list if none)
+                done_today = []
+                if not today_logs.empty:
+                    done_today = [str(x).strip().upper() for x in today_logs['Sub_Activities'].unique()]
+                
+                # Compare against all known categories
+                missing_cats = [c for c in health_categories if c.upper() not in done_today]
+                
+                if missing_cats:
+                    for cat in missing_cats:
+                        last_done = get_last_done_str(cat, log_df, now)
+                        st.markdown(f"<div style='background-color:#fff3e0; padding:10px; border-radius:5px; margin-bottom:8px; border-left: 4px solid #ff9800;'><b>{cat}</b> <span style='color: #666; font-size: 14px;'>(Last: {last_done})</span></div>", unsafe_allow_html=True)
+                else:
+                    st.success("Amazing! You've touched on every single health category today.")
 
         elif not health_categories:
             st.info("No Health categories found. Create one below to get started!")
@@ -438,7 +573,7 @@ try:
                 with col4: param_4 = st.text_input("Parameter 4")
                 
                 if st.form_submit_button("Create Category", use_container_width=True, type="primary"):
-                    if new_cat_name.strip():
+                    if new_cat_name.strip() and new_cat_name.strip().upper() != 'UPDATE':
                         try:
                             health_ss = get_health_spreadsheet()
                             
@@ -462,6 +597,8 @@ try:
                                 
                         except Exception as e:
                             st.error(f"System Error: {e}")
+                    elif new_cat_name.strip().upper() == 'UPDATE':
+                        st.error("The name 'Update' is reserved. Please choose a different name.")
                     else:
                         st.error("Please provide an Activity Name.")
 

@@ -85,7 +85,6 @@ def get_health_categories():
     try:
         ss = get_health_spreadsheet()
         worksheets = ss.worksheets()
-        # Filter out 'Sheet1' and 'Update'
         tabs = [ws.title for ws in worksheets if ws.title not in ['Sheet1', 'Update']]
         return tabs
     except Exception as e:
@@ -350,9 +349,9 @@ try:
                         st.rerun()
             st.markdown("<br>", unsafe_allow_html=True)
 
-        # 2. TABBED INTERFACE (Live, Manual, Summary)
+        # 2. TABBED INTERFACE (Live, Manual, Summary, History)
         if health_categories and active_count == 0:
-            tab_live, tab_manual, tab_summary = st.tabs(["⏱️ Live Timer", "📝 Manual Log", "📈 Summary & Insights"])
+            tab_live, tab_manual, tab_summary, tab_history = st.tabs(["⏱️ Live Timer", "📝 Manual Log", "📈 Summary & Insights", "📜 History"])
             
             # --- LIVE TIMER TAB ---
             with tab_live:
@@ -479,55 +478,13 @@ try:
                         hours, remainder_mins = divmod(total_mins, 60)
                         dur_display = f"{int(hours)}h {int(remainder_mins)}m" if hours > 0 else f"{int(remainder_mins)}m"
                         
-                        param_summaries = []
-                        cat_df = get_health_category_data(cat_name)
-                        
-                        if not cat_df.empty:
-                            cat_today = cat_df[cat_df['Date'] == today_str]
-                            if not cat_today.empty:
-                                m_base_headers = ["Date", "Start_Time", "End_Time", "Duration"]
-                                custom_params = [c for c in cat_df.columns if c not in m_base_headers]
-                                
-                                for param in custom_params:
-                                    clean_param_name = param.split("[")[0].strip()
-                                    
-                                    # Handle Numeric Parameters (SUM them)
-                                    is_num_col = False
-                                    total_val = 0
-                                    
-                                    # Handle Text/Dropdown Parameters (LIST them)
-                                    text_vals = []
-                                    
-                                    for val in cat_today[param]:
-                                        if is_numeric(val):
-                                            total_val += float(val)
-                                            is_num_col = True
-                                        elif pd.notna(val) and str(val).strip() != "":
-                                            text_vals.append(str(val).strip())
-                                            
-                                    if is_num_col:
-                                        f_val = int(total_val) if total_val.is_integer() else round(total_val, 2)
-                                        # Now using HTML <b> tags for bolding instead of markdown asterisks
-                                        param_summaries.append(f"<b>{clean_param_name}:</b> {f_val}")
-                                    elif text_vals:
-                                        unique_text = list(dict.fromkeys(text_vals))
-                                        # Now using HTML <b> tags for bolding instead of markdown asterisks
-                                        param_summaries.append(f"<b>{clean_param_name}:</b> {', '.join(unique_text)}")
-                        
-                        # Build parameter HTML block if parameters exist
-                        param_html = ""
-                        if param_summaries:
-                            param_str = ' &nbsp;|&nbsp; '.join(param_summaries)
-                            param_html = f"<div style='font-size: 14px; color: #388e3c; border-top: 1px solid rgba(46, 123, 50, 0.2); padding-top: 8px; margin-top: 8px;'>📊 {param_str}</div>"
-                        
-                        # Render Beautiful Attractive Box
+                        # Render Beautiful Attractive Box without parameters
                         box_html = f"""
                         <div style='background: linear-gradient(to right, #e8f5e9, #f1f8e9); padding: 15px; border-radius: 10px; border-left: 6px solid #4caf50; box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 12px;'>
                             <div style='display: flex; justify-content: space-between; align-items: center;'>
                                 <span style='font-size: 18px; font-weight: bold; color: #2e7b32; letter-spacing: 0.5px;'>{cat_name}</span>
                                 <span style='font-size: 15px; color: #1b5e20; font-weight: 600; background-color: rgba(255,255,255,0.6); padding: 4px 10px; border-radius: 12px;'>⏱️ {dur_display}</span>
                             </div>
-                            {param_html}
                         </div>
                         """
                         st.markdown(box_html, unsafe_allow_html=True)
@@ -612,6 +569,76 @@ try:
                                 st.error("The name 'Update' is reserved. Please choose a different name.")
                             else:
                                 st.error("Please provide an Activity Name.")
+
+            # --- ACTIVITY HISTORY TAB ---
+            with tab_history:
+                st.markdown("<div style='margin-bottom: 5px; color: #555;'><b>📜 Activity History:</b></div>", unsafe_allow_html=True)
+                
+                selected_history_cat = st.selectbox("Select Health Activity to View", health_categories, key="history_cat_sel")
+                cat_data = get_health_category_data(selected_history_cat)
+                
+                if not cat_data.empty:
+                    # Parse Dates for sorting and gaps
+                    cat_data['Parsed_Date'] = pd.to_datetime(cat_data['Date'], errors='coerce')
+                    cat_data['Parsed_Time'] = pd.to_datetime(cat_data['Start_Time'], format='%H:%M', errors='coerce').dt.time
+                    
+                    # Sort descending (Newest first)
+                    cat_data = cat_data.sort_values(by=['Parsed_Date', 'Parsed_Time'], ascending=[False, False]).reset_index(drop=True)
+                    
+                    current_month_year = ""
+                    
+                    for i in range(len(cat_data)):
+                        row = cat_data.iloc[i]
+                        p_date = row['Parsed_Date']
+                        
+                        if pd.isna(p_date): continue
+                        
+                        m_y = p_date.strftime('%B %Y').upper()
+                        day_str = p_date.strftime('%d %a').upper()
+                        
+                        # Show Month Header if changed
+                        if m_y != current_month_year:
+                            st.markdown(f"<h4 style='color: #2e7b32; margin-top: 20px; border-bottom: 2px solid #c8e6c9; padding-bottom: 5px;'>{m_y}</h4>", unsafe_allow_html=True)
+                            current_month_year = m_y
+                        
+                        # Extract Custom Parameters
+                        base_h = ["Date", "Start_Time", "End_Time", "Duration", "Parsed_Date", "Parsed_Time"]
+                        custom_params = [c for c in cat_data.columns if c not in base_h]
+                        
+                        params_display = []
+                        for cp in custom_params:
+                            val = row[cp]
+                            if pd.notna(val) and str(val).strip() != "":
+                                clean_cp = cp.split("[")[0].strip()
+                                # Using standard HTML bold tags for clean parameter display
+                                params_display.append(f"<b>{clean_cp}:</b> {val}")
+                                
+                        param_html = f"<br><span style='color: #555; font-size: 14px;'>{' | '.join(params_display)}</span>" if params_display else ""
+                        
+                        # Build Row UI
+                        st.markdown(f"""
+                        <div style='display: flex; align-items: flex-start; margin-bottom: 10px; background-color: #f8f9fa; padding: 10px; border-radius: 8px; border-left: 4px solid #81c784;'>
+                            <div style='min-width: 80px; text-align: center; background-color: #e8f5e9; padding: 5px; border-radius: 5px; margin-right: 15px;'>
+                                <strong style='color: #2e7b32; font-size: 16px;'>{day_str.split()[0]}</strong><br>
+                                <span style='color: #666; font-size: 12px;'>{day_str.split()[1]}</span>
+                            </div>
+                            <div style='flex-grow: 1;'>
+                                <strong style='font-size: 16px; color: #333;'>⏱️ {row['Start_Time']} - {row['End_Time']}</strong> <span style='color: #888; font-size: 14px;'>(Dur: {row['Duration']})</span>
+                                {param_html}
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Calculate gap to next (older) entry
+                        if i < len(cat_data) - 1:
+                            next_row = cat_data.iloc[i+1]
+                            next_date = next_row['Parsed_Date']
+                            if pd.notna(next_date):
+                                diff_days = (p_date - next_date).days
+                                if diff_days > 1:
+                                    st.markdown(f"<div style='text-align: center; color: #9e9e9e; font-size: 13px; margin: 10px 0;'><em>[{diff_days} days gap]</em></div>", unsafe_allow_html=True)
+                else:
+                    st.info("No records found for this activity.")
 
         elif not health_categories:
             st.info("No Health categories found. Create one below to get started!")

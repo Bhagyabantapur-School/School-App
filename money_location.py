@@ -1669,6 +1669,7 @@ with tab_dash:
             df_b = df_bike.copy()
             df_b['Odometer'] = pd.to_numeric(df_b['Odometer'])
             df_b['Litres'] = pd.to_numeric(df_b['Litres'])
+            df_b['Date_Obj'] = pd.to_datetime(df_b['Date'], format='%d-%m-%Y', errors='coerce')
             
             # Calculate distance covered since LAST log and divide by LAST log's litres
             df_b['Prev_Odo'] = df_b['Odometer'].shift(1)
@@ -1676,14 +1677,36 @@ with tab_dash:
             df_b['Distance_Covered'] = df_b['Odometer'] - df_b['Prev_Odo']
             df_b['Mileage'] = df_b['Distance_Covered'] / df_b['Prev_Litres']
             
+            # Date gaps
+            df_b['Days_Gap'] = df_b['Date_Obj'].diff().dt.days
+            
             latest_mileage = df_b.iloc[-1]['Mileage']
             total_dist = df_b.iloc[-1]['Odometer'] - df_b.iloc[0]['Odometer']
             
-            c_m1, c_m2 = st.columns(2)
-            c_m1.metric("Latest Bike Mileage", f"{latest_mileage:.1f} km/L")
-            c_m2.metric("Total Tracked Distance", f"{total_dist} km")
+            # Average calculation: Total distance / Total fuel burned (excluding fuel just bought)
+            total_litres_consumed = df_b['Prev_Litres'].sum()
+            avg_mileage = total_dist / total_litres_consumed if total_litres_consumed > 0 else 0.0
             
-            fig_mileage = px.line(df_b.dropna(), x='Date', y='Mileage', markers=True, title="Mileage Trend Over Time", color_discrete_sequence=['#ff9800'])
+            avg_gap = df_b['Days_Gap'].mean()
+            latest_gap = df_b.iloc[-1]['Days_Gap']
+            
+            last_date = df_b.iloc[-1]['Date_Obj']
+            days_since_last = (get_ist_now().date() - last_date.date()).days
+            
+            safe_avg_gap = f"{avg_gap:.1f} days" if pd.notnull(avg_gap) else "N/A"
+            safe_latest_gap = f"{latest_gap:.0f} days" if pd.notnull(latest_gap) else "N/A"
+            
+            c_m1, c_m2, c_m3 = st.columns(3)
+            c_m1.metric("Latest Mileage", f"{latest_mileage:.1f} km/L")
+            c_m2.metric("Avg Mileage", f"{avg_mileage:.1f} km/L")
+            c_m3.metric("Total Distance", f"{total_dist} km")
+            
+            c_g1, c_g2, c_g3 = st.columns(3)
+            c_g1.metric("Avg Refuel Interval", safe_avg_gap)
+            c_g2.metric("Previous Refuel Gap", safe_latest_gap)
+            c_g3.metric("Current Tank Status", f"Last: {days_since_last} d ago")
+            
+            fig_mileage = px.line(df_b.dropna(subset=['Mileage']), x='Date', y='Mileage', markers=True, title="Mileage Trend Over Time", color_discrete_sequence=['#ff9800'])
             st.plotly_chart(fig_mileage, use_container_width=True)
             st.divider()
         except Exception as e:

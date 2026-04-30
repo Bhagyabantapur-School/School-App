@@ -465,6 +465,9 @@ try:
                     today_logs['Total_Minutes'] = today_logs['Duration'].apply(parse_duration_to_minutes)
                     summary = today_logs.groupby('Sub_Activities')['Total_Minutes'].sum().reset_index()
                     
+                    # Ensure we don't process empty Sub_Activities created by accident
+                    summary = summary[summary['Sub_Activities'].str.strip() != '']
+                    
                     st.markdown("#### ✅ Completed Today")
                     
                     for _, row in summary.iterrows():
@@ -474,16 +477,15 @@ try:
                         hours, remainder_mins = divmod(total_mins, 60)
                         dur_display = f"{int(hours)}h {int(remainder_mins)}m" if hours > 0 else f"{int(remainder_mins)}m"
                         
-                        display_string = f"**{cat_name}** — ⏱️ {dur_display}"
-                        
+                        param_summaries = []
                         cat_df = get_health_category_data(cat_name)
+                        
                         if not cat_df.empty:
                             cat_today = cat_df[cat_df['Date'] == today_str]
                             if not cat_today.empty:
                                 m_base_headers = ["Date", "Start_Time", "End_Time", "Duration"]
                                 custom_params = [c for c in cat_df.columns if c not in m_base_headers]
                                 
-                                param_summaries = []
                                 for param in custom_params:
                                     clean_param_name = param.split("[")[0].strip()
                                     total_val = 0
@@ -497,11 +499,24 @@ try:
                                     if is_num_col:
                                         f_val = int(total_val) if total_val.is_integer() else round(total_val, 2)
                                         param_summaries.append(f"{clean_param_name}: {f_val}")
-                                
-                                if param_summaries:
-                                    display_string += f" &nbsp;|&nbsp; 📊 {' / '.join(param_summaries)}"
                         
-                        st.markdown(f"<div style='background-color:#e8f5e9; padding:10px; border-radius:5px; margin-bottom:8px; border-left: 4px solid #4caf50;'>{display_string}</div>", unsafe_allow_html=True)
+                        # Build parameter HTML block if parameters exist
+                        param_html = ""
+                        if param_summaries:
+                            param_str = ' &nbsp;•&nbsp; '.join(param_summaries)
+                            param_html = f"<div style='font-size: 14px; color: #388e3c; border-top: 1px solid rgba(46, 123, 50, 0.2); padding-top: 8px; margin-top: 8px;'>📊 {param_str}</div>"
+                        
+                        # Render Beautiful Attractive Box
+                        box_html = f"""
+                        <div style='background: linear-gradient(to right, #e8f5e9, #f1f8e9); padding: 15px; border-radius: 10px; border-left: 6px solid #4caf50; box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 12px;'>
+                            <div style='display: flex; justify-content: space-between; align-items: center;'>
+                                <span style='font-size: 18px; font-weight: bold; color: #2e7b32; letter-spacing: 0.5px;'>{cat_name}</span>
+                                <span style='font-size: 15px; color: #1b5e20; font-weight: 600; background-color: rgba(255,255,255,0.6); padding: 4px 10px; border-radius: 12px;'>⏱️ {dur_display}</span>
+                            </div>
+                            {param_html}
+                        </div>
+                        """
+                        st.markdown(box_html, unsafe_allow_html=True)
                 else:
                     st.info("No health activities logged yet today.")
 
@@ -512,7 +527,7 @@ try:
                 
                 done_today = []
                 if not today_logs.empty:
-                    done_today = [str(x).strip().upper() for x in today_logs['Sub_Activities'].unique()]
+                    done_today = [str(x).strip().upper() for x in today_logs['Sub_Activities'].unique() if str(x).strip() != '']
                 
                 missing_cats = [c for c in health_categories if c.upper() not in done_today]
                 
@@ -524,7 +539,7 @@ try:
                     st.success("Amazing! You've touched on every single health category today.")
 
                 # ==========================================
-                # 3. HEALTH LOG CONFIGURATION (Moved inside Summary Tab)
+                # 3. HEALTH LOG CONFIGURATION (Inside Summary Tab)
                 # ==========================================
                 st.markdown("<br><hr><br>", unsafe_allow_html=True)
                 st.markdown("### ⚙️ Health Log Configuration")
@@ -532,7 +547,6 @@ try:
                 with st.expander("➕ Create New Health Category", expanded=not health_categories):
                     st.markdown("This will create a new tab in your `Health_log` Google Sheet.")
                     
-                    # Dynamically ask how many parameters they want
                     num_params = st.number_input("How many custom parameters do you want to add?", min_value=0, max_value=20, value=4, step=1)
                     
                     with st.form("new_health_cat_form", clear_on_submit=True):
@@ -551,12 +565,10 @@ try:
                             cols = st.columns(2)
                             for i in range(num_params):
                                 with cols[i % 2]:
-                                    # Provide helpful placeholders for the first few
                                     ph = ""
                                     if i == 0: ph = "e.g., Heart Rate"
                                     elif i == 1: ph = "e.g., Music [Drop: Yes, No]"
                                     elif i == 2: ph = "e.g., Felt Good [Check]"
-                                    
                                     param_inputs.append(st.text_input(f"Parameter {i+1}", placeholder=ph, key=f"param_input_{i}"))
                         else:
                             param_inputs = []

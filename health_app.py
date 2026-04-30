@@ -3,7 +3,7 @@ import streamlit.components.v1 as components
 import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import time
 
@@ -109,6 +109,7 @@ def get_health_category_headers(category_name):
 ist_timezone = pytz.timezone('Asia/Kolkata')
 now = datetime.now(ist_timezone)
 today_str = now.strftime('%Y-%m-%d')
+clean_now = now.replace(second=0, microsecond=0).time()
 
 try:
     log_df = get_activity_log()
@@ -141,13 +142,13 @@ try:
         """, unsafe_allow_html=True)
 
     # ==========================================
-    # SECTION A: LIVE TIME TRACKING
+    # SECTION A: LIVE TIME TRACKING & MANUAL LOG
     # ==========================================
     with st.container():
-        st.markdown("### ⏱️ Live Session Tracking")
+        st.markdown("### ⏱️ Session Tracking")
         st.markdown("---")
         
-        # 1. RENDER RUNNING HEALTH TASKS
+        # 1. RENDER RUNNING HEALTH TASKS (If any exist)
         if active_count > 0:
             st.markdown("<div style='margin-bottom: 10px; color: #2e7b32;'><b>🟢 Currently Running:</b></div>", unsafe_allow_html=True)
             for idx, active_row in running_tasks.iterrows():
@@ -241,13 +242,13 @@ try:
                                 clean_param = param.split("[Drop:")[0].strip()
                                 options_raw = param.split("[Drop:")[1].split("]")[0]
                                 options = [o.strip() for o in options_raw.split(",")]
-                                param_values[param] = st.selectbox(clean_param, options, key=f"param_{idx}_{param}")
+                                param_values[param] = st.selectbox(clean_param, options, key=f"live_param_{idx}_{param}")
                             elif "[Check]" in param:
                                 clean_param = param.split("[Check]")[0].strip()
-                                checked = st.checkbox(clean_param, key=f"param_{idx}_{param}")
+                                checked = st.checkbox(clean_param, key=f"live_param_{idx}_{param}")
                                 param_values[param] = "Yes" if checked else "No"
                             else:
-                                param_values[param] = st.text_input(param, key=f"param_{idx}_{param}")
+                                param_values[param] = st.text_input(param, key=f"live_param_{idx}_{param}")
 
                 col_stop, col_cancel = st.columns([1, 1])
                 with col_stop:
@@ -294,42 +295,116 @@ try:
                         st.rerun()
             st.markdown("<br>", unsafe_allow_html=True)
 
-        # 2. START A NEW HEALTH SESSION
+        # 2. START OR LOG A NEW HEALTH SESSION
         if health_categories and active_count == 0:
-            st.markdown("<div style='margin-bottom: 5px; color: #2e7b32;'><b>🚀 Start New Session:</b></div>", unsafe_allow_html=True)
+            tab_live, tab_manual = st.tabs(["⏱️ Live Timer", "📝 Manual Log"])
             
-            col_cat, col_btn = st.columns([3, 1])
-            with col_cat:
-                selected_cat = st.selectbox("Select Health Activity", health_categories, label_visibility="collapsed", key="start_cat_sel")
-            
-            with col_btn:
-                st.markdown(
-                    """
-                    <div id="health_start_anchor"></div>
-                    <style>
-                    div[data-testid="column"]:nth-of-type(2) div.element-container:has(#health_start_anchor) + div.element-container button {
-                        background-color: #2e7b32 !important; 
-                        color: white !important;
-                        border: none !important;
-                    }
-                    div[data-testid="column"]:nth-of-type(2) div.element-container:has(#health_start_anchor) + div.element-container button:hover {
-                        background-color: #1b5e20 !important; 
-                    }
-                    </style>
-                    """,
-                    unsafe_allow_html=True
-                )
-                if st.button("▶️ Start Timer", key="start_health", use_container_width=True):
-                    # Start logging to Main Activity Log only (details saved on Stop)
+            # --- LIVE TIMER TAB ---
+            with tab_live:
+                st.markdown("<div style='margin-bottom: 5px; color: #2e7b32;'><b>🚀 Start New Session:</b></div>", unsafe_allow_html=True)
+                
+                col_cat, col_btn = st.columns([3, 1])
+                with col_cat:
+                    selected_cat_live = st.selectbox("Select Health Activity", health_categories, label_visibility="collapsed", key="start_cat_sel_live")
+                
+                with col_btn:
+                    st.markdown(
+                        """
+                        <div id="health_start_anchor"></div>
+                        <style>
+                        div[data-testid="column"]:nth-of-type(2) div.element-container:has(#health_start_anchor) + div.element-container button {
+                            background-color: #2e7b32 !important; 
+                            color: white !important;
+                            border: none !important;
+                        }
+                        div[data-testid="column"]:nth-of-type(2) div.element-container:has(#health_start_anchor) + div.element-container button:hover {
+                            background-color: #1b5e20 !important; 
+                        }
+                        </style>
+                        """,
+                        unsafe_allow_html=True
+                    )
+                    if st.button("▶️ Start Timer", key="start_health_live", use_container_width=True):
+                        # Start logging to Main Activity Log only (details saved on Stop)
+                        main_ss = get_main_spreadsheet()
+                        log_sheet = main_ss.worksheet("activity_log")
+                        log_sheet.append_row([
+                            today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
+                            "HEALTH", selected_cat_live, "", "Tracked via Health App Timer"
+                        ], value_input_option="USER_ENTERED")
+                        
+                        get_activity_log.clear() 
+                        st.rerun()
+
+            # --- MANUAL LOG TAB ---
+            with tab_manual:
+                st.markdown("<div style='margin-bottom: 5px; color: #555;'><b>📝 Record Completed Activity:</b></div>", unsafe_allow_html=True)
+                
+                selected_cat_manual = st.selectbox("Select Health Activity", health_categories, key="start_cat_sel_manual")
+                
+                # Fetch parameters for the selected category so user can fill them out now
+                m_headers = get_health_category_headers(selected_cat_manual)
+                m_base_headers = ["Date", "Start_Time", "End_Time", "Duration"]
+                m_custom_params = [h for h in m_headers if h not in m_base_headers]
+                
+                col_md, col_ms, col_me = st.columns([2, 1, 1])
+                with col_md: m_date = st.date_input("Date", value=now.date(), key="manual_date")
+                with col_ms: m_start = st.time_input("Start Time", value=clean_now, key="manual_start")
+                with col_me: m_end = st.time_input("End Time", value=clean_now, key="manual_end")
+                
+                m_param_values = {}
+                if m_custom_params:
+                    st.markdown("**Activity Details:**")
+                    m_cols = st.columns(min(len(m_custom_params), 4))
+                    for i, param in enumerate(m_custom_params):
+                        with m_cols[i % 4]:
+                            if "[Drop:" in param:
+                                clean_param = param.split("[Drop:")[0].strip()
+                                options_raw = param.split("[Drop:")[1].split("]")[0]
+                                options = [o.strip() for o in options_raw.split(",")]
+                                m_param_values[param] = st.selectbox(clean_param, options, key=f"man_param_{param}")
+                            elif "[Check]" in param:
+                                clean_param = param.split("[Check]")[0].strip()
+                                checked = st.checkbox(clean_param, key=f"man_param_{param}")
+                                m_param_values[param] = "Yes" if checked else "No"
+                            else:
+                                m_param_values[param] = st.text_input(param, key=f"man_param_{param}")
+                                
+                if st.button("💾 Save Manual Log", use_container_width=True, type="primary"):
+                    start_str_m = m_start.strftime('%H:%M')
+                    end_str_m = m_end.strftime('%H:%M')
+                    date_str_m = m_date.strftime('%Y-%m-%d')
+                    
+                    # 1. Update Main Activity Log
                     main_ss = get_main_spreadsheet()
                     log_sheet = main_ss.worksheet("activity_log")
                     log_sheet.append_row([
-                        today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
-                        "HEALTH", selected_cat, "", "Tracked via Health App"
+                        date_str_m, start_str_m, end_str_m, GS_FORMULA,    
+                        "HEALTH", selected_cat_manual, "", "Manually logged via Health App"
                     ], value_input_option="USER_ENTERED")
                     
-                    get_activity_log.clear() 
-                    st.rerun()
+                    # 2. Add Detailed Log to Specific Health Tab
+                    health_ss = get_health_spreadsheet()
+                    try:
+                        target_sheet = health_ss.worksheet(selected_cat_manual)
+                        
+                        row_data = []
+                        for h in m_headers:
+                            if h == "Date": row_data.append(date_str_m)
+                            elif h == "Start_Time": row_data.append(start_str_m)
+                            elif h == "End_Time": row_data.append(end_str_m)
+                            elif h == "Duration": row_data.append(GS_FORMULA)
+                            else: row_data.append(m_param_values.get(h, ""))
+                            
+                        target_sheet.append_row(row_data, value_input_option="USER_ENTERED")
+                        
+                        get_activity_log.clear() 
+                        st.success(f"Saved: Detailed log added to '{selected_cat_manual}' tab!")
+                        time.sleep(1.5)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to log details to Health_log: {e}")
+
         elif not health_categories:
             st.info("No Health categories found. Create one below to get started!")
 

@@ -85,6 +85,7 @@ def get_health_categories():
     try:
         ss = get_health_spreadsheet()
         worksheets = ss.worksheets()
+        # Filter out 'Sheet1' and 'Update'
         tabs = [ws.title for ws in worksheets if ws.title not in ['Sheet1', 'Update']]
         return tabs
     except Exception as e:
@@ -478,13 +479,54 @@ try:
                         hours, remainder_mins = divmod(total_mins, 60)
                         dur_display = f"{int(hours)}h {int(remainder_mins)}m" if hours > 0 else f"{int(remainder_mins)}m"
                         
-                        # Render Beautiful Attractive Box without parameters
+                        param_summaries = []
+                        cat_df = get_health_category_data(cat_name)
+                        
+                        if not cat_df.empty:
+                            cat_today = cat_df[cat_df['Date'] == today_str]
+                            if not cat_today.empty:
+                                m_base_headers = ["Date", "Start_Time", "End_Time", "Duration"]
+                                custom_params = [c for c in cat_df.columns if c not in m_base_headers]
+                                
+                                for param in custom_params:
+                                    clean_param_name = param.split("[")[0].strip()
+                                    
+                                    # Handle Numeric Parameters (SUM them)
+                                    is_num_col = False
+                                    total_val = 0
+                                    
+                                    # Handle Text/Dropdown Parameters (LIST them)
+                                    text_vals = []
+                                    
+                                    for val in cat_today[param]:
+                                        if is_numeric(val):
+                                            total_val += float(val)
+                                            is_num_col = True
+                                        elif pd.notna(val) and str(val).strip() != "":
+                                            text_vals.append(str(val).strip())
+                                            
+                                    if is_num_col:
+                                        f_val = int(total_val) if total_val.is_integer() else round(total_val, 2)
+                                        param_summaries.append(f"<b>{clean_param_name}:</b> {f_val}")
+                                    elif text_vals:
+                                        unique_text = list(dict.fromkeys(text_vals))
+                                        param_summaries.append(f"<b>{clean_param_name}:</b> {', '.join(unique_text)}")
+                        
+                        # Build parameter HTML block if parameters exist
+                        param_html = ""
+                        if param_summaries:
+                            param_str = ' &nbsp;|&nbsp; '.join(param_summaries)
+                            # Reduced padding top and margin top for a tighter layout
+                            param_html = f"<div style='font-size: 14px; color: #388e3c; border-top: 1px solid rgba(46, 123, 50, 0.2); padding-top: 6px; margin-top: 6px;'>📊 {param_str}</div>"
+                        
+                        # Render Beautiful Attractive Box with tightened padding (10px top/bottom, 15px left/right)
                         box_html = f"""
-                        <div style='background: linear-gradient(to right, #e8f5e9, #f1f8e9); padding: 15px; border-radius: 10px; border-left: 6px solid #4caf50; box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 12px;'>
+                        <div style='background: linear-gradient(to right, #e8f5e9, #f1f8e9); padding: 10px 15px; border-radius: 10px; border-left: 6px solid #4caf50; box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 10px;'>
                             <div style='display: flex; justify-content: space-between; align-items: center;'>
                                 <span style='font-size: 18px; font-weight: bold; color: #2e7b32; letter-spacing: 0.5px;'>{cat_name}</span>
                                 <span style='font-size: 15px; color: #1b5e20; font-weight: 600; background-color: rgba(255,255,255,0.6); padding: 4px 10px; border-radius: 12px;'>⏱️ {dur_display}</span>
                             </div>
+                            {param_html}
                         </div>
                         """
                         st.markdown(box_html, unsafe_allow_html=True)
@@ -505,7 +547,7 @@ try:
                 if missing_cats:
                     for cat in missing_cats:
                         last_done = get_last_done_str(cat, log_df, now)
-                        st.markdown(f"<div style='background-color:#fff3e0; padding:10px; border-radius:5px; margin-bottom:8px; border-left: 4px solid #ff9800;'><b>{cat}</b> <span style='color: #666; font-size: 14px;'>(Last: {last_done})</span></div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='background-color:#fff3e0; padding:8px 10px; border-radius:5px; margin-bottom:8px; border-left: 4px solid #ff9800;'><b>{cat}</b> <span style='color: #666; font-size: 14px;'>(Last: {last_done})</span></div>", unsafe_allow_html=True)
                 else:
                     st.success("Amazing! You've touched on every single health category today.")
 
@@ -610,14 +652,13 @@ try:
                             val = row[cp]
                             if pd.notna(val) and str(val).strip() != "":
                                 clean_cp = cp.split("[")[0].strip()
-                                # Using standard HTML bold tags for clean parameter display
                                 params_display.append(f"<b>{clean_cp}:</b> {val}")
                                 
                         param_html = f"<br><span style='color: #555; font-size: 14px;'>{' | '.join(params_display)}</span>" if params_display else ""
                         
-                        # Build Row UI
+                        # Build Row UI with tighter padding
                         st.markdown(f"""
-                        <div style='display: flex; align-items: flex-start; margin-bottom: 10px; background-color: #f8f9fa; padding: 10px; border-radius: 8px; border-left: 4px solid #81c784;'>
+                        <div style='display: flex; align-items: flex-start; margin-bottom: 10px; background-color: #f8f9fa; padding: 8px 10px; border-radius: 8px; border-left: 4px solid #81c784;'>
                             <div style='min-width: 80px; text-align: center; background-color: #e8f5e9; padding: 5px; border-radius: 5px; margin-right: 15px;'>
                                 <strong style='color: #2e7b32; font-size: 16px;'>{day_str.split()[0]}</strong><br>
                                 <span style='color: #666; font-size: 12px;'>{day_str.split()[1]}</span>

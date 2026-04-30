@@ -151,6 +151,8 @@ def get_last_done_str(item_name, log_df, now, col_name='Sub_Activities'):
 
 def is_numeric(val):
     """Helper to check if a string represents a number (for parameter aggregation)"""
+    if pd.isna(val) or val == "":
+        return False
     try:
         float(val)
         return True
@@ -488,22 +490,33 @@ try:
                                 
                                 for param in custom_params:
                                     clean_param_name = param.split("[")[0].strip()
-                                    total_val = 0
+                                    
+                                    # Handle Numeric Parameters (SUM them)
                                     is_num_col = False
+                                    total_val = 0
+                                    
+                                    # Handle Text/Dropdown Parameters (LIST them)
+                                    text_vals = []
                                     
                                     for val in cat_today[param]:
                                         if is_numeric(val):
                                             total_val += float(val)
                                             is_num_col = True
+                                        elif pd.notna(val) and str(val).strip() != "":
+                                            text_vals.append(str(val).strip())
                                             
                                     if is_num_col:
                                         f_val = int(total_val) if total_val.is_integer() else round(total_val, 2)
-                                        param_summaries.append(f"{clean_param_name}: {f_val}")
+                                        param_summaries.append(f"**{clean_param_name}:** {f_val}")
+                                    elif text_vals:
+                                        # Only show unique text values if there are multiple entries
+                                        unique_text = list(dict.fromkeys(text_vals))
+                                        param_summaries.append(f"**{clean_param_name}:** {', '.join(unique_text)}")
                         
                         # Build parameter HTML block if parameters exist
                         param_html = ""
                         if param_summaries:
-                            param_str = ' &nbsp;•&nbsp; '.join(param_summaries)
+                            param_str = ' &nbsp;|&nbsp; '.join(param_summaries)
                             param_html = f"<div style='font-size: 14px; color: #388e3c; border-top: 1px solid rgba(46, 123, 50, 0.2); padding-top: 8px; margin-top: 8px;'>📊 {param_str}</div>"
                         
                         # Render Beautiful Attractive Box

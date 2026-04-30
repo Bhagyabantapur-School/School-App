@@ -197,7 +197,7 @@ try:
         """, unsafe_allow_html=True)
 
     # ==========================================
-    # SECTION A: LIVE TIME TRACKING, MANUAL LOG, & SUMMARY
+    # SECTION A: LIVE TIME TRACKING & MANUAL LOG
     # ==========================================
     with st.container():
         st.markdown("### ⏱️ Session Tracking & Insights")
@@ -378,7 +378,6 @@ try:
                         unsafe_allow_html=True
                     )
                     if st.button("▶️ Start Timer", key="start_health_live", use_container_width=True):
-                        # Start logging to Main Activity Log only (details saved on Stop)
                         main_ss = get_main_spreadsheet()
                         log_sheet = main_ss.worksheet("activity_log")
                         log_sheet.append_row([
@@ -395,7 +394,6 @@ try:
                 
                 selected_cat_manual = st.selectbox("Select Health Activity", health_categories, key="start_cat_sel_manual")
                 
-                # Fetch parameters for the selected category so user can fill them out now
                 m_headers = get_health_category_headers(selected_cat_manual)
                 m_base_headers = ["Date", "Start_Time", "End_Time", "Duration"]
                 m_custom_params = [h for h in m_headers if h not in m_base_headers]
@@ -428,7 +426,6 @@ try:
                     end_str_m = m_end.strftime('%H:%M')
                     date_str_m = m_date.strftime('%Y-%m-%d')
                     
-                    # 1. Update Main Activity Log
                     main_ss = get_main_spreadsheet()
                     log_sheet = main_ss.worksheet("activity_log")
                     log_sheet.append_row([
@@ -436,11 +433,9 @@ try:
                         "HEALTH", selected_cat_manual, "", "Manually logged via Health App"
                     ], value_input_option="USER_ENTERED")
                     
-                    # 2. Add Detailed Log to Specific Health Tab
                     health_ss = get_health_spreadsheet()
                     try:
                         target_sheet = health_ss.worksheet(selected_cat_manual)
-                        
                         row_data = []
                         for h in m_headers:
                             if h == "Date": row_data.append(date_str_m)
@@ -452,7 +447,7 @@ try:
                         target_sheet.append_row(row_data, value_input_option="USER_ENTERED")
                         
                         get_activity_log.clear() 
-                        get_health_category_data.clear() # Clear cache to refresh summary
+                        get_health_category_data.clear() 
                         st.success(f"Saved: Detailed log added to '{selected_cat_manual}' tab!")
                         time.sleep(1.5)
                         st.rerun()
@@ -468,48 +463,38 @@ try:
                 
                 if not today_logs.empty:
                     today_logs['Total_Minutes'] = today_logs['Duration'].apply(parse_duration_to_minutes)
-                    
-                    # Group by the Sub_Activity (which holds our health categories like YOGA, MEDITATION)
                     summary = today_logs.groupby('Sub_Activities')['Total_Minutes'].sum().reset_index()
                     
                     st.markdown("#### ✅ Completed Today")
                     
-                    # For each completed category, dig into the specific Health_log tab to aggregate parameters
                     for _, row in summary.iterrows():
                         cat_name = str(row['Sub_Activities']).strip().upper()
                         total_mins = row['Total_Minutes']
                         
-                        # Build the display string
                         hours, remainder_mins = divmod(total_mins, 60)
                         dur_display = f"{int(hours)}h {int(remainder_mins)}m" if hours > 0 else f"{int(remainder_mins)}m"
                         
                         display_string = f"**{cat_name}** — ⏱️ {dur_display}"
                         
-                        # Fetch the detailed tab data to aggregate numeric parameters
                         cat_df = get_health_category_data(cat_name)
                         if not cat_df.empty:
-                            # Filter the detailed data for today
                             cat_today = cat_df[cat_df['Date'] == today_str]
                             if not cat_today.empty:
-                                # Find columns that might be numeric (skip base headers)
                                 m_base_headers = ["Date", "Start_Time", "End_Time", "Duration"]
                                 custom_params = [c for c in cat_df.columns if c not in m_base_headers]
                                 
                                 param_summaries = []
                                 for param in custom_params:
-                                    # Clean parameter name for display
                                     clean_param_name = param.split("[")[0].strip()
-                                    
-                                    # Try to sum numeric values
                                     total_val = 0
                                     is_num_col = False
+                                    
                                     for val in cat_today[param]:
                                         if is_numeric(val):
                                             total_val += float(val)
                                             is_num_col = True
                                             
                                     if is_num_col:
-                                        # Format sum (remove .0 if it's an integer)
                                         f_val = int(total_val) if total_val.is_integer() else round(total_val, 2)
                                         param_summaries.append(f"{clean_param_name}: {f_val}")
                                 
@@ -525,12 +510,10 @@ try:
                 # 2. Analyze Missing Tasks (Needs Attention)
                 st.markdown("#### ⚠️ Needs Attention (Not Done Today)")
                 
-                # Get the list of activities done today (empty list if none)
                 done_today = []
                 if not today_logs.empty:
                     done_today = [str(x).strip().upper() for x in today_logs['Sub_Activities'].unique()]
                 
-                # Compare against all known categories
                 missing_cats = [c for c in health_categories if c.upper() not in done_today]
                 
                 if missing_cats:
@@ -540,67 +523,129 @@ try:
                 else:
                     st.success("Amazing! You've touched on every single health category today.")
 
+                # ==========================================
+                # 3. HEALTH LOG CONFIGURATION (Moved inside Summary Tab)
+                # ==========================================
+                st.markdown("<br><hr><br>", unsafe_allow_html=True)
+                st.markdown("### ⚙️ Health Log Configuration")
+                
+                with st.expander("➕ Create New Health Category", expanded=not health_categories):
+                    st.markdown("This will create a new tab in your `Health_log` Google Sheet.")
+                    
+                    # Dynamically ask how many parameters they want
+                    num_params = st.number_input("How many custom parameters do you want to add?", min_value=0, max_value=20, value=4, step=1)
+                    
+                    with st.form("new_health_cat_form", clear_on_submit=True):
+                        new_cat_name = st.text_input("Activity Name (e.g., MEDITATION, YOGA, RUNNING)").upper()
+                        
+                        if num_params > 0:
+                            st.markdown("#### Add Custom Tracking Parameters")
+                            st.markdown("""
+                            *Tips for adding parameters:*
+                            * **Text/Number Input:** Just type the name (e.g., `Heart Rate`, `Distance (km)`)
+                            * **Dropdown:** Add `[Drop: Option1, Option2]` (e.g., `Music [Drop: Calm, Focus, None]`)
+                            * **Checkbox:** Add `[Check]` (e.g., `Stretched After [Check]`)
+                            """)
+                            
+                            param_inputs = []
+                            cols = st.columns(2)
+                            for i in range(num_params):
+                                with cols[i % 2]:
+                                    # Provide helpful placeholders for the first few
+                                    ph = ""
+                                    if i == 0: ph = "e.g., Heart Rate"
+                                    elif i == 1: ph = "e.g., Music [Drop: Yes, No]"
+                                    elif i == 2: ph = "e.g., Felt Good [Check]"
+                                    
+                                    param_inputs.append(st.text_input(f"Parameter {i+1}", placeholder=ph, key=f"param_input_{i}"))
+                        else:
+                            param_inputs = []
+                        
+                        if st.form_submit_button("Create Category", use_container_width=True, type="primary"):
+                            if new_cat_name.strip() and new_cat_name.strip().upper() != 'UPDATE':
+                                try:
+                                    health_ss = get_health_spreadsheet()
+                                    headers = ["Date", "Start_Time", "End_Time", "Duration"]
+                                    params = [p.strip() for p in param_inputs if p.strip()]
+                                    headers.extend(params)
+                                    
+                                    try:
+                                        new_sheet = health_ss.add_worksheet(title=new_cat_name.strip(), rows="1000", cols=str(max(len(headers), 5)))
+                                        new_sheet.append_row(headers)
+                                        get_health_categories.clear()
+                                        get_health_category_headers.clear()
+                                        st.success(f"Success! '{new_cat_name}' tab created in Health_log.")
+                                        time.sleep(1)
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Error creating tab (It might already exist): {e}")
+                                        
+                                except Exception as e:
+                                    st.error(f"System Error: {e}")
+                            elif new_cat_name.strip().upper() == 'UPDATE':
+                                st.error("The name 'Update' is reserved. Please choose a different name.")
+                            else:
+                                st.error("Please provide an Activity Name.")
+
         elif not health_categories:
             st.info("No Health categories found. Create one below to get started!")
-
-    st.markdown("<br><hr><br>", unsafe_allow_html=True)
-
-    # ==========================================
-    # SECTION B: CATEGORY & PARAMETER MANAGER
-    # ==========================================
-    with st.container():
-        st.markdown("### ⚙️ Health Log Configuration")
-        
-        with st.expander("➕ Create New Health Category", expanded=not health_categories):
-            with st.form("new_health_cat_form", clear_on_submit=True):
+            
+            st.markdown("<br><hr><br>", unsafe_allow_html=True)
+            st.markdown("### ⚙️ Health Log Configuration")
+            with st.expander("➕ Create New Health Category", expanded=True):
                 st.markdown("This will create a new tab in your `Health_log` Google Sheet.")
-                new_cat_name = st.text_input("Activity Name (e.g., MEDITATION, YOGA, RUNNING)").upper()
                 
-                st.markdown("#### Add Custom Tracking Parameters")
-                st.markdown("""
-                *Tips for adding parameters:*
-                * **Text/Number Input:** Just type the name (e.g., `Heart Rate`, `Distance (km)`)
-                * **Dropdown:** Add `[Drop: Option1, Option2]` (e.g., `Music [Drop: Calm, Focus, None]`)
-                * **Checkbox:** Add `[Check]` (e.g., `Stretched After [Check]`)
-                """)
+                num_params = st.number_input("How many custom parameters do you want to add?", min_value=0, max_value=20, value=4, step=1)
                 
-                col1, col2 = st.columns(2)
-                with col1: param_1 = st.text_input("Parameter 1", placeholder="e.g., Heart Rate")
-                with col2: param_2 = st.text_input("Parameter 2", placeholder="e.g., Music [Drop: Yes, No]")
-                
-                col3, col4 = st.columns(2)
-                with col3: param_3 = st.text_input("Parameter 3", placeholder="e.g., Felt Good [Check]")
-                with col4: param_4 = st.text_input("Parameter 4")
-                
-                if st.form_submit_button("Create Category", use_container_width=True, type="primary"):
-                    if new_cat_name.strip() and new_cat_name.strip().upper() != 'UPDATE':
-                        try:
-                            health_ss = get_health_spreadsheet()
-                            
-                            # Standard Headers
-                            headers = ["Date", "Start_Time", "End_Time", "Duration"]
-                            
-                            # Add user-defined params
-                            params = [p.strip() for p in [param_1, param_2, param_3, param_4] if p.strip()]
-                            headers.extend(params)
-                            
-                            try:
-                                new_sheet = health_ss.add_worksheet(title=new_cat_name.strip(), rows="1000", cols=str(max(len(headers), 5)))
-                                new_sheet.append_row(headers)
-                                get_health_categories.clear()
-                                get_health_category_headers.clear()
-                                st.success(f"Success! '{new_cat_name}' tab created in Health_log.")
-                                time.sleep(1)
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Error creating tab (It might already exist): {e}")
-                                
-                        except Exception as e:
-                            st.error(f"System Error: {e}")
-                    elif new_cat_name.strip().upper() == 'UPDATE':
-                        st.error("The name 'Update' is reserved. Please choose a different name.")
+                with st.form("new_health_cat_form_initial", clear_on_submit=True):
+                    new_cat_name = st.text_input("Activity Name (e.g., MEDITATION, YOGA, RUNNING)").upper()
+                    
+                    if num_params > 0:
+                        st.markdown("#### Add Custom Tracking Parameters")
+                        st.markdown("""
+                        *Tips for adding parameters:*
+                        * **Text/Number Input:** Just type the name (e.g., `Heart Rate`, `Distance (km)`)
+                        * **Dropdown:** Add `[Drop: Option1, Option2]` (e.g., `Music [Drop: Calm, Focus, None]`)
+                        * **Checkbox:** Add `[Check]` (e.g., `Stretched After [Check]`)
+                        """)
+                        
+                        param_inputs = []
+                        cols = st.columns(2)
+                        for i in range(num_params):
+                            with cols[i % 2]:
+                                ph = ""
+                                if i == 0: ph = "e.g., Heart Rate"
+                                elif i == 1: ph = "e.g., Music [Drop: Yes, No]"
+                                elif i == 2: ph = "e.g., Felt Good [Check]"
+                                param_inputs.append(st.text_input(f"Parameter {i+1}", placeholder=ph, key=f"init_param_input_{i}"))
                     else:
-                        st.error("Please provide an Activity Name.")
+                        param_inputs = []
+                    
+                    if st.form_submit_button("Create Category", use_container_width=True, type="primary"):
+                        if new_cat_name.strip() and new_cat_name.strip().upper() != 'UPDATE':
+                            try:
+                                health_ss = get_health_spreadsheet()
+                                headers = ["Date", "Start_Time", "End_Time", "Duration"]
+                                params = [p.strip() for p in param_inputs if p.strip()]
+                                headers.extend(params)
+                                
+                                try:
+                                    new_sheet = health_ss.add_worksheet(title=new_cat_name.strip(), rows="1000", cols=str(max(len(headers), 5)))
+                                    new_sheet.append_row(headers)
+                                    get_health_categories.clear()
+                                    get_health_category_headers.clear()
+                                    st.success(f"Success! '{new_cat_name}' tab created in Health_log.")
+                                    time.sleep(1)
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Error creating tab (It might already exist): {e}")
+                                    
+                            except Exception as e:
+                                st.error(f"System Error: {e}")
+                        elif new_cat_name.strip().upper() == 'UPDATE':
+                            st.error("The name 'Update' is reserved. Please choose a different name.")
+                        else:
+                            st.error("Please provide an Activity Name.")
 
 except Exception as e:
     st.error(f"Critical System Error: Make sure your 'Health_log' Google Sheet exists and is shared with your service account. Details: {e}")

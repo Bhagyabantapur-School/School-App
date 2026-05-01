@@ -32,14 +32,12 @@ st.markdown("""
         box-shadow: none !important;
     }
     
-    /* CSS for the pulsing dot animation */
     @keyframes pulse {
         0% { transform: scale(0.95); opacity: 0.9; }
         50% { transform: scale(1.1); opacity: 1; }
         100% { transform: scale(0.95); opacity: 0.9; }
     }
     
-    /* Hide the default triangle arrow on custom HTML expanders */
     details > summary {
       list-style: none;
     }
@@ -73,6 +71,15 @@ def get_health_spreadsheet():
     client = init_connection()
     return client.open("Health_log")
 
+def smart_append_row(sheet, row_data):
+    """Safely appends a row by finding the true end of Column A, avoiding formatting bugs."""
+    col_a = sheet.col_values(1)
+    next_row = len(col_a) + 1
+    try:
+        sheet.update(range_name=f"A{next_row}", values=[row_data], value_input_option="USER_ENTERED")
+    except TypeError:
+        sheet.update(f"A{next_row}", [row_data], value_input_option="USER_ENTERED")
+
 @st.cache_data(ttl=300)
 def get_activity_log():
     ss = get_main_spreadsheet()
@@ -84,6 +91,7 @@ def get_activity_log():
     while df.shape[1] < 8: df[df.shape[1]] = ""
     df = df.iloc[:, :8]
     df.columns = ["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"]
+    df = df[df["Date"].astype(str).str.strip() != ""] 
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
     return df
 
@@ -117,6 +125,7 @@ def get_health_category_data(category_name):
         if len(data) <= 1:
             return pd.DataFrame()
         df = pd.DataFrame(data[1:], columns=data[0])
+        df = df[df[df.columns[0]].astype(str).str.strip() != ""] 
         return df
     except Exception:
         return pd.DataFrame()
@@ -152,7 +161,6 @@ def get_last_done_str(item_name, log_df, now, col_name='Sub_Activities'):
     else: return "Just now"
 
 def delete_log_entry(date_str, start_time_str, cat_name):
-    """Deletes a health record from both Health_log and activity_log"""
     try:
         health_ss = get_health_spreadsheet()
         cat_sheet = health_ss.worksheet(cat_name)
@@ -180,7 +188,6 @@ def delete_log_entry(date_str, start_time_str, cat_name):
         if row_del_main:
             log_sheet.delete_rows(row_del_main)
 
-        # TARGETED CACHE CLEAR
         get_activity_log.clear()
         get_health_category_data.clear()
         return True
@@ -200,7 +207,6 @@ try:
     log_df = get_activity_log()
     health_categories = get_health_categories()
     
-    # Filter for currently running Health Tasks
     running_tasks = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Activity'] == 'HEALTH')]
     active_count = len(running_tasks)
 
@@ -211,7 +217,6 @@ try:
     with col2:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🔄 Sync Data", use_container_width=True):
-            # TARGETED CLEAR ONLY
             get_activity_log.clear()
             get_health_categories.clear()
             get_health_category_headers.clear()
@@ -228,14 +233,10 @@ try:
             </div>
         """, unsafe_allow_html=True)
 
-    # ==========================================
-    # SECTION A: LIVE TIME TRACKING & MANUAL LOG
-    # ==========================================
     with st.container():
         st.markdown("### ⏱️ Session Tracking & Insights")
         st.markdown("---")
         
-        # 1. RENDER RUNNING HEALTH TASKS
         if active_count > 0:
             st.markdown("<div style='margin-bottom: 10px; color: #2e7b32;'><b>🟢 Currently Running:</b></div>", unsafe_allow_html=True)
             for idx, active_row in running_tasks.iterrows():
@@ -344,7 +345,6 @@ try:
                             st.error("⚠️ Please select a valid option for all dropdown parameters before saving!")
                         else:
                             end_time_log = now.time()
-                            
                             main_ss = get_main_spreadsheet()
                             log_sheet = main_ss.worksheet("activity_log")
                             log_sheet.update_cell(sheet_row, 3, end_time_log.strftime('%H:%M')) 
@@ -353,7 +353,6 @@ try:
                             health_ss = get_health_spreadsheet()
                             try:
                                 target_sheet = health_ss.worksheet(display_name)
-                                
                                 row_data = []
                                 for h in headers:
                                     if h == "Date": row_data.append(today_str)
@@ -362,10 +361,9 @@ try:
                                     elif h == "Duration": row_data.append(GS_FORMULA)
                                     else: row_data.append(param_values.get(h, ""))
                                     
-                                target_sheet.append_row(row_data, value_input_option="USER_ENTERED")
+                                smart_append_row(target_sheet, row_data)
                                 
-                                # TARGETED CLEAR + SAFE SLEEP
-                                get_activity_log.clear()
+                                get_activity_log.clear() 
                                 get_health_category_data.clear()
                                 st.success(f"Saved: Detailed log added to '{display_name}' tab!")
                                 time.sleep(1.5)
@@ -379,14 +377,12 @@ try:
                         log_sheet = main_ss.worksheet("activity_log")
                         log_sheet.delete_rows(sheet_row)
                         
-                        # TARGETED CLEAR + SAFE SLEEP
                         get_activity_log.clear() 
                         st.warning(f"Cancelled: {display_name}")
                         time.sleep(1.5)
                         st.rerun()
             st.markdown("<br>", unsafe_allow_html=True)
 
-        # 2. TABBED INTERFACE
         if health_categories and active_count == 0:
             tab_live, tab_manual, tab_summary, tab_history = st.tabs(["⏱️ Live Timer", "📝 Manual Log", "📈 Summary & Insights", "📜 History"])
             
@@ -418,12 +414,12 @@ try:
                     if st.button("▶️ Start Timer", key="start_health_live", use_container_width=True):
                         main_ss = get_main_spreadsheet()
                         log_sheet = main_ss.worksheet("activity_log")
-                        log_sheet.append_row([
+                        row_to_add = [
                             today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
                             "HEALTH", selected_cat_live, "", "Tracked via Health App Timer"
-                        ], value_input_option="USER_ENTERED")
+                        ]
+                        smart_append_row(log_sheet, row_to_add)
                         
-                        # TARGETED CLEAR + SAFE SLEEP
                         get_activity_log.clear() 
                         time.sleep(1.5)
                         st.rerun()
@@ -478,7 +474,6 @@ try:
                                         m_param_values[param] = st.text_input(param, key=f"man_param_{param}")
                                 
                 if st.button("💾 Save Manual Log", use_container_width=True, type="primary"):
-                    
                     has_missing = any(v == "-- Select --" for v in m_param_values.values())
                     if has_missing:
                         st.error("⚠️ Please select a valid option for all dropdown parameters before saving!")
@@ -489,10 +484,11 @@ try:
                         
                         main_ss = get_main_spreadsheet()
                         log_sheet = main_ss.worksheet("activity_log")
-                        log_sheet.append_row([
+                        row_to_add = [
                             date_str_m, start_str_m, end_str_m, GS_FORMULA,    
                             "HEALTH", selected_cat_manual, "", "Manually logged via Health App"
-                        ], value_input_option="USER_ENTERED")
+                        ]
+                        smart_append_row(log_sheet, row_to_add)
                         
                         health_ss = get_health_spreadsheet()
                         try:
@@ -505,9 +501,8 @@ try:
                                 elif h == "Duration": row_data.append(GS_FORMULA)
                                 else: row_data.append(m_param_values.get(h, ""))
                                 
-                            target_sheet.append_row(row_data, value_input_option="USER_ENTERED")
+                            smart_append_row(target_sheet, row_data)
                             
-                            # TARGETED CLEAR + SAFE SLEEP
                             get_activity_log.clear() 
                             get_health_category_data.clear()
                             st.success(f"Saved: Detailed log added to '{selected_cat_manual}' tab!")
@@ -519,7 +514,6 @@ try:
             # --- SUMMARY & INSIGHTS TAB ---
             with tab_summary:
                 st.markdown("<div style='margin-bottom: 5px; color: #555;'><b>📊 Today's Health Overview:</b></div>", unsafe_allow_html=True)
-                
                 st.markdown("#### ✅ Completed Today")
                 
                 today_completed_categories = []
@@ -556,7 +550,6 @@ try:
                     st.info("No health activities logged yet today.")
 
                 st.markdown("<br>", unsafe_allow_html=True)
-                
                 st.markdown("#### ⚠️ Needs Attention (Not Done Today)")
                 
                 missing_cats = [c for c in health_categories if c.upper() not in today_completed_categories]
@@ -568,15 +561,11 @@ try:
                 else:
                     st.success("Amazing! You've touched on every single health category today.")
 
-                # ==========================================
-                # HEALTH LOG CONFIGURATION (Inside Summary Tab)
-                # ==========================================
                 st.markdown("<br><hr><br>", unsafe_allow_html=True)
                 st.markdown("### ⚙️ Health Log Configuration")
                 
                 with st.expander("➕ Create New Health Category", expanded=not health_categories):
                     st.markdown("This will create a new tab in your `Health_log` Google Sheet.")
-                    
                     num_params = st.number_input("How many custom parameters do you want to add?", min_value=0, max_value=20, value=4, step=1)
                     
                     with st.form("new_health_cat_form", clear_on_submit=True):
@@ -608,8 +597,7 @@ try:
                                     
                                     try:
                                         new_sheet = health_ss.add_worksheet(title=new_cat_name.strip(), rows="1000", cols=str(max(len(headers), 5)))
-                                        new_sheet.append_row(headers)
-                                        # TARGETED CLEAR + SAFE SLEEP
+                                        smart_append_row(new_sheet, headers)
                                         get_health_categories.clear()
                                         get_health_category_headers.clear()
                                         st.success(f"Success! '{new_cat_name}' tab created in Health_log.")
@@ -635,17 +623,14 @@ try:
                 if not cat_data.empty:
                     cat_data['Parsed_Date'] = pd.to_datetime(cat_data['Date'], errors='coerce')
                     cat_data['Parsed_Time'] = pd.to_datetime(cat_data['Start_Time'], format='%H:%M', errors='coerce').dt.time
-                    
                     cat_data = cat_data.sort_values(by=['Parsed_Date', 'Parsed_Time'], ascending=[False, False]).reset_index(drop=True)
                     
                     current_month_year = ""
-                    
                     for i in range(len(cat_data)):
                         row = cat_data.iloc[i]
                         p_date = row['Parsed_Date']
                         
                         if pd.isna(p_date): continue
-                        
                         m_y = p_date.strftime('%B %Y').upper()
                         day_str = p_date.strftime('%d %a').upper()
                         
@@ -666,7 +651,6 @@ try:
                         param_html = f"<br><span style='color: #555; font-size: 14px;'>{' | '.join(params_display)}</span>" if params_display else ""
                         
                         col_record, col_del = st.columns([10, 1])
-                        
                         with col_record:
                             st.markdown(f"""
                             <div style='display: flex; align-items: flex-start; margin-bottom: 10px; background-color: #f8f9fa; padding: 8px 10px; border-radius: 8px; border-left: 4px solid #81c784;'>
@@ -707,7 +691,6 @@ try:
             st.markdown("### ⚙️ Health Log Configuration")
             with st.expander("➕ Create New Health Category", expanded=True):
                 st.markdown("This will create a new tab in your `Health_log` Google Sheet.")
-                
                 num_params = st.number_input("How many custom parameters do you want to add?", min_value=0, max_value=20, value=4, step=1)
                 
                 with st.form("new_health_cat_form_initial", clear_on_submit=True):
@@ -739,8 +722,7 @@ try:
                                 
                                 try:
                                     new_sheet = health_ss.add_worksheet(title=new_cat_name.strip(), rows="1000", cols=str(max(len(headers), 5)))
-                                    new_sheet.append_row(headers)
-                                    # TARGETED CLEAR + SAFE SLEEP
+                                    smart_append_row(new_sheet, headers)
                                     get_health_categories.clear()
                                     get_health_category_headers.clear()
                                     st.success(f"Success! '{new_cat_name}' tab created in Health_log.")

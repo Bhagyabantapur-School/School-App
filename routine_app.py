@@ -60,7 +60,6 @@ st.markdown("""
         padding-bottom: 5px;
     }
     
-    /* CSS for the pulsing dot animation */
     @keyframes pulse {
         0% { transform: scale(0.95); opacity: 0.9; }
         50% { transform: scale(1.1); opacity: 1; }
@@ -85,20 +84,26 @@ def init_connection():
 
 @st.cache_resource
 def get_main_spreadsheet():
-    """Searches for 'MY ROUTINE 2026' once and caches the connection."""
     client = init_connection()
     return client.open("MY ROUTINE 2026")
 
 @st.cache_resource
 def get_money_spreadsheet():
-    """Searches for 'sk_money_location' once and caches the connection."""
     client = init_connection()
     return client.open("sk_money_location")
 
 def get_sheet(tab_name):
-    """Fetches a specific tab from the already-opened main spreadsheet."""
     ss = get_main_spreadsheet()
     return ss.worksheet(tab_name)
+
+def smart_append_row(sheet, row_data):
+    """Safely appends a row by finding the true end of Column A, avoiding formatting bugs."""
+    col_a = sheet.col_values(1)
+    next_row = len(col_a) + 1
+    try:
+        sheet.update(range_name=f"A{next_row}", values=[row_data], value_input_option="USER_ENTERED")
+    except TypeError:
+        sheet.update(f"A{next_row}", [row_data], value_input_option="USER_ENTERED")
 
 # --- DATA FETCHING ---
 @st.cache_data(ttl=300) 
@@ -123,6 +128,7 @@ def get_activity_log():
     while df.shape[1] < 8: df[df.shape[1]] = ""
     df = df.iloc[:, :8]
     df.columns = ["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"]
+    df = df[df["Date"].astype(str).str.strip() != ""] 
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
     return df
 
@@ -133,7 +139,7 @@ def get_future_tasks():
         sheet = ss.worksheet("future_tasks")
     except gspread.exceptions.WorksheetNotFound:
         sheet = ss.add_worksheet(title="future_tasks", rows="100", cols="8")
-        sheet.append_row(["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason"])
+        smart_append_row(sheet, ["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason"])
     data = sheet.get_all_values()
     if len(data) <= 1:
         return pd.DataFrame(columns=["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason", "row_index"])
@@ -141,6 +147,7 @@ def get_future_tasks():
     while df.shape[1] < 8: df[df.shape[1]] = ""
     df = df.iloc[:, :8]
     df.columns = ["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason"]
+    df = df[df["Due_Date"].astype(str).str.strip() != ""] 
     df['row_index'] = df.index + 2 
     return df
 
@@ -151,7 +158,7 @@ def get_water_log():
         sheet = ss.worksheet("water_log")
     except gspread.exceptions.WorksheetNotFound:
         sheet = ss.add_worksheet(title="water_log", rows="1000", cols="3")
-        sheet.append_row(["Date", "Time", "Amount_ml"])
+        smart_append_row(sheet, ["Date", "Time", "Amount_ml"])
     data = sheet.get_all_values()
     if len(data) <= 1:
         return pd.DataFrame(columns=["Date", "Time", "Amount_ml"])
@@ -159,6 +166,7 @@ def get_water_log():
     while df.shape[1] < 3: df[df.shape[1]] = ""
     df = df.iloc[:, :3]
     df.columns = ["Date", "Time", "Amount_ml"]
+    df = df[df["Date"].astype(str).str.strip() != ""] 
     df['Amount_ml'] = pd.to_numeric(df['Amount_ml'], errors='coerce').fillna(0)
     return df
 
@@ -169,7 +177,7 @@ def get_holidays():
         sheet = ss.worksheet("holidays")
     except gspread.exceptions.WorksheetNotFound:
         sheet = ss.add_worksheet(title="holidays", rows="50", cols="2")
-        sheet.append_row(["Date", "Occasion"])
+        smart_append_row(sheet, ["Date", "Occasion"])
     data = sheet.get_all_values()
     if len(data) <= 1:
         return pd.DataFrame(columns=["Date", "Occasion"])
@@ -177,6 +185,7 @@ def get_holidays():
     while df.shape[1] < 2: df[df.shape[1]] = ""
     df = df.iloc[:, :2]
     df.columns = ["Date", "Occasion"]
+    df = df[df["Date"].astype(str).str.strip() != ""] 
     return df
 
 @st.cache_data(ttl=300)
@@ -190,7 +199,7 @@ def get_location_data():
         sheet = ss.worksheet("LOCATION_DATA")
     except gspread.exceptions.WorksheetNotFound:
         sheet = ss.add_worksheet(title="LOCATION_DATA", rows="1000", cols="6")
-        sheet.append_row(["Date", "Time", "Move", "Place", "People", "Remark"])
+        smart_append_row(sheet, ["Date", "Time", "Move", "Place", "People", "Remark"])
     data = sheet.get_all_values()
     if len(data) <= 1:
         return pd.DataFrame(columns=["Date", "Time", "Move", "Place", "People", "Remark"])
@@ -198,6 +207,7 @@ def get_location_data():
     while df.shape[1] < 6: df[df.shape[1]] = ""
     df = df.iloc[:, :6]
     df.columns = ["Date", "Time", "Move", "Place", "People", "Remark"]
+    df = df[df["Date"].astype(str).str.strip() != ""] 
     return df
 
 @st.cache_data(ttl=300)
@@ -229,6 +239,7 @@ def get_payment_checklist():
     while df.shape[1] < 9: df[df.shape[1]] = ""
     df = df.iloc[:, :9]
     df.columns = ["Month", "Bill_Name", "Type", "Est_Amount", "Due_Date", "Status", "Fund", "Account", "Actual_Paid"]
+    df = df[df["Month"].astype(str).str.strip() != ""] 
     df['row_index'] = df.index + 2
     return df
 
@@ -239,7 +250,7 @@ def get_must_do_tasks():
         sheet = ss.worksheet("must_do")
     except gspread.exceptions.WorksheetNotFound:
         sheet = ss.add_worksheet(title="must_do", rows="100", cols="2")
-        sheet.append_row(["Main Category", "Task Name"])
+        smart_append_row(sheet, ["Main Category", "Task Name"])
     data = sheet.get_all_values()
     if len(data) <= 1:
         return pd.DataFrame(columns=["Main Category", "Task Name"])
@@ -247,6 +258,7 @@ def get_must_do_tasks():
     while df.shape[1] < 2: df[df.shape[1]] = ""
     df = df.iloc[:, :2]
     df.columns = ["Main Category", "Task Name"]
+    df = df[df["Main Category"].astype(str).str.strip() != ""] 
     return df
 
 def parse_duration_to_minutes(dur_str):
@@ -274,7 +286,6 @@ def get_last_done_str(item_name, log_df, now, col_name='Sub_Activities'):
     elif diff.seconds >= 60: return f"{diff.seconds // 60}m ago"
     else: return "Just now"
 
-# --- GLOBAL PLACE CATEGORIZER ---
 def get_short_stop_label(place):
     p = str(place).upper()
     if "HOME" in p:
@@ -333,12 +344,20 @@ try:
             holiday_on = st.toggle("🎉 Holiday", key="holiday_toggle")
         with col3:
             if st.button("🔄 Sync", use_container_width=True):
-                st.cache_data.clear()
+                get_routine_data.clear()
+                get_activity_log.clear()
+                get_future_tasks.clear()
+                get_water_log.clear()
+                get_holidays.clear()
+                get_location_data.clear() 
+                get_visited_places.clear()
+                get_payment_checklist.clear()
+                get_must_do_tasks.clear()
                 st.toast("✅ Force Synced with Google Sheets!")
-                time.sleep(0.5)
+                time.sleep(1.0)
                 st.rerun()
 
-        # PRE-PROCESS ALL PAYMENTS (OVERDUE, TODAY, TOMORROW)
+        # PRE-PROCESS ALL PAYMENTS 
         all_alert_pays = []
         if not payment_df.empty:
             def parse_pay_date(d_str):
@@ -461,7 +480,6 @@ try:
         else:
             st.markdown("<div style='margin-bottom: 15px;'></div>", unsafe_allow_html=True)
             
-        # --- NEXT ACTIVITY ---
         if next_activity == "FLEX MODE ACTIVE":
             st.markdown(f"<h4 style='text-align: center; color: #e65100; margin-bottom: 20px; font-weight: 400;'>⚠️ Schedule Paused - Logging Custom Activity</h4>", unsafe_allow_html=True)
         elif next_activity not in ["NONE", "END OF DAY"]:
@@ -469,30 +487,26 @@ try:
         elif next_activity == "END OF DAY":
             st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;'>Up Next: Schedule Complete</h4>", unsafe_allow_html=True)
 
-        # --- ALL ALERT PAYMENTS BLOCK ---
         if all_alert_pays:
             all_alert_pays.sort(key=lambda x: x[0])
             st.markdown("<br>", unsafe_allow_html=True)
             
-            # Outer container with a distinct header color (Blue)
             box_html = "<div style='background-color: #f8f9fa; border: 1px solid #e0e0e0; padding: 15px; margin-bottom: 15px; border-radius: 8px;'>"
             box_html += "<h4 style='color: #1e88e5; margin-top: 0px; margin-bottom: 15px; border-bottom: 2px solid #1e88e5; padding-bottom: 8px;'>🚨 Pending Payments</h4>"
             
             for i, (days_until, p_row) in enumerate(all_alert_pays):
-                # Determine background colors based on urgency
                 if days_until < 0:
                     day_str = f"Overdue by {abs(days_until)} days!"
-                    bg_color = "#d32f2f" # Solid Red
+                    bg_color = "#d32f2f" 
                 elif days_until == 0:
                     day_str = "Due Today!"
-                    bg_color = "#ef5350" # Light Red
+                    bg_color = "#ef5350" 
                 else:
                     day_str = "Due Tomorrow!"
-                    bg_color = "#f57c00" # Orange
+                    bg_color = "#f57c00" 
                     
                 pad_bot = "margin-bottom: 10px;" if i < len(all_alert_pays) - 1 else "margin-bottom: 0px;"
                 
-                # Build the item card with the specific background color
                 box_html += f"<div style='background-color: {bg_color}; color: white; padding: 12px; border-radius: 6px; {pad_bot}'>"
                 box_html += f"<strong style='font-size: 16px;'>{p_row['Bill_Name']} ({p_row['Type']}) - {day_str}</strong><br>"
                 box_html += f"<span style='font-size: 14px; opacity: 0.9;'>Est: ₹{p_row['Est_Amount']} | Fund: {p_row['Fund']} | A/c: {p_row['Account']}</span>"
@@ -501,7 +515,6 @@ try:
             box_html += "</div>"
             st.markdown(box_html, unsafe_allow_html=True)
 
-        # --- SMART HYDRATION TRACKER ---
         st.markdown("---")
         today_water = water_df[water_df['Date'] == today_str]
         total_water_today = today_water['Amount_ml'].sum()
@@ -527,26 +540,25 @@ try:
         with col_w1:
             if st.button("🥃 250 ml", use_container_width=True):
                 wsheet = get_sheet("water_log")
-                wsheet.append_row([today_str, now.strftime('%H:%M'), 250])
-                st.cache_data.clear() 
-                time.sleep(0.5)
+                smart_append_row(wsheet, [today_str, now.strftime('%H:%M'), 250])
+                get_water_log.clear() 
+                time.sleep(1.0)
                 st.rerun()
         with col_w2:
             if st.button("🚰 500 ml", use_container_width=True):
                 wsheet = get_sheet("water_log")
-                wsheet.append_row([today_str, now.strftime('%H:%M'), 500])
-                st.cache_data.clear() 
-                time.sleep(0.5)
+                smart_append_row(wsheet, [today_str, now.strftime('%H:%M'), 500])
+                get_water_log.clear() 
+                time.sleep(1.0)
                 st.rerun()
         with col_w3:
             if st.button("🥛 1000 ml", use_container_width=True):
                 wsheet = get_sheet("water_log")
-                wsheet.append_row([today_str, now.strftime('%H:%M'), 1000])
-                st.cache_data.clear() 
-                time.sleep(0.5)
+                smart_append_row(wsheet, [today_str, now.strftime('%H:%M'), 1000])
+                get_water_log.clear() 
+                time.sleep(1.0)
                 st.rerun()
 
-        # --- SMART SCHEDULE INJECTION & COUNTDOWN ---
         sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
         chk_list = [c.strip() for c in current_check_list.split(',') if c.strip()]
         all_logged_items = log_df['check_list'].tolist() + log_df['Sub_Activities'].tolist()
@@ -618,13 +630,16 @@ try:
                                 fsheet.update_cell(int(r['row_index']), 1, new_date.strftime('%Y-%m-%d'))
                                 fsheet.update_cell(int(r['row_index']), 2, new_time)
                                 sheet_log = get_sheet("activity_log")
-                                sheet_log.append_row([
+                                row_to_add = [
                                     today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
                                     GS_FORMULA, str(r['Activity']).upper(), "", f"{r['Task_Name']} [RESCHEDULED]", f"Moved to {new_date.strftime('%Y-%m-%d')} {new_time}"
-                                ], value_input_option="USER_ENTERED")
-                                st.cache_data.clear() 
+                                ]
+                                smart_append_row(sheet_log, row_to_add)
+                                
+                                get_future_tasks.clear() 
+                                get_activity_log.clear() 
                                 st.success("Task Rescheduled!")
-                                time.sleep(1)
+                                time.sleep(1.5)
                                 st.rerun()
                         with tab_cancel:
                             col_r, col_b = st.columns([3, 1])
@@ -637,16 +652,18 @@ try:
                                         fsheet.update_cell(int(r['row_index']), 7, "Canceled")
                                         fsheet.update_cell(int(r['row_index']), 8, cancel_reason)
                                         sheet_log = get_sheet("activity_log")
-                                        sheet_log.append_row([
+                                        row_to_add = [
                                             today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
                                             GS_FORMULA, str(r['Activity']).upper(), "", f"{r['Task_Name']} [CANCELED]", f"Cancel Reason: {cancel_reason}"
-                                        ], value_input_option="USER_ENTERED")
-                                        st.cache_data.clear() 
-                                        time.sleep(0.5)
+                                        ]
+                                        smart_append_row(sheet_log, row_to_add)
+                                        
+                                        get_future_tasks.clear() 
+                                        get_activity_log.clear() 
+                                        time.sleep(1.5)
                                         st.rerun()
                     st.markdown("<hr style='margin-top:5px; margin-bottom:15px;'>", unsafe_allow_html=True)
 
-        # --- UPCOMING HOLIDAYS ---
         future_holidays = holidays_df[holidays_df['Date_dt'].dt.date > now.date()].sort_values('Date_dt')
         
         if not future_holidays.empty:
@@ -657,7 +674,6 @@ try:
                     day_str = "Tomorrow!" if days_until == 1 else f"in {days_until} days"
                     st.markdown(f"**{h_row['Date_dt'].strftime('%b %d, %Y')}** - {h_row['Occasion']} *( {day_str} )*")
 
-        # --- MUST DO REGULAR TASKS ---
         if not must_do_df.empty:
             valid_must_dos = must_do_df[must_do_df['Task Name'].str.strip() != '']
             if not valid_must_dos.empty:
@@ -680,12 +696,13 @@ try:
                             else:
                                 if st.button(f"▶️ {md_task}", key=f"md_btn_{idx}", use_container_width=True):
                                     log_sheet = get_sheet("activity_log")
-                                    log_sheet.append_row([
+                                    row_to_add = [
                                         today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
                                         md_cat, md_task, "", "Must Do Task"
-                                    ], value_input_option="USER_ENTERED")
-                                    st.cache_data.clear()
-                                    time.sleep(0.5)
+                                    ]
+                                    smart_append_row(log_sheet, row_to_add)
+                                    get_activity_log.clear()
+                                    time.sleep(1.5)
                                     st.rerun()
 
         if chk_list:
@@ -702,17 +719,17 @@ try:
                     else: is_done = any(task.upper() == str(x).strip().upper() for x in all_logged_items)
                 else: is_done = any(task.upper() == str(x).strip().upper() for x in today_logged_tasks)
                 
-                # Fetch last done time for the checklist item
                 last_done = get_last_done_str(task, log_df, now, col_name='check_list')
                 display_label = f"{task} (Last: {last_done})" if "[Due:" not in task else f"{task} (Last: {last_done})"
                     
                 checked = st.checkbox(display_label, value=is_done, disabled=is_done, key=f"chk_{task}_{current_activity}")
                 if checked and not is_done:
                     sheet_log = get_sheet("activity_log")
-                    sheet_log.append_row([
+                    row_to_add = [
                         today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
                         GS_FORMULA, current_activity, "", task, "Checked off"
-                    ], value_input_option="USER_ENTERED")
+                    ]
+                    smart_append_row(sheet_log, row_to_add)
                     
                     if "[Due:" in task:
                         raw_task = task.split(" [Due:")[0].strip()
@@ -721,9 +738,10 @@ try:
                             r_idx = int(matches.iloc[0]['row_index'])
                             fsheet = get_sheet("future_tasks")
                             fsheet.update_cell(r_idx, 7, "Completed") 
+                            get_future_tasks.clear() 
                             
-                    st.cache_data.clear() 
-                    time.sleep(0.5)
+                    get_activity_log.clear() 
+                    time.sleep(1.5)
                     st.rerun()
 
         # ==========================================
@@ -731,10 +749,8 @@ try:
         # ==========================================
         if sub_list or active_count > 0:
             st.markdown("---")
-            
             st.markdown("<h4 style='text-align: center; color: #333;'>Tap to Track Activity</h4>", unsafe_allow_html=True)
             
-            # --- 1. RENDER ALL RUNNING TASKS WITH POMODORO ---
             if active_count > 0:
                 for idx, active_row in running_tasks.iterrows():
                     sheet_row = idx + 2 
@@ -750,7 +766,6 @@ try:
                         mins_elapsed = int(elapsed_time.total_seconds() // 60)
                     except: mins_elapsed = 0 
                     
-                    # --- POMODORO LOGIC & BEEP TRIGGER ---
                     cycle_minute = mins_elapsed % 30
                     pomodoro_count = (mins_elapsed // 30) + 1
                     
@@ -785,12 +800,12 @@ try:
 
                     if current_state == "Focus":
                         p_state = "🍅 Focus Time"
-                        p_color = "#d84315" # Deep Orange
+                        p_color = "#d84315" 
                         p_left = 25 - cycle_minute
                         p_prog = cycle_minute / 25.0
                     else:
                         p_state = "☕ Break Time"
-                        p_color = "#2e7b32" # Green
+                        p_color = "#2e7b32" 
                         p_left = 30 - cycle_minute
                         p_prog = (cycle_minute - 25) / 5.0
                     
@@ -830,24 +845,24 @@ try:
                                     r_idx = int(matches.iloc[0]['row_index'])
                                     fsheet = get_sheet("future_tasks")
                                     fsheet.update_cell(r_idx, 7, "Completed") 
+                                    get_future_tasks.clear()
                                     
-                            st.cache_data.clear() 
+                            get_activity_log.clear() 
                             st.success(f"Saved: {display_name}")
-                            time.sleep(1)
+                            time.sleep(1.5)
                             st.rerun()
 
                     with col_cancel:
                         if st.button("❌ CANCEL", key=f"cancel_{sheet_row}", use_container_width=True):
                             log_sheet = get_sheet("activity_log")
                             log_sheet.delete_rows(sheet_row)
-                            st.cache_data.clear() 
+                            get_activity_log.clear() 
                             st.warning(f"Cancelled: {display_name}")
-                            time.sleep(1)
+                            time.sleep(1.5)
                             st.rerun()
             
             running_subs = running_tasks['Sub_Activities'].tolist()
 
-            # --- 2. RENDER ROUTINE SUB-ACTIVITIES (Not Currently Running) ---
             avail_subs = [t for t in sub_list if t not in running_subs]
             if avail_subs:
                 st.markdown("<div style='margin-top: 15px; margin-bottom: 5px; color: #333;'><b>▶️ Routine Tasks:</b></div>", unsafe_allow_html=True)
@@ -858,25 +873,27 @@ try:
                         last_txt = f"\n(Last: {last_done})" if "[Due:" not in task else ""
                         if st.button(f"▶️ {task}{last_txt}", key=f"btn_{idx}_{task}", use_container_width=True):
                             log_sheet = get_sheet("activity_log")
-                            log_sheet.append_row([
+                            row_to_add = [
                                 today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
                                 current_activity, task, "", "Auto-logged via Timer"
-                            ], value_input_option="USER_ENTERED")
-                            st.cache_data.clear() 
-                            time.sleep(0.5)
+                            ]
+                            smart_append_row(log_sheet, row_to_add)
+                            
+                            get_activity_log.clear() 
+                            time.sleep(1.5)
                             st.rerun()
 
-            # --- 3. RENDER MEETING/VISITOR TRACKER ---
             st.markdown("<div style='margin-top: 15px; margin-bottom: 5px; color: #ff4b4b;'><b>👥 Meeting / Visitor Tracker:</b></div>", unsafe_allow_html=True)
             
             if st.button("⚡ Quick Start (Update Details Later)", use_container_width=True):
                 log_sheet = get_sheet("activity_log")
-                log_sheet.append_row([
+                row_to_add = [
                     today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
                     "PEOPLE", "MEETING / VISITOR", "", "Update details later"
-                ], value_input_option="USER_ENTERED")
-                st.cache_data.clear() 
-                time.sleep(0.5)
+                ]
+                smart_append_row(log_sheet, row_to_add)
+                get_activity_log.clear() 
+                time.sleep(1.5)
                 st.rerun()
 
             with st.expander("📝 Or Enter Details Before Starting", expanded=False):
@@ -908,12 +925,13 @@ try:
                     notes_str = f"Topic: {topic_talk} | Purpose: {purpose_visit}"
                     
                     log_sheet = get_sheet("activity_log")
-                    log_sheet.append_row([
+                    row_to_add = [
                         today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
                         "PEOPLE", sub_act_str.upper(), "", notes_str
-                    ], value_input_option="USER_ENTERED")
-                    st.cache_data.clear() 
-                    time.sleep(0.5)
+                    ]
+                    smart_append_row(log_sheet, row_to_add)
+                    get_activity_log.clear() 
+                    time.sleep(1.5)
                     st.rerun()
 
         st.markdown("---")
@@ -956,7 +974,7 @@ try:
                 if st.form_submit_button("Schedule Task", use_container_width=True):
                     if f_name:
                         fsheet = get_sheet("future_tasks")
-                        fsheet.append_row([
+                        row_to_add = [
                             f_date.strftime('%Y-%m-%d'),
                             f_time.strftime('%H:%M'),
                             f_act.upper().strip(),
@@ -965,8 +983,9 @@ try:
                             f_entity,
                             "Pending",
                             ""
-                        ])
-                        st.cache_data.clear() 
+                        ]
+                        smart_append_row(fsheet, row_to_add)
+                        get_future_tasks.clear() 
                         st.success("Task Scheduled! It will appear 24 hours before due time.")
                         time.sleep(1.5)
                         st.rerun()
@@ -990,14 +1009,15 @@ try:
                 if st.form_submit_button("Save to Activity Log", use_container_width=True):
                     if log_activity:
                         sheet_log = get_sheet("activity_log")
-                        sheet_log.append_row([
+                        row_to_add = [
                             log_date.strftime('%Y-%m-%d'), log_start.strftime('%H:%M'), log_end.strftime('%H:%M'), 
                             GS_FORMULA, log_activity.upper().strip(), log_sub_activity.upper().strip(),
                             log_chk.strip(), log_notes
-                        ], value_input_option="USER_ENTERED")
-                        st.cache_data.clear() 
+                        ]
+                        smart_append_row(sheet_log, row_to_add)
+                        get_activity_log.clear() 
                         st.success("Activity logged!")
-                        time.sleep(1)
+                        time.sleep(1.5)
                         st.rerun()
                     else: st.error("Please enter a Main Category.")
 
@@ -1009,7 +1029,6 @@ try:
 
         days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Holiday"]
         
-        # --- ADVANCED BATCH TOOLS & FREE TIME FINDER ---
         with st.expander("🛠️ Advanced Tools: Batch Add, Replace & Free Time", expanded=False):
             tool_mode = st.radio("Select Tool:", ["🔍 Find Free Time", "➕ Batch Add Task", "🔄 Find & Replace"], horizontal=True)
             
@@ -1103,9 +1122,9 @@ try:
                             routine_sheet.clear()
                             routine_sheet.update(values=[final_df.columns.values.tolist()] + final_df.values.tolist(), range_name="A1")
                             
-                            st.cache_data.clear()
+                            get_routine_data.clear()
                             st.success(f"Added '{b_act}' to {len(b_days)} days!")
-                            time.sleep(1)
+                            time.sleep(1.5)
                             st.rerun()
 
             elif tool_mode == "🔄 Find & Replace":
@@ -1160,9 +1179,9 @@ try:
                             routine_sheet.clear()
                             routine_sheet.update(values=[full_df.columns.values.tolist()] + full_df.values.tolist(), range_name="A1")
                             
-                            st.cache_data.clear()
+                            get_routine_data.clear()
                             st.success(f"Replaced {count} instances of '{old_val}' with '{new_val}'!")
-                            time.sleep(1)
+                            time.sleep(1.5)
                             st.rerun()
                         else: st.info(f"No instances of '{old_val}' found on selected days.")
 
@@ -1234,9 +1253,9 @@ try:
                     data_to_upload = [final_df.columns.values.tolist()] + final_df.values.tolist()
                     routine_sheet.update(values=data_to_upload, range_name="A1")
                     
-                    st.cache_data.clear() 
+                    get_routine_data.clear() 
                     st.success("Schedule successfully updated!")
-                    time.sleep(1)
+                    time.sleep(1.5)
                     st.rerun()
 
             st.markdown("---")
@@ -1300,10 +1319,9 @@ try:
         
         selected_timeline_date = st.date_input("Select Date to Review", value=now.date(), key="timeline_date_sel")
         selected_date_str = selected_timeline_date.strftime('%Y-%m-%d')
-        formatted_target_date = selected_timeline_date.strftime('%d.%m.%y') # Used to match VISITED_PLACES dates
+        formatted_target_date = selected_timeline_date.strftime('%d.%m.%y') 
         prev_date_str = (selected_timeline_date - timedelta(days=1)).strftime('%Y-%m-%d')
         
-        # --- NEW HELPER: Fetch Gap Label based on VISITED_PLACES (Time-Aware) ---
         def get_gap_label(dur, loc, visited_df, start_dt, end_dt):
             if "HOME" in str(loc).upper():
                 return get_short_stop_label(loc) if dur < 5 else "Unlogged Time / Break"
@@ -1312,7 +1330,6 @@ try:
             if not visited_df.empty:
                 matches = visited_df[visited_df['Place'].str.strip().str.upper() == str(loc).strip().upper()]
                 if not matches.empty:
-                    # 1. Look for EXACT time matches within this specific gap
                     if 'Visit Dates & Times' in matches.columns:
                         for _, m_row in matches.iterrows():
                             visit_times_str = str(m_row['Visit Dates & Times'])
@@ -1322,7 +1339,6 @@ try:
                                     if t_str:
                                         try:
                                             v_dt = pd.to_datetime(t_str, format="%d.%m.%y %H:%M")
-                                            # Buffer of 1 minute to catch exact boundary timestamps safely
                                             if (start_dt - pd.Timedelta(minutes=1)) <= v_dt <= (end_dt + pd.Timedelta(minutes=1)):
                                                 purpose = str(m_row['Purpose']).strip()
                                                 if purpose and purpose not in found_purposes:
@@ -1330,11 +1346,9 @@ try:
                                         except:
                                             pass
                     
-                    # Return joined purposes if time matches were found
                     if found_purposes:
                         return " + ".join(found_purposes)
 
-                    # 2. Fallback to just matching the date if no exact times align
                     if 'Visit Dates & Times' in matches.columns:
                         for _, m_row in matches.iterrows():
                             if pd.notna(m_row['Visit Dates & Times']) and formatted_target_date in str(m_row['Visit Dates & Times']):
@@ -1342,7 +1356,6 @@ try:
                                 if pd.notna(purpose) and str(purpose).strip() != "":
                                     return str(purpose).strip()
                                     
-                    # 3. Fallback to the first match overall if no date matches
                     purpose = matches.iloc[0]['Purpose']
                     if pd.notna(purpose) and str(purpose).strip() != "":
                         return str(purpose).strip()
@@ -1865,12 +1878,10 @@ try:
                     date_raw = str(row.get('Date', '')).strip()
                     time_raw = str(row.get('Time', '')).strip()
                     
-                    # 1. Skip Transit
                     transit_keywords = ['BIKE', 'WALK', 'TOTO', 'AUTO', 'BUS', 'CAR', 'TRAIN', 'CYCLE', 'SCOOTER', 'VAN']
                     if any(k in move_raw.upper() for k in transit_keywords):
                         continue
                         
-                    # 2. Extract Place properly (Handling blank Move bugs)
                     actual_place = place_raw
                     if actual_place == "" or actual_place.upper() in ["I", "NAN", "NONE"]:
                         actual_place = move_raw
@@ -1878,14 +1889,11 @@ try:
                     if not actual_place or actual_place.upper() in ["I", "NAN", "NONE", "- STATIONARY -"]:
                         continue
                         
-                    # 3. Clean Date
                     clean_date = date_raw.split(' ')[0] if ' ' in date_raw else date_raw
                     dt_str = f"{clean_date} {time_raw}"
                     
-                    # 4. Determine Purpose
                     purpose = get_short_stop_label(actual_place)
                     
-                    # Allow manual Remark to act as purpose if it exists
                     remark_raw = str(row.get('Remark', '')).strip()
                     ignore_remarks = ["I", "NAN", "NONE", "LOGGED ARRIVAL", "QUICK HOME LOG", "UPDATE DETAILS LATER"]
                     if remark_raw and remark_raw.upper() not in ignore_remarks:
@@ -1900,12 +1908,10 @@ try:
                 if valid_visits:
                     v_df = pd.DataFrame(valid_visits)
                     
-                    # Group by Place and Purpose, append times
                     grouped = v_df.groupby(['Place', 'Purpose'])['Visit_DateTime'].apply(
                         lambda x: '\n'.join(list(dict.fromkeys(x)))
                     ).reset_index()
                     
-                    # Sync to Sheets
                     try:
                         client = init_connection()
                         ss = client.open("sk_money_location")

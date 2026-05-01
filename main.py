@@ -12,7 +12,6 @@ st.set_page_config(
 )
 
 # 2. Google Sheets Connection Setup
-# This securely connects to Google using the secrets.toml file
 @st.cache_resource
 def init_gsheets():
     scopes = [
@@ -26,13 +25,12 @@ def init_gsheets():
 client = init_gsheets()
 SHEET_NAME = "Personal_Dashboard_Data"
 
-# Fetch data from sheet (cached for 5 seconds to keep the app fast)
-@st.cache_data(ttl=5)
+# Fetch data from sheet (Fixed: Cache set to 10 minutes to prevent API Quota limits)
+@st.cache_data(ttl=600)
 def get_tracker_data():
     try:
         sheet = client.open(SHEET_NAME).worksheet("Tracker")
         records = sheet.get_all_records()
-        # Creates a dictionary: {'Health Hub': '2026-05-01 08:30:00', ...}
         return {row['App Name']: str(row['Last Opened']) for row in records}
     except Exception as e:
         st.error(f"Database connection error: {e}")
@@ -43,7 +41,6 @@ def get_time_stats(last_opened_str):
     if not last_opened_str or last_opened_str.strip() == "":
         return "Never", "N/A"
     try:
-        # Converts the sheet text into a real date object
         last_date = datetime.strptime(last_opened_str, "%Y-%m-%d %H:%M:%S")
         days = (datetime.now() - last_date).days
         date_display = last_date.strftime("%d %b %Y")
@@ -52,17 +49,13 @@ def get_time_stats(last_opened_str):
         return last_opened_str, "N/A"
 
 def log_and_open(app_name, target_page):
-    # Get exact current time
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         sheet = client.open(SHEET_NAME).worksheet("Tracker")
-        # Find the row for this app
         cell = sheet.find(app_name)
         if cell:
-            # Update the exact cell in Column 2 (Last Opened)
             sheet.update_cell(cell.row, 2, now_str)
         else:
-            # If app isn't in the sheet yet, add it automatically
             sheet.append_row([app_name, now_str])
             
         # Clear the cache so it pulls the new date when you return
@@ -70,7 +63,6 @@ def log_and_open(app_name, target_page):
     except Exception as e:
         print(f"Failed to log time: {e}")
     
-    # Finally, switch to the requested page
     st.switch_page(target_page)
 
 # 4. Custom CSS
@@ -98,7 +90,6 @@ st.markdown("""
 
 # 5. Card Generator Function
 def create_card(icon, title, data_label, data_value, bg_color, border_color, text_color, tracker_data):
-    # Pull the date for this specific app from our dictionary
     raw_date = tracker_data.get(title, "")
     last_date, days_ago = get_time_stats(raw_date)
     

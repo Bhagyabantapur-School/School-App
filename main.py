@@ -25,7 +25,7 @@ def init_gsheets():
 client = init_gsheets()
 SHEET_NAME = "Personal_Dashboard_Data"
 
-@st.cache_data(ttl=600) # 10-minute cache to prevent 429 Quota errors
+@st.cache_data(ttl=600) 
 def get_tracker_data():
     try:
         sheet = client.open(SHEET_NAME).worksheet("Tracker")
@@ -61,25 +61,25 @@ def log_and_open(app_name, target_page):
         print(f"Failed to log time: {e}")
     st.switch_page(target_page)
 
-# 4. SCOPED STYLING (CSS)
+# 4. SCOPED STYLING (THE MARKER FIX)
 def apply_dashboard_styles():
     st.markdown("""
     <style>
-        /* This class selector ensures styles only apply inside the wrapper */
-        .dashboard-container div[data-testid="stButton"] {
+        /* html:has ensures these styles ONLY apply when our hidden marker is on the page */
+        html:has(.dashboard-marker) div[data-testid="stButton"] {
             margin-top: -75px; 
             margin-bottom: 25px;
             padding: 0px 20px;
             position: relative;
             z-index: 10;
         }
-        .dashboard-container div[data-testid="stButton"] button {
+        html:has(.dashboard-marker) div[data-testid="stButton"] button {
             background-color: rgba(255, 255, 255, 0.6);
             border: 1px solid rgba(0, 0, 0, 0.1);
             font-weight: bold;
             color: #333;
         }
-        .dashboard-container div[data-testid="stButton"] button:hover {
+        html:has(.dashboard-marker) div[data-testid="stButton"] button:hover {
             background-color: white;
             border: 1px solid rgba(0, 0, 0, 0.3);
         }
@@ -104,13 +104,12 @@ def create_card(icon, title, data_label, data_value, bg_color, border_color, tex
     </div>
     """
 
-# 6. DASHBOARD LANDING PAGE (WITH WRAPPER)
+# 6. DASHBOARD LANDING PAGE
 def show_dashboard():
-    # 1. Apply the scoped styles
     apply_dashboard_styles()
     
-    # 2. Open the scoped container
-    st.markdown('<div class="dashboard-container">', unsafe_allow_html=True)
+    # 1. Inject the Invisible CSS Marker
+    st.markdown('<div class="dashboard-marker" style="display:none;"></div>', unsafe_allow_html=True)
 
     tracker_data = get_tracker_data()
     col_title, col_count = st.columns([3, 1])
@@ -141,9 +140,6 @@ def show_dashboard():
         if st.button("Open App", key="btn3", use_container_width=True): log_and_open("Project App", project_page)
         st.markdown(create_card("💵", "Money Tracker", "Wallet", "₹ 4,250", "#E8F5E9", "#43A047", "#2E7D32", tracker_data), unsafe_allow_html=True)
         if st.button("Open App", key="btn6", use_container_width=True): log_and_open("Money Tracker", money_tracker_page)
-
-    # 3. Close the scoped container
-    st.markdown('</div>', unsafe_allow_html=True)
 
 # 7. NAVIGATION SETUP
 dashboard_page = st.Page(show_dashboard, title="Visual Dashboard", icon="🚀", default=True)

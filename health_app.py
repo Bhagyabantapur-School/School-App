@@ -50,7 +50,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. Database Connection
+# 2. Database Connection & Helpers
 # ==========================================
 @st.cache_resource
 def init_connection():
@@ -89,7 +89,6 @@ def get_activity_log():
 
 @st.cache_data(ttl=60)
 def get_health_categories():
-    """Fetches all tab names from the Health_log spreadsheet, filtering out specific utility tabs."""
     try:
         ss = get_health_spreadsheet()
         worksheets = ss.worksheets()
@@ -101,7 +100,6 @@ def get_health_categories():
 
 @st.cache_data(ttl=60)
 def get_health_category_headers(category_name):
-    """Fetches the headers (parameters) for a specific health category"""
     try:
         ss = get_health_spreadsheet()
         sheet = ss.worksheet(category_name)
@@ -112,7 +110,6 @@ def get_health_category_headers(category_name):
 
 @st.cache_data(ttl=60)
 def get_health_category_data(category_name):
-    """Fetches all data for a specific health category to aggregate parameters"""
     try:
         ss = get_health_spreadsheet()
         sheet = ss.worksheet(category_name)
@@ -154,13 +151,41 @@ def get_last_done_str(item_name, log_df, now, col_name='Sub_Activities'):
     elif diff.seconds >= 60: return f"{diff.seconds // 60}m ago"
     else: return "Just now"
 
-def is_numeric(val):
-    if pd.isna(val) or val == "":
-        return False
+def delete_log_entry(date_str, start_time_str, cat_name):
+    """Deletes a health record from both Health_log and activity_log"""
     try:
-        float(val)
+        # 1. Delete from specific Health Category Tab
+        health_ss = get_health_spreadsheet()
+        cat_sheet = health_ss.worksheet(cat_name)
+        cat_data = cat_sheet.get_all_values()
+        
+        row_del_health = None
+        for idx, row in enumerate(cat_data):
+            if idx > 0 and row[0] == date_str and row[1] == start_time_str:
+                row_del_health = idx + 1 # Gspread is 1-indexed
+                break
+                
+        if row_del_health:
+            cat_sheet.delete_rows(row_del_health)
+
+        # 2. Delete from master activity_log
+        main_ss = get_main_spreadsheet()
+        log_sheet = main_ss.worksheet("activity_log")
+        log_data = log_sheet.get_all_values()
+        
+        row_del_main = None
+        for idx, row in enumerate(log_data):
+            if idx > 0 and row[0] == date_str and row[1] == start_time_str and str(row[4]).strip().upper() == "HEALTH" and str(row[5]).strip().upper() == cat_name.upper():
+                row_del_main = idx + 1
+                break
+                
+        if row_del_main:
+            log_sheet.delete_rows(row_del_main)
+
+        st.cache_data.clear()
         return True
-    except ValueError:
+    except Exception as e:
+        st.error(f"Failed to delete record: {e}")
         return False
 
 # ==========================================
@@ -288,20 +313,25 @@ try:
                 
                 param_values = {}
                 if custom_params:
-                    cols = st.columns(min(len(custom_params), 4))
-                    for i, param in enumerate(custom_params):
-                        with cols[i % 4]:
-                            if "[Drop:" in param:
-                                clean_param = param.split("[Drop:")[0].strip()
-                                options_raw = param.split("[Drop:")[1].split("]")[0]
-                                options = ["-- Select --"] + [o.strip() for o in options_raw.split(",")]
-                                param_values[param] = st.selectbox(clean_param, options, key=f"live_param_{idx}_{param}")
-                            elif "[Check]" in param:
-                                clean_param = param.split("[Check]")[0].strip()
-                                checked = st.checkbox(clean_param, key=f"live_param_{idx}_{param}")
-                                param_values[param] = "Yes" if checked else "No"
-                            else:
-                                param_values[param] = st.text_input(param, key=f"live_param_{idx}_{param}")
+                    # FIX: Correct mobile-responsive row-by-row rendering
+                    n_cols = min(len(custom_params), 4)
+                    for i in range(0, len(custom_params), n_cols):
+                        cols = st.columns(n_cols)
+                        for j in range(n_cols):
+                            if i + j < len(custom_params):
+                                param = custom_params[i + j]
+                                with cols[j]:
+                                    if "[Drop:" in param:
+                                        clean_param = param.split("[Drop:")[0].strip()
+                                        options_raw = param.split("[Drop:")[1].split("]")[0]
+                                        options = ["-- Select --"] + [o.strip() for o in options_raw.split(",")]
+                                        param_values[param] = st.selectbox(clean_param, options, key=f"live_param_{idx}_{param}")
+                                    elif "[Check]" in param:
+                                        clean_param = param.split("[Check]")[0].strip()
+                                        checked = st.checkbox(clean_param, key=f"live_param_{idx}_{param}")
+                                        param_values[param] = "Yes" if checked else "No"
+                                    else:
+                                        param_values[param] = st.text_input(param, key=f"live_param_{idx}_{param}")
 
                 col_stop, col_cancel = st.columns([1, 1])
                 with col_stop:
@@ -419,20 +449,25 @@ try:
                 m_param_values = {}
                 if m_custom_params:
                     st.markdown("**Activity Details:**")
-                    m_cols = st.columns(min(len(m_custom_params), 4))
-                    for i, param in enumerate(m_custom_params):
-                        with m_cols[i % 4]:
-                            if "[Drop:" in param:
-                                clean_param = param.split("[Drop:")[0].strip()
-                                options_raw = param.split("[Drop:")[1].split("]")[0]
-                                options = ["-- Select --"] + [o.strip() for o in options_raw.split(",")]
-                                m_param_values[param] = st.selectbox(clean_param, options, key=f"man_param_{param}")
-                            elif "[Check]" in param:
-                                clean_param = param.split("[Check]")[0].strip()
-                                checked = st.checkbox(clean_param, key=f"man_param_{param}")
-                                m_param_values[param] = "Yes" if checked else "No"
-                            else:
-                                m_param_values[param] = st.text_input(param, key=f"man_param_{param}")
+                    # FIX: Correct mobile-responsive row-by-row rendering
+                    n_cols = min(len(m_custom_params), 4)
+                    for i in range(0, len(m_custom_params), n_cols):
+                        cols = st.columns(n_cols)
+                        for j in range(n_cols):
+                            if i + j < len(m_custom_params):
+                                param = m_custom_params[i + j]
+                                with cols[j]:
+                                    if "[Drop:" in param:
+                                        clean_param = param.split("[Drop:")[0].strip()
+                                        options_raw = param.split("[Drop:")[1].split("]")[0]
+                                        options = ["-- Select --"] + [o.strip() for o in options_raw.split(",")]
+                                        m_param_values[param] = st.selectbox(clean_param, options, key=f"man_param_{param}")
+                                    elif "[Check]" in param:
+                                        clean_param = param.split("[Check]")[0].strip()
+                                        checked = st.checkbox(clean_param, key=f"man_param_{param}")
+                                        m_param_values[param] = "Yes" if checked else "No"
+                                    else:
+                                        m_param_values[param] = st.text_input(param, key=f"man_param_{param}")
                                 
                 if st.button("💾 Save Manual Log", use_container_width=True, type="primary"):
                     
@@ -498,12 +533,10 @@ try:
                         sessions_html = ""
                         if session_count > 0:
                             for _, row in today_data.iterrows():
-                                # Formatted completely inside spans/divs to avoid markdown parsing errors
                                 sessions_html += f"<div style='display: flex; justify-content: space-between; margin-bottom: 4px;'><span>&bull; <b>{row['Start_Time']} to {row['End_Time']}</b></span><em style='color: #666; font-style: italic;'>{row['Duration']}</em></div>"
                         
                         session_badge = f"<span style='font-weight: normal; font-size: 13px; opacity: 0.8; margin-left: 8px;'>{session_count} Sessions</span>" if session_count > 1 else ""
                         
-                        # Flat HTML string to fix Streamlit's Markdown Parser Bug
                         box_html = f"<details style='background: linear-gradient(to right, #e8f5e9, #f1f8e9); padding: 6px 14px; border-radius: 8px; border-left: 6px solid #4caf50; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 8px; cursor: pointer;'><summary style='display: flex; justify-content: space-between; align-items: center; outline: none;'><span style='display: flex; align-items: center;'><span style='font-size: 16px; font-weight: bold; color: #2e7b32; letter-spacing: 0.5px;'>{cat.upper()}</span>{session_badge}</span><span style='font-size: 14px; color: #1b5e20; font-weight: 600; background-color: rgba(255,255,255,0.6); padding: 2px 8px; border-radius: 10px;'>⏱️ {dur_display}</span></summary><div style='margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(46, 123, 50, 0.2); font-size: 14px; color: #444; line-height: 1.5;'>{sessions_html}</div></details>"
                         html_cards.append(box_html)
                 
@@ -514,7 +547,6 @@ try:
 
                 st.markdown("<br>", unsafe_allow_html=True)
                 
-                # Analyze Missing Tasks (Needs Attention)
                 st.markdown("#### ⚠️ Needs Attention (Not Done Today)")
                 
                 missing_cats = [c for c in health_categories if c.upper() not in today_completed_categories]
@@ -542,22 +574,18 @@ try:
                         
                         if num_params > 0:
                             st.markdown("#### Add Custom Tracking Parameters")
-                            st.markdown("""
-                            *Tips for adding parameters:*
-                            * **Text/Number Input:** Just type the name (e.g., `Heart Rate`, `Distance (km)`)
-                            * **Dropdown:** Add `[Drop: Option1, Option2]` (e.g., `Music [Drop: Calm, Focus, None]`)
-                            * **Checkbox:** Add `[Check]` (e.g., `Stretched After [Check]`)
-                            """)
-                            
                             param_inputs = []
-                            cols = st.columns(2)
-                            for i in range(num_params):
-                                with cols[i % 2]:
-                                    ph = ""
-                                    if i == 0: ph = "e.g., Heart Rate"
-                                    elif i == 1: ph = "e.g., Music [Drop: Yes, No]"
-                                    elif i == 2: ph = "e.g., Felt Good [Check]"
-                                    param_inputs.append(st.text_input(f"Parameter {i+1}", placeholder=ph, key=f"param_input_{i}"))
+                            # FIX: Correct mobile-responsive row-by-row rendering
+                            for i in range(0, num_params, 2):
+                                cols = st.columns(2)
+                                for j in range(2):
+                                    if i + j < num_params:
+                                        with cols[j]:
+                                            ph = ""
+                                            if (i+j) == 0: ph = "e.g., Heart Rate"
+                                            elif (i+j) == 1: ph = "e.g., Music [Drop: Yes, No]"
+                                            elif (i+j) == 2: ph = "e.g., Felt Good [Check]"
+                                            param_inputs.append(st.text_input(f"Parameter {(i+j)+1}", placeholder=ph, key=f"param_input_{i+j}"))
                         else:
                             param_inputs = []
                         
@@ -594,11 +622,9 @@ try:
                 cat_data = get_health_category_data(selected_history_cat)
                 
                 if not cat_data.empty:
-                    # Parse Dates for sorting and gaps
                     cat_data['Parsed_Date'] = pd.to_datetime(cat_data['Date'], errors='coerce')
                     cat_data['Parsed_Time'] = pd.to_datetime(cat_data['Start_Time'], format='%H:%M', errors='coerce').dt.time
                     
-                    # Sort descending (Newest first)
                     cat_data = cat_data.sort_values(by=['Parsed_Date', 'Parsed_Time'], ascending=[False, False]).reset_index(drop=True)
                     
                     current_month_year = ""
@@ -612,12 +638,10 @@ try:
                         m_y = p_date.strftime('%B %Y').upper()
                         day_str = p_date.strftime('%d %a').upper()
                         
-                        # Show Month Header if changed
                         if m_y != current_month_year:
                             st.markdown(f"<h4 style='color: #2e7b32; margin-top: 20px; border-bottom: 2px solid #c8e6c9; padding-bottom: 5px;'>{m_y}</h4>", unsafe_allow_html=True)
                             current_month_year = m_y
                         
-                        # Extract Custom Parameters
                         base_h = ["Date", "Start_Time", "End_Time", "Duration", "Parsed_Date", "Parsed_Time"]
                         custom_params = [c for c in cat_data.columns if c not in base_h]
                         
@@ -630,19 +654,32 @@ try:
                                 
                         param_html = f"<br><span style='color: #555; font-size: 14px;'>{' | '.join(params_display)}</span>" if params_display else ""
                         
-                        # Build Row UI with tighter padding
-                        st.markdown(f"""
-                        <div style='display: flex; align-items: flex-start; margin-bottom: 10px; background-color: #f8f9fa; padding: 8px 10px; border-radius: 8px; border-left: 4px solid #81c784;'>
-                            <div style='min-width: 80px; text-align: center; background-color: #e8f5e9; padding: 5px; border-radius: 5px; margin-right: 15px;'>
-                                <strong style='color: #2e7b32; font-size: 16px;'>{day_str.split()[0]}</strong><br>
-                                <span style='color: #666; font-size: 12px;'>{day_str.split()[1]}</span>
+                        # Fix 1: Add Delete Button Column next to each record
+                        col_record, col_del = st.columns([10, 1])
+                        
+                        with col_record:
+                            st.markdown(f"""
+                            <div style='display: flex; align-items: flex-start; margin-bottom: 10px; background-color: #f8f9fa; padding: 8px 10px; border-radius: 8px; border-left: 4px solid #81c784;'>
+                                <div style='min-width: 80px; text-align: center; background-color: #e8f5e9; padding: 5px; border-radius: 5px; margin-right: 15px;'>
+                                    <strong style='color: #2e7b32; font-size: 16px;'>{day_str.split()[0]}</strong><br>
+                                    <span style='color: #666; font-size: 12px;'>{day_str.split()[1]}</span>
+                                </div>
+                                <div style='flex-grow: 1;'>
+                                    <strong style='font-size: 16px; color: #333;'>⏱️ {row['Start_Time']} - {row['End_Time']}</strong> <span style='color: #888; font-size: 14px;'>(Dur: {row['Duration']})</span>
+                                    {param_html}
+                                </div>
                             </div>
-                            <div style='flex-grow: 1;'>
-                                <strong style='font-size: 16px; color: #333;'>⏱️ {row['Start_Time']} - {row['End_Time']}</strong> <span style='color: #888; font-size: 14px;'>(Dur: {row['Duration']})</span>
-                                {param_html}
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
+                            """, unsafe_allow_html=True)
+                            
+                        with col_del:
+                            # Unique key for delete button based on exact timestamp
+                            del_key = f"del_{row['Date']}_{row['Start_Time']}_{selected_history_cat}"
+                            if st.button("🗑️", key=del_key, help="Delete this log"):
+                                with st.spinner("Deleting..."):
+                                    if delete_log_entry(str(row['Date']), str(row['Start_Time']), selected_history_cat):
+                                        st.success("Deleted!")
+                                        time.sleep(1)
+                                        st.rerun()
                         
                         # Calculate gap to next (older) entry
                         if i < len(cat_data) - 1:
@@ -670,22 +707,18 @@ try:
                     
                     if num_params > 0:
                         st.markdown("#### Add Custom Tracking Parameters")
-                        st.markdown("""
-                        *Tips for adding parameters:*
-                        * **Text/Number Input:** Just type the name (e.g., `Heart Rate`, `Distance (km)`)
-                        * **Dropdown:** Add `[Drop: Option1, Option2]` (e.g., `Music [Drop: Calm, Focus, None]`)
-                        * **Checkbox:** Add `[Check]` (e.g., `Stretched After [Check]`)
-                        """)
-                        
                         param_inputs = []
-                        cols = st.columns(2)
-                        for i in range(num_params):
-                            with cols[i % 2]:
-                                ph = ""
-                                if i == 0: ph = "e.g., Heart Rate"
-                                elif i == 1: ph = "e.g., Music [Drop: Yes, No]"
-                                elif i == 2: ph = "e.g., Felt Good [Check]"
-                                param_inputs.append(st.text_input(f"Parameter {i+1}", placeholder=ph, key=f"init_param_input_{i}"))
+                        # FIX: Correct mobile-responsive row-by-row rendering
+                        for i in range(0, num_params, 2):
+                            cols = st.columns(2)
+                            for j in range(2):
+                                if i + j < num_params:
+                                    with cols[j]:
+                                        ph = ""
+                                        if (i+j) == 0: ph = "e.g., Heart Rate"
+                                        elif (i+j) == 1: ph = "e.g., Music [Drop: Yes, No]"
+                                        elif (i+j) == 2: ph = "e.g., Felt Good [Check]"
+                                        param_inputs.append(st.text_input(f"Parameter {(i+j)+1}", placeholder=ph, key=f"init_param_input_{i+j}"))
                     else:
                         param_inputs = []
                     

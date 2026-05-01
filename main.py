@@ -155,7 +155,7 @@ def show_dashboard():
     # The 3rd slot is left blank since you only have 8 apps here
 
 # 7. NAVIGATION SETUP
-dashboard_page = st.Page(show_dashboard, title="Visual Dashboard", icon="🚀", default=True)
+dashboard_page = st.Page(show_dashboard, title="Visual Dashboard", icon="🚀", default=True, url_path="home")
 money_location_page = st.Page("money_location.py", title="Money & Location", icon="📍")
 strong_page = st.Page("strong.py", title="Strong Tracker", icon="💪")
 project_page = st.Page("project_app.py", title="Project Tracker", icon="🚀")

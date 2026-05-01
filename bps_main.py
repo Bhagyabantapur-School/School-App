@@ -18,7 +18,6 @@ def init_gsheets():
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    # Uses the same service account from your secrets.toml
     skey = st.secrets["gcp_service_account"]
     credentials = Credentials.from_service_account_info(skey, scopes=scopes)
     return gspread.authorize(credentials)
@@ -26,7 +25,6 @@ def init_gsheets():
 client = init_gsheets()
 SHEET_NAME = "Personal_Dashboard_Data"
 
-# Fetch data from the BPS tab (10-minute cache)
 @st.cache_data(ttl=600)
 def get_bps_tracker_data():
     try:
@@ -58,31 +56,30 @@ def log_and_open(app_name, target_page):
             sheet.update_cell(cell.row, 2, now_str)
         else:
             sheet.append_row([app_name, now_str])
-        
         get_bps_tracker_data.clear()
     except Exception as e:
         print(f"Failed to log time: {e}")
     st.switch_page(target_page)
 
-# 4. SCOPED STYLING (CSS)
+# 4. SCOPED STYLING (THE MARKER FIX)
 def apply_bps_styles():
     st.markdown("""
     <style>
-        /* This class selector ensures styles only apply inside the wrapper */
-        .bps-dashboard-container div[data-testid="stButton"] {
+        /* html:has ensures these styles ONLY apply when our hidden marker is on the page */
+        html:has(.bps-dashboard-marker) div[data-testid="stButton"] {
             margin-top: -75px; 
             margin-bottom: 25px;
             padding: 0px 20px;
             position: relative;
             z-index: 10;
         }
-        .bps-dashboard-container div[data-testid="stButton"] button {
+        html:has(.bps-dashboard-marker) div[data-testid="stButton"] button {
             background-color: rgba(255, 255, 255, 0.6);
             border: 1px solid rgba(0, 0, 0, 0.1);
             font-weight: bold;
             color: #333;
         }
-        .bps-dashboard-container div[data-testid="stButton"] button:hover {
+        html:has(.bps-dashboard-marker) div[data-testid="stButton"] button:hover {
             background-color: white;
             border: 1px solid rgba(0, 0, 0, 0.3);
         }
@@ -107,13 +104,12 @@ def create_card(icon, title, data_label, data_value, bg_color, border_color, tex
     </div>
     """
 
-# 6. DASHBOARD LANDING PAGE (WITH WRAPPER)
+# 6. DASHBOARD LANDING PAGE
 def show_bps_dashboard():
-    # 1. Apply the scoped styles
     apply_bps_styles()
     
-    # 2. Open the scoped container
-    st.markdown('<div class="bps-dashboard-container">', unsafe_allow_html=True)
+    # 1. Inject the Invisible CSS Marker
+    st.markdown('<div class="bps-dashboard-marker" style="display:none;"></div>', unsafe_allow_html=True)
 
     tracker_data = get_bps_tracker_data()
     col_title, col_count = st.columns([3, 1])
@@ -150,9 +146,6 @@ def show_bps_dashboard():
         if st.button("Open App", key="btn8", use_container_width=True): log_and_open("Returns", returns_page)
         st.markdown(create_card("📋", "Form Manager", "Templates", "Available", "#ECEFF1", "#546E7A", "#37474F", tracker_data), unsafe_allow_html=True)
         if st.button("Open App", key="btn9", use_container_width=True): log_and_open("Form Manager", form_page)
-
-    # 3. Close the scoped container
-    st.markdown('</div>', unsafe_allow_html=True)
 
 # 7. DEFINE ALL APP PAGES
 dashboard_page = st.Page(show_bps_dashboard, title="Main Dashboard", icon="🏫", default=True)

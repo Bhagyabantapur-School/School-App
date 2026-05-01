@@ -87,7 +87,7 @@ def get_activity_log():
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
     return df
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def get_health_categories():
     try:
         ss = get_health_spreadsheet()
@@ -98,7 +98,7 @@ def get_health_categories():
         st.error(f"Error connecting to Health_log: {e}")
         return []
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def get_health_category_headers(category_name):
     try:
         ss = get_health_spreadsheet()
@@ -108,7 +108,7 @@ def get_health_category_headers(category_name):
     except Exception:
         return []
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def get_health_category_data(category_name):
     try:
         ss = get_health_spreadsheet()
@@ -154,7 +154,6 @@ def get_last_done_str(item_name, log_df, now, col_name='Sub_Activities'):
 def delete_log_entry(date_str, start_time_str, cat_name):
     """Deletes a health record from both Health_log and activity_log"""
     try:
-        # 1. Delete from specific Health Category Tab
         health_ss = get_health_spreadsheet()
         cat_sheet = health_ss.worksheet(cat_name)
         cat_data = cat_sheet.get_all_values()
@@ -162,13 +161,12 @@ def delete_log_entry(date_str, start_time_str, cat_name):
         row_del_health = None
         for idx, row in enumerate(cat_data):
             if idx > 0 and row[0] == date_str and row[1] == start_time_str:
-                row_del_health = idx + 1 # Gspread is 1-indexed
+                row_del_health = idx + 1 
                 break
                 
         if row_del_health:
             cat_sheet.delete_rows(row_del_health)
 
-        # 2. Delete from master activity_log
         main_ss = get_main_spreadsheet()
         log_sheet = main_ss.worksheet("activity_log")
         log_data = log_sheet.get_all_values()
@@ -182,7 +180,9 @@ def delete_log_entry(date_str, start_time_str, cat_name):
         if row_del_main:
             log_sheet.delete_rows(row_del_main)
 
-        st.cache_data.clear()
+        # TARGETED CACHE CLEAR
+        get_activity_log.clear()
+        get_health_category_data.clear()
         return True
     except Exception as e:
         st.error(f"Failed to delete record: {e}")
@@ -211,9 +211,13 @@ try:
     with col2:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🔄 Sync Data", use_container_width=True):
-            st.cache_data.clear()
+            # TARGETED CLEAR ONLY
+            get_activity_log.clear()
+            get_health_categories.clear()
+            get_health_category_headers.clear()
+            get_health_category_data.clear()
             st.toast("Synced with Google Sheets!")
-            time.sleep(0.5)
+            time.sleep(1.0)
             st.rerun()
 
     # --- FLOATING ACTIVE BADGE ---
@@ -313,7 +317,6 @@ try:
                 
                 param_values = {}
                 if custom_params:
-                    # FIX: Correct mobile-responsive row-by-row rendering
                     n_cols = min(len(custom_params), 4)
                     for i in range(0, len(custom_params), n_cols):
                         cols = st.columns(n_cols)
@@ -361,9 +364,11 @@ try:
                                     
                                 target_sheet.append_row(row_data, value_input_option="USER_ENTERED")
                                 
-                                st.cache_data.clear() 
+                                # TARGETED CLEAR + SAFE SLEEP
+                                get_activity_log.clear()
+                                get_health_category_data.clear()
                                 st.success(f"Saved: Detailed log added to '{display_name}' tab!")
-                                time.sleep(1)
+                                time.sleep(1.5)
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Failed to log details to Health_log: {e}")
@@ -373,9 +378,11 @@ try:
                         main_ss = get_main_spreadsheet()
                         log_sheet = main_ss.worksheet("activity_log")
                         log_sheet.delete_rows(sheet_row)
-                        st.cache_data.clear() 
+                        
+                        # TARGETED CLEAR + SAFE SLEEP
+                        get_activity_log.clear() 
                         st.warning(f"Cancelled: {display_name}")
-                        time.sleep(1)
+                        time.sleep(1.5)
                         st.rerun()
             st.markdown("<br>", unsafe_allow_html=True)
 
@@ -416,7 +423,9 @@ try:
                             "HEALTH", selected_cat_live, "", "Tracked via Health App Timer"
                         ], value_input_option="USER_ENTERED")
                         
-                        st.cache_data.clear() 
+                        # TARGETED CLEAR + SAFE SLEEP
+                        get_activity_log.clear() 
+                        time.sleep(1.5)
                         st.rerun()
 
             # --- MANUAL LOG TAB ---
@@ -449,7 +458,6 @@ try:
                 m_param_values = {}
                 if m_custom_params:
                     st.markdown("**Activity Details:**")
-                    # FIX: Correct mobile-responsive row-by-row rendering
                     n_cols = min(len(m_custom_params), 4)
                     for i in range(0, len(m_custom_params), n_cols):
                         cols = st.columns(n_cols)
@@ -499,7 +507,9 @@ try:
                                 
                             target_sheet.append_row(row_data, value_input_option="USER_ENTERED")
                             
-                            st.cache_data.clear() 
+                            # TARGETED CLEAR + SAFE SLEEP
+                            get_activity_log.clear() 
+                            get_health_category_data.clear()
                             st.success(f"Saved: Detailed log added to '{selected_cat_manual}' tab!")
                             time.sleep(1.5)
                             st.rerun()
@@ -575,7 +585,6 @@ try:
                         if num_params > 0:
                             st.markdown("#### Add Custom Tracking Parameters")
                             param_inputs = []
-                            # FIX: Correct mobile-responsive row-by-row rendering
                             for i in range(0, num_params, 2):
                                 cols = st.columns(2)
                                 for j in range(2):
@@ -600,9 +609,11 @@ try:
                                     try:
                                         new_sheet = health_ss.add_worksheet(title=new_cat_name.strip(), rows="1000", cols=str(max(len(headers), 5)))
                                         new_sheet.append_row(headers)
-                                        st.cache_data.clear()
+                                        # TARGETED CLEAR + SAFE SLEEP
+                                        get_health_categories.clear()
+                                        get_health_category_headers.clear()
                                         st.success(f"Success! '{new_cat_name}' tab created in Health_log.")
-                                        time.sleep(1)
+                                        time.sleep(1.5)
                                         st.rerun()
                                     except Exception as e:
                                         st.error(f"Error creating tab (It might already exist): {e}")
@@ -654,7 +665,6 @@ try:
                                 
                         param_html = f"<br><span style='color: #555; font-size: 14px;'>{' | '.join(params_display)}</span>" if params_display else ""
                         
-                        # Fix 1: Add Delete Button Column next to each record
                         col_record, col_del = st.columns([10, 1])
                         
                         with col_record:
@@ -672,16 +682,14 @@ try:
                             """, unsafe_allow_html=True)
                             
                         with col_del:
-                            # Unique key for delete button based on exact timestamp
                             del_key = f"del_{row['Date']}_{row['Start_Time']}_{selected_history_cat}"
                             if st.button("🗑️", key=del_key, help="Delete this log"):
                                 with st.spinner("Deleting..."):
                                     if delete_log_entry(str(row['Date']), str(row['Start_Time']), selected_history_cat):
                                         st.success("Deleted!")
-                                        time.sleep(1)
+                                        time.sleep(1.5)
                                         st.rerun()
                         
-                        # Calculate gap to next (older) entry
                         if i < len(cat_data) - 1:
                             next_row = cat_data.iloc[i+1]
                             next_date = next_row['Parsed_Date']
@@ -708,7 +716,6 @@ try:
                     if num_params > 0:
                         st.markdown("#### Add Custom Tracking Parameters")
                         param_inputs = []
-                        # FIX: Correct mobile-responsive row-by-row rendering
                         for i in range(0, num_params, 2):
                             cols = st.columns(2)
                             for j in range(2):
@@ -733,9 +740,11 @@ try:
                                 try:
                                     new_sheet = health_ss.add_worksheet(title=new_cat_name.strip(), rows="1000", cols=str(max(len(headers), 5)))
                                     new_sheet.append_row(headers)
-                                    st.cache_data.clear()
+                                    # TARGETED CLEAR + SAFE SLEEP
+                                    get_health_categories.clear()
+                                    get_health_category_headers.clear()
                                     st.success(f"Success! '{new_cat_name}' tab created in Health_log.")
-                                    time.sleep(1)
+                                    time.sleep(1.5)
                                     st.rerun()
                                 except Exception as e:
                                     st.error(f"Error creating tab (It might already exist): {e}")

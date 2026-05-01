@@ -2,9 +2,10 @@ import streamlit as st
 
 # --- BACK BUTTON ---
 if st.button("⬅️ Back to Dashboard", type="secondary"):
-    st.switch_page("home") # <--- Changed this to the new url_path
+    st.switch_page("dashboard.py") 
 st.write("---") 
 # -------------------
+
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta, timezone, date

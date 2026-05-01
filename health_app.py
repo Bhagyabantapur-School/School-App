@@ -44,6 +44,18 @@ st.markdown("""
     details > summary::-webkit-details-marker {
       display: none;
     }
+    
+    /* Mobile specific adjustments */
+    @media (max-width: 640px) {
+        /* Ensure the title doesn't get squished */
+        .stHeadingContainer h1 {
+            font-size: 1.8rem !important;
+        }
+        /* Add some breathing room for buttons on mobile */
+        div.stButton > button {
+            margin-top: 5px;
+        }
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -210,20 +222,21 @@ try:
     running_tasks = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Activity'] == 'HEALTH')]
     active_count = len(running_tasks)
 
-    # --- HEADER & SYNC ---
-    col1, col2 = st.columns([5, 1])
-    with col1:
-        st.title("🧘 Health & Workout Tracker")
-    with col2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🔄 Sync Data", use_container_width=True):
-            get_activity_log.clear()
-            get_health_categories.clear()
-            get_health_category_headers.clear()
-            get_health_category_data.clear()
-            st.toast("Synced with Google Sheets!")
-            time.sleep(1.0)
-            st.rerun()
+    # --- HEADER & SYNC (MOBILE RESPONSIVE FIX) ---
+    # Using vertical flow instead of strict columns to prevent overlap on small screens
+    st.title("🧘 Health Tracker")
+    
+    # Place sync button below title on mobile, or alongside on desktop
+    if st.button("🔄 Sync Data", use_container_width=True):
+        get_activity_log.clear()
+        get_health_categories.clear()
+        get_health_category_headers.clear()
+        get_health_category_data.clear()
+        st.toast("Synced with Google Sheets!")
+        time.sleep(1.0)
+        st.rerun()
+        
+    st.markdown("---")
 
     # --- FLOATING ACTIVE BADGE ---
     if active_count > 0:
@@ -234,11 +247,10 @@ try:
         """, unsafe_allow_html=True)
 
     with st.container():
-        st.markdown("### ⏱️ Session Tracking & Insights")
-        st.markdown("---")
         
+        # 1. RENDER RUNNING HEALTH TASKS
         if active_count > 0:
-            st.markdown("<div style='margin-bottom: 10px; color: #2e7b32;'><b>🟢 Currently Running:</b></div>", unsafe_allow_html=True)
+            st.markdown("### ⏱️ Active Session")
             for idx, active_row in running_tasks.iterrows():
                 sheet_row = idx + 2 
                 active_sub = str(active_row['Sub_Activities'])
@@ -310,7 +322,7 @@ try:
                 </div>
                 """, unsafe_allow_html=True)
                 
-                st.markdown("**Log Session Details:**")
+                st.markdown("**Log Details:**")
                 headers = get_health_category_headers(display_name)
                 
                 base_headers = ["Date", "Start_Time", "End_Time", "Duration"]
@@ -318,31 +330,28 @@ try:
                 
                 param_values = {}
                 if custom_params:
-                    n_cols = min(len(custom_params), 4)
-                    for i in range(0, len(custom_params), n_cols):
-                        cols = st.columns(n_cols)
-                        for j in range(n_cols):
-                            if i + j < len(custom_params):
-                                param = custom_params[i + j]
-                                with cols[j]:
-                                    if "[Drop:" in param:
-                                        clean_param = param.split("[Drop:")[0].strip()
-                                        options_raw = param.split("[Drop:")[1].split("]")[0]
-                                        options = ["-- Select --"] + [o.strip() for o in options_raw.split(",")]
-                                        param_values[param] = st.selectbox(clean_param, options, key=f"live_param_{idx}_{param}")
-                                    elif "[Check]" in param:
-                                        clean_param = param.split("[Check]")[0].strip()
-                                        checked = st.checkbox(clean_param, key=f"live_param_{idx}_{param}")
-                                        param_values[param] = "Yes" if checked else "No"
-                                    else:
-                                        param_values[param] = st.text_input(param, key=f"live_param_{idx}_{param}")
+                    # Using dynamic columns based on screen size (handled automatically by Streamlit)
+                    # We just output the inputs directly instead of forcing them into strict columns
+                    for param in custom_params:
+                        if "[Drop:" in param:
+                            clean_param = param.split("[Drop:")[0].strip()
+                            options_raw = param.split("[Drop:")[1].split("]")[0]
+                            options = ["-- Select --"] + [o.strip() for o in options_raw.split(",")]
+                            param_values[param] = st.selectbox(clean_param, options, key=f"live_param_{idx}_{param}")
+                        elif "[Check]" in param:
+                            clean_param = param.split("[Check]")[0].strip()
+                            checked = st.checkbox(clean_param, key=f"live_param_{idx}_{param}")
+                            param_values[param] = "Yes" if checked else "No"
+                        else:
+                            param_values[param] = st.text_input(param, key=f"live_param_{idx}_{param}")
 
+                # Use columns for buttons as they are usually small enough even on mobile
                 col_stop, col_cancel = st.columns([1, 1])
                 with col_stop:
-                    if st.button("🛑 SAVE & LOG", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
+                    if st.button("🛑 SAVE", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
                         has_missing = any(v == "-- Select --" for v in param_values.values())
                         if has_missing:
-                            st.error("⚠️ Please select a valid option for all dropdown parameters before saving!")
+                            st.error("⚠️ Please select valid options for all dropdowns!")
                         else:
                             end_time_log = now.time()
                             main_ss = get_main_spreadsheet()
@@ -365,11 +374,11 @@ try:
                                 
                                 get_activity_log.clear() 
                                 get_health_category_data.clear()
-                                st.success(f"Saved: Detailed log added to '{display_name}' tab!")
-                                time.sleep(1.5)
+                                st.success(f"Saved!")
+                                time.sleep(1.0)
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Failed to log details to Health_log: {e}")
+                                st.error(f"Failed to log details: {e}")
 
                 with col_cancel:
                     if st.button("❌ CANCEL", key=f"cancel_{sheet_row}", use_container_width=True):
@@ -378,57 +387,57 @@ try:
                         log_sheet.delete_rows(sheet_row)
                         
                         get_activity_log.clear() 
-                        st.warning(f"Cancelled: {display_name}")
-                        time.sleep(1.5)
+                        st.warning(f"Cancelled")
+                        time.sleep(1.0)
                         st.rerun()
             st.markdown("<br>", unsafe_allow_html=True)
 
         if health_categories and active_count == 0:
-            tab_live, tab_manual, tab_summary, tab_history = st.tabs(["⏱️ Live Timer", "📝 Manual Log", "📈 Summary & Insights", "📜 History"])
+            tab_live, tab_manual, tab_summary, tab_history = st.tabs(["⏱️ Live", "📝 Manual", "📈 Summary", "📜 History"])
             
-            # --- LIVE TIMER TAB ---
+            # --- LIVE TIMER TAB (MOBILE RESPONSIVE FIX) ---
             with tab_live:
-                st.markdown("<div style='margin-bottom: 5px; color: #2e7b32;'><b>🚀 Start New Session:</b></div>", unsafe_allow_html=True)
+                st.markdown("<div style='margin-bottom: 5px; color: #2e7b32;'><b>🚀 Start Session:</b></div>", unsafe_allow_html=True)
                 
-                col_cat, col_btn = st.columns([3, 1])
-                with col_cat:
-                    selected_cat_live = st.selectbox("Select Health Activity", health_categories, label_visibility="collapsed", key="start_cat_sel_live")
+                # Removed columns here to prevent the dropdown and button from overlapping on mobile
+                # Elements will now stack vertically on smaller screens
+                selected_cat_live = st.selectbox("Activity", health_categories, key="start_cat_sel_live")
                 
-                with col_btn:
-                    st.markdown(
-                        """
-                        <div id="health_start_anchor"></div>
-                        <style>
-                        div[data-testid="column"]:nth-of-type(2) div.element-container:has(#health_start_anchor) + div.element-container button {
-                            background-color: #2e7b32 !important; 
-                            color: white !important;
-                            border: none !important;
-                        }
-                        div[data-testid="column"]:nth-of-type(2) div.element-container:has(#health_start_anchor) + div.element-container button:hover {
-                            background-color: #1b5e20 !important; 
-                        }
-                        </style>
-                        """,
-                        unsafe_allow_html=True
-                    )
-                    if st.button("▶️ Start Timer", key="start_health_live", use_container_width=True):
-                        main_ss = get_main_spreadsheet()
-                        log_sheet = main_ss.worksheet("activity_log")
-                        row_to_add = [
-                            today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
-                            "HEALTH", selected_cat_live, "", "Tracked via Health App Timer"
-                        ]
-                        smart_append_row(log_sheet, row_to_add)
-                        
-                        get_activity_log.clear() 
-                        time.sleep(1.5)
-                        st.rerun()
+                st.markdown(
+                    """
+                    <div id="health_start_anchor"></div>
+                    <style>
+                    div.element-container:has(#health_start_anchor) + div.element-container button {
+                        background-color: #2e7b32 !important; 
+                        color: white !important;
+                        border: none !important;
+                        margin-top: 10px;
+                    }
+                    div.element-container:has(#health_start_anchor) + div.element-container button:hover {
+                        background-color: #1b5e20 !important; 
+                    }
+                    </style>
+                    """,
+                    unsafe_allow_html=True
+                )
+                if st.button("▶️ Start Timer", key="start_health_live", use_container_width=True):
+                    main_ss = get_main_spreadsheet()
+                    log_sheet = main_ss.worksheet("activity_log")
+                    row_to_add = [
+                        today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
+                        "HEALTH", selected_cat_live, "", "Tracked via Health App Timer"
+                    ]
+                    smart_append_row(log_sheet, row_to_add)
+                    
+                    get_activity_log.clear() 
+                    time.sleep(1.0)
+                    st.rerun()
 
-            # --- MANUAL LOG TAB ---
+            # --- MANUAL LOG TAB (MOBILE RESPONSIVE FIX) ---
             with tab_manual:
-                st.markdown("<div style='margin-bottom: 5px; color: #555;'><b>📝 Record Completed Activity:</b></div>", unsafe_allow_html=True)
+                st.markdown("<div style='margin-bottom: 5px; color: #555;'><b>📝 Record Activity:</b></div>", unsafe_allow_html=True)
                 
-                selected_cat_manual = st.selectbox("Select Health Activity", health_categories, key="start_cat_sel_manual")
+                selected_cat_manual = st.selectbox("Activity", health_categories, key="start_cat_sel_manual")
                 
                 m_headers = get_health_category_headers(selected_cat_manual)
                 m_base_headers = ["Date", "Start_Time", "End_Time", "Duration"]
@@ -439,13 +448,16 @@ try:
                 curr_h = clean_now.strftime('%H')
                 curr_m = clean_now.strftime('%M')
                 
-                col_md, col_sh, col_sm, col_eh, col_em = st.columns([2, 1, 1, 1, 1])
-                with col_md: 
-                    m_date = st.date_input("Date", value=now.date(), key="manual_date")
+                m_date = st.date_input("Date", value=now.date(), key="manual_date")
+                
+                # Simplified time inputs for better mobile stacking
+                col_sh, col_sm = st.columns(2)
                 with col_sh: 
                     m_start_h = st.selectbox("Start HH", hours_opts, index=hours_opts.index(curr_h), key="man_sh")
                 with col_sm: 
                     m_start_m = st.selectbox("Start MM", mins_opts, index=mins_opts.index(curr_m), key="man_sm")
+                    
+                col_eh, col_em = st.columns(2)
                 with col_eh: 
                     m_end_h = st.selectbox("End HH", hours_opts, index=hours_opts.index(curr_h), key="man_eh")
                 with col_em: 
@@ -453,30 +465,26 @@ try:
                 
                 m_param_values = {}
                 if m_custom_params:
-                    st.markdown("**Activity Details:**")
-                    n_cols = min(len(m_custom_params), 4)
-                    for i in range(0, len(m_custom_params), n_cols):
-                        cols = st.columns(n_cols)
-                        for j in range(n_cols):
-                            if i + j < len(m_custom_params):
-                                param = m_custom_params[i + j]
-                                with cols[j]:
-                                    if "[Drop:" in param:
-                                        clean_param = param.split("[Drop:")[0].strip()
-                                        options_raw = param.split("[Drop:")[1].split("]")[0]
-                                        options = ["-- Select --"] + [o.strip() for o in options_raw.split(",")]
-                                        m_param_values[param] = st.selectbox(clean_param, options, key=f"man_param_{param}")
-                                    elif "[Check]" in param:
-                                        clean_param = param.split("[Check]")[0].strip()
-                                        checked = st.checkbox(clean_param, key=f"man_param_{param}")
-                                        m_param_values[param] = "Yes" if checked else "No"
-                                    else:
-                                        m_param_values[param] = st.text_input(param, key=f"man_param_{param}")
+                    st.markdown("**Details:**")
+                    # Render parameters sequentially to ensure mobile stacking
+                    for param in m_custom_params:
+                        if "[Drop:" in param:
+                            clean_param = param.split("[Drop:")[0].strip()
+                            options_raw = param.split("[Drop:")[1].split("]")[0]
+                            options = ["-- Select --"] + [o.strip() for o in options_raw.split(",")]
+                            m_param_values[param] = st.selectbox(clean_param, options, key=f"man_param_{param}")
+                        elif "[Check]" in param:
+                            clean_param = param.split("[Check]")[0].strip()
+                            checked = st.checkbox(clean_param, key=f"man_param_{param}")
+                            m_param_values[param] = "Yes" if checked else "No"
+                        else:
+                            m_param_values[param] = st.text_input(param, key=f"man_param_{param}")
                                 
                 if st.button("💾 Save Manual Log", use_container_width=True, type="primary"):
+                    
                     has_missing = any(v == "-- Select --" for v in m_param_values.values())
                     if has_missing:
-                        st.error("⚠️ Please select a valid option for all dropdown parameters before saving!")
+                        st.error("⚠️ Please select valid options!")
                     else:
                         start_str_m = f"{m_start_h}:{m_start_m}"
                         end_str_m = f"{m_end_h}:{m_end_m}"
@@ -505,16 +513,15 @@ try:
                             
                             get_activity_log.clear() 
                             get_health_category_data.clear()
-                            st.success(f"Saved: Detailed log added to '{selected_cat_manual}' tab!")
-                            time.sleep(1.5)
+                            st.success(f"Saved!")
+                            time.sleep(1.0)
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Failed to log details to Health_log: {e}")
+                            st.error(f"Failed to log details: {e}")
 
-            # --- SUMMARY & INSIGHTS TAB ---
+            # --- SUMMARY TAB ---
             with tab_summary:
-                st.markdown("<div style='margin-bottom: 5px; color: #555;'><b>📊 Today's Health Overview:</b></div>", unsafe_allow_html=True)
-                st.markdown("#### ✅ Completed Today")
+                st.markdown("<div style='margin-bottom: 5px; color: #555;'><b>📊 Today's Overview:</b></div>", unsafe_allow_html=True)
                 
                 today_completed_categories = []
                 html_cards = []
@@ -539,7 +546,7 @@ try:
                             for _, row in today_data.iterrows():
                                 sessions_html += f"<div style='display: flex; justify-content: space-between; margin-bottom: 4px;'><span>&bull; <b>{row['Start_Time']} to {row['End_Time']}</b></span><em style='color: #666; font-style: italic;'>{row['Duration']}</em></div>"
                         
-                        session_badge = f"<span style='font-weight: normal; font-size: 13px; opacity: 0.8; margin-left: 8px;'>{session_count} Sessions</span>" if session_count > 1 else ""
+                        session_badge = f"<span style='font-weight: normal; font-size: 13px; opacity: 0.8; margin-left: 8px;'>{session_count} Sess.</span>" if session_count > 1 else ""
                         
                         box_html = f"<details style='background: linear-gradient(to right, #e8f5e9, #f1f8e9); padding: 6px 14px; border-radius: 8px; border-left: 6px solid #4caf50; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 8px; cursor: pointer;'><summary style='display: flex; justify-content: space-between; align-items: center; outline: none;'><span style='display: flex; align-items: center;'><span style='font-size: 16px; font-weight: bold; color: #2e7b32; letter-spacing: 0.5px;'>{cat.upper()}</span>{session_badge}</span><span style='font-size: 14px; color: #1b5e20; font-weight: 600; background-color: rgba(255,255,255,0.6); padding: 2px 8px; border-radius: 10px;'>⏱️ {dur_display}</span></summary><div style='margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(46, 123, 50, 0.2); font-size: 14px; color: #444; line-height: 1.5;'>{sessions_html}</div></details>"
                         html_cards.append(box_html)
@@ -547,10 +554,10 @@ try:
                 if html_cards:
                     st.markdown("".join(html_cards), unsafe_allow_html=True)
                 else:
-                    st.info("No health activities logged yet today.")
+                    st.info("No activities logged today.")
 
                 st.markdown("<br>", unsafe_allow_html=True)
-                st.markdown("#### ⚠️ Needs Attention (Not Done Today)")
+                st.markdown("#### ⚠️ Not Done Today")
                 
                 missing_cats = [c for c in health_categories if c.upper() not in today_completed_categories]
                 
@@ -559,33 +566,27 @@ try:
                         last_done = get_last_done_str(cat, log_df, now)
                         st.markdown(f"<div style='background-color:#fff3e0; padding:6px 14px; border-radius:8px; margin-bottom:8px; border-left: 4px solid #ff9800;'><b style='font-size: 15px;'>{cat}</b> <span style='color: #666; font-size: 13px;'>(Last: {last_done})</span></div>", unsafe_allow_html=True)
                 else:
-                    st.success("Amazing! You've touched on every single health category today.")
+                    st.success("Amazing! Touched on all categories today.")
 
                 st.markdown("<br><hr><br>", unsafe_allow_html=True)
-                st.markdown("### ⚙️ Health Log Configuration")
                 
-                with st.expander("➕ Create New Health Category", expanded=not health_categories):
-                    st.markdown("This will create a new tab in your `Health_log` Google Sheet.")
-                    num_params = st.number_input("How many custom parameters do you want to add?", min_value=0, max_value=20, value=4, step=1)
+                # --- NEW CATEGORY (MOBILE RESPONSIVE FIX) ---
+                with st.expander("➕ Create New Category", expanded=not health_categories):
+                    num_params = st.number_input("Custom params to add?", min_value=0, max_value=20, value=2, step=1)
                     
                     with st.form("new_health_cat_form", clear_on_submit=True):
-                        new_cat_name = st.text_input("Activity Name (e.g., MEDITATION, YOGA, RUNNING)").upper()
+                        new_cat_name = st.text_input("Activity Name").upper()
                         
+                        param_inputs = []
                         if num_params > 0:
-                            st.markdown("#### Add Custom Tracking Parameters")
-                            param_inputs = []
-                            for i in range(0, num_params, 2):
-                                cols = st.columns(2)
-                                for j in range(2):
-                                    if i + j < num_params:
-                                        with cols[j]:
-                                            ph = ""
-                                            if (i+j) == 0: ph = "e.g., Heart Rate"
-                                            elif (i+j) == 1: ph = "e.g., Music [Drop: Yes, No]"
-                                            elif (i+j) == 2: ph = "e.g., Felt Good [Check]"
-                                            param_inputs.append(st.text_input(f"Parameter {(i+j)+1}", placeholder=ph, key=f"param_input_{i+j}"))
-                        else:
-                            param_inputs = []
+                            st.markdown("#### Custom Params")
+                            # Removed columns for robust mobile stacking
+                            for i in range(num_params):
+                                ph = ""
+                                if i == 0: ph = "e.g., Heart Rate"
+                                elif i == 1: ph = "e.g., Music [Drop: Yes, No]"
+                                elif i == 2: ph = "e.g., Felt Good [Check]"
+                                param_inputs.append(st.text_input(f"Parameter {i+1}", placeholder=ph, key=f"param_input_{i}"))
                         
                         if st.form_submit_button("Create Category", use_container_width=True, type="primary"):
                             if new_cat_name.strip() and new_cat_name.strip().upper() != 'UPDATE':
@@ -600,24 +601,24 @@ try:
                                         smart_append_row(new_sheet, headers)
                                         get_health_categories.clear()
                                         get_health_category_headers.clear()
-                                        st.success(f"Success! '{new_cat_name}' tab created in Health_log.")
-                                        time.sleep(1.5)
+                                        st.success(f"Created!")
+                                        time.sleep(1.0)
                                         st.rerun()
                                     except Exception as e:
-                                        st.error(f"Error creating tab (It might already exist): {e}")
+                                        st.error(f"Error creating tab: {e}")
                                         
                                 except Exception as e:
                                     st.error(f"System Error: {e}")
                             elif new_cat_name.strip().upper() == 'UPDATE':
-                                st.error("The name 'Update' is reserved. Please choose a different name.")
+                                st.error("Reserved name.")
                             else:
-                                st.error("Please provide an Activity Name.")
+                                st.error("Provide a name.")
 
             # --- ACTIVITY HISTORY TAB ---
             with tab_history:
                 st.markdown("<div style='margin-bottom: 5px; color: #555;'><b>📜 Activity History:</b></div>", unsafe_allow_html=True)
                 
-                selected_history_cat = st.selectbox("Select Health Activity to View", health_categories, key="history_cat_sel")
+                selected_history_cat = st.selectbox("Select Activity", health_categories, key="history_cat_sel")
                 cat_data = get_health_category_data(selected_history_cat)
                 
                 if not cat_data.empty:
@@ -650,7 +651,7 @@ try:
                                 
                         param_html = f"<br><span style='color: #555; font-size: 14px;'>{' | '.join(params_display)}</span>" if params_display else ""
                         
-                        col_record, col_del = st.columns([10, 1])
+                        col_record, col_del = st.columns([10, 2])
                         with col_record:
                             st.markdown(f"""
                             <div style='display: flex; align-items: flex-start; margin-bottom: 10px; background-color: #f8f9fa; padding: 8px 10px; border-radius: 8px; border-left: 4px solid #81c784;'>
@@ -671,7 +672,7 @@ try:
                                 with st.spinner("Deleting..."):
                                     if delete_log_entry(str(row['Date']), str(row['Start_Time']), selected_history_cat):
                                         st.success("Deleted!")
-                                        time.sleep(1.5)
+                                        time.sleep(1.0)
                                         st.rerun()
                         
                         if i < len(cat_data) - 1:
@@ -682,35 +683,27 @@ try:
                                 if diff_days > 1:
                                     st.markdown(f"<div style='text-align: center; color: #9e9e9e; font-size: 13px; margin: 10px 0;'><em>[{diff_days} days gap]</em></div>", unsafe_allow_html=True)
                 else:
-                    st.info("No records found for this activity.")
+                    st.info("No records found.")
 
         elif not health_categories:
-            st.info("No Health categories found. Create one below to get started!")
+            st.info("Create a category below to get started!")
             
             st.markdown("<br><hr><br>", unsafe_allow_html=True)
-            st.markdown("### ⚙️ Health Log Configuration")
-            with st.expander("➕ Create New Health Category", expanded=True):
-                st.markdown("This will create a new tab in your `Health_log` Google Sheet.")
-                num_params = st.number_input("How many custom parameters do you want to add?", min_value=0, max_value=20, value=4, step=1)
+            with st.expander("➕ Create New Category", expanded=True):
+                num_params = st.number_input("Custom params to add?", min_value=0, max_value=20, value=2, step=1)
                 
                 with st.form("new_health_cat_form_initial", clear_on_submit=True):
-                    new_cat_name = st.text_input("Activity Name (e.g., MEDITATION, YOGA, RUNNING)").upper()
+                    new_cat_name = st.text_input("Activity Name").upper()
                     
+                    param_inputs = []
                     if num_params > 0:
-                        st.markdown("#### Add Custom Tracking Parameters")
-                        param_inputs = []
-                        for i in range(0, num_params, 2):
-                            cols = st.columns(2)
-                            for j in range(2):
-                                if i + j < num_params:
-                                    with cols[j]:
-                                        ph = ""
-                                        if (i+j) == 0: ph = "e.g., Heart Rate"
-                                        elif (i+j) == 1: ph = "e.g., Music [Drop: Yes, No]"
-                                        elif (i+j) == 2: ph = "e.g., Felt Good [Check]"
-                                        param_inputs.append(st.text_input(f"Parameter {(i+j)+1}", placeholder=ph, key=f"init_param_input_{i+j}"))
-                    else:
-                        param_inputs = []
+                        st.markdown("#### Custom Params")
+                        for i in range(num_params):
+                            ph = ""
+                            if i == 0: ph = "e.g., Heart Rate"
+                            elif i == 1: ph = "e.g., Music [Drop: Yes, No]"
+                            elif i == 2: ph = "e.g., Felt Good [Check]"
+                            param_inputs.append(st.text_input(f"Parameter {i+1}", placeholder=ph, key=f"init_param_input_{i}"))
                     
                     if st.form_submit_button("Create Category", use_container_width=True, type="primary"):
                         if new_cat_name.strip() and new_cat_name.strip().upper() != 'UPDATE':
@@ -725,18 +718,18 @@ try:
                                     smart_append_row(new_sheet, headers)
                                     get_health_categories.clear()
                                     get_health_category_headers.clear()
-                                    st.success(f"Success! '{new_cat_name}' tab created in Health_log.")
-                                    time.sleep(1.5)
+                                    st.success(f"Success!")
+                                    time.sleep(1.0)
                                     st.rerun()
                                 except Exception as e:
-                                    st.error(f"Error creating tab (It might already exist): {e}")
+                                    st.error(f"Error creating tab: {e}")
                                     
                             except Exception as e:
                                 st.error(f"System Error: {e}")
                         elif new_cat_name.strip().upper() == 'UPDATE':
-                            st.error("The name 'Update' is reserved. Please choose a different name.")
+                            st.error("Reserved name.")
                         else:
-                            st.error("Please provide an Activity Name.")
+                            st.error("Provide a name.")
 
 except Exception as e:
-    st.error(f"Critical System Error: Make sure your 'Health_log' Google Sheet exists and is shared with your service account. Details: {e}")
+    st.error(f"Critical System Error: Make sure your 'Health_log' Google Sheet exists. Details: {e}")

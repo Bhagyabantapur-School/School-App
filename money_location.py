@@ -2,7 +2,7 @@ import streamlit as st
 
 # --- BACK BUTTON ---
 if st.button("⬅️ Back to Dashboard", type="secondary"):
-    st.switch_page("main.py") # <--- Changed this line
+    st.switch_page("home") # <--- Changed this to the new url_path
 st.write("---") 
 # -------------------
 import pandas as pd

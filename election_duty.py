@@ -683,9 +683,8 @@ with tab12:
         pdf = FPDF()
         pdf.add_page()
         
-        # LOGO (Checking if election_logo.png exists)
+        # LOGO 
         if os.path.exists("election_logo.png"):
-            # Using pdf.image(filename, x, y, width, height)
             pdf.image("election_logo.png", 10, 8, 20)
 
         # TITLE
@@ -693,7 +692,7 @@ with tab12:
         pdf.cell(200, 10, txt="Election Duty 2026 - Master Report", ln=True, align='C')
         
         pdf.set_font("Arial", 'I', 10)
-        # Added West Bengal Legislative Assembly Election 2026 and dates
+        # Election dates
         pdf.cell(200, 6, txt="West Bengal Legislative Assembly Election 2026", ln=True, align='C')
         pdf.cell(200, 6, txt="April - May 2026", ln=True, align='C')
         pdf.cell(200, 6, txt=f"Generated on: {get_ist_now().strftime('%d-%m-%Y %I:%M %p')} (IST)", ln=True, align='C')
@@ -711,12 +710,12 @@ with tab12:
             pdf.cell(200, 8, txt="No booth data recorded.", ln=True)
         pdf.ln(5)
         
-        # 2. TEAM DIRECTORY (Updated to include your details)
+        # 2. TEAM DIRECTORY 
         pdf.set_font("Arial", 'B', 14)
         pdf.cell(200, 10, txt="2. Polling Team Directory", ln=True)
         pdf.set_font("Arial", '', 12)
         
-        # Extract Presiding Officer and print first
+        # PO first
         po_found = False
         for m_info in team_list:
             m = m_info['data']
@@ -728,10 +727,10 @@ with tab12:
         if not po_found:
              pdf.cell(200, 8, txt="- Presiding Officer details not found.", ln=True)
 
-        # Print your name as 1st PO
+        # Your name
         pdf.cell(200, 8, txt="- SUKHAMAY KISKU - 1st Polling Officer (7908390822)", ln=True)
 
-        # Print the rest of the team (excluding PO to avoid duplicates, and assuming you might not be in the sheet)
+        # Rest of team
         for m_info in team_list:
              m = m_info['data']
              rank = str(m.get('Polling Office Rank')).strip()
@@ -742,7 +741,7 @@ with tab12:
             pdf.cell(200, 8, txt="No team members recorded (excluding defaults).", ln=True)
         pdf.ln(5)
         
-        # 3. TRAINING & DUTY DETAILS (Renamed and filtered content)
+        # 3. TRAINING & DUTY DETAILS (Removed Notes completely)
         pdf.set_font("Arial", 'B', 14)
         pdf.cell(200, 10, txt="3. Training & Duty details", ln=True)
         pdf.set_font("Arial", '', 10)
@@ -751,17 +750,11 @@ with tab12:
             for r in records:
                 if r.get("Start Time") != "Pending":
                     count += 1
-                    # Extracting data carefully to avoid errors if some columns are empty
                     log_date = str(r.get('Date', 'N/A'))
                     activity = str(r.get('Activity Type', 'N/A'))
-                    notes = str(r.get('Notes / Key Learnings', ''))
                     
                     pdf.set_font("Arial", 'B', 10)
                     pdf.cell(200, 6, txt=clean_txt(f"[{count}] Date: {log_date} | Activity: {activity}"), ln=True)
-                    
-                    if notes:
-                        pdf.set_font("Arial", 'I', 9)
-                        pdf.multi_cell(0, 5, txt=clean_txt(f"Notes/Key Learnings: {notes}"))
                     pdf.ln(2)
                     
             if count == 0: 
@@ -808,20 +801,18 @@ with tab12:
 
         pdf.ln(20) # Add some space before signature
 
-        # Report Prepared By & Signature (Center Aligned)
+        # Report Prepared By & Signature (Right Aligned)
         pdf.set_font("Arial", '', 12)
-        pdf.cell(200, 10, txt="Report prepared by", ln=True, align='C')
+        pdf.cell(0, 10, txt="Report prepared by", ln=True, align='R')
         
-        # Adding Signature Image
+        # Adding Signature Image right aligned
         if os.path.exists("signature.png"):
-             # Get current Y position to place signature correctly
              current_y = pdf.get_y()
-             # Adjust coordinates: A4 width is 210mm. Image w=40. Center X = (210-40)/2 = 85
-             pdf.image("signature.png", x=85, y=current_y, w=40)
-             pdf.ln(15) # Move past the image
+             pdf.image("signature.png", x=160, y=current_y, w=40)
+             pdf.ln(15) 
              
         pdf.set_font("Arial", 'B', 12)
-        pdf.cell(200, 10, txt="Sukhamay Kisku", ln=True, align='C')
+        pdf.cell(0, 10, txt="Sukhamay Kisku", ln=True, align='R')
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             pdf.output(tmp.name)

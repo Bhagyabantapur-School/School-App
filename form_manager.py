@@ -1,9 +1,4 @@
 import streamlit as st
-# --- BACK BUTTON ---
-if st.button("⬅️ Back to BPS Home", type="secondary"):
-    st.switch_page("bps_dashboard.py")
-st.write("---") 
-# -------------------
 import pandas as pd
 from datetime import datetime, timedelta
 import os
@@ -11,12 +6,12 @@ import gspread
 from google.oauth2.service_account import Credentials
 from fpdf import FPDF
 
-# --- 1. CONFIGURATION & STYLING ---
+# --- 1. CONFIGURATION & STYLING (MUST BE FIRST) ---
 st.set_page_config(page_title="BPS Form Manager", page_icon="📝", layout="wide")
 
 st.markdown("""
     <style>
-        .block-container { padding-top: 2rem; max-width: 1100px;}
+        .block-container { padding-top: 3rem; max-width: 1100px;} /* Increased padding slightly so button isn't hidden */
         .alert-box { padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 5px solid; }
         .alert-success { background-color: #d4edda; border-color: #28a745; color: #155724; }
         .alert-warning { background-color: #fff3cd; border-color: #ffc107; color: #856404; }
@@ -25,6 +20,12 @@ st.markdown("""
         .stButton>button { border-radius: 8px; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
+
+# --- BACK BUTTON ---
+if st.button("⬅️ Back to BPS Home", type="secondary"):
+    st.switch_page("bps_dashboard.py")
+st.write("---") 
+# -------------------
 
 st.title("📝 BPS Form Generator & Tracker")
 

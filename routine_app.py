@@ -333,15 +333,7 @@ try:
             holiday_on = st.toggle("🎉 Holiday", key="holiday_toggle")
         with col3:
             if st.button("🔄 Sync", use_container_width=True):
-                get_routine_data.clear()
-                get_activity_log.clear()
-                get_future_tasks.clear()
-                get_water_log.clear()
-                get_holidays.clear()
-                get_location_data.clear() 
-                get_visited_places.clear()
-                get_payment_checklist.clear()
-                get_must_do_tasks.clear()
+                st.cache_data.clear()
                 st.toast("✅ Force Synced with Google Sheets!")
                 time.sleep(0.5)
                 st.rerun()
@@ -536,19 +528,22 @@ try:
             if st.button("🥃 250 ml", use_container_width=True):
                 wsheet = get_sheet("water_log")
                 wsheet.append_row([today_str, now.strftime('%H:%M'), 250])
-                get_water_log.clear() 
+                st.cache_data.clear() 
+                time.sleep(0.5)
                 st.rerun()
         with col_w2:
             if st.button("🚰 500 ml", use_container_width=True):
                 wsheet = get_sheet("water_log")
                 wsheet.append_row([today_str, now.strftime('%H:%M'), 500])
-                get_water_log.clear() 
+                st.cache_data.clear() 
+                time.sleep(0.5)
                 st.rerun()
         with col_w3:
             if st.button("🥛 1000 ml", use_container_width=True):
                 wsheet = get_sheet("water_log")
                 wsheet.append_row([today_str, now.strftime('%H:%M'), 1000])
-                get_water_log.clear() 
+                st.cache_data.clear() 
+                time.sleep(0.5)
                 st.rerun()
 
         # --- SMART SCHEDULE INJECTION & COUNTDOWN ---
@@ -627,8 +622,7 @@ try:
                                     today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
                                     GS_FORMULA, str(r['Activity']).upper(), "", f"{r['Task_Name']} [RESCHEDULED]", f"Moved to {new_date.strftime('%Y-%m-%d')} {new_time}"
                                 ], value_input_option="USER_ENTERED")
-                                get_future_tasks.clear() 
-                                get_activity_log.clear() 
+                                st.cache_data.clear() 
                                 st.success("Task Rescheduled!")
                                 time.sleep(1)
                                 st.rerun()
@@ -647,8 +641,8 @@ try:
                                             today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
                                             GS_FORMULA, str(r['Activity']).upper(), "", f"{r['Task_Name']} [CANCELED]", f"Cancel Reason: {cancel_reason}"
                                         ], value_input_option="USER_ENTERED")
-                                        get_future_tasks.clear() 
-                                        get_activity_log.clear() 
+                                        st.cache_data.clear() 
+                                        time.sleep(0.5)
                                         st.rerun()
                     st.markdown("<hr style='margin-top:5px; margin-bottom:15px;'>", unsafe_allow_html=True)
 
@@ -690,7 +684,8 @@ try:
                                         today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
                                         md_cat, md_task, "", "Must Do Task"
                                     ], value_input_option="USER_ENTERED")
-                                    get_activity_log.clear()
+                                    st.cache_data.clear()
+                                    time.sleep(0.5)
                                     st.rerun()
 
         if chk_list:
@@ -718,7 +713,6 @@ try:
                         today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), 
                         GS_FORMULA, current_activity, "", task, "Checked off"
                     ], value_input_option="USER_ENTERED")
-                    get_activity_log.clear() 
                     
                     if "[Due:" in task:
                         raw_task = task.split(" [Due:")[0].strip()
@@ -727,8 +721,9 @@ try:
                             r_idx = int(matches.iloc[0]['row_index'])
                             fsheet = get_sheet("future_tasks")
                             fsheet.update_cell(r_idx, 7, "Completed") 
-                            get_future_tasks.clear() 
                             
+                    st.cache_data.clear() 
+                    time.sleep(0.5)
                     st.rerun()
 
         # ==========================================
@@ -835,9 +830,8 @@ try:
                                     r_idx = int(matches.iloc[0]['row_index'])
                                     fsheet = get_sheet("future_tasks")
                                     fsheet.update_cell(r_idx, 7, "Completed") 
-                                    get_future_tasks.clear() 
                                     
-                            get_activity_log.clear() 
+                            st.cache_data.clear() 
                             st.success(f"Saved: {display_name}")
                             time.sleep(1)
                             st.rerun()
@@ -846,7 +840,7 @@ try:
                         if st.button("❌ CANCEL", key=f"cancel_{sheet_row}", use_container_width=True):
                             log_sheet = get_sheet("activity_log")
                             log_sheet.delete_rows(sheet_row)
-                            get_activity_log.clear() 
+                            st.cache_data.clear() 
                             st.warning(f"Cancelled: {display_name}")
                             time.sleep(1)
                             st.rerun()
@@ -868,7 +862,8 @@ try:
                                 today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
                                 current_activity, task, "", "Auto-logged via Timer"
                             ], value_input_option="USER_ENTERED")
-                            get_activity_log.clear() 
+                            st.cache_data.clear() 
+                            time.sleep(0.5)
                             st.rerun()
 
             # --- 3. RENDER MEETING/VISITOR TRACKER ---
@@ -880,7 +875,8 @@ try:
                     today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
                     "PEOPLE", "MEETING / VISITOR", "", "Update details later"
                 ], value_input_option="USER_ENTERED")
-                get_activity_log.clear() 
+                st.cache_data.clear() 
+                time.sleep(0.5)
                 st.rerun()
 
             with st.expander("📝 Or Enter Details Before Starting", expanded=False):
@@ -916,7 +912,8 @@ try:
                         today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
                         "PEOPLE", sub_act_str.upper(), "", notes_str
                     ], value_input_option="USER_ENTERED")
-                    get_activity_log.clear() 
+                    st.cache_data.clear() 
+                    time.sleep(0.5)
                     st.rerun()
 
         st.markdown("---")
@@ -969,7 +966,7 @@ try:
                             "Pending",
                             ""
                         ])
-                        get_future_tasks.clear() 
+                        st.cache_data.clear() 
                         st.success("Task Scheduled! It will appear 24 hours before due time.")
                         time.sleep(1.5)
                         st.rerun()
@@ -998,7 +995,7 @@ try:
                             GS_FORMULA, log_activity.upper().strip(), log_sub_activity.upper().strip(),
                             log_chk.strip(), log_notes
                         ], value_input_option="USER_ENTERED")
-                        get_activity_log.clear() 
+                        st.cache_data.clear() 
                         st.success("Activity logged!")
                         time.sleep(1)
                         st.rerun()
@@ -1106,7 +1103,7 @@ try:
                             routine_sheet.clear()
                             routine_sheet.update(values=[final_df.columns.values.tolist()] + final_df.values.tolist(), range_name="A1")
                             
-                            get_routine_data.clear()
+                            st.cache_data.clear()
                             st.success(f"Added '{b_act}' to {len(b_days)} days!")
                             time.sleep(1)
                             st.rerun()
@@ -1163,7 +1160,7 @@ try:
                             routine_sheet.clear()
                             routine_sheet.update(values=[full_df.columns.values.tolist()] + full_df.values.tolist(), range_name="A1")
                             
-                            get_routine_data.clear()
+                            st.cache_data.clear()
                             st.success(f"Replaced {count} instances of '{old_val}' with '{new_val}'!")
                             time.sleep(1)
                             st.rerun()
@@ -1237,7 +1234,7 @@ try:
                     data_to_upload = [final_df.columns.values.tolist()] + final_df.values.tolist()
                     routine_sheet.update(values=data_to_upload, range_name="A1")
                     
-                    get_routine_data.clear() 
+                    st.cache_data.clear() 
                     st.success("Schedule successfully updated!")
                     time.sleep(1)
                     st.rerun()

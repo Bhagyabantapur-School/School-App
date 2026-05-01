@@ -677,18 +677,27 @@ with tab12:
     
     # ---------------- PDF GENERATION LOGIC ----------------
     st.subheader("📄 Export Master Report")
-    st.markdown("Download a PDF copy containing Booth Details, Team Directory, Study Logs, Final Turnout, and Form 17C.")
+    st.markdown("Download a PDF copy containing Booth Details, Team Directory, Timeline Logs, Final Turnout, and Form 17C.")
 
     def generate_pdf_report():
         pdf = FPDF()
         pdf.add_page()
         
+        # LOGO (Checking if election_logo.png exists)
+        if os.path.exists("election_logo.png"):
+            # Using pdf.image(filename, x, y, width, height)
+            pdf.image("election_logo.png", 10, 8, 20)
+
         # TITLE
         pdf.set_font("Arial", 'B', 16)
         pdf.cell(200, 10, txt="Election Duty 2026 - Master Report", ln=True, align='C')
+        
         pdf.set_font("Arial", 'I', 10)
-        pdf.cell(200, 10, txt=f"Generated on: {get_ist_now().strftime('%d-%m-%Y %I:%M %p')} (IST)", ln=True, align='C')
-        pdf.ln(5)
+        # Added West Bengal Legislative Assembly Election 2026 and dates
+        pdf.cell(200, 6, txt="West Bengal Legislative Assembly Election 2026", ln=True, align='C')
+        pdf.cell(200, 6, txt="April - May 2026", ln=True, align='C')
+        pdf.cell(200, 6, txt=f"Generated on: {get_ist_now().strftime('%d-%m-%Y %I:%M %p')} (IST)", ln=True, align='C')
+        pdf.ln(10)
         
         # 1. BOOTH DETAILS
         pdf.set_font("Arial", 'B', 14)
@@ -702,29 +711,62 @@ with tab12:
             pdf.cell(200, 8, txt="No booth data recorded.", ln=True)
         pdf.ln(5)
         
-        # 2. TEAM DIRECTORY
+        # 2. TEAM DIRECTORY (Updated to include your details)
         pdf.set_font("Arial", 'B', 14)
         pdf.cell(200, 10, txt="2. Polling Team Directory", ln=True)
         pdf.set_font("Arial", '', 12)
-        if team_list:
-            for idx, member in enumerate(team_list):
-                m = member['data']
-                pdf.cell(200, 8, txt=clean_txt(f"{idx+1}. {m.get('Name')} - {m.get('Polling Office Rank')} ({m.get('Mobile Number')})"), ln=True)
-        else:
-            pdf.cell(200, 8, txt="No team members recorded.", ln=True)
+        
+        # Extract Presiding Officer and print first
+        po_found = False
+        for m_info in team_list:
+            m = m_info['data']
+            if str(m.get('Polling Office Rank')).strip().lower() == "presiding officer":
+                pdf.cell(200, 8, txt=clean_txt(f"- {m.get('Name')} - Presiding Officer ({m.get('Mobile Number')})"), ln=True)
+                po_found = True
+                break
+        
+        if not po_found:
+             pdf.cell(200, 8, txt="- Presiding Officer details not found.", ln=True)
+
+        # Print your name as 1st PO
+        pdf.cell(200, 8, txt="- SUKHAMAY KISKU - 1st Polling Officer (7908390822)", ln=True)
+
+        # Print the rest of the team (excluding PO to avoid duplicates, and assuming you might not be in the sheet)
+        for m_info in team_list:
+             m = m_info['data']
+             rank = str(m.get('Polling Office Rank')).strip()
+             if rank.lower() != "presiding officer" and m.get('Name') != "SUKHAMAY KISKU":
+                  pdf.cell(200, 8, txt=clean_txt(f"- {m.get('Name')} - {rank} ({m.get('Mobile Number')})"), ln=True)
+
+        if not team_list:
+            pdf.cell(200, 8, txt="No team members recorded (excluding defaults).", ln=True)
         pdf.ln(5)
         
-        # 3. TRAINING LOGS
+        # 3. TRAINING & DUTY DETAILS (Renamed and filtered content)
         pdf.set_font("Arial", 'B', 14)
-        pdf.cell(200, 10, txt="3. Training & Study Logs", ln=True)
+        pdf.cell(200, 10, txt="3. Training & Duty details", ln=True)
         pdf.set_font("Arial", '', 10)
         if records:
             count = 0
             for r in records:
                 if r.get("Start Time") != "Pending":
                     count += 1
-                    pdf.cell(200, 6, txt=clean_txt(f"- {r.get('Date')} | {r.get('Activity Type')} | Duration: {r.get('Duration')}"), ln=True)
-            if count == 0: pdf.cell(200, 6, txt="No completed training sessions.", ln=True)
+                    # Extracting data carefully to avoid errors if some columns are empty
+                    log_date = str(r.get('Date', 'N/A'))
+                    activity = str(r.get('Activity Type', 'N/A'))
+                    notes = str(r.get('Notes / Key Learnings', ''))
+                    
+                    pdf.set_font("Arial", 'B', 10)
+                    pdf.cell(200, 6, txt=clean_txt(f"[{count}] Date: {log_date} | Activity: {activity}"), ln=True)
+                    
+                    if notes:
+                        pdf.set_font("Arial", 'I', 9)
+                        pdf.multi_cell(0, 5, txt=clean_txt(f"Notes/Key Learnings: {notes}"))
+                    pdf.ln(2)
+                    
+            if count == 0: 
+                pdf.set_font("Arial", '', 10)
+                pdf.cell(200, 6, txt="No completed logs found.", ln=True)
         else:
             pdf.cell(200, 6, txt="No logs recorded.", ln=True)
         pdf.ln(5)
@@ -740,6 +782,7 @@ with tab12:
             pdf.cell(200, 8, txt=clean_txt(f"Time Block: {latest.get('Time_Block')} ({latest.get('Timestamp')})"), ln=True)
             pdf.cell(200, 8, txt=clean_txt(f"Total Cast: {tc} | Turnout: {tp:.2f}%"), ln=True)
             pdf.cell(200, 8, txt=clean_txt(f"Male: {latest.get('Male')} | Female: {latest.get('Female')} | TG: {latest.get('TG')}"), ln=True)
+            pdf.cell(200, 8, txt=clean_txt(f"Special: EDC: {latest.get('EDC', 0)} | ASD: {latest.get('ASD', 0)} | Proxy: {latest.get('Proxy', 0)} | PB: {latest.get('PB', 0)}"), ln=True)
         else:
             pdf.cell(200, 8, txt="No turnout data recorded.", ln=True)
         pdf.ln(5)
@@ -762,6 +805,23 @@ with tab12:
             pdf.cell(200, 10, txt=clean_txt(f"STATUS: {status} (Expected: {exp}, Actual: {act})"), ln=True)
         else:
             pdf.cell(200, 8, txt="Form 17C data not saved.", ln=True)
+
+        pdf.ln(20) # Add some space before signature
+
+        # Report Prepared By & Signature
+        pdf.set_font("Arial", '', 12)
+        pdf.cell(200, 10, txt="Report prepared by", ln=True, align='R')
+        
+        # Adding Signature Image
+        if os.path.exists("signature.png"):
+             # Get current Y position to place signature correctly
+             current_y = pdf.get_y()
+             # Adjust coordinates (x=140 is right-aligned approx, y is dynamic)
+             pdf.image("signature.png", x=140, y=current_y, w=40)
+             pdf.ln(15) # Move past the image
+             
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(200, 10, txt="Sukhamay Kisku", ln=True, align='R')
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             pdf.output(tmp.name)

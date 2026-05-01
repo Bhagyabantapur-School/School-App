@@ -120,26 +120,39 @@ def show_dashboard():
         st.metric("Total Active Apps", "8")
     st.write("---") 
     
-    col1, col2, col3 = st.columns(3)
-    with col1:
+    # ROW 1
+    r1_col1, r1_col2, r1_col3 = st.columns(3)
+    with r1_col1:
         st.markdown(create_card("📍", "Money & Location", "Latest Log", "Bhagyabantapur", "#E3F2FD", "#1E88E5", "#1565C0", tracker_data), unsafe_allow_html=True)
         if st.button("Open App", key="btn1", use_container_width=True): log_and_open("Money & Location", money_location_page)
-        st.markdown(create_card("🗳️", "Election Duty", "Status", "Assigned", "#E8EAF6", "#3949AB", "#283593", tracker_data), unsafe_allow_html=True)
-        if st.button("Open App", key="btn4", use_container_width=True): log_and_open("Election Duty", election_page)
-        st.markdown(create_card("❤️", "Health Hub", "Status", "Active", "#FCE4EC", "#D81B60", "#AD1457", tracker_data), unsafe_allow_html=True)
-        if st.button("Open App", key="btn7", use_container_width=True): log_and_open("Health Hub", health_page)
-    with col2:
+    with r1_col2:
         st.markdown(create_card("💪", "Strong Tracker", "Current Streak", "12 Days", "#FFEBEE", "#E53935", "#C62828", tracker_data), unsafe_allow_html=True)
         if st.button("Open App", key="btn2", use_container_width=True): log_and_open("Strong Tracker", strong_page)
-        st.markdown(create_card("📆", "Monthly Tracker", "Month", "May 2026", "#E0F2F1", "#00897B", "#00695C", tracker_data), unsafe_allow_html=True)
-        if st.button("Open App", key="btn5", use_container_width=True): log_and_open("Monthly Tracker", monthly_page)
-        st.markdown(create_card("💾", "Backup Tracker", "Last Backup", "2 Hours Ago", "#FFF3E0", "#FB8C00", "#EF6C00", tracker_data), unsafe_allow_html=True)
-        if st.button("Open App", key="btn8", use_container_width=True): log_and_open("Backup Tracker", backup_page)
-    with col3:
+    with r1_col3:
         st.markdown(create_card("🚀", "Project App", "Tasks", "85%", "#F3E5F5", "#8E24AA", "#6A1B9A", tracker_data), unsafe_allow_html=True)
         if st.button("Open App", key="btn3", use_container_width=True): log_and_open("Project App", project_page)
+
+    # ROW 2
+    r2_col1, r2_col2, r2_col3 = st.columns(3)
+    with r2_col1:
+        st.markdown(create_card("🗳️", "Election Duty", "Status", "Assigned", "#E8EAF6", "#3949AB", "#283593", tracker_data), unsafe_allow_html=True)
+        if st.button("Open App", key="btn4", use_container_width=True): log_and_open("Election Duty", election_page)
+    with r2_col2:
+        st.markdown(create_card("📆", "Monthly Tracker", "Month", "May 2026", "#E0F2F1", "#00897B", "#00695C", tracker_data), unsafe_allow_html=True)
+        if st.button("Open App", key="btn5", use_container_width=True): log_and_open("Monthly Tracker", monthly_page)
+    with r2_col3:
         st.markdown(create_card("💵", "Money Tracker", "Wallet", "₹ 4,250", "#E8F5E9", "#43A047", "#2E7D32", tracker_data), unsafe_allow_html=True)
         if st.button("Open App", key="btn6", use_container_width=True): log_and_open("Money Tracker", money_tracker_page)
+
+    # ROW 3
+    r3_col1, r3_col2, r3_col3 = st.columns(3)
+    with r3_col1:
+        st.markdown(create_card("❤️", "Health Hub", "Status", "Active", "#FCE4EC", "#D81B60", "#AD1457", tracker_data), unsafe_allow_html=True)
+        if st.button("Open App", key="btn7", use_container_width=True): log_and_open("Health Hub", health_page)
+    with r3_col2:
+        st.markdown(create_card("💾", "Backup Tracker", "Last Backup", "2 Hours Ago", "#FFF3E0", "#FB8C00", "#EF6C00", tracker_data), unsafe_allow_html=True)
+        if st.button("Open App", key="btn8", use_container_width=True): log_and_open("Backup Tracker", backup_page)
+    # The 3rd slot is left blank since you only have 8 apps here
 
 # 7. NAVIGATION SETUP
 dashboard_page = st.Page(show_dashboard, title="Visual Dashboard", icon="🚀", default=True)

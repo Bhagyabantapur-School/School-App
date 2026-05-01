@@ -1,4 +1,9 @@
 import streamlit as st
+# --- BACK BUTTON ---
+if st.button("⬅️ Back to BPS Home", type="secondary"):
+    st.switch_page("bps_dashboard.py")
+st.write("---") 
+# -------------------
 import pandas as pd
 import plotly.express as px
 import gspread

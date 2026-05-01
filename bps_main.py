@@ -121,29 +121,39 @@ def show_bps_dashboard():
         
     st.write("---") 
 
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
+    # ROW 1: Student Management Focus
+    r1_col1, r1_col2, r1_col3 = st.columns(3)
+    with r1_col1:
         st.markdown(create_card("📝", "Admission Hub", "Status", "Active", "#E3F2FD", "#1E88E5", "#1565C0", tracker_data), unsafe_allow_html=True)
         if st.button("Open App", key="btn1", use_container_width=True): log_and_open("Admission Hub", admission_page)
+    with r1_col2:
         st.markdown(create_card("🧑‍🎓", "Student Profiles", "Records", "Secure", "#E8EAF6", "#3949AB", "#283593", tracker_data), unsafe_allow_html=True)
         if st.button("Open App", key="btn2", use_container_width=True): log_and_open("Student Profiles", student_profile_page)
+    with r1_col3:
         st.markdown(create_card("🪪", "ID Card Generator", "Format", "14-Digit Ready", "#F3E5F5", "#8E24AA", "#6A1B9A", tracker_data), unsafe_allow_html=True)
         if st.button("Open App", key="btn3", use_container_width=True): log_and_open("ID Card Generator", id_card_page)
 
-    with col2:
+    # ROW 2: Academics & Finance Focus
+    r2_col1, r2_col2, r2_col3 = st.columns(3)
+    with r2_col1:
         st.markdown(create_card("📊", "School Data", "Analytics", "Live", "#E0F2F1", "#00897B", "#00695C", tracker_data), unsafe_allow_html=True)
         if st.button("Open App", key="btn4", use_container_width=True): log_and_open("School Data", school_data_page)
+    with r2_col2:
         st.markdown(create_card("💰", "Exam & Fees", "Collection", "Tracked", "#E8F5E9", "#43A047", "#2E7D32", tracker_data), unsafe_allow_html=True)
         if st.button("Open App", key="btn5", use_container_width=True): log_and_open("Exam & Fees", exam_fees_page)
+    with r2_col3:
         st.markdown(create_card("🗓️", "Leave Management", "System", "Operational", "#FFF3E0", "#FB8C00", "#EF6C00", tracker_data), unsafe_allow_html=True)
         if st.button("Open App", key="btn6", use_container_width=True): log_and_open("Leave Management", leave_page)
 
-    with col3:
+    # ROW 3: Operations & Forms Focus
+    r3_col1, r3_col2, r3_col3 = st.columns(3)
+    with r3_col1:
         st.markdown(create_card("🎒", "Distributions", "Inventory", "Monitored", "#FCE4EC", "#D81B60", "#AD1457", tracker_data), unsafe_allow_html=True)
         if st.button("Open App", key="btn7", use_container_width=True): log_and_open("Distributions", distribution_page)
+    with r3_col2:
         st.markdown(create_card("📑", "Returns", "Processing", "Logged", "#FFEBEE", "#E53935", "#C62828", tracker_data), unsafe_allow_html=True)
         if st.button("Open App", key="btn8", use_container_width=True): log_and_open("Returns", returns_page)
+    with r3_col3:
         st.markdown(create_card("📋", "Form Manager", "Templates", "Available", "#ECEFF1", "#546E7A", "#37474F", tracker_data), unsafe_allow_html=True)
         if st.button("Open App", key="btn9", use_container_width=True): log_and_open("Form Manager", form_page)
 

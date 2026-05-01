@@ -93,7 +93,6 @@ def get_health_categories():
     try:
         ss = get_health_spreadsheet()
         worksheets = ss.worksheets()
-        # Filter out 'Sheet1' and 'Update'
         tabs = [ws.title for ws in worksheets if ws.title not in ['Sheet1', 'Update']]
         return tabs
     except Exception as e:
@@ -126,7 +125,6 @@ def get_health_category_data(category_name):
         return pd.DataFrame()
 
 def parse_duration_to_minutes(dur_str):
-    """Helper to convert H:MM strings to integer minutes"""
     try:
         h, m = map(int, str(dur_str).strip().split(':'))
         return (h * 60) + m
@@ -134,7 +132,6 @@ def parse_duration_to_minutes(dur_str):
         return 0
 
 def get_last_done_str(item_name, log_df, now, col_name='Sub_Activities'):
-    """Helper to find the last time a specific sub-activity was logged"""
     completed_logs = log_df[log_df['End_Time'] != 'RUNNING']
     matches = completed_logs[completed_logs[col_name].astype(str).str.strip().str.upper() == item_name.upper()]
     if matches.empty: return "Never"
@@ -158,7 +155,6 @@ def get_last_done_str(item_name, log_df, now, col_name='Sub_Activities'):
     else: return "Just now"
 
 def is_numeric(val):
-    """Helper to check if a string represents a number (for parameter aggregation)"""
     if pd.isna(val) or val == "":
         return False
     try:
@@ -190,7 +186,7 @@ try:
     with col2:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🔄 Sync Data", use_container_width=True):
-            st.cache_data.clear() # Fully clears cache to fetch newest Google Sheet edits
+            st.cache_data.clear()
             st.toast("Synced with Google Sheets!")
             time.sleep(0.5)
             st.rerun()
@@ -210,7 +206,7 @@ try:
         st.markdown("### ⏱️ Session Tracking & Insights")
         st.markdown("---")
         
-        # 1. RENDER RUNNING HEALTH TASKS (If any exist)
+        # 1. RENDER RUNNING HEALTH TASKS
         if active_count > 0:
             st.markdown("<div style='margin-bottom: 10px; color: #2e7b32;'><b>🟢 Currently Running:</b></div>", unsafe_allow_html=True)
             for idx, active_row in running_tasks.iterrows():
@@ -226,7 +222,6 @@ try:
                     mins_elapsed = int(elapsed_time.total_seconds() // 60)
                 except: mins_elapsed = 0 
                 
-                # --- POMODORO LOGIC & BEEP TRIGGER ---
                 cycle_minute = mins_elapsed % 30
                 pomodoro_count = (mins_elapsed // 30) + 1
                 current_state = "Focus" if cycle_minute < 25 else "Break"
@@ -260,12 +255,12 @@ try:
 
                 if current_state == "Focus":
                     p_state = "🍅 Activity Time"
-                    p_color = "#2e7b32" # Green for Health
+                    p_color = "#2e7b32"
                     p_left = 25 - cycle_minute
                     p_prog = cycle_minute / 25.0
                 else:
                     p_state = "☕ Rest"
-                    p_color = "#1e88e5" # Blue for rest
+                    p_color = "#1e88e5"
                     p_left = 30 - cycle_minute
                     p_prog = (cycle_minute - 25) / 5.0
                 
@@ -285,7 +280,6 @@ try:
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Dynamic Parameter Inputs for Saving
                 st.markdown("**Log Session Details:**")
                 headers = get_health_category_headers(display_name)
                 
@@ -312,8 +306,6 @@ try:
                 col_stop, col_cancel = st.columns([1, 1])
                 with col_stop:
                     if st.button("🛑 SAVE & LOG", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
-                        
-                        # Validate Dropdowns before saving
                         has_missing = any(v == "-- Select --" for v in param_values.values())
                         if has_missing:
                             st.error("⚠️ Please select a valid option for all dropdown parameters before saving!")
@@ -357,7 +349,7 @@ try:
                         st.rerun()
             st.markdown("<br>", unsafe_allow_html=True)
 
-        # 2. TABBED INTERFACE (Live, Manual, Summary, History)
+        # 2. TABBED INTERFACE
         if health_categories and active_count == 0:
             tab_live, tab_manual, tab_summary, tab_history = st.tabs(["⏱️ Live Timer", "📝 Manual Log", "📈 Summary & Insights", "📜 History"])
             
@@ -506,30 +498,13 @@ try:
                         sessions_html = ""
                         if session_count > 0:
                             for _, row in today_data.iterrows():
-                                # FIX: Used flexbox to push duration to the right and removed parenthesis
-                                sessions_html += f"""
-                                <div style='display: flex; justify-content: space-between; margin-bottom: 4px;'>
-                                    <span>&bull; <b>{row['Start_Time']} to {row['End_Time']}</b></span>
-                                    <em style='color: #666; font-style: italic;'>{row['Duration']}</em>
-                                </div>
-                                """
+                                # Formatted completely inside spans/divs to avoid markdown parsing errors
+                                sessions_html += f"<div style='display: flex; justify-content: space-between; margin-bottom: 4px;'><span>&bull; <b>{row['Start_Time']} to {row['End_Time']}</b></span><em style='color: #666; font-style: italic;'>{row['Duration']}</em></div>"
                         
                         session_badge = f"<span style='font-weight: normal; font-size: 13px; opacity: 0.8; margin-left: 8px;'>{session_count} Sessions</span>" if session_count > 1 else ""
                         
-                        box_html = f"""
-                        <details style='background: linear-gradient(to right, #e8f5e9, #f1f8e9); padding: 6px 14px; border-radius: 8px; border-left: 6px solid #4caf50; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 8px; cursor: pointer;'>
-                            <summary style='display: flex; justify-content: space-between; align-items: center; outline: none;'>
-                                <div style='display: flex; align-items: center;'>
-                                    <span style='font-size: 16px; font-weight: bold; color: #2e7b32; letter-spacing: 0.5px;'>{cat.upper()}</span>
-                                    {session_badge}
-                                </div>
-                                <span style='font-size: 14px; color: #1b5e20; font-weight: 600; background-color: rgba(255,255,255,0.6); padding: 2px 8px; border-radius: 10px;'>⏱️ {dur_display}</span>
-                            </summary>
-                            <div style='margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(46, 123, 50, 0.2); font-size: 14px; color: #444; line-height: 1.5;'>
-                                {sessions_html}
-                            </div>
-                        </details>
-                        """
+                        # Flat HTML string to fix Streamlit's Markdown Parser Bug
+                        box_html = f"<details style='background: linear-gradient(to right, #e8f5e9, #f1f8e9); padding: 6px 14px; border-radius: 8px; border-left: 6px solid #4caf50; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 8px; cursor: pointer;'><summary style='display: flex; justify-content: space-between; align-items: center; outline: none;'><span style='display: flex; align-items: center;'><span style='font-size: 16px; font-weight: bold; color: #2e7b32; letter-spacing: 0.5px;'>{cat.upper()}</span>{session_badge}</span><span style='font-size: 14px; color: #1b5e20; font-weight: 600; background-color: rgba(255,255,255,0.6); padding: 2px 8px; border-radius: 10px;'>⏱️ {dur_display}</span></summary><div style='margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(46, 123, 50, 0.2); font-size: 14px; color: #444; line-height: 1.5;'>{sessions_html}</div></details>"
                         html_cards.append(box_html)
                 
                 if html_cards:

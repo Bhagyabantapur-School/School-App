@@ -808,20 +808,20 @@ with tab12:
 
         pdf.ln(20) # Add some space before signature
 
-        # Report Prepared By & Signature
+        # Report Prepared By & Signature (Center Aligned)
         pdf.set_font("Arial", '', 12)
-        pdf.cell(200, 10, txt="Report prepared by", ln=True, align='R')
+        pdf.cell(200, 10, txt="Report prepared by", ln=True, align='C')
         
         # Adding Signature Image
         if os.path.exists("signature.png"):
              # Get current Y position to place signature correctly
              current_y = pdf.get_y()
-             # Adjust coordinates (x=140 is right-aligned approx, y is dynamic)
-             pdf.image("signature.png", x=140, y=current_y, w=40)
+             # Adjust coordinates: A4 width is 210mm. Image w=40. Center X = (210-40)/2 = 85
+             pdf.image("signature.png", x=85, y=current_y, w=40)
              pdf.ln(15) # Move past the image
              
         pdf.set_font("Arial", 'B', 12)
-        pdf.cell(200, 10, txt="Sukhamay Kisku", ln=True, align='R')
+        pdf.cell(200, 10, txt="Sukhamay Kisku", ln=True, align='C')
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             pdf.output(tmp.name)

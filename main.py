@@ -8,98 +8,69 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# 2. Custom CSS for Beautiful Cards
-st.markdown("""
-<style>
-    .main {
-        background-color: #f0f2f6;
-    }
-    div[data-testid="stMetricValue"] {
-        font-size: 25px;
-    }
-    .app-card {
-        background-color: white;
-        padding: 20px;
-        border-radius: 15px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        border-left: 5px solid #4F8BF9;
-        margin-bottom: 20px;
-        transition: transform 0.2s;
-    }
-    .app-card:hover {
-        transform: scale(1.02);
-    }
-    .card-title {
-        font-size: 20px;
-        font-weight: bold;
-        margin-bottom: 10px;
-        display: flex;
-        align-items: center;
-    }
-</style>
-""", unsafe_allow_html=True)
+# 2. Card Generator Function (Creates the colored card, bold title, line, and data)
+def create_card(icon, title, data_label, data_value, bg_color, border_color):
+    return f"""
+    <div style="background-color: {bg_color}; padding: 20px; border-radius: 12px; border-left: 6px solid {border_color}; margin-bottom: 10px; box-shadow: 2px 2px 8px rgba(0,0,0,0.05);">
+        <div style="font-size: 20px; color: #333;"><b>{icon} {title}</b></div>
+        <hr style="margin: 12px 0; border: none; border-top: 2px solid rgba(0,0,0,0.1);">
+        <div style="font-size: 15px; color: #555;">
+            {data_label}<br>
+            <span style="font-size: 24px; font-weight: 900; color: #111;">{data_value}</span>
+        </div>
+    </div>
+    """
 
-# 3. Define the Dashboard Function (The Landing Page)
+# 3. Define the Dashboard Function
 def show_dashboard():
     st.title("🚀 My Personal Dashboard")
     st.markdown("Welcome back! Here is a summary of your systems:")
-    
-    # Grid Layout: 3 columns for desktop
+    st.write("") # Adds a little spacing
+
+    # Grid Layout: 3 columns
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        with st.container():
-            st.markdown('<div class="app-card"><div class="card-title">📍 Money & Location</div>', unsafe_allow_html=True)
-            st.metric("Latest Log", "Bhagyabantapur")
-            if st.button("Open Money & Location", key="btn1"): st.switch_page(money_location_page)
-            st.markdown('</div>', unsafe_allow_html=True)
+        # Blue Theme
+        st.markdown(create_card("📍", "Money & Location", "Latest Log", "Bhagyabantapur", "#E3F2FD", "#1E88E5"), unsafe_allow_html=True)
+        if st.button("Open App", key="btn1", use_container_width=True): st.switch_page(money_location_page)
+        st.write("---")
 
-        with st.container():
-            st.markdown('<div class="app-card"><div class="card-title">🗳️ Election Duty</div>', unsafe_allow_html=True)
-            st.metric("Status", "Assigned")
-            if st.button("Open Election Duty", key="btn4"): st.switch_page(election_page)
-            st.markdown('</div>', unsafe_allow_html=True)
+        # Indigo Theme
+        st.markdown(create_card("🗳️", "Election Duty", "Status", "Assigned", "#E8EAF6", "#3949AB"), unsafe_allow_html=True)
+        if st.button("Open App", key="btn4", use_container_width=True): st.switch_page(election_page)
+        st.write("---")
+        
+        # Pink Theme
+        st.markdown(create_card("❤️", "Health Hub", "Blood Pressure", "120/80", "#FCE4EC", "#D81B60"), unsafe_allow_html=True)
+        if st.button("Open App", key="btn7", use_container_width=True): st.switch_page(health_page)
 
     with col2:
-        with st.container():
-            st.markdown('<div class="app-card"><div class="card-title">💪 Strong Tracker</div>', unsafe_allow_html=True)
-            st.metric("Current Streak", "12 Days")
-            if st.button("Open Strong", key="btn2"): st.switch_page(strong_page)
-            st.markdown('</div>', unsafe_allow_html=True)
+        # Red Theme
+        st.markdown(create_card("💪", "Strong Tracker", "Current Streak", "12 Days", "#FFEBEE", "#E53935"), unsafe_allow_html=True)
+        if st.button("Open App", key="btn2", use_container_width=True): st.switch_page(strong_page)
+        st.write("---")
 
-        with st.container():
-            st.markdown('<div class="app-card"><div class="card-title">📆 Monthly Summary</div>', unsafe_allow_html=True)
-            st.metric("Month", "April 2026")
-            if st.button("Open Monthly", key="btn5"): st.switch_page(monthly_page)
-            st.markdown('</div>', unsafe_allow_html=True)
+        # Teal Theme
+        st.markdown(create_card("📆", "Monthly Tracker", "Current Month", "April 2026", "#E0F2F1", "#00897B"), unsafe_allow_html=True)
+        if st.button("Open App", key="btn5", use_container_width=True): st.switch_page(monthly_page)
+        st.write("---")
             
-        with st.container():
-            st.markdown('<div class="app-card"><div class="card-title">💾 Backup Tracker</div>', unsafe_allow_html=True)
-            st.metric("Last Backup", "2 Hours Ago")
-            if st.button("Open Backup", key="btn8"): st.switch_page(backup_page)
-            st.markdown('</div>', unsafe_allow_html=True)
+        # Orange Theme
+        st.markdown(create_card("💾", "Backup Tracker", "Last Backup", "2 Hours Ago", "#FFF3E0", "#FB8C00"), unsafe_allow_html=True)
+        if st.button("Open App", key="btn8", use_container_width=True): st.switch_page(backup_page)
 
     with col3:
-        with st.container():
-            st.markdown('<div class="app-card"><div class="card-title">🚀 Project App</div>', unsafe_allow_html=True)
-            st.metric("Tasks Done", "85%")
-            if st.button("Open Project", key="btn3"): st.switch_page(project_page)
-            st.markdown('</div>', unsafe_allow_html=True)
+        # Purple Theme
+        st.markdown(create_card("🚀", "Project App", "Tasks Completed", "85%", "#F3E5F5", "#8E24AA"), unsafe_allow_html=True)
+        if st.button("Open App", key="btn3", use_container_width=True): st.switch_page(project_page)
+        st.write("---")
 
-        with st.container():
-            st.markdown('<div class="app-card"><div class="card-title">💵 Money Tracker</div>', unsafe_allow_html=True)
-            st.metric("Wallet Balance", "₹ 4,250")
-            if st.button("Open Money Tracker", key="btn6"): st.switch_page(money_tracker_page)
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        with st.container():
-            st.markdown('<div class="app-card"><div class="card-title">❤️ Health Hub</div>', unsafe_allow_html=True)
-            st.metric("Blood Pressure", "120/80")
-            if st.button("Open Health", key="btn7"): st.switch_page(health_page)
-            st.markdown('</div>', unsafe_allow_html=True)
+        # Green Theme
+        st.markdown(create_card("💵", "Money Tracker", "Wallet Balance", "₹ 4,250", "#E8F5E9", "#43A047"), unsafe_allow_html=True)
+        if st.button("Open App", key="btn6", use_container_width=True): st.switch_page(money_tracker_page)
 
 # 4. Define all Page Links
-# Note: The Dashboard is defined as a function here
 dashboard_page = st.Page(show_dashboard, title="Visual Dashboard", icon="🚀", default=True)
 
 money_location_page = st.Page("money_location.py", title="Money & Location", icon="📍")

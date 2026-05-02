@@ -8,6 +8,8 @@ from google.auth.transport.requests import AuthorizedSession
 
 st.set_page_config(page_title="BPS Digital", page_icon="🏫", layout="centered")
 
+
+
 def inject_beep_script():
     components.html("""
         <script>

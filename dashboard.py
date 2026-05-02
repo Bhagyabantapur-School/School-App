@@ -48,9 +48,12 @@ def log_and_open(app_name, target_file):
             sheet.update_cell(cell.row, 2, now_str)
         else:
             sheet.append_row([app_name, now_str])
-        get_tracker_data.clear()
+        
     except Exception as e:
         print(f"Failed to log time: {e}")
+    cached_data = get_tracker_data() 
+    cached_data[app_name] = now_str
+    
     st.switch_page(target_file)
 
 # 3. SCOPED STYLING

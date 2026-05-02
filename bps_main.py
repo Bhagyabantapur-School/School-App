@@ -8,7 +8,7 @@ st.set_page_config(
     initial_sidebar_state="expanded" 
 )
 
-# 2. DEFINE ALL APP PAGES (Pointing directly to the physical files)
+# 2. DEFINE ALL APP PAGES
 dashboard_page = st.Page("bps_dashboard.py", title="Main Dashboard", icon="🏫", default=True)
 
 # Student Management
@@ -26,9 +26,13 @@ distribution_page = st.Page("bps_distribution.py", title="Distributions", icon="
 returns_page = st.Page("bps_returns.py", title="Returns", icon="📑")
 form_page = st.Page("form_manager.py", title="Form Manager", icon="📋")
 
+# Staff & Administration (NEW)
+staff_portal_page = st.Page("bps_digital_sk.py", title="Staff Portal", icon="🔐")
+
 # 3. GROUPED SIDEBAR NAVIGATION
 pg = st.navigation({
     "System Home": [dashboard_page],
+    "Staff & Admin": [staff_portal_page], # <-- New Category Added Here
     "Student Management": [admission_page, student_profile_page, id_card_page],
     "Academics & Finance": [school_data_page, exam_fees_page],
     "Operations": [leave_page, distribution_page, returns_page, form_page]

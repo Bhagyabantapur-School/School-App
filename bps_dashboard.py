@@ -51,8 +51,6 @@ def log_and_open(app_name, target_file):
         get_bps_tracker_data.clear()
     except Exception as e:
         print(f"Failed to log time: {e}")
-    
-    # We now switch to the literal file name!
     st.switch_page(target_file)
 
 # 3. SCOPED STYLING
@@ -96,7 +94,6 @@ def create_card(icon, title, data_label, data_value, bg_color, border_color, tex
     """
 
 # 4. DASHBOARD UI LAYOUT
-# The invisible marker that triggers the custom CSS above
 st.markdown('<div class="bps-dashboard-marker" style="display:none;"></div>', unsafe_allow_html=True)
 
 tracker_data = get_bps_tracker_data()
@@ -105,7 +102,7 @@ with col_title:
     st.title("🏫 BPS Digital System")
     st.markdown("Bhagyabantapur Primary School - Administrative Hub")
 with col_count:
-    st.metric("Total Modules", "9")
+    st.metric("Total Modules", "10") # <-- Updated metric to 10
     
 st.write("---") 
 
@@ -144,3 +141,9 @@ with r3_col2:
 with r3_col3:
     st.markdown(create_card("📋", "Form Manager", "Templates", "Available", "#ECEFF1", "#546E7A", "#37474F", tracker_data), unsafe_allow_html=True)
     if st.button("Open App", key="btn9", use_container_width=True): log_and_open("Form Manager", "form_manager.py")
+
+# ROW 4: Staff Hub Focus (NEW)
+r4_col1, r4_col2, r4_col3 = st.columns(3)
+with r4_col1:
+    st.markdown(create_card("🔐", "Staff Portal", "Access", "Active", "#F5F5F5", "#9E9E9E", "#616161", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn10", use_container_width=True): log_and_open("Staff Portal", "bps_digital_sk.py")

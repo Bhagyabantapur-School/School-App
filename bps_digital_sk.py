@@ -16,10 +16,6 @@ st.write("---")
 
 def inject_beep_script():
     components.html("""
-# ... the rest of your app continues exactly as you wrote it ...
-
-def inject_beep_script():
-    components.html("""
         <script>
             const doc = window.parent.document;
             if (!doc.getElementById("beep-listener-setup")) {

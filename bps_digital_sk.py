@@ -8,6 +8,16 @@ from google.auth.transport.requests import AuthorizedSession
 
 st.set_page_config(page_title="BPS Digital", page_icon="🏫", layout="centered")
 
+# --- BACK BUTTON (MUST BE RIGHT AFTER PAGE CONFIG) ---
+if st.button("⬅️ Back to BPS Home", type="secondary"):
+    st.switch_page("bps_dashboard.py")
+st.write("---") 
+# -----------------------------------------------------
+
+def inject_beep_script():
+    components.html("""
+# ... the rest of your app continues exactly as you wrote it ...
+
 def inject_beep_script():
     components.html("""
         <script>

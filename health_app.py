@@ -1,4 +1,9 @@
 import streamlit as st
+# --- BACK BUTTON ---
+if st.button("⬅️ Back to Dashboard", type="secondary"):
+    st.switch_page("dashboard.py") 
+st.write("---") 
+# -------------------
 import streamlit.components.v1 as components
 import gspread
 from google.oauth2.service_account import Credentials

@@ -1,9 +1,4 @@
 import streamlit as st
-# --- BACK BUTTON ---
-if st.button("⬅️ Back to Dashboard", type="secondary"):
-    st.switch_page("dashboard.py") 
-st.write("---") 
-# -------------------
 import streamlit.components.v1 as components
 import gspread
 from google.oauth2.service_account import Credentials
@@ -52,11 +47,9 @@ st.markdown("""
     
     /* Mobile specific adjustments */
     @media (max-width: 640px) {
-        /* Ensure the title doesn't get squished */
         .stHeadingContainer h1 {
             font-size: 1.8rem !important;
         }
-        /* Add some breathing room for buttons on mobile */
         div.stButton > button {
             margin-top: 5px;
         }
@@ -177,41 +170,6 @@ def get_last_done_str(item_name, log_df, now, col_name='Sub_Activities'):
     elif diff.seconds >= 60: return f"{diff.seconds // 60}m ago"
     else: return "Just now"
 
-def delete_log_entry(date_str, start_time_str, cat_name):
-    try:
-        health_ss = get_health_spreadsheet()
-        cat_sheet = health_ss.worksheet(cat_name)
-        cat_data = cat_sheet.get_all_values()
-        
-        row_del_health = None
-        for idx, row in enumerate(cat_data):
-            if idx > 0 and row[0] == date_str and row[1] == start_time_str:
-                row_del_health = idx + 1 
-                break
-                
-        if row_del_health:
-            cat_sheet.delete_rows(row_del_health)
-
-        main_ss = get_main_spreadsheet()
-        log_sheet = main_ss.worksheet("activity_log")
-        log_data = log_sheet.get_all_values()
-        
-        row_del_main = None
-        for idx, row in enumerate(log_data):
-            if idx > 0 and row[0] == date_str and row[1] == start_time_str and str(row[4]).strip().upper() == "HEALTH" and str(row[5]).strip().upper() == cat_name.upper():
-                row_del_main = idx + 1
-                break
-                
-        if row_del_main:
-            log_sheet.delete_rows(row_del_main)
-
-        get_activity_log.clear()
-        get_health_category_data.clear()
-        return True
-    except Exception as e:
-        st.error(f"Failed to delete record: {e}")
-        return False
-
 # ==========================================
 # 3. Main Application Logic
 # ==========================================
@@ -227,11 +185,9 @@ try:
     running_tasks = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Activity'] == 'HEALTH')]
     active_count = len(running_tasks)
 
-    # --- HEADER & SYNC (MOBILE RESPONSIVE FIX) ---
-    # Using vertical flow instead of strict columns to prevent overlap on small screens
+    # --- HEADER & SYNC ---
     st.title("🧘 Health Tracker")
     
-    # Place sync button below title on mobile, or alongside on desktop
     if st.button("🔄 Sync Data", use_container_width=True):
         get_activity_log.clear()
         get_health_categories.clear()
@@ -335,8 +291,6 @@ try:
                 
                 param_values = {}
                 if custom_params:
-                    # Using dynamic columns based on screen size (handled automatically by Streamlit)
-                    # We just output the inputs directly instead of forcing them into strict columns
                     for param in custom_params:
                         if "[Drop:" in param:
                             clean_param = param.split("[Drop:")[0].strip()
@@ -350,7 +304,6 @@ try:
                         else:
                             param_values[param] = st.text_input(param, key=f"live_param_{idx}_{param}")
 
-                # Use columns for buttons as they are usually small enough even on mobile
                 col_stop, col_cancel = st.columns([1, 1])
                 with col_stop:
                     if st.button("🛑 SAVE", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
@@ -400,12 +353,10 @@ try:
         if health_categories and active_count == 0:
             tab_live, tab_manual, tab_summary, tab_history = st.tabs(["⏱️ Live", "📝 Manual", "📈 Summary", "📜 History"])
             
-            # --- LIVE TIMER TAB (MOBILE RESPONSIVE FIX) ---
+            # --- LIVE TIMER TAB ---
             with tab_live:
                 st.markdown("<div style='margin-bottom: 5px; color: #2e7b32;'><b>🚀 Start Session:</b></div>", unsafe_allow_html=True)
                 
-                # Removed columns here to prevent the dropdown and button from overlapping on mobile
-                # Elements will now stack vertically on smaller screens
                 selected_cat_live = st.selectbox("Activity", health_categories, key="start_cat_sel_live")
                 
                 st.markdown(
@@ -438,7 +389,7 @@ try:
                     time.sleep(1.0)
                     st.rerun()
 
-            # --- MANUAL LOG TAB (MOBILE RESPONSIVE FIX) ---
+            # --- MANUAL LOG TAB ---
             with tab_manual:
                 st.markdown("<div style='margin-bottom: 5px; color: #555;'><b>📝 Record Activity:</b></div>", unsafe_allow_html=True)
                 
@@ -455,7 +406,6 @@ try:
                 
                 m_date = st.date_input("Date", value=now.date(), key="manual_date")
                 
-                # Simplified time inputs for better mobile stacking
                 col_sh, col_sm = st.columns(2)
                 with col_sh: 
                     m_start_h = st.selectbox("Start HH", hours_opts, index=hours_opts.index(curr_h), key="man_sh")
@@ -471,7 +421,6 @@ try:
                 m_param_values = {}
                 if m_custom_params:
                     st.markdown("**Details:**")
-                    # Render parameters sequentially to ensure mobile stacking
                     for param in m_custom_params:
                         if "[Drop:" in param:
                             clean_param = param.split("[Drop:")[0].strip()
@@ -575,7 +524,6 @@ try:
 
                 st.markdown("<br><hr><br>", unsafe_allow_html=True)
                 
-                # --- NEW CATEGORY (MOBILE RESPONSIVE FIX) ---
                 with st.expander("➕ Create New Category", expanded=not health_categories):
                     num_params = st.number_input("Custom params to add?", min_value=0, max_value=20, value=2, step=1)
                     
@@ -585,7 +533,6 @@ try:
                         param_inputs = []
                         if num_params > 0:
                             st.markdown("#### Custom Params")
-                            # Removed columns for robust mobile stacking
                             for i in range(num_params):
                                 ph = ""
                                 if i == 0: ph = "e.g., Heart Rate"
@@ -623,6 +570,9 @@ try:
             with tab_history:
                 st.markdown("<div style='margin-bottom: 5px; color: #555;'><b>📜 Activity History:</b></div>", unsafe_allow_html=True)
                 
+                # --- NEW NOTE EXPLAINING HOW TO DELETE DATA ---
+                st.info("ℹ️ **Note:** To delete a record, you must manually delete the row from both the **MY ROUTINE 2026** (`activity_log` tab) and **Health_log** Google Sheets.")
+                
                 selected_history_cat = st.selectbox("Select Activity", health_categories, key="history_cat_sel")
                 cat_data = get_health_category_data(selected_history_cat)
                 
@@ -656,30 +606,19 @@ try:
                                 
                         param_html = f"<br><span style='color: #555; font-size: 14px;'>{' | '.join(params_display)}</span>" if params_display else ""
                         
-                        col_record, col_del = st.columns([10, 2])
-                        with col_record:
-                            st.markdown(f"""
-                            <div style='display: flex; align-items: flex-start; margin-bottom: 10px; background-color: #f8f9fa; padding: 8px 10px; border-radius: 8px; border-left: 4px solid #81c784;'>
-                                <div style='min-width: 80px; text-align: center; background-color: #e8f5e9; padding: 5px; border-radius: 5px; margin-right: 15px;'>
-                                    <strong style='color: #2e7b32; font-size: 16px;'>{day_str.split()[0]}</strong><br>
-                                    <span style='color: #666; font-size: 12px;'>{day_str.split()[1]}</span>
-                                </div>
-                                <div style='flex-grow: 1;'>
-                                    <strong style='font-size: 16px; color: #333;'>⏱️ {row['Start_Time']} - {row['End_Time']}</strong> <span style='color: #888; font-size: 14px;'>(Dur: {row['Duration']})</span>
-                                    {param_html}
-                                </div>
+                        st.markdown(f"""
+                        <div style='display: flex; align-items: flex-start; margin-bottom: 10px; background-color: #f8f9fa; padding: 8px 10px; border-radius: 8px; border-left: 4px solid #81c784;'>
+                            <div style='min-width: 80px; text-align: center; background-color: #e8f5e9; padding: 5px; border-radius: 5px; margin-right: 15px;'>
+                                <strong style='color: #2e7b32; font-size: 16px;'>{day_str.split()[0]}</strong><br>
+                                <span style='color: #666; font-size: 12px;'>{day_str.split()[1]}</span>
                             </div>
-                            """, unsafe_allow_html=True)
+                            <div style='flex-grow: 1;'>
+                                <strong style='font-size: 16px; color: #333;'>⏱️ {row['Start_Time']} - {row['End_Time']}</strong> <span style='color: #888; font-size: 14px;'>(Dur: {row['Duration']})</span>
+                                {param_html}
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
                             
-                        with col_del:
-                            del_key = f"del_{row['Date']}_{row['Start_Time']}_{selected_history_cat}"
-                            if st.button("🗑️", key=del_key, help="Delete this log"):
-                                with st.spinner("Deleting..."):
-                                    if delete_log_entry(str(row['Date']), str(row['Start_Time']), selected_history_cat):
-                                        st.success("Deleted!")
-                                        time.sleep(1.0)
-                                        st.rerun()
-                        
                         if i < len(cat_data) - 1:
                             next_row = cat_data.iloc[i+1]
                             next_date = next_row['Parsed_Date']

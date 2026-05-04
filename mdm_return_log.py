@@ -8,33 +8,27 @@ import pytz
 import time
 
 # --- Master Google Sheets Formulas for Duration ---
-# For MY ROUTINE 2026 (Start=B, End=C)
 GS_FORMULA = '=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm"), ""))'
-
-# For MDM RETURN LOG (Start=D, End=E)
 MDM_GS_FORMULA = '=IF(INDIRECT("E"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("E"&ROW())-INDIRECT("D"&ROW()), 1), "h:mm"), ""))'
 
 # ==========================================
-# 1. Configuration & Back Button 
+# 1. Configuration & Session State Init
 # ==========================================
 st.set_page_config(page_title="MDM Return Logger", page_icon="📦", layout="wide")
 
-# --- BACK BUTTON (LOCKED IN PLACE) ---
-if st.button("⬅️ Back to Dashboard", type="secondary"):
-    st.switch_page("dashboard.py")
-st.write("---") 
-# -------------------------------------
-
 if 'pomodoro_state' not in st.session_state:
     st.session_state.pomodoro_state = {}
+
+# --- ADDED: State for Selected Month ---
+if 'selected_month' not in st.session_state:
+    st.session_state.selected_month = datetime.now().strftime("%B")
 
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
     footer {visibility: hidden;}
-    /* Added 3rem top padding so the back button is perfectly visible */
-    .block-container {padding-top: 3rem; padding-bottom: 2rem;}
+    .block-container {padding-top: 2rem; padding-bottom: 2rem;}
     
     div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {
         border-radius: 0px !important;
@@ -49,7 +43,6 @@ st.markdown("""
         100% { transform: scale(0.95); opacity: 0.9; }
     }
     
-    /* Mobile specific adjustments */
     @media (max-width: 640px) {
         .stHeadingContainer h1 {
             font-size: 1.8rem !important;
@@ -109,7 +102,6 @@ def get_activity_log():
 
 @st.cache_data(ttl=300)
 def fetch_mdm_raw_data():
-    """Fetches both CONFIG and Log data in one cached call."""
     try:
         ss = get_mdm_spreadsheet()
         config_data = ss.worksheet("CONFIG").get_all_records()
@@ -120,7 +112,6 @@ def fetch_mdm_raw_data():
         return [], []
 
 def get_mdm_tasks(config_data, log_data):
-    """Parses tasks from the raw data without triggering an API call."""
     if not config_data:
         return ["Error loading tasks"]
         
@@ -179,7 +170,8 @@ try:
     # --- HEADER & SYNC ---
     col_title, col_sync = st.columns([4, 1])
     with col_title:
-        st.markdown(f"<h1 style='margin-top: 0px; margin-bottom: 0px;'>📦 MDM RETURN PREPARE</h1>", unsafe_allow_html=True)
+        # Display the selected month in the title
+        st.markdown(f"<h1 style='margin-top: 0px; margin-bottom: 0px;'>📦 MDM RETURN PREPARE ({st.session_state.selected_month})</h1>", unsafe_allow_html=True)
     with col_sync:
         st.markdown("<br>", unsafe_allow_html=True) 
         if st.button("🔄 Sync Data", use_container_width=True):
@@ -329,7 +321,7 @@ try:
                 
                 task_status = st.selectbox(
                     "Update Task Status:", 
-                    ["In Progress", "Completed", "Not Started"], 
+                    ["In Progress", "Completed"], 
                     index=0, 
                     key=f"status_{sheet_row}"
                 )
@@ -416,6 +408,101 @@ try:
                     get_activity_log.clear() 
                     time.sleep(1.0)
                     st.rerun()
+
+    # ==========================================
+    # 4. MASTER TASK LIST (Beautiful Table)
+    # ==========================================
+    st.markdown("<br><hr>", unsafe_allow_html=True)
+    st.markdown("### 📋 Master Task List")
+    
+    # Track the latest status for each Sheet/Work combo
+    status_dict = {}
+    if len(log_raw) > 1:
+        for row in log_raw[1:]:
+            if len(row) > 6:
+                sheet_val = str(row[0]).strip()
+                work_val = str(row[1]).strip()
+                status_val = str(row[6]).strip().title() # Format to Title Case
+                key = f"{sheet_val} | {work_val}"
+                status_dict[key] = status_val # Overwrites continuously, keeping the latest status
+
+    # Build the table data from CONFIG
+    table_data = []
+    for row in config_raw:
+        sheet_val = str(row.get('Sheet', '')).strip()
+        work_val = str(row.get('Work', '')).strip()
+        if sheet_val or work_val:
+            key = f"{sheet_val} | {work_val}"
+            current_status = status_dict.get(key, "Not Started")
+            table_data.append({
+                "Sheet": sheet_val,
+                "Work": work_val,
+                "Status": current_status
+            })
+
+    # Create the DataFrame and apply Pandas Styling
+    if table_data:
+        df_table = pd.DataFrame(table_data)
+        
+        def highlight_status(row):
+            val = row['Status']
+            # Soft, premium Tailwind-style colors
+            if val == 'Completed':
+                color = '#dcfce7' # Soft Green
+                text = '#166534'
+            elif val == 'In Progress':
+                color = '#fef08a' # Soft Yellow
+                text = '#854d0e'
+            else: # Not Started
+                color = '#fee2e2' # Soft Red
+                text = '#991b1b'
+            return [f'background-color: {color}; color: {text}; font-weight: 500'] * len(row)
+
+        styled_df = df_table.style.apply(highlight_status, axis=1)
+        
+        # Display as a full-width clean dataframe
+        st.dataframe(styled_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No tasks found in CONFIG sheet.")
+
+    # ==========================================
+    # 5. Configuration & Reset Logic
+    # ==========================================
+    st.markdown("<br>", unsafe_allow_html=True)
+    with st.expander("⚙️ Configuration & Reset"):
+        st.markdown("Select a month to begin tracking your MDM returns. **Warning:** Clicking 'Reset All' will clear all current progress in the database and start fresh for the selected month.")
+        
+        months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+        current_idx = months.index(st.session_state.selected_month) if st.session_state.selected_month in months else 0
+        
+        new_month = st.selectbox("Tracking Month", months, index=current_idx)
+        
+        if new_month != st.session_state.selected_month:
+            st.session_state.selected_month = new_month
+            st.rerun()
+
+        st.warning("🚨 This action will delete all existing log entries from the MDM RETURN LOG database.")
+        
+        if st.button("🗑️ Reset All (Start Fresh)", type="primary", use_container_width=True):
+            try:
+                mdm_ss = get_mdm_spreadsheet()
+                log_sheet = mdm_ss.get_worksheet(0)
+                
+                # Fetch headers to preserve them
+                headers = log_sheet.row_values(1)
+                
+                # Clear the sheet and rewrite only the headers
+                log_sheet.clear()
+                if headers:
+                    log_sheet.append_row(headers)
+                    
+                # Clear cache and refresh
+                fetch_mdm_raw_data.clear()
+                st.success(f"Log cleared! Ready to start tracking for {st.session_state.selected_month}.")
+                time.sleep(1.5)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to reset database: {e}")
 
 except Exception as e:
     st.error(f"Critical System Error: Make sure your spreadsheets exist and are shared. Details: {e}")

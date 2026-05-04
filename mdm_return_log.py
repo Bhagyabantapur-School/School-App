@@ -160,7 +160,7 @@ try:
     running_tasks = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Notes'] == 'MDM Return Task')]
     active_count = len(running_tasks)
 
-    # --- PROGRESS CALCULATION (Now quota-safe) ---
+    # --- PROGRESS CALCULATION ---
     total_tasks = sum(1 for row in config_raw if str(row.get('Sheet', '')).strip() or str(row.get('Work', '')).strip())
     
     completed_count = 0
@@ -172,47 +172,74 @@ try:
     progress_val = completed_count / total_tasks if total_tasks > 0 else 0
     progress_percentage = int(progress_val * 100)
 
-    # --- HEADER & SYNC & DONUT CHART ---
-    col_chart, col_title, col_sync = st.columns([2, 5, 2], gap="small")
-    
+    # --- HEADER & SYNC ---
+    col_title, col_sync = st.columns([4, 1])
+    with col_title:
+        st.markdown(f"<h1 style='margin-top: 0px; margin-bottom: 0px;'>📦 MDM Logger</h1>", unsafe_allow_html=True)
+    with col_sync:
+        st.markdown("<br>", unsafe_allow_html=True) 
+        if st.button("🔄 Sync Data", use_container_width=True):
+            get_activity_log.clear()
+            fetch_mdm_raw_data.clear() 
+            st.toast("Synced with Google Sheets!")
+            time.sleep(1.0)
+            st.rerun()
+
+    # --- ATTRACTIVE PROGRESS BOX ---
+    # We use a CSS adjacent sibling selector to style exactly the row of columns below this anchor
+    st.markdown(
+        """
+        <div id="progress_box_anchor"></div>
+        <style>
+        div.element-container:has(#progress_box_anchor) + div[data-testid="stHorizontalBlock"] {
+            background: linear-gradient(135deg, #f8fbff 0%, #ffffff 100%);
+            border: 1px solid #cce0ff;
+            border-radius: 16px;
+            padding: 15px 25px;
+            box-shadow: 0 4px 12px rgba(0,104,201,0.08);
+            align-items: center; /* This magically vertically centers the text with the chart */
+            margin-bottom: 25px;
+            margin-top: 15px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # The columns inside the attractive box
+    col_text, col_chart = st.columns([1.5, 1])
+
+    with col_text:
+        st.markdown(f"""
+            <div style='display: flex; flex-direction: column; justify-content: center;'>
+                <h3 style='margin: 0; color: #1e3a8a; font-size: 26px; font-weight: 700;'>Progress</h3>
+                <p style='margin: 5px 0 0 0; color: #64748b; font-size: 16px; font-weight: 500;'>{completed_count} of {total_tasks} tasks finished</p>
+            </div>
+        """, unsafe_allow_html=True)
+
     with col_chart:
         import plotly.graph_objects as go
-        
         remaining = 100 - progress_percentage
         
         fig = go.Figure(data=[go.Pie(
             values=[progress_percentage, remaining],
             labels=['Completed', 'Pending'],
-            hole=0.7, 
-            marker=dict(colors=['#0068c9', '#e0e0e0']), 
+            hole=0.75, # Thinner, sleeker donut ring
+            marker=dict(colors=['#0068c9', '#e2e8f0']), # Google Blue and subtle grey
             textinfo='none', 
             hoverinfo='label+percent'
         )])
         
         fig.update_layout(
-            annotations=[dict(text=f"{progress_percentage}%", x=0.5, y=0.5, font_size=18, showarrow=False)],
+            annotations=[dict(text=f"<b>{progress_percentage}%</b>", x=0.5, y=0.5, font_size=24, showarrow=False, font=dict(color="#0068c9"))],
             showlegend=False,
-            margin=dict(t=5, b=5, l=5, r=5), 
-            height=110, 
+            margin=dict(t=0, b=0, l=0, r=0), 
+            height=130, # Perfect height to align with the text
             paper_bgcolor='rgba(0,0,0,0)', 
             plot_bgcolor='rgba(0,0,0,0)'
         )
-        
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-
-    with col_title:
-        st.markdown(f"<h1 style='margin-top: 15px; margin-bottom: 0px;'>📦 MDM Logger</h1>", unsafe_allow_html=True)
-        st.caption(f"{completed_count} of {total_tasks} tasks finished")
-    
-    with col_sync:
-        st.markdown("<br>", unsafe_allow_html=True) 
-        if st.button("🔄 Sync Data", use_container_width=True):
-            get_activity_log.clear()
-            fetch_mdm_raw_data.clear() # Clear the unified cache
-            st.toast("Synced with Google Sheets!")
-            time.sleep(1.0)
-            st.rerun()
-            
+        
     st.markdown("---")
 
     # --- FLOATING ACTIVE BADGE ---

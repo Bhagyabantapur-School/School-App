@@ -8,13 +8,22 @@ import pytz
 import time
 
 # --- Master Google Sheets Formulas for Duration ---
+# For MY ROUTINE 2026 (Start=B, End=C)
 GS_FORMULA = '=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm"), ""))'
+
+# For MDM RETURN LOG (Start=D, End=E)
 MDM_GS_FORMULA = '=IF(INDIRECT("E"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("E"&ROW())-INDIRECT("D"&ROW()), 1), "h:mm"), ""))'
 
 # ==========================================
-# 1. Configuration & Session State Init
+# 1. Configuration & Back Button 
 # ==========================================
 st.set_page_config(page_title="MDM Return Logger", page_icon="📦", layout="wide")
+
+# --- BACK BUTTON (LOCKED IN PLACE) ---
+if st.button("⬅️ Back to Dashboard", type="secondary"):
+    st.switch_page("dashboard.py")
+st.write("---") 
+# -------------------------------------
 
 if 'pomodoro_state' not in st.session_state:
     st.session_state.pomodoro_state = {}
@@ -24,7 +33,8 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
     footer {visibility: hidden;}
-    .block-container {padding-top: 2rem; padding-bottom: 2rem;}
+    /* Added 3rem top padding so the back button is perfectly visible */
+    .block-container {padding-top: 3rem; padding-bottom: 2rem;}
     
     div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {
         border-radius: 0px !important;
@@ -39,6 +49,7 @@ st.markdown("""
         100% { transform: scale(0.95); opacity: 0.9; }
     }
     
+    /* Mobile specific adjustments */
     @media (max-width: 640px) {
         .stHeadingContainer h1 {
             font-size: 1.8rem !important;
@@ -98,6 +109,7 @@ def get_activity_log():
 
 @st.cache_data(ttl=300)
 def fetch_mdm_raw_data():
+    """Fetches both CONFIG and Log data in one cached call."""
     try:
         ss = get_mdm_spreadsheet()
         config_data = ss.worksheet("CONFIG").get_all_records()
@@ -108,6 +120,7 @@ def fetch_mdm_raw_data():
         return [], []
 
 def get_mdm_tasks(config_data, log_data):
+    """Parses tasks from the raw data without triggering an API call."""
     if not config_data:
         return ["Error loading tasks"]
         
@@ -314,10 +327,9 @@ try:
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # --- UPDATED DROPDOWN (No "Not Started") ---
                 task_status = st.selectbox(
                     "Update Task Status:", 
-                    ["In Progress", "Completed"], 
+                    ["In Progress", "Completed", "Not Started"], 
                     index=0, 
                     key=f"status_{sheet_row}"
                 )
@@ -404,62 +416,6 @@ try:
                     get_activity_log.clear() 
                     time.sleep(1.0)
                     st.rerun()
-
-    # ==========================================
-    # 4. MASTER TASK LIST (Beautiful Table)
-    # ==========================================
-    st.markdown("<br><hr>", unsafe_allow_html=True)
-    st.markdown("### 📋 Master Task List")
-    
-    # Track the latest status for each Sheet/Work combo
-    status_dict = {}
-    if len(log_raw) > 1:
-        for row in log_raw[1:]:
-            if len(row) > 6:
-                sheet_val = str(row[0]).strip()
-                work_val = str(row[1]).strip()
-                status_val = str(row[6]).strip().title() # Format to Title Case
-                key = f"{sheet_val} | {work_val}"
-                status_dict[key] = status_val # Overwrites continuously, keeping the latest status
-
-    # Build the table data from CONFIG
-    table_data = []
-    for row in config_raw:
-        sheet_val = str(row.get('Sheet', '')).strip()
-        work_val = str(row.get('Work', '')).strip()
-        if sheet_val or work_val:
-            key = f"{sheet_val} | {work_val}"
-            current_status = status_dict.get(key, "Not Started")
-            table_data.append({
-                "Sheet": sheet_val,
-                "Work": work_val,
-                "Status": current_status
-            })
-
-    # Create the DataFrame and apply Pandas Styling
-    if table_data:
-        df_table = pd.DataFrame(table_data)
-        
-        def highlight_status(row):
-            val = row['Status']
-            # Soft, premium Tailwind-style colors
-            if val == 'Completed':
-                color = '#dcfce7' # Soft Green
-                text = '#166534'
-            elif val == 'In Progress':
-                color = '#fef08a' # Soft Yellow
-                text = '#854d0e'
-            else: # Not Started
-                color = '#fee2e2' # Soft Red
-                text = '#991b1b'
-            return [f'background-color: {color}; color: {text}; font-weight: 500'] * len(row)
-
-        styled_df = df_table.style.apply(highlight_status, axis=1)
-        
-        # Display as a full-width clean dataframe
-        st.dataframe(styled_df, use_container_width=True, hide_index=True)
-    else:
-        st.info("No tasks found in CONFIG sheet.")
 
 except Exception as e:
     st.error(f"Critical System Error: Make sure your spreadsheets exist and are shared. Details: {e}")

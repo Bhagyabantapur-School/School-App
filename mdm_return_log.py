@@ -131,6 +131,7 @@ ist_timezone = pytz.timezone('Asia/Kolkata')
 now = datetime.now(ist_timezone)
 today_str = now.strftime('%Y-%m-%d')
 mdm_date_str = now.strftime('%d-%b-%Y') 
+current_year = now.strftime('%Y')
 
 try:
     log_df = get_activity_log()
@@ -148,7 +149,8 @@ try:
     # --- HEADER & SYNC ---
     col_title, col_sync = st.columns([4, 1])
     with col_title:
-        st.markdown(f"<h1 style='margin-top: 0px;'>📦 MDM RETURN PREPARE ({st.session_state.selected_month})</h1>", unsafe_allow_html=True)
+        # Title updated to include the dynamic Year
+        st.markdown(f"<h1 style='margin-top: 0px;'>📦 MDM RETURN PREPARE ({st.session_state.selected_month} {current_year})</h1>", unsafe_allow_html=True)
     with col_sync:
         if st.button("🔄 Sync", use_container_width=True):
             get_activity_log.clear(); fetch_mdm_raw_data.clear(); st.rerun()
@@ -197,7 +199,15 @@ try:
                 get_activity_log.clear(); st.rerun()
 
     # --- MASTER TASK LIST TABLE ---
-    st.markdown("<br><hr>### 📋 Master Task List", unsafe_allow_html=True)
+    # Replaced markdown '###' with a custom, beautiful CSS-styled header
+    st.markdown("""
+        <br><hr>
+        <div style='display: flex; align-items: center; margin-bottom: 15px;'>
+            <span style='font-size: 28px; margin-right: 10px;'>📋</span>
+            <span style='background: linear-gradient(120deg, #1e3a8a, #0068c9); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 28px; font-weight: 800; letter-spacing: 0.5px;'>Master Task List</span>
+        </div>
+    """, unsafe_allow_html=True)
+    
     table_data = [{"Sheet": str(r.get('Sheet','')), "Work": str(r.get('Work','')), "Status": str(r.get('Status','PENDING')).title()} for r in config_raw]
     if table_data:
         df_table = pd.DataFrame(table_data)
@@ -226,7 +236,7 @@ try:
                     # One single API call to update the entire month and status range
                     config_ws.update(range_name=f"C2:D{len(rows)}", values=batch_values)
                     
-                    fetch_mdm_raw_data.clear(); st.success(f"Tasks reset for {new_month}!"); time.sleep(1.5); st.rerun()
+                    fetch_mdm_raw_data.clear(); st.success(f"Tasks reset for {new_month} {current_year}!"); time.sleep(1.5); st.rerun()
             except Exception as e:
                 st.error(f"Reset Failed: {e}")
 

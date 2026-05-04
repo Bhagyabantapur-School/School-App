@@ -55,7 +55,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. Database Connection & Helpers
+# 2. Database Connection & Caching Helpers
 # ==========================================
 @st.cache_resource
 def init_connection():
@@ -79,7 +79,6 @@ def get_mdm_spreadsheet():
     return client.open("MDM RETURN LOG")
 
 def smart_append_row(sheet, row_data):
-    """Safely appends a row by finding the true end of Column A, avoiding formatting bugs."""
     col_a = sheet.col_values(1)
     next_row = len(col_a) + 1
     try:
@@ -101,49 +100,46 @@ def get_activity_log():
     df = df[df["Date"].astype(str).str.strip() != ""] 
     return df
 
+# --- THE FIX: Unified Caching for MDM Data to prevent 429 Errors ---
 @st.cache_data(ttl=300)
-def get_mdm_tasks():
-    """Fetches tasks from CONFIG and hides any that are marked as Completed in the log tab."""
+def fetch_mdm_raw_data():
+    """Fetches both CONFIG and Log data in one cached call."""
     try:
         ss = get_mdm_spreadsheet()
-        
-        # 1. Fetch full task list from CONFIG
-        config_sheet = ss.worksheet("CONFIG")
-        config_data = config_sheet.get_all_records()
-        
-        all_tasks = []
-        for row in config_data:
-            sheet_val = str(row.get('Sheet', '')).strip()
-            work_val = str(row.get('Work', '')).strip()
-            if sheet_val or work_val: 
-                all_tasks.append(f"{sheet_val} | {work_val}")
-                
-        # 2. Fetch logged data from the first tab to find Completed tasks
-        log_sheet = ss.get_worksheet(0)
-        log_data = log_sheet.get_all_values()
-        
-        completed_tasks = set()
-        if len(log_data) > 1:
-            for row in log_data[1:]:
-                # Check if row has at least 7 columns (Index 6 is the Status column)
-                if len(row) > 6:
-                    sheet_val = str(row[0]).strip()
-                    work_val = str(row[1]).strip()
-                    status_val = str(row[6]).strip().upper()
-                    
-                    if status_val == "COMPLETED":
-                        completed_tasks.add(f"{sheet_val} | {work_val}")
-                        
-        # 3. Filter out completed tasks
-        available_tasks = [task for task in all_tasks if task not in completed_tasks]
-                
-        if not available_tasks:
-            return ["🎉 All MDM tasks completed!"]
-        return available_tasks
-        
+        config_data = ss.worksheet("CONFIG").get_all_records()
+        log_data = ss.get_worksheet(0).get_all_values()
+        return config_data, log_data
     except Exception as e:
-        st.error(f"Failed to read CONFIG sheet: {e}")
+        st.error(f"Failed to fetch MDM data: {e}")
+        return [], []
+
+def get_mdm_tasks(config_data, log_data):
+    """Parses tasks from the raw data without triggering an API call."""
+    if not config_data:
         return ["Error loading tasks"]
+        
+    all_tasks = []
+    for row in config_data:
+        sheet_val = str(row.get('Sheet', '')).strip()
+        work_val = str(row.get('Work', '')).strip()
+        if sheet_val or work_val: 
+            all_tasks.append(f"{sheet_val} | {work_val}")
+            
+    completed_tasks = set()
+    if len(log_data) > 1:
+        for row in log_data[1:]:
+            if len(row) > 6:
+                sheet_val = str(row[0]).strip()
+                work_val = str(row[1]).strip()
+                status_val = str(row[6]).strip().upper()
+                if status_val == "COMPLETED":
+                    completed_tasks.add(f"{sheet_val} | {work_val}")
+                    
+    available_tasks = [task for task in all_tasks if task not in completed_tasks]
+            
+    if not available_tasks:
+        return ["🎉 All MDM tasks completed!"]
+    return available_tasks
 
 # ==========================================
 # 3. Main Application Logic
@@ -151,50 +147,32 @@ def get_mdm_tasks():
 ist_timezone = pytz.timezone('Asia/Kolkata')
 now = datetime.now(ist_timezone)
 today_str = now.strftime('%Y-%m-%d')
-mdm_date_str = now.strftime('%d-%b-%Y') # Specific format for MDM sheet
+mdm_date_str = now.strftime('%d-%b-%Y') 
 
 try:
     log_df = get_activity_log()
-    mdm_tasks_list = get_mdm_tasks()
+    
+    # Use the unified cache to get data for both tasks and progress
+    config_raw, log_raw = fetch_mdm_raw_data()
+    mdm_tasks_list = get_mdm_tasks(config_raw, log_raw)
     
     # Filter for currently running MDM Tasks
     running_tasks = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Notes'] == 'MDM Return Task')]
     active_count = len(running_tasks)
 
-    # --- PROGRESS CALCULATION ---
-    # To show meaningful progress, we need the total tasks from CONFIG
-    # and the number of completed tasks from the MDM Log.
-    try:
-        ss_mdm = get_mdm_spreadsheet()
-        config_sheet = ss_mdm.worksheet("CONFIG")
-        config_data = config_sheet.get_all_records()
-        
-        # 1. Total valid tasks
-        total_tasks = sum(1 for row in config_data if str(row.get('Sheet', '')).strip() or str(row.get('Work', '')).strip())
-        
-        # 2. Completed tasks
-        log_sheet = ss_mdm.get_worksheet(0)
-        log_data = log_sheet.get_all_values()
-        
-        completed_count = 0
-        if len(log_data) > 1:
-            for row in log_data[1:]:
-                if len(row) > 6 and str(row[6]).strip().upper() == "COMPLETED":
-                    completed_count += 1
-                    
-        # 3. Calculate percentage
-        progress_val = completed_count / total_tasks if total_tasks > 0 else 0
-        progress_percentage = int(progress_val * 100)
-        
-    except Exception as e:
-        st.warning(f"Could not calculate progress: {e}")
-        total_tasks = 1
-        completed_count = 0
-        progress_val = 0
-        progress_percentage = 0
+    # --- PROGRESS CALCULATION (Now quota-safe) ---
+    total_tasks = sum(1 for row in config_raw if str(row.get('Sheet', '')).strip() or str(row.get('Work', '')).strip())
+    
+    completed_count = 0
+    if len(log_raw) > 1:
+        for row in log_raw[1:]:
+            if len(row) > 6 and str(row[6]).strip().upper() == "COMPLETED":
+                completed_count += 1
+                
+    progress_val = completed_count / total_tasks if total_tasks > 0 else 0
+    progress_percentage = int(progress_val * 100)
 
     # --- HEADER & SYNC & DONUT CHART ---
-    # Adjusted column ratios to give the chart a bit more room
     col_chart, col_title, col_sync = st.columns([2, 5, 2], gap="small")
     
     with col_chart:
@@ -214,33 +192,29 @@ try:
         fig.update_layout(
             annotations=[dict(text=f"{progress_percentage}%", x=0.5, y=0.5, font_size=18, showarrow=False)],
             showlegend=False,
-            # Added a tiny 5px margin on all sides to prevent edge clipping
             margin=dict(t=5, b=5, l=5, r=5), 
-            height=110, # Increased height slightly for a perfect circle
-            # Removed the strict 'width' parameter so it adapts to the column
+            height=110, 
             paper_bgcolor='rgba(0,0,0,0)', 
             plot_bgcolor='rgba(0,0,0,0)'
         )
         
-        # Switched use_container_width to True to let Streamlit handle the bounds perfectly
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     with col_title:
-        # Use HTML to vertically align the title nicely with the chart
-        st.markdown(f"<h1 style='margin-top: 15px; margin-bottom: 0px;'>📦 MDM Return Logger</h1>", unsafe_allow_html=True)
+        st.markdown(f"<h1 style='margin-top: 15px; margin-bottom: 0px;'>📦 MDM Logger</h1>", unsafe_allow_html=True)
         st.caption(f"{completed_count} of {total_tasks} tasks finished")
     
     with col_sync:
         st.markdown("<br>", unsafe_allow_html=True) 
         if st.button("🔄 Sync Data", use_container_width=True):
             get_activity_log.clear()
-            get_mdm_tasks.clear()
+            fetch_mdm_raw_data.clear() # Clear the unified cache
             st.toast("Synced with Google Sheets!")
             time.sleep(1.0)
             st.rerun()
             
     st.markdown("---")
-   
+
     # --- FLOATING ACTIVE BADGE ---
     if active_count > 0:
         st.markdown(f"""
@@ -266,7 +240,6 @@ try:
                     mins_elapsed = int(elapsed_time.total_seconds() // 60)
                 except: mins_elapsed = 0 
                 
-                # Pomodoro Logic
                 cycle_minute = mins_elapsed % 30
                 pomodoro_count = (mins_elapsed // 30) + 1
                 current_state = "Focus" if cycle_minute < 25 else "Break"
@@ -300,12 +273,12 @@ try:
 
                 if current_state == "Focus":
                     p_state = "🍅 Focus Time"
-                    p_color = "#0068c9" # Blue for Work
+                    p_color = "#0068c9" 
                     p_left = 25 - cycle_minute
                     p_prog = cycle_minute / 25.0
                 else:
                     p_state = "☕ Rest"
-                    p_color = "#2e7b32" # Green for Break
+                    p_color = "#2e7b32" 
                     p_left = 30 - cycle_minute
                     p_prog = (cycle_minute - 25) / 5.0
                 
@@ -325,7 +298,6 @@ try:
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # --- NEW STATUS SELECTOR ---
                 task_status = st.selectbox(
                     "Update Task Status:", 
                     ["In Progress", "Completed", "Not Started"], 
@@ -348,21 +320,19 @@ try:
                         parts = display_name.split(" | ", 1)
                         sheet_name = parts[0] if len(parts) > 0 else ""
                         work_name = parts[1] if len(parts) > 1 else ""
-                        
                         start_str = active_row['Start_Time']
                         
-                        # Notice we are injecting MDM_GS_FORMULA here instead of duration_str
                         row_data = [sheet_name, work_name, mdm_date_str, start_str, end_time_log, MDM_GS_FORMULA, task_status]
                         
                         # 3. Append to MDM Log
                         try:
                             mdm_ss = get_mdm_spreadsheet()
-                            mdm_target_sheet = mdm_ss.get_worksheet(0) # First tab
+                            mdm_target_sheet = mdm_ss.get_worksheet(0) 
                             smart_append_row(mdm_target_sheet, row_data)
                             
-                            # Targeted clear
+                            # Targeted clear of caches
                             get_activity_log.clear() 
-                            get_mdm_tasks.clear() # Clear tasks to remove if completed
+                            fetch_mdm_raw_data.clear() 
                             st.success(f"Saved: Task logged to both databases!")
                             time.sleep(1.0)
                             st.rerun()

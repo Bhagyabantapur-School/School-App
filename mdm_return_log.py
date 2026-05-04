@@ -8,22 +8,13 @@ import pytz
 import time
 
 # --- Master Google Sheets Formulas for Duration ---
-# For MY ROUTINE 2026 (Start=B, End=C)
 GS_FORMULA = '=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm"), ""))'
-
-# For MDM RETURN LOG (Start=D, End=E)
 MDM_GS_FORMULA = '=IF(INDIRECT("E"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("E"&ROW())-INDIRECT("D"&ROW()), 1), "h:mm"), ""))'
 
 # ==========================================
 # 1. Configuration & Session State Init
 # ==========================================
 st.set_page_config(page_title="MDM Return Logger", page_icon="📦", layout="wide")
-
-# --- BACK BUTTON (MUST GO HERE) ---
-if st.button("⬅️ Back to Dashboard", type="secondary"):
-    st.switch_page("dashboard.py")
-st.write("---") 
-# ----------------------------------
 
 if 'pomodoro_state' not in st.session_state:
     st.session_state.pomodoro_state = {}
@@ -48,7 +39,6 @@ st.markdown("""
         100% { transform: scale(0.95); opacity: 0.9; }
     }
     
-    /* Mobile specific adjustments */
     @media (max-width: 640px) {
         .stHeadingContainer h1 {
             font-size: 1.8rem !important;
@@ -106,10 +96,8 @@ def get_activity_log():
     df = df[df["Date"].astype(str).str.strip() != ""] 
     return df
 
-# --- THE FIX: Unified Caching for MDM Data to prevent 429 Errors ---
 @st.cache_data(ttl=300)
 def fetch_mdm_raw_data():
-    """Fetches both CONFIG and Log data in one cached call."""
     try:
         ss = get_mdm_spreadsheet()
         config_data = ss.worksheet("CONFIG").get_all_records()
@@ -120,7 +108,6 @@ def fetch_mdm_raw_data():
         return [], []
 
 def get_mdm_tasks(config_data, log_data):
-    """Parses tasks from the raw data without triggering an API call."""
     if not config_data:
         return ["Error loading tasks"]
         
@@ -158,11 +145,9 @@ mdm_date_str = now.strftime('%d-%b-%Y')
 try:
     log_df = get_activity_log()
     
-    # Use the unified cache to get data for both tasks and progress
     config_raw, log_raw = fetch_mdm_raw_data()
     mdm_tasks_list = get_mdm_tasks(config_raw, log_raw)
     
-    # Filter for currently running MDM Tasks
     running_tasks = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Notes'] == 'MDM Return Task')]
     active_count = len(running_tasks)
 
@@ -192,13 +177,11 @@ try:
             st.rerun()
 
     # --- ATTRACTIVE PROGRESS BOX ---
-    # We use a CSS adjacent sibling selector to style exactly the row of columns below this anchor
     st.markdown(
         """
         <div id="progress_box_anchor"></div>
         <style>
         div.element-container:has(#progress_box_anchor) + div[data-testid="stHorizontalBlock"] {
-            /* Changed to a beautiful light sky blue gradient */
             background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%);
             border: 1px solid #7dd3fc;
             border-radius: 16px;
@@ -213,7 +196,6 @@ try:
         unsafe_allow_html=True
     )
 
-    # The columns inside the attractive box
     col_text, col_chart = st.columns([1.5, 1])
 
     with col_text:
@@ -231,8 +213,8 @@ try:
         fig = go.Figure(data=[go.Pie(
             values=[progress_percentage, remaining],
             labels=['Completed', 'Pending'],
-            hole=0.75, # Thinner, sleeker donut ring
-            marker=dict(colors=['#0068c9', '#e2e8f0']), # Google Blue and subtle grey
+            hole=0.75, 
+            marker=dict(colors=['#0068c9', '#e2e8f0']), 
             textinfo='none', 
             hoverinfo='label+percent'
         )])
@@ -241,7 +223,7 @@ try:
             annotations=[dict(text=f"<b>{progress_percentage}%</b>", x=0.5, y=0.5, font_size=24, showarrow=False, font=dict(color="#0068c9"))],
             showlegend=False,
             margin=dict(t=0, b=0, l=0, r=0), 
-            height=130, # Perfect height to align with the text
+            height=130, 
             paper_bgcolor='rgba(0,0,0,0)', 
             plot_bgcolor='rgba(0,0,0,0)'
         )
@@ -332,9 +314,10 @@ try:
                 </div>
                 """, unsafe_allow_html=True)
                 
+                # --- UPDATED DROPDOWN (No "Not Started") ---
                 task_status = st.selectbox(
                     "Update Task Status:", 
-                    ["In Progress", "Completed", "Not Started"], 
+                    ["In Progress", "Completed"], 
                     index=0, 
                     key=f"status_{sheet_row}"
                 )
@@ -344,13 +327,11 @@ try:
                     if st.button("🛑 STOP & LOG", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
                         end_time_log = now.strftime('%H:%M')
                         
-                        # 1. Update Routine App Master Log
                         main_ss = get_main_spreadsheet()
                         log_sheet = main_ss.worksheet("activity_log")
                         log_sheet.update_cell(sheet_row, 3, end_time_log) 
                         log_sheet.update_cell(sheet_row, 4, GS_FORMULA)                   
                         
-                        # 2. Extract specific MDM data for the MDM Log
                         parts = display_name.split(" | ", 1)
                         sheet_name = parts[0] if len(parts) > 0 else ""
                         work_name = parts[1] if len(parts) > 1 else ""
@@ -358,13 +339,11 @@ try:
                         
                         row_data = [sheet_name, work_name, mdm_date_str, start_str, end_time_log, MDM_GS_FORMULA, task_status]
                         
-                        # 3. Append to MDM Log
                         try:
                             mdm_ss = get_mdm_spreadsheet()
                             mdm_target_sheet = mdm_ss.get_worksheet(0) 
                             smart_append_row(mdm_target_sheet, row_data)
                             
-                            # Targeted clear of caches
                             get_activity_log.clear() 
                             fetch_mdm_raw_data.clear() 
                             st.success(f"Saved: Task logged to both databases!")
@@ -425,6 +404,62 @@ try:
                     get_activity_log.clear() 
                     time.sleep(1.0)
                     st.rerun()
+
+    # ==========================================
+    # 4. MASTER TASK LIST (Beautiful Table)
+    # ==========================================
+    st.markdown("<br><hr>", unsafe_allow_html=True)
+    st.markdown("### 📋 Master Task List")
+    
+    # Track the latest status for each Sheet/Work combo
+    status_dict = {}
+    if len(log_raw) > 1:
+        for row in log_raw[1:]:
+            if len(row) > 6:
+                sheet_val = str(row[0]).strip()
+                work_val = str(row[1]).strip()
+                status_val = str(row[6]).strip().title() # Format to Title Case
+                key = f"{sheet_val} | {work_val}"
+                status_dict[key] = status_val # Overwrites continuously, keeping the latest status
+
+    # Build the table data from CONFIG
+    table_data = []
+    for row in config_raw:
+        sheet_val = str(row.get('Sheet', '')).strip()
+        work_val = str(row.get('Work', '')).strip()
+        if sheet_val or work_val:
+            key = f"{sheet_val} | {work_val}"
+            current_status = status_dict.get(key, "Not Started")
+            table_data.append({
+                "Sheet": sheet_val,
+                "Work": work_val,
+                "Status": current_status
+            })
+
+    # Create the DataFrame and apply Pandas Styling
+    if table_data:
+        df_table = pd.DataFrame(table_data)
+        
+        def highlight_status(row):
+            val = row['Status']
+            # Soft, premium Tailwind-style colors
+            if val == 'Completed':
+                color = '#dcfce7' # Soft Green
+                text = '#166534'
+            elif val == 'In Progress':
+                color = '#fef08a' # Soft Yellow
+                text = '#854d0e'
+            else: # Not Started
+                color = '#fee2e2' # Soft Red
+                text = '#991b1b'
+            return [f'background-color: {color}; color: {text}; font-weight: 500'] * len(row)
+
+        styled_df = df_table.style.apply(highlight_status, axis=1)
+        
+        # Display as a full-width clean dataframe
+        st.dataframe(styled_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No tasks found in CONFIG sheet.")
 
 except Exception as e:
     st.error(f"Critical System Error: Make sure your spreadsheets exist and are shared. Details: {e}")

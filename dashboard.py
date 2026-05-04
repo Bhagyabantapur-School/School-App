@@ -3,7 +3,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 
-# 1. GOOGLE SHEETS CONNECTION
+# 1. GOOGLE SHEETS CONNECTION SETUP
 @st.cache_resource
 def init_gsheets():
     scopes = [
@@ -41,19 +41,23 @@ def get_time_stats(last_opened_str):
 
 def log_and_open(app_name, target_file):
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # 1. Write to Google silently (Protects against 429 Errors)
     try:
-        sheet = client.open(SHEET_NAME).worksheet("Tracker")
+        sheet = client.open(SHEET_NAME).worksheet("Tracker") 
         cell = sheet.find(app_name)
         if cell:
             sheet.update_cell(cell.row, 2, now_str)
         else:
             sheet.append_row([app_name, now_str])
-        
     except Exception as e:
-        print(f"Failed to log time: {e}")
+        print(f"Silent log failure: {e}")
+        
+    # 2. OPTIMISTIC UPDATE: Instantly update the UI without reloading Google
     cached_data = get_tracker_data() 
-    cached_data[app_name] = now_str
+    cached_data[app_name] = now_str 
     
+    # 3. Switch page
     st.switch_page(target_file)
 
 # 3. SCOPED STYLING
@@ -105,7 +109,7 @@ with col_title:
     st.title("🚀 My Personal Dashboard")
     st.markdown("Welcome back! Here is a summary of your systems:")
 with col_count:
-    st.metric("Total Active Apps", "9") # <-- Updated metric to 9
+    st.metric("Total Active Apps", "10") # <-- Updated metric to 10
 st.write("---") 
 
 # ROW 1
@@ -141,6 +145,11 @@ with r3_col2:
     st.markdown(create_card("💾", "Backup Tracker", "Last Backup", "2 Hours Ago", "#FFF3E0", "#FB8C00", "#EF6C00", tracker_data), unsafe_allow_html=True)
     if st.button("Open App", key="btn8", use_container_width=True): log_and_open("Backup Tracker", "backup_tracker_app.py")
 with r3_col3:
-    # <-- Added the new Routine App here to complete the grid
     st.markdown(create_card("⏱️", "Daily Routine", "Next Session", "Yoga", "#FFF8E1", "#FFB300", "#FF8F00", tracker_data), unsafe_allow_html=True)
     if st.button("Open App", key="btn9", use_container_width=True): log_and_open("Daily Routine", "routine_app.py")
+
+# ROW 4 (NEW MDM APP)
+r4_col1, r4_col2, r4_col3 = st.columns(3)
+with r4_col1:
+    st.markdown(create_card("📦", "MDM Returns", "Sync", "Ready", "#E8F5E9", "#43A047", "#2E7D32", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn10", use_container_width=True): log_and_open("MDM Returns", "mdm_return_log.py")

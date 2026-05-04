@@ -192,12 +192,13 @@ try:
         <div id="progress_box_anchor"></div>
         <style>
         div.element-container:has(#progress_box_anchor) + div[data-testid="stHorizontalBlock"] {
-            background: linear-gradient(135deg, #f8fbff 0%, #ffffff 100%);
-            border: 1px solid #cce0ff;
+            /* Changed to a beautiful light sky blue gradient */
+            background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%);
+            border: 1px solid #7dd3fc;
             border-radius: 16px;
             padding: 15px 25px;
-            box-shadow: 0 4px 12px rgba(0,104,201,0.08);
-            align-items: center; /* This magically vertically centers the text with the chart */
+            box-shadow: 0 4px 12px rgba(14, 165, 233, 0.15);
+            align-items: center; 
             margin-bottom: 25px;
             margin-top: 15px;
         }

@@ -119,24 +119,13 @@ def get_mdm_tasks(config_data, log_data):
     for row in config_data:
         sheet_val = str(row.get('Sheet', '')).strip()
         work_val = str(row.get('Work', '')).strip()
-        if sheet_val or work_val: 
+        # Filter to show only tasks that are NOT marked COMPLETED in CONFIG[cite: 5]
+        if (sheet_val or work_val) and str(row.get('Status', '')).upper() != "COMPLETED": 
             all_tasks.append(f"{sheet_val} | {work_val}")
             
-    completed_tasks = set()
-    if len(log_data) > 1:
-        for row in log_data[1:]:
-            if len(row) > 6:
-                sheet_val = str(row[0]).strip()
-                work_val = str(row[1]).strip()
-                status_val = str(row[6]).strip().upper()
-                if status_val == "COMPLETED":
-                    completed_tasks.add(f"{sheet_val} | {work_val}")
-                    
-    available_tasks = [task for task in all_tasks if task not in completed_tasks]
-            
-    if not available_tasks:
+    if not all_tasks:
         return ["🎉 All MDM tasks completed!"]
-    return available_tasks
+    return all_tasks
 
 # ==========================================
 # 3. Main Application Logic
@@ -156,13 +145,8 @@ try:
     active_count = len(running_tasks)
 
     # --- PROGRESS CALCULATION ---
-    total_tasks = sum(1 for row in config_raw if str(row.get('Sheet', '')).strip() or str(row.get('Work', '')).strip())
-    
-    completed_count = 0
-    if len(log_raw) > 1:
-        for row in log_raw[1:]:
-            if len(row) > 6 and str(row[6]).strip().upper() == "COMPLETED":
-                completed_count += 1
+    total_tasks = len(config_raw)
+    completed_count = sum(1 for row in config_raw if str(row.get('Status', '')).upper() == "COMPLETED")
                 
     progress_val = completed_count / total_tasks if total_tasks > 0 else 0
     progress_percentage = int(progress_val * 100)
@@ -170,7 +154,7 @@ try:
     # --- HEADER & SYNC ---
     col_title, col_sync = st.columns([4, 1])
     with col_title:
-        # Display the selected month in the title
+        # Title updated to reflect selected month[cite: 5]
         st.markdown(f"<h1 style='margin-top: 0px; margin-bottom: 0px;'>📦 MDM RETURN PREPARE ({st.session_state.selected_month})</h1>", unsafe_allow_html=True)
     with col_sync:
         st.markdown("<br>", unsafe_allow_html=True) 
@@ -345,16 +329,24 @@ try:
                         
                         try:
                             mdm_ss = get_mdm_spreadsheet()
+                            # 1. Log to the main log tab[cite: 5]
                             mdm_target_sheet = mdm_ss.get_worksheet(0) 
                             smart_append_row(mdm_target_sheet, row_data)
                             
+                            # 2. Update specific task status in CONFIG tab[cite: 5]
+                            config_ws = mdm_ss.worksheet("CONFIG")
+                            config_list = config_ws.get_all_records()
+                            for i, row in enumerate(config_list):
+                                if f"{row['Sheet']} | {row['Work']}" == display_name:
+                                    config_ws.update_cell(i + 2, 4, task_status.upper())
+                            
                             get_activity_log.clear() 
                             fetch_mdm_raw_data.clear() 
-                            st.success(f"Saved: Task logged to both databases!")
+                            st.success(f"Saved: Task logged and CONFIG updated!")
                             time.sleep(1.0)
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Failed to log details to MDM LOG: {e}")
+                            st.error(f"Failed to log details: {e}")
 
                 with col_cancel:
                     if st.button("❌ CANCEL", key=f"cancel_{sheet_row}", use_container_width=True):
@@ -415,62 +407,43 @@ try:
     st.markdown("<br><hr>", unsafe_allow_html=True)
     st.markdown("### 📋 Master Task List")
     
-    # Track the latest status for each Sheet/Work combo
-    status_dict = {}
-    if len(log_raw) > 1:
-        for row in log_raw[1:]:
-            if len(row) > 6:
-                sheet_val = str(row[0]).strip()
-                work_val = str(row[1]).strip()
-                status_val = str(row[6]).strip().title() # Format to Title Case
-                key = f"{sheet_val} | {work_val}"
-                status_dict[key] = status_val # Overwrites continuously, keeping the latest status
-
-    # Build the table data from CONFIG
+    # Table data built directly from latest CONFIG[cite: 5]
     table_data = []
     for row in config_raw:
         sheet_val = str(row.get('Sheet', '')).strip()
         work_val = str(row.get('Work', '')).strip()
         if sheet_val or work_val:
-            key = f"{sheet_val} | {work_val}"
-            current_status = status_dict.get(key, "Not Started")
+            current_status = str(row.get('Status', 'PENDING')).title()
             table_data.append({
                 "Sheet": sheet_val,
                 "Work": work_val,
                 "Status": current_status
             })
 
-    # Create the DataFrame and apply Pandas Styling
     if table_data:
         df_table = pd.DataFrame(table_data)
         
         def highlight_status(row):
             val = row['Status']
-            # Soft, premium Tailwind-style colors
             if val == 'Completed':
-                color = '#dcfce7' # Soft Green
-                text = '#166534'
+                color = '#dcfce7'; text = '#166534'
             elif val == 'In Progress':
-                color = '#fef08a' # Soft Yellow
-                text = '#854d0e'
-            else: # Not Started
-                color = '#fee2e2' # Soft Red
-                text = '#991b1b'
+                color = '#fef08a'; text = '#854d0e'
+            else:
+                color = '#fee2e2'; text = '#991b1b'
             return [f'background-color: {color}; color: {text}; font-weight: 500'] * len(row)
 
         styled_df = df_table.style.apply(highlight_status, axis=1)
-        
-        # Display as a full-width clean dataframe
         st.dataframe(styled_df, use_container_width=True, hide_index=True)
     else:
         st.info("No tasks found in CONFIG sheet.")
 
     # ==========================================
-    # 5. Configuration & Reset Logic
+    # 5. Configuration & Reset Logic (NEW)[cite: 5]
     # ==========================================
     st.markdown("<br>", unsafe_allow_html=True)
-    with st.expander("⚙️ Configuration & Reset"):
-        st.markdown("Select a month to begin tracking your MDM returns. **Warning:** Clicking 'Reset All' will clear all current progress in the database and start fresh for the selected month.")
+    with st.expander("⚙️ Configuration & Monthly Reset"):
+        st.markdown("Update the CONFIG sheet Month and set all statuses to PENDING for a fresh tracking period.")
         
         months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
         current_idx = months.index(st.session_state.selected_month) if st.session_state.selected_month in months else 0
@@ -481,28 +454,25 @@ try:
             st.session_state.selected_month = new_month
             st.rerun()
 
-        st.warning("🚨 This action will delete all existing log entries from the MDM RETURN LOG database.")
+        st.info("💡 Clicking Reset will update all tasks in **CONFIG** to 'PENDING' for the selected month. Logs are not deleted.")
         
-        if st.button("🗑️ Reset All (Start Fresh)", type="primary", use_container_width=True):
+        if st.button("🔄 Reset Config for New Month", use_container_width=True):
             try:
                 mdm_ss = get_mdm_spreadsheet()
-                log_sheet = mdm_ss.get_worksheet(0)
+                config_ws = mdm_ss.worksheet("CONFIG")
+                rows = config_ws.get_all_values()
                 
-                # Fetch headers to preserve them
-                headers = log_sheet.row_values(1)
-                
-                # Clear the sheet and rewrite only the headers
-                log_sheet.clear()
-                if headers:
-                    log_sheet.append_row(headers)
+                if len(rows) > 1:
+                    # Update cells for Month (Col 3) and Status (Col 4)[cite: 5]
+                    for i in range(1, len(rows)):
+                        config_ws.update_cell(i + 1, 3, new_month)
+                        config_ws.update_cell(i + 1, 4, "PENDING")
                     
-                # Clear cache and refresh
-                fetch_mdm_raw_data.clear()
-                st.success(f"Log cleared! Ready to start tracking for {st.session_state.selected_month}.")
-                time.sleep(1.5)
-                st.rerun()
+                    fetch_mdm_raw_data.clear()
+                    st.success(f"All tasks reset to PENDING for {new_month}!")
+                    time.sleep(1.5); st.rerun()
             except Exception as e:
                 st.error(f"Failed to reset database: {e}")
 
 except Exception as e:
-    st.error(f"Critical System Error: Make sure your spreadsheets exist and are shared. Details: {e}")
+    st.error(f"Critical System Error: {e}")

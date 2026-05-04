@@ -7,8 +7,12 @@ from datetime import datetime
 import pytz
 import time
 
-# --- Master Google Sheets Formula for Duration ---
+# --- Master Google Sheets Formulas for Duration ---
+# For MY ROUTINE 2026 (Start=B, End=C)
 GS_FORMULA = '=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm"), ""))'
+
+# For MDM RETURN LOG (Start=D, End=E)
+MDM_GS_FORMULA = '=IF(INDIRECT("E"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("E"&ROW())-INDIRECT("D"&ROW()), 1), "h:mm"), ""))'
 
 # ==========================================
 # 1. Configuration & Session State Init
@@ -279,11 +283,8 @@ try:
                         
                         start_str = active_row['Start_Time']
                         
-                        h, m = divmod(mins_elapsed, 60)
-                        duration_str = f"{h}:{m:02d}"
-                        
-                        # Added Task Status as the 7th Column
-                        row_data = [sheet_name, work_name, mdm_date_str, start_str, end_time_log, duration_str, task_status]
+                        # Notice we are injecting MDM_GS_FORMULA here instead of duration_str
+                        row_data = [sheet_name, work_name, mdm_date_str, start_str, end_time_log, MDM_GS_FORMULA, task_status]
                         
                         # 3. Append to MDM Log
                         try:

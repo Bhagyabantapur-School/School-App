@@ -161,18 +161,89 @@ try:
     running_tasks = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Notes'] == 'MDM Return Task')]
     active_count = len(running_tasks)
 
-    # --- HEADER & SYNC ---
-    st.title("📦 MDM Return Logger")
-    
-    if st.button("🔄 Sync Data", use_container_width=True):
-        get_activity_log.clear()
-        get_mdm_tasks.clear()
-        st.toast("Synced with Google Sheets!")
-        time.sleep(1.0)
-        st.rerun()
+    # --- PROGRESS CALCULATION ---
+    # To show meaningful progress, we need the total tasks from CONFIG
+    # and the number of completed tasks from the MDM Log.
+    try:
+        ss_mdm = get_mdm_spreadsheet()
+        config_sheet = ss_mdm.worksheet("CONFIG")
+        config_data = config_sheet.get_all_records()
         
-    st.markdown("---")
+        # 1. Total valid tasks
+        total_tasks = sum(1 for row in config_data if str(row.get('Sheet', '')).strip() or str(row.get('Work', '')).strip())
+        
+        # 2. Completed tasks
+        log_sheet = ss_mdm.get_worksheet(0)
+        log_data = log_sheet.get_all_values()
+        
+        completed_count = 0
+        if len(log_data) > 1:
+            for row in log_data[1:]:
+                if len(row) > 6 and str(row[6]).strip().upper() == "COMPLETED":
+                    completed_count += 1
+                    
+        # 3. Calculate percentage
+        progress_val = completed_count / total_tasks if total_tasks > 0 else 0
+        progress_percentage = int(progress_val * 100)
+        
+    except Exception as e:
+        st.warning(f"Could not calculate progress: {e}")
+        total_tasks = 1
+        completed_count = 0
+        progress_val = 0
+        progress_percentage = 0
 
+    # --- HEADER & SYNC & DONUT CHART ---
+    # We use columns to put the Donut Chart, Title, and Sync Button on the same row.
+    # col_chart gets the donut, col_title gets the heading, col_sync gets the button.
+    col_chart, col_title, col_sync = st.columns([1.5, 5, 1.5])
+    
+    with col_chart:
+        # Create a tiny Plotly Donut Chart
+        import plotly.graph_objects as go
+        
+        # Calculate remaining
+        remaining = 100 - progress_percentage
+        
+        fig = go.Figure(data=[go.Pie(
+            values=[progress_percentage, remaining],
+            labels=['Completed', 'Pending'],
+            hole=0.7, # Makes it a donut
+            marker=dict(colors=['#0068c9', '#e0e0e0']), # Blue for done, grey for pending
+            textinfo='none', # Hide default text labels
+            hoverinfo='label+percent'
+        )])
+        
+        # Add the percentage number in the center
+        fig.update_layout(
+            annotations=[dict(text=f"{progress_percentage}%", x=0.5, y=0.5, font_size=20, showarrow=False)],
+            showlegend=False,
+            margin=dict(t=0, b=0, l=0, r=0), # Remove margins to fit nicely
+            height=80, # Keep it small
+            width=80,
+            paper_bgcolor='rgba(0,0,0,0)', # Transparent background
+            plot_bgcolor='rgba(0,0,0,0)'
+        )
+        
+        # Render the chart without the toolbar
+        st.plotly_chart(fig, use_container_width=False, config={'displayModeBar': False})
+
+    with col_title:
+        # Use HTML to vertically align the title nicely with the chart
+        st.markdown(f"<h1 style='margin-top: 10px; margin-bottom: 0px;'>📦 MDM Return Logger</h1>", unsafe_allow_html=True)
+        st.caption(f"{completed_count} of {total_tasks} tasks finished")
+    
+    with col_sync:
+        st.markdown("<br>", unsafe_allow_html=True) # Add spacing to align button
+        if st.button("🔄 Sync Data", use_container_width=True):
+            get_activity_log.clear()
+            get_mdm_tasks.clear()
+            st.toast("Synced with Google Sheets!")
+            time.sleep(1.0)
+            st.rerun()
+            
+    st.markdown("---")
+   
     # --- FLOATING ACTIVE BADGE ---
     if active_count > 0:
         st.markdown(f"""

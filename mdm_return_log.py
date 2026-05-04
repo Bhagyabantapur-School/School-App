@@ -99,21 +99,44 @@ def get_activity_log():
 
 @st.cache_data(ttl=300)
 def get_mdm_tasks():
+    """Fetches tasks from CONFIG and hides any that are marked as Completed in the log tab."""
     try:
         ss = get_mdm_spreadsheet()
+        
+        # 1. Fetch full task list from CONFIG
         config_sheet = ss.worksheet("CONFIG")
         config_data = config_sheet.get_all_records()
         
-        tasks = []
+        all_tasks = []
         for row in config_data:
             sheet_val = str(row.get('Sheet', '')).strip()
             work_val = str(row.get('Work', '')).strip()
             if sheet_val or work_val: 
-                tasks.append(f"{sheet_val} | {work_val}")
+                all_tasks.append(f"{sheet_val} | {work_val}")
                 
-        if not tasks:
-            return ["No tasks found in CONFIG sheet"]
-        return tasks
+        # 2. Fetch logged data from the first tab to find Completed tasks
+        log_sheet = ss.get_worksheet(0)
+        log_data = log_sheet.get_all_values()
+        
+        completed_tasks = set()
+        if len(log_data) > 1:
+            for row in log_data[1:]:
+                # Check if row has at least 7 columns (Index 6 is the Status column)
+                if len(row) > 6:
+                    sheet_val = str(row[0]).strip()
+                    work_val = str(row[1]).strip()
+                    status_val = str(row[6]).strip().upper()
+                    
+                    if status_val == "COMPLETED":
+                        completed_tasks.add(f"{sheet_val} | {work_val}")
+                        
+        # 3. Filter out completed tasks
+        available_tasks = [task for task in all_tasks if task not in completed_tasks]
+                
+        if not available_tasks:
+            return ["🎉 All MDM tasks completed!"]
+        return available_tasks
+        
     except Exception as e:
         st.error(f"Failed to read CONFIG sheet: {e}")
         return ["Error loading tasks"]
@@ -131,7 +154,6 @@ try:
     mdm_tasks_list = get_mdm_tasks()
     
     # Filter for currently running MDM Tasks
-    # We identify MDM tasks in the routine tracker by looking for the specific Note
     running_tasks = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Notes'] == 'MDM Return Task')]
     active_count = len(running_tasks)
 
@@ -231,6 +253,14 @@ try:
                 </div>
                 """, unsafe_allow_html=True)
                 
+                # --- NEW STATUS SELECTOR ---
+                task_status = st.selectbox(
+                    "Update Task Status:", 
+                    ["In Progress", "Completed", "Not Started"], 
+                    index=0, 
+                    key=f"status_{sheet_row}"
+                )
+                
                 col_stop, col_cancel = st.columns([1, 1])
                 with col_stop:
                     if st.button("🛑 STOP & LOG", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
@@ -249,11 +279,11 @@ try:
                         
                         start_str = active_row['Start_Time']
                         
-                        # Calculate static duration string for the MDM log specifically
                         h, m = divmod(mins_elapsed, 60)
                         duration_str = f"{h}:{m:02d}"
                         
-                        row_data = [sheet_name, work_name, mdm_date_str, start_str, end_time_log, duration_str]
+                        # Added Task Status as the 7th Column
+                        row_data = [sheet_name, work_name, mdm_date_str, start_str, end_time_log, duration_str, task_status]
                         
                         # 3. Append to MDM Log
                         try:
@@ -263,6 +293,7 @@ try:
                             
                             # Targeted clear
                             get_activity_log.clear() 
+                            get_mdm_tasks.clear() # Clear tasks to remove if completed
                             st.success(f"Saved: Task logged to both databases!")
                             time.sleep(1.0)
                             st.rerun()
@@ -306,13 +337,12 @@ try:
             )
             
             if st.button("▶️ Start Task", key="start_mdm_btn", use_container_width=True):
-                if selected_task in ["No tasks found in CONFIG sheet", "Error loading tasks"]:
-                    st.error("Cannot start without valid tasks from CONFIG tab.")
+                if selected_task in ["No tasks found in CONFIG sheet", "Error loading tasks", "🎉 All MDM tasks completed!"]:
+                    st.error("Cannot start. No valid pending tasks available.")
                 else:
                     main_ss = get_main_spreadsheet()
                     log_sheet = main_ss.worksheet("activity_log")
                     
-                    # Appends a RUNNING row to Routine Master activity_log
                     row_to_add = [
                         today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
                         "WORK", selected_task, "", "MDM Return Task"

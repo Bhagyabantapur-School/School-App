@@ -194,47 +194,44 @@ try:
         progress_percentage = 0
 
     # --- HEADER & SYNC & DONUT CHART ---
-    # We use columns to put the Donut Chart, Title, and Sync Button on the same row.
-    # col_chart gets the donut, col_title gets the heading, col_sync gets the button.
-    col_chart, col_title, col_sync = st.columns([1.5, 5, 1.5])
+    # Adjusted column ratios to give the chart a bit more room
+    col_chart, col_title, col_sync = st.columns([2, 5, 2], gap="small")
     
     with col_chart:
-        # Create a tiny Plotly Donut Chart
         import plotly.graph_objects as go
         
-        # Calculate remaining
         remaining = 100 - progress_percentage
         
         fig = go.Figure(data=[go.Pie(
             values=[progress_percentage, remaining],
             labels=['Completed', 'Pending'],
-            hole=0.7, # Makes it a donut
-            marker=dict(colors=['#0068c9', '#e0e0e0']), # Blue for done, grey for pending
-            textinfo='none', # Hide default text labels
+            hole=0.7, 
+            marker=dict(colors=['#0068c9', '#e0e0e0']), 
+            textinfo='none', 
             hoverinfo='label+percent'
         )])
         
-        # Add the percentage number in the center
         fig.update_layout(
-            annotations=[dict(text=f"{progress_percentage}%", x=0.5, y=0.5, font_size=20, showarrow=False)],
+            annotations=[dict(text=f"{progress_percentage}%", x=0.5, y=0.5, font_size=18, showarrow=False)],
             showlegend=False,
-            margin=dict(t=0, b=0, l=0, r=0), # Remove margins to fit nicely
-            height=80, # Keep it small
-            width=80,
-            paper_bgcolor='rgba(0,0,0,0)', # Transparent background
+            # Added a tiny 5px margin on all sides to prevent edge clipping
+            margin=dict(t=5, b=5, l=5, r=5), 
+            height=110, # Increased height slightly for a perfect circle
+            # Removed the strict 'width' parameter so it adapts to the column
+            paper_bgcolor='rgba(0,0,0,0)', 
             plot_bgcolor='rgba(0,0,0,0)'
         )
         
-        # Render the chart without the toolbar
-        st.plotly_chart(fig, use_container_width=False, config={'displayModeBar': False})
+        # Switched use_container_width to True to let Streamlit handle the bounds perfectly
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     with col_title:
         # Use HTML to vertically align the title nicely with the chart
-        st.markdown(f"<h1 style='margin-top: 10px; margin-bottom: 0px;'>📦 MDM Return Logger</h1>", unsafe_allow_html=True)
+        st.markdown(f"<h1 style='margin-top: 15px; margin-bottom: 0px;'>📦 MDM Return Logger</h1>", unsafe_allow_html=True)
         st.caption(f"{completed_count} of {total_tasks} tasks finished")
     
     with col_sync:
-        st.markdown("<br>", unsafe_allow_html=True) # Add spacing to align button
+        st.markdown("<br>", unsafe_allow_html=True) 
         if st.button("🔄 Sync Data", use_container_width=True):
             get_activity_log.clear()
             get_mdm_tasks.clear()

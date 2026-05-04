@@ -19,6 +19,12 @@ MDM_GS_FORMULA = '=IF(INDIRECT("E"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD
 # ==========================================
 st.set_page_config(page_title="MDM Return Logger", page_icon="📦", layout="wide")
 
+# --- BACK BUTTON (MUST GO HERE) ---
+if st.button("⬅️ Back to Dashboard", type="secondary"):
+    st.switch_page("dashboard.py")
+st.write("---") 
+# ----------------------------------
+
 if 'pomodoro_state' not in st.session_state:
     st.session_state.pomodoro_state = {}
 

@@ -176,27 +176,81 @@ try:
             task_status = st.selectbox("Update Status:", ["In Progress", "Completed"], key=f"status_{sheet_row}")
             if st.button("🛑 STOP & LOG", key=f"save_{sheet_row}", type="primary"):
                 end_time = now.strftime('%H:%M')
+                
+                # 1. Update MY ROUTINE 2026
                 main_ss = get_main_spreadsheet()
                 main_ss.worksheet("activity_log").update_cell(sheet_row, 3, end_time)
+                
+                # Setup target identifiers
                 mdm_ss = get_mdm_spreadsheet()
                 parts = display_name.split(" | ", 1)
-                smart_append_row(mdm_ss.get_worksheet(0), [parts[0], parts[1] if len(parts)>1 else "", mdm_date_str, active_row['Start_Time'], end_time, MDM_GS_FORMULA, task_status])
+                target_sheet = parts[0].strip()
+                target_work = parts[1].strip() if len(parts) > 1 else ""
                 
-                # Update CONFIG status
+                # 2. Update CONFIG Status & Get Month from Config
                 config_ws = mdm_ss.worksheet("CONFIG")
                 config_list = config_ws.get_all_records()
-                for i, row in enumerate(config_list):
-                    if f"{row['Sheet']} | {row['Work']}" == display_name:
-                        config_ws.update_cell(i + 2, 4, task_status.upper())
+                task_month = st.session_state.selected_month
                 
-                get_activity_log.clear(); fetch_mdm_raw_data.clear(); st.rerun()
+                for i, row in enumerate(config_list):
+                    if str(row.get('Sheet', '')).strip() == target_sheet and str(row.get('Work', '')).strip() == target_work:
+                        task_month = str(row.get('Month', '')).strip()
+                        # Log selected status to Status column (D)
+                        config_ws.update_cell(i + 2, 4, task_status.upper())
+                        break
+                
+                # 3. Locate and update the RUNNING row in MDM LOGS tab
+                logs_ws = mdm_ss.get_worksheet(0)
+                logs_data = logs_ws.get_all_values()
+                log_row_idx = None
+                
+                # Search backward through the logs to find the active "RUNNING" entry
+                for i in range(len(logs_data)-1, -1, -1):
+                    row = logs_data[i]
+                    if len(row) >= 5 and str(row[0]).strip() == target_sheet and str(row[1]).strip() == target_work and str(row[4]).strip() == "RUNNING":
+                        log_row_idx = i + 1
+                        break
+                
+                # Update Stop time and Month in the specific LOGS row
+                if log_row_idx:
+                    try:
+                        logs_ws.update(range_name=f"E{log_row_idx}", values=[[end_time]], value_input_option="USER_ENTERED")
+                        logs_ws.update(range_name=f"G{log_row_idx}", values=[[task_month]], value_input_option="USER_ENTERED")
+                    except TypeError:
+                        logs_ws.update(f"E{log_row_idx}", [[end_time]], value_input_option="USER_ENTERED")
+                        logs_ws.update(f"G{log_row_idx}", [[task_month]], value_input_option="USER_ENTERED")
+                else:
+                    # Failsafe: if for some reason the RUNNING row was manually deleted during operation
+                    smart_append_row(logs_ws, [target_sheet, target_work, mdm_date_str, active_row['Start_Time'], end_time, MDM_GS_FORMULA, task_month])
+                
+                get_activity_log.clear()
+                fetch_mdm_raw_data.clear()
+                st.rerun()
 
     if active_count == 0:
         selected_task = st.selectbox("Select Task from Config", mdm_tasks_list)
         if st.button("▶️ Start Task", type="primary", use_container_width=True):
             if "All MDM tasks" not in selected_task:
+                parts = selected_task.split(" | ", 1)
+                target_sheet = parts[0].strip()
+                target_work = parts[1].strip() if len(parts) > 1 else ""
+
+                # Look up the task's active Month from CONFIG to inject during startup
+                task_month = st.session_state.selected_month
+                for row in config_raw:
+                    if str(row.get('Sheet', '')).strip() == target_sheet and str(row.get('Work', '')).strip() == target_work:
+                        task_month = str(row.get('Month', '')).strip()
+                        break
+                
+                # Log to MY ROUTINE 2026 as RUNNING
                 smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, "WORK", selected_task, "", "MDM Return Task"])
-                get_activity_log.clear(); st.rerun()
+                
+                # Log to MDM RETURN LOG as RUNNING
+                smart_append_row(get_mdm_spreadsheet().get_worksheet(0), [target_sheet, target_work, mdm_date_str, now.strftime('%H:%M'), "RUNNING", MDM_GS_FORMULA, task_month])
+                
+                get_activity_log.clear()
+                fetch_mdm_raw_data.clear()
+                st.rerun()
 
     # --- MASTER TASK LIST TABLE ---
     # Replaced markdown '###' with a custom, beautiful CSS-styled header
@@ -231,12 +285,14 @@ try:
                 config_ws = mdm_ss.worksheet("CONFIG")
                 rows = config_ws.get_all_values()
                 if len(rows) > 1:
-                    # BATCH UPDATE: Prepare all values first to avoid multiple API calls
+                    # BATCH UPDATE: Changes all Month column (C) to the selected month and Status (D) to "PENDING"
                     batch_values = [[new_month, "PENDING"] for _ in range(len(rows) - 1)]
-                    # One single API call to update the entire month and status range
                     config_ws.update(range_name=f"C2:D{len(rows)}", values=batch_values)
                     
-                    fetch_mdm_raw_data.clear(); st.success(f"Tasks reset for {new_month} {current_year}!"); time.sleep(1.5); st.rerun()
+                    fetch_mdm_raw_data.clear()
+                    st.success(f"Tasks reset for {new_month} {current_year}!")
+                    time.sleep(1.5)
+                    st.rerun()
             except Exception as e:
                 st.error(f"Reset Failed: {e}")
 

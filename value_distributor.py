@@ -144,20 +144,18 @@ if st.session_state.data_entries:
         # Add the actual data row first
         display_data.append(entry)
         
-        # Calculate percentages
+        # Calculate percentages based on the MAX allowable limits from Google Sheets
         sl_no, total_given, p1, p2, p3, p4 = entry
         
-        if total_given > 0:
-            pct_row = [
-                "",  # Leave Sl.No blank for the percentage row
-                "% Breakdown",
-                f"{(p1/total_given)*100:.1f}%",
-                f"{(p2/total_given)*100:.1f}%",
-                f"{(p3/total_given)*100:.1f}%",
-                f"{(p4/total_given)*100:.1f}%"
-            ]
-        else:
-            pct_row = ["", "% Breakdown", "0.0%", "0.0%", "0.0%", "0.0%"]
+        # We calculate (part / max) * 100. We also check `if maxes[i] > 0` to prevent dividing by zero errors!
+        pct_row = [
+            "",  # Leave Sl.No blank for the percentage row
+            "% of Max Allowed",
+            f"{(p1/maxes[0])*100:.1f}%" if maxes[0] > 0 else "0.0%",
+            f"{(p2/maxes[1])*100:.1f}%" if maxes[1] > 0 else "0.0%",
+            f"{(p3/maxes[2])*100:.1f}%" if maxes[2] > 0 else "0.0%",
+            f"{(p4/maxes[3])*100:.1f}%" if maxes[3] > 0 else "0.0%"
+        ]
             
         # Add the percentage row right under the data row
         display_data.append(pct_row)
@@ -170,11 +168,11 @@ if st.session_state.data_entries:
     
     # 3. Apply Styling for both zero-rows and percentage-rows
     def style_rows(row):
-        # Color code the percentage rows (Soft blue background, slightly smaller text)
-        if str(row["Total Given"]) == "% Breakdown":
+        # Color code the percentage rows
+        if str(row["Total Given"]) == "% of Max Allowed":
             return ['background-color: #f0f7ff; color: #0366d6; font-size: 0.9em; border-bottom: 2px solid #ddd;'] * len(row)
         
-        # Highlight zero values (Soft yellow)
+        # Highlight zero values
         elif row["Total Given"] == 0:
             return ['background-color: #fff3cd; color: #856404; font-weight: bold'] * len(row)
             

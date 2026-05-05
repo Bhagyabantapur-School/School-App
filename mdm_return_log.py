@@ -181,10 +181,20 @@ try:
                 mdm_ss = get_mdm_spreadsheet()
                 parts = display_name.split(" | ", 1)
                 
-                # FIX 1: Push the selected_month to Column G in the LOGS tab
-                smart_append_row(mdm_ss.get_worksheet(0), [parts[0], parts[1] if len(parts)>1 else "", mdm_date_str, active_row['Start_Time'], end_time, MDM_GS_FORMULA, st.session_state.selected_month])
+                sheet_name = parts[0].strip()
+                work_name = parts[1].strip() if len(parts) > 1 else ""
                 
-                # FIX 2: Update ONLY the Status (Column D) in the CONFIG tab
+                # FIX: Look up the exact Month from the CONFIG data for this specific task
+                task_month = st.session_state.selected_month # Default fallback just in case
+                for row in config_raw:
+                    if str(row.get('Sheet', '')).strip() == sheet_name and str(row.get('Work', '')).strip() == work_name:
+                        task_month = str(row.get('Month', '')).strip()
+                        break
+                
+                # Push the fetched task_month to Column G in the LOGS tab
+                smart_append_row(mdm_ss.get_worksheet(0), [sheet_name, work_name, mdm_date_str, active_row['Start_Time'], end_time, MDM_GS_FORMULA, task_month])
+                
+                # Update ONLY the Status (Column D) in the CONFIG tab
                 config_ws = mdm_ss.worksheet("CONFIG")
                 config_list = config_ws.get_all_records()
                 for i, row in enumerate(config_list):

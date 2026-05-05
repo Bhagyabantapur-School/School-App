@@ -69,16 +69,32 @@ def distribute(total, maxes):
     remaining = total
     
     while remaining > 0:
-        valid_indices = [i for i in range(4) if result[i] < maxes[i]]
-        random.shuffle(valid_indices)
-        i = valid_indices[0]
+        # 1. Calculate the current fill percentage of each column
+        pcts = [result[i] / maxes[i] if maxes[i] > 0 else float('inf') for i in range(4)]
         
-        max_possible_chunk = min(
+        # 2. Only look at columns that haven't hit their maximum yet
+        valid_indices = [i for i in range(4) if result[i] < maxes[i]]
+        if not valid_indices:
+            break
+            
+        # 3. Find the absolute lowest percentage among valid columns
+        min_pct = min([pcts[i] for i in valid_indices])
+        
+        # 4. Find all columns tied for the lowest percentage
+        candidates = [i for i in valid_indices if pcts[i] == min_pct]
+        
+        # Pick one of the lowest-percentage columns randomly
+        i = random.choice(candidates)
+        
+        # 5. Cap the chunk size to a maximum of 5% of that column's capacity. 
+        # This prevents large gaps and forces tight percentage clusters!
+        max_chunk = min(
             remaining, 
             maxes[i] - result[i], 
-            max(1, math.ceil(remaining / len(valid_indices)))
+            max(1, math.ceil(maxes[i] * 0.05)) 
         )
-        chunk = random.randint(1, max_possible_chunk)
+        
+        chunk = random.randint(1, max_chunk)
         
         result[i] += chunk
         remaining -= chunk
@@ -147,7 +163,7 @@ if st.session_state.data_entries:
         # Calculate percentages based on the MAX allowable limits from Google Sheets
         sl_no, total_given, p1, p2, p3, p4 = entry
         
-        # We calculate (part / max) * 100. We also check `if maxes[i] > 0` to prevent dividing by zero errors!
+        # We calculate (part / max) * 100.
         pct_row = [
             "",  # Leave Sl.No blank for the percentage row
             "% of Max Allowed",

@@ -180,26 +180,14 @@ try:
                 main_ss.worksheet("activity_log").update_cell(sheet_row, 3, end_time)
                 mdm_ss = get_mdm_spreadsheet()
                 parts = display_name.split(" | ", 1)
+                smart_append_row(mdm_ss.get_worksheet(0), [parts[0], parts[1] if len(parts)>1 else "", mdm_date_str, active_row['Start_Time'], end_time, MDM_GS_FORMULA, task_status])
                 
-                sheet_name = parts[0].strip()
-                work_name = parts[1].strip() if len(parts) > 1 else ""
-                
-                # FIX: Look up the exact Month from the CONFIG data for this specific task
-                task_month = st.session_state.selected_month # Default fallback just in case
-                for row in config_raw:
-                    if str(row.get('Sheet', '')).strip() == sheet_name and str(row.get('Work', '')).strip() == work_name:
-                        task_month = str(row.get('Month', '')).strip()
-                        break
-                
-                # Push the fetched task_month to Column G in the LOGS tab
-                smart_append_row(mdm_ss.get_worksheet(0), [sheet_name, work_name, mdm_date_str, active_row['Start_Time'], end_time, MDM_GS_FORMULA, task_month])
-                
-                # Update ONLY the Status (Column D) in the CONFIG tab
+                # Update CONFIG status
                 config_ws = mdm_ss.worksheet("CONFIG")
                 config_list = config_ws.get_all_records()
                 for i, row in enumerate(config_list):
                     if f"{row['Sheet']} | {row['Work']}" == display_name:
-                        config_ws.update_cell(i + 2, 4, task_status.title()) # Using title() to keep it formatted nicely
+                        config_ws.update_cell(i + 2, 4, task_status.upper())
                 
                 get_activity_log.clear(); fetch_mdm_raw_data.clear(); st.rerun()
 
@@ -211,6 +199,7 @@ try:
                 get_activity_log.clear(); st.rerun()
 
     # --- MASTER TASK LIST TABLE ---
+    # Replaced markdown '###' with a custom, beautiful CSS-styled header
     st.markdown("""
         <br><hr>
         <div style='display: flex; align-items: center; margin-bottom: 15px;'>
@@ -228,7 +217,7 @@ try:
             return [f'background-color: {bg}; color: {txt}; font-weight: 500'] * len(row)
         st.dataframe(df_table.style.apply(highlight_status, axis=1), use_container_width=True, hide_index=True)
 
-    # --- RESET LOGIC ---
+    # --- RESET LOGIC (BATCH UPDATE TO PREVENT 429 ERROR) ---
     st.markdown("<br>", unsafe_allow_html=True)
     with st.expander("⚙️ Configuration & Monthly Reset"):
         months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
@@ -242,7 +231,9 @@ try:
                 config_ws = mdm_ss.worksheet("CONFIG")
                 rows = config_ws.get_all_values()
                 if len(rows) > 1:
+                    # BATCH UPDATE: Prepare all values first to avoid multiple API calls
                     batch_values = [[new_month, "PENDING"] for _ in range(len(rows) - 1)]
+                    # One single API call to update the entire month and status range
                     config_ws.update(range_name=f"C2:D{len(rows)}", values=batch_values)
                     
                     fetch_mdm_raw_data.clear(); st.success(f"Tasks reset for {new_month} {current_year}!"); time.sleep(1.5); st.rerun()

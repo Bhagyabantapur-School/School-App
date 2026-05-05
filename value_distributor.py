@@ -107,7 +107,6 @@ st.subheader("Distribute Value")
 
 # Using a form to allow rapid entry via the "Enter" key
 with st.form("entry_form", clear_on_submit=True):
-    # Changed from number_input to text_input to fix the Streamlit "Enter key" form bug
     total_val_str = st.text_input("Total Value to Distribute (Type number and press Enter)")
     submitted = st.form_submit_button("Distribute & Add")
 
@@ -116,20 +115,16 @@ with st.form("entry_form", clear_on_submit=True):
             st.error("Please enter a valid total value.")
         else:
             try:
-                # Convert the text input into an integer
                 total_val = int(total_val_str)
-                
-                # Try to distribute
                 distribution = distribute(total_val, maxes)
                 
                 if distribution is None:
-                    # Upgraded error message to tell you exactly why it failed
                     st.error(f"Error: You tried to distribute {total_val}, but your headers only allow a maximum total of {sum(maxes)}!")
                 else:
+                    # IMPORTANT: Only the raw numbers are added to data_entries and Google Sheets
                     row_data = [st.session_state.sl_no, total_val] + distribution
                     st.session_state.data_entries.append(row_data)
                     
-                    # Sync to Google Sheets automatically
                     if worksheet:
                         worksheet.append_row(row_data)
                     
@@ -140,18 +135,52 @@ with st.form("entry_form", clear_on_submit=True):
                 st.error("Please enter a valid whole number.")
 
 st.subheader("Distribution Results")
+
 if st.session_state.data_entries:
+    # 1. Dynamically build a display list that includes the percentage rows
+    display_data = []
+    
+    for entry in st.session_state.data_entries:
+        # Add the actual data row first
+        display_data.append(entry)
+        
+        # Calculate percentages
+        sl_no, total_given, p1, p2, p3, p4 = entry
+        
+        if total_given > 0:
+            pct_row = [
+                "",  # Leave Sl.No blank for the percentage row
+                "% Breakdown",
+                f"{(p1/total_given)*100:.1f}%",
+                f"{(p2/total_given)*100:.1f}%",
+                f"{(p3/total_given)*100:.1f}%",
+                f"{(p4/total_given)*100:.1f}%"
+            ]
+        else:
+            pct_row = ["", "% Breakdown", "0.0%", "0.0%", "0.0%", "0.0%"]
+            
+        # Add the percentage row right under the data row
+        display_data.append(pct_row)
+
+    # 2. Create the DataFrame using the display_data
     df = pd.DataFrame(
-        st.session_state.data_entries, 
+        display_data, 
         columns=["Sl.No.", "Total Given", f"Max: {maxes[0]}", f"Max: {maxes[1]}", f"Max: {maxes[2]}", f"Max: {maxes[3]}"]
     )
     
-    # Apply styling to highlight 0 values
-    def highlight_zero(row):
-        if row["Total Given"] == 0:
+    # 3. Apply Styling for both zero-rows and percentage-rows
+    def style_rows(row):
+        # Color code the percentage rows (Soft blue background, slightly smaller text)
+        if str(row["Total Given"]) == "% Breakdown":
+            return ['background-color: #f0f7ff; color: #0366d6; font-size: 0.9em; border-bottom: 2px solid #ddd;'] * len(row)
+        
+        # Highlight zero values (Soft yellow)
+        elif row["Total Given"] == 0:
             return ['background-color: #fff3cd; color: #856404; font-weight: bold'] * len(row)
+            
+        # Default styling for normal rows
         return [''] * len(row)
         
-    st.dataframe(df.style.apply(highlight_zero, axis=1), use_container_width=True)
+    st.dataframe(df.style.apply(style_rows, axis=1), use_container_width=True)
 else:
     st.info("No entries yet.")

@@ -107,28 +107,37 @@ st.subheader("Distribute Value")
 
 # Using a form to allow rapid entry via the "Enter" key
 with st.form("entry_form", clear_on_submit=True):
-    # value=None keeps the input blank by default
-    total_val = st.number_input("Total Value to Distribute", min_value=0, step=1, value=None)
+    # Changed from number_input to text_input to fix the Streamlit "Enter key" form bug
+    total_val_str = st.text_input("Total Value to Distribute (Type number and press Enter)")
     submitted = st.form_submit_button("Distribute & Add")
 
     if submitted:
-        if total_val is None:
+        if not total_val_str.strip():
             st.error("Please enter a valid total value.")
         else:
-            distribution = distribute(total_val, maxes)
-            
-            if distribution is None:
-                st.error("Error: Total exceeds the sum of the header maximums!")
-            else:
-                row_data = [st.session_state.sl_no, total_val] + distribution
-                st.session_state.data_entries.append(row_data)
+            try:
+                # Convert the text input into an integer
+                total_val = int(total_val_str)
                 
-                # Sync to Google Sheets automatically
-                if worksheet:
-                    worksheet.append_row(row_data)
+                # Try to distribute
+                distribution = distribute(total_val, maxes)
                 
-                st.session_state.sl_no += 1
-                st.success("Distributed successfully and synced to Sheets!")
+                if distribution is None:
+                    # Upgraded error message to tell you exactly why it failed
+                    st.error(f"Error: You tried to distribute {total_val}, but your headers only allow a maximum total of {sum(maxes)}!")
+                else:
+                    row_data = [st.session_state.sl_no, total_val] + distribution
+                    st.session_state.data_entries.append(row_data)
+                    
+                    # Sync to Google Sheets automatically
+                    if worksheet:
+                        worksheet.append_row(row_data)
+                    
+                    st.session_state.sl_no += 1
+                    st.success("Distributed successfully and synced to Sheets!")
+                    
+            except ValueError:
+                st.error("Please enter a valid whole number.")
 
 st.subheader("Distribution Results")
 if st.session_state.data_entries:

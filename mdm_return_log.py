@@ -112,15 +112,25 @@ def fetch_mdm_raw_data():
         st.error(f"Failed to fetch MDM data: {e}")
         return [], []
 
+# --- SAFEGUARD FUNCTION: Strips hidden spaces from Google Sheets headers and cells ---
+def get_clean_val(row_dict, target_key):
+    for k, v in row_dict.items():
+        if str(k).strip().lower() == target_key.strip().lower():
+            return str(v).strip()
+    return ""
+
 def get_mdm_tasks(config_data, log_data):
     if not config_data: return ["Error loading tasks"]
     all_tasks = []
     for row in config_data:
-        sheet_val = str(row.get('Sheet', '')).strip()
-        work_val = str(row.get('Work', '')).strip()
-        # Logic to hide already completed tasks in Config
-        if (sheet_val or work_val) and str(row.get('Status', '')).upper() != "COMPLETED": 
+        sheet_val = get_clean_val(row, 'Sheet')
+        work_val = get_clean_val(row, 'Work')
+        status_val = get_clean_val(row, 'Status').upper()
+        
+        # Safe logic to hide already completed tasks
+        if (sheet_val or work_val) and status_val != "COMPLETED": 
             all_tasks.append(f"{sheet_val} | {work_val}")
+            
     if not all_tasks: return ["🎉 All MDM tasks completed!"]
     return all_tasks
 
@@ -141,15 +151,14 @@ try:
     running_tasks = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Notes'] == 'MDM Return Task')]
     active_count = len(running_tasks)
 
-    # --- PROGRESS CALCULATION ---
+    # --- PROGRESS CALCULATION (Using safe get_clean_val) ---
     total_tasks = len(config_raw)
-    completed_count = sum(1 for row in config_raw if str(row.get('Status', '')).upper() == "COMPLETED")
+    completed_count = sum(1 for row in config_raw if get_clean_val(row, 'Status').upper() == "COMPLETED")
     progress_percentage = int((completed_count / total_tasks) * 100) if total_tasks > 0 else 0
 
     # --- HEADER & SYNC ---
     col_title, col_sync = st.columns([4, 1])
     with col_title:
-        # Title updated to include the dynamic Year
         st.markdown(f"<h1 style='margin-top: 0px;'>📦 MDM RETURN PREPARE ({st.session_state.selected_month} {current_year})</h1>", unsafe_allow_html=True)
     with col_sync:
         if st.button("🔄 Sync", use_container_width=True):
@@ -187,15 +196,17 @@ try:
                 target_sheet = parts[0].strip()
                 target_work = parts[1].strip() if len(parts) > 1 else ""
                 
-                # 2. Update CONFIG Status & Get Month from Config
+                # 2. Update CONFIG Status & Get Month from Config (Safe read)
                 config_ws = mdm_ss.worksheet("CONFIG")
                 config_list = config_ws.get_all_records()
                 task_month = st.session_state.selected_month
                 
                 for i, row in enumerate(config_list):
-                    if str(row.get('Sheet', '')).strip() == target_sheet and str(row.get('Work', '')).strip() == target_work:
-                        task_month = str(row.get('Month', '')).strip()
-                        # Log selected status to Status column (D)
+                    if get_clean_val(row, 'Sheet') == target_sheet and get_clean_val(row, 'Work') == target_work:
+                        found_month = get_clean_val(row, 'Month')
+                        if found_month: 
+                            task_month = found_month
+                        # Log selected status to Status column (D is 4)
                         config_ws.update_cell(i + 2, 4, task_status.upper())
                         break
                 
@@ -220,7 +231,6 @@ try:
                         logs_ws.update(f"E{log_row_idx}", [[end_time]], value_input_option="USER_ENTERED")
                         logs_ws.update(f"G{log_row_idx}", [[task_month]], value_input_option="USER_ENTERED")
                 else:
-                    # Failsafe: if for some reason the RUNNING row was manually deleted during operation
                     smart_append_row(logs_ws, [target_sheet, target_work, mdm_date_str, active_row['Start_Time'], end_time, MDM_GS_FORMULA, task_month])
                 
                 get_activity_log.clear()
@@ -235,11 +245,13 @@ try:
                 target_sheet = parts[0].strip()
                 target_work = parts[1].strip() if len(parts) > 1 else ""
 
-                # Look up the task's active Month from CONFIG to inject during startup
+                # Look up the task's active Month safely
                 task_month = st.session_state.selected_month
                 for row in config_raw:
-                    if str(row.get('Sheet', '')).strip() == target_sheet and str(row.get('Work', '')).strip() == target_work:
-                        task_month = str(row.get('Month', '')).strip()
+                    if get_clean_val(row, 'Sheet') == target_sheet and get_clean_val(row, 'Work') == target_work:
+                        found_month = get_clean_val(row, 'Month')
+                        if found_month: 
+                            task_month = found_month
                         break
                 
                 # Log to MY ROUTINE 2026 as RUNNING
@@ -253,7 +265,6 @@ try:
                 st.rerun()
 
     # --- MASTER TASK LIST TABLE ---
-    # Replaced markdown '###' with a custom, beautiful CSS-styled header
     st.markdown("""
         <br><hr>
         <div style='display: flex; align-items: center; margin-bottom: 15px;'>
@@ -262,7 +273,9 @@ try:
         </div>
     """, unsafe_allow_html=True)
     
-    table_data = [{"Sheet": str(r.get('Sheet','')), "Work": str(r.get('Work','')), "Status": str(r.get('Status','PENDING')).title()} for r in config_raw]
+    # Safely build the table
+    table_data = [{"Sheet": get_clean_val(r, 'Sheet'), "Work": get_clean_val(r, 'Work'), "Status": get_clean_val(r, 'Status').title() or "Pending"} for r in config_raw]
+    
     if table_data:
         df_table = pd.DataFrame(table_data)
         def highlight_status(row):
@@ -285,7 +298,6 @@ try:
                 config_ws = mdm_ss.worksheet("CONFIG")
                 rows = config_ws.get_all_values()
                 if len(rows) > 1:
-                    # BATCH UPDATE: Changes all Month column (C) to the selected month and Status (D) to "PENDING"
                     batch_values = [[new_month, "PENDING"] for _ in range(len(rows) - 1)]
                     config_ws.update(range_name=f"C2:D{len(rows)}", values=batch_values)
                     

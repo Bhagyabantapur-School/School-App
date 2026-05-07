@@ -151,7 +151,7 @@ try:
     running_tasks = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Notes'] == 'MDM Return Task')]
     active_count = len(running_tasks)
 
-    # --- PROGRESS CALCULATION (Using safe get_clean_val) ---
+    # --- PROGRESS CALCULATION ---
     total_tasks = len(config_raw)
     completed_count = sum(1 for row in config_raw if get_clean_val(row, 'Status').upper() == "COMPLETED")
     progress_percentage = int((completed_count / total_tasks) * 100) if total_tasks > 0 else 0
@@ -196,7 +196,7 @@ try:
                 target_sheet = parts[0].strip()
                 target_work = parts[1].strip() if len(parts) > 1 else ""
                 
-                # 2. Update CONFIG Status & Get Month from Config (Safe read)
+                # 2. Update CONFIG Status & Get Month from Config
                 config_ws = mdm_ss.worksheet("CONFIG")
                 config_list = config_ws.get_all_records()
                 task_month = st.session_state.selected_month
@@ -222,16 +222,18 @@ try:
                         log_row_idx = i + 1
                         break
                 
-                # Update Stop time and Month in the specific LOGS row
+                # Update Stop time (E), Month (G), and Status (H) in the specific LOGS row
                 if log_row_idx:
                     try:
                         logs_ws.update(range_name=f"E{log_row_idx}", values=[[end_time]], value_input_option="USER_ENTERED")
-                        logs_ws.update(range_name=f"G{log_row_idx}", values=[[task_month]], value_input_option="USER_ENTERED")
+                        # Col G = Month, Col H = Status
+                        logs_ws.update(range_name=f"G{log_row_idx}:H{log_row_idx}", values=[[task_month, task_status.upper()]], value_input_option="USER_ENTERED")
                     except TypeError:
                         logs_ws.update(f"E{log_row_idx}", [[end_time]], value_input_option="USER_ENTERED")
-                        logs_ws.update(f"G{log_row_idx}", [[task_month]], value_input_option="USER_ENTERED")
+                        logs_ws.update(f"G{log_row_idx}:H{log_row_idx}", [[task_month, task_status.upper()]], value_input_option="USER_ENTERED")
                 else:
-                    smart_append_row(logs_ws, [target_sheet, target_work, mdm_date_str, active_row['Start_Time'], end_time, MDM_GS_FORMULA, task_month])
+                    # Failsafe append (A-H columns)
+                    smart_append_row(logs_ws, [target_sheet, target_work, mdm_date_str, active_row['Start_Time'], end_time, MDM_GS_FORMULA, task_month, task_status.upper()])
                 
                 get_activity_log.clear()
                 fetch_mdm_raw_data.clear()
@@ -257,8 +259,8 @@ try:
                 # Log to MY ROUTINE 2026 as RUNNING
                 smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, "WORK", selected_task, "", "MDM Return Task"])
                 
-                # Log to MDM RETURN LOG as RUNNING
-                smart_append_row(get_mdm_spreadsheet().get_worksheet(0), [target_sheet, target_work, mdm_date_str, now.strftime('%H:%M'), "RUNNING", MDM_GS_FORMULA, task_month])
+                # Log to MDM RETURN LOG as RUNNING (Month in Col G, Status as IN PROGRESS in Col H)
+                smart_append_row(get_mdm_spreadsheet().get_worksheet(0), [target_sheet, target_work, mdm_date_str, now.strftime('%H:%M'), "RUNNING", MDM_GS_FORMULA, task_month, "IN PROGRESS"])
                 
                 get_activity_log.clear()
                 fetch_mdm_raw_data.clear()

@@ -25,6 +25,8 @@ st.write("---")
 if 'pomodoro_state' not in st.session_state:
     st.session_state.pomodoro_state = {}
 
+# (Removed the premature selected_month initialization from here)
+
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -103,13 +105,13 @@ def fetch_mdm_raw_data():
         ss = get_mdm_spreadsheet()
         config_data = ss.worksheet("CONFIG").get_all_records()
         log_data = ss.get_worksheet(0).get_all_values()
-        data_tab_data = ss.worksheet("Data").get_all_records() # Fetches the new Data tab
+        data_tab_data = ss.worksheet("Data").get_all_records()
         return config_data, log_data, data_tab_data
     except Exception as e:
         st.error(f"Failed to fetch MDM data: {e}")
         return [], [], []
 
-# --- SAFEGUARD FUNCTION: Strips hidden spaces from Google Sheets headers and cells ---
+# --- SAFEGUARD FUNCTION ---
 def get_clean_val(row_dict, target_key):
     for k, v in row_dict.items():
         if str(k).strip().lower() == target_key.strip().lower():
@@ -124,7 +126,6 @@ def get_mdm_tasks(config_data, log_data):
         work_val = get_clean_val(row, 'Work')
         status_val = get_clean_val(row, 'Status').upper()
         
-        # Safe logic to hide already completed tasks
         if (sheet_val or work_val) and status_val != "COMPLETED": 
             all_tasks.append(f"{sheet_val} | {work_val}")
             
@@ -150,11 +151,12 @@ try:
     default_month = now.strftime('%B')
     
     if data_raw and len(data_raw) > 0:
-        app_title = get_clean_val(data_raw[0], 'Title') or app_title
+        raw_title = get_clean_val(data_raw[0], 'Title') or app_title
+        app_title = raw_title.split('(')[0].strip() 
         default_month = get_clean_val(data_raw[0], 'Month') or default_month
         app_year = get_clean_val(data_raw[0], 'Year') or app_year
 
-    # Set the session state month ONLY on the first load using the Data tab
+    # --- THE FIX: Set the session state month ONLY AFTER reading the Data tab ---
     if 'selected_month' not in st.session_state:
         st.session_state.selected_month = default_month
 
@@ -169,7 +171,6 @@ try:
     # --- HEADER & SYNC ---
     col_title, col_sync = st.columns([4, 1])
     with col_title:
-        # Title updated dynamically from the Data tab
         st.markdown(f"<h1 style='margin-top: 0px;'>📦 {app_title} ({st.session_state.selected_month} {app_year})</h1>", unsafe_allow_html=True)
     with col_sync:
         if st.button("🔄 Sync", use_container_width=True):
@@ -197,17 +198,14 @@ try:
             if st.button("🛑 STOP & LOG", key=f"save_{sheet_row}", type="primary"):
                 end_time = now.strftime('%H:%M')
                 
-                # 1. Update MY ROUTINE 2026
                 main_ss = get_main_spreadsheet()
                 main_ss.worksheet("activity_log").update_cell(sheet_row, 3, end_time)
                 
-                # Setup target identifiers
                 mdm_ss = get_mdm_spreadsheet()
                 parts = display_name.split(" | ", 1)
                 target_sheet = parts[0].strip()
                 target_work = parts[1].strip() if len(parts) > 1 else ""
                 
-                # 2. Update CONFIG Status & Get Month from Config
                 config_ws = mdm_ss.worksheet("CONFIG")
                 config_list = config_ws.get_all_records()
                 task_month = st.session_state.selected_month
@@ -217,23 +215,19 @@ try:
                         found_month = get_clean_val(row, 'Month')
                         if found_month: 
                             task_month = found_month
-                        # Log selected status to Status column (D is 4)
                         config_ws.update_cell(i + 2, 4, task_status.upper())
                         break
                 
-                # 3. Locate and update the RUNNING row in MDM LOGS tab
                 logs_ws = mdm_ss.get_worksheet(0)
                 logs_data = logs_ws.get_all_values()
                 log_row_idx = None
                 
-                # Search backward through the logs to find the active "RUNNING" entry
                 for i in range(len(logs_data)-1, -1, -1):
                     row = logs_data[i]
                     if len(row) >= 5 and str(row[0]).strip() == target_sheet and str(row[1]).strip() == target_work and str(row[4]).strip() == "RUNNING":
                         log_row_idx = i + 1
                         break
                 
-                # Update Stop time (E), Month (G), and Status (H) in the specific LOGS row
                 if log_row_idx:
                     try:
                         logs_ws.update(range_name=f"E{log_row_idx}", values=[[end_time]], value_input_option="USER_ENTERED")
@@ -242,7 +236,6 @@ try:
                         logs_ws.update(f"E{log_row_idx}", [[end_time]], value_input_option="USER_ENTERED")
                         logs_ws.update(f"G{log_row_idx}:H{log_row_idx}", [[task_month, task_status.upper()]], value_input_option="USER_ENTERED")
                 else:
-                    # Failsafe append (A-H columns)
                     smart_append_row(logs_ws, [target_sheet, target_work, mdm_date_str, active_row['Start_Time'], end_time, MDM_GS_FORMULA, task_month, task_status.upper()])
                 
                 get_activity_log.clear()
@@ -257,7 +250,6 @@ try:
                 target_sheet = parts[0].strip()
                 target_work = parts[1].strip() if len(parts) > 1 else ""
 
-                # Look up the task's active Month safely
                 task_month = st.session_state.selected_month
                 for row in config_raw:
                     if get_clean_val(row, 'Sheet') == target_sheet and get_clean_val(row, 'Work') == target_work:
@@ -266,10 +258,7 @@ try:
                             task_month = found_month
                         break
                 
-                # Log to MY ROUTINE 2026 as RUNNING
                 smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, "WORK", selected_task, "", "MDM Return Task"])
-                
-                # Log to MDM RETURN LOG as RUNNING (Month in Col G, Status as IN PROGRESS in Col H)
                 smart_append_row(get_mdm_spreadsheet().get_worksheet(0), [target_sheet, target_work, mdm_date_str, now.strftime('%H:%M'), "RUNNING", MDM_GS_FORMULA, task_month, "IN PROGRESS"])
                 
                 get_activity_log.clear()
@@ -285,7 +274,6 @@ try:
         </div>
     """, unsafe_allow_html=True)
     
-    # Safely build the table
     table_data = [{"Sheet": get_clean_val(r, 'Sheet'), "Work": get_clean_val(r, 'Work'), "Status": get_clean_val(r, 'Status').title() or "Pending"} for r in config_raw]
     
     if table_data:
@@ -296,13 +284,18 @@ try:
             return [f'background-color: {bg}; color: {txt}; font-weight: 500'] * len(row)
         st.dataframe(df_table.style.apply(highlight_status, axis=1), use_container_width=True, hide_index=True)
 
-    # --- RESET LOGIC (BATCH UPDATE TO PREVENT 429 ERROR) ---
+    # --- RESET LOGIC ---
     st.markdown("<br>", unsafe_allow_html=True)
     with st.expander("⚙️ Configuration & Monthly Reset"):
         months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
-        new_month = st.selectbox("Tracking Month", months, index=months.index(st.session_state.selected_month))
+        
+        # Ensure the fallback uses the dynamically pulled month
+        fallback_month = st.session_state.selected_month if st.session_state.selected_month in months else "January"
+        new_month = st.selectbox("Tracking Month", months, index=months.index(fallback_month))
+        
         if new_month != st.session_state.selected_month:
-            st.session_state.selected_month = new_month; st.rerun()
+            st.session_state.selected_month = new_month
+            st.rerun()
 
         if st.button("🔄 Reset Config for New Month", use_container_width=True):
             try:

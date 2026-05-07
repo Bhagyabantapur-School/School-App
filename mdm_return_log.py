@@ -25,10 +25,6 @@ st.write("---")
 if 'pomodoro_state' not in st.session_state:
     st.session_state.pomodoro_state = {}
 
-# State for Selected Month
-if 'selected_month' not in st.session_state:
-    st.session_state.selected_month = datetime.now().strftime("%B")
-
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -107,10 +103,11 @@ def fetch_mdm_raw_data():
         ss = get_mdm_spreadsheet()
         config_data = ss.worksheet("CONFIG").get_all_records()
         log_data = ss.get_worksheet(0).get_all_values()
-        return config_data, log_data
+        data_tab_data = ss.worksheet("Data").get_all_records() # Fetches the new Data tab
+        return config_data, log_data, data_tab_data
     except Exception as e:
         st.error(f"Failed to fetch MDM data: {e}")
-        return [], []
+        return [], [], []
 
 # --- SAFEGUARD FUNCTION: Strips hidden spaces from Google Sheets headers and cells ---
 def get_clean_val(row_dict, target_key):
@@ -141,13 +138,26 @@ ist_timezone = pytz.timezone('Asia/Kolkata')
 now = datetime.now(ist_timezone)
 today_str = now.strftime('%Y-%m-%d')
 mdm_date_str = now.strftime('%d-%b-%Y') 
-current_year = now.strftime('%Y')
 
 try:
     log_df = get_activity_log()
-    config_raw, log_raw = fetch_mdm_raw_data()
+    config_raw, log_raw, data_raw = fetch_mdm_raw_data()
     mdm_tasks_list = get_mdm_tasks(config_raw, log_raw)
     
+    # --- EXTRACT DATA FROM THE NEW "Data" TAB ---
+    app_title = "MDM RETURN PREPARE"
+    app_year = now.strftime('%Y')
+    default_month = now.strftime('%B')
+    
+    if data_raw and len(data_raw) > 0:
+        app_title = get_clean_val(data_raw[0], 'Title') or app_title
+        default_month = get_clean_val(data_raw[0], 'Month') or default_month
+        app_year = get_clean_val(data_raw[0], 'Year') or app_year
+
+    # Set the session state month ONLY on the first load using the Data tab
+    if 'selected_month' not in st.session_state:
+        st.session_state.selected_month = default_month
+
     running_tasks = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Notes'] == 'MDM Return Task')]
     active_count = len(running_tasks)
 
@@ -159,7 +169,8 @@ try:
     # --- HEADER & SYNC ---
     col_title, col_sync = st.columns([4, 1])
     with col_title:
-        st.markdown(f"<h1 style='margin-top: 0px;'>📦 MDM RETURN PREPARE ({st.session_state.selected_month} {current_year})</h1>", unsafe_allow_html=True)
+        # Title updated dynamically from the Data tab
+        st.markdown(f"<h1 style='margin-top: 0px;'>📦 {app_title} ({st.session_state.selected_month} {app_year})</h1>", unsafe_allow_html=True)
     with col_sync:
         if st.button("🔄 Sync", use_container_width=True):
             get_activity_log.clear(); fetch_mdm_raw_data.clear(); st.rerun()
@@ -226,7 +237,6 @@ try:
                 if log_row_idx:
                     try:
                         logs_ws.update(range_name=f"E{log_row_idx}", values=[[end_time]], value_input_option="USER_ENTERED")
-                        # Col G = Month, Col H = Status
                         logs_ws.update(range_name=f"G{log_row_idx}:H{log_row_idx}", values=[[task_month, task_status.upper()]], value_input_option="USER_ENTERED")
                     except TypeError:
                         logs_ws.update(f"E{log_row_idx}", [[end_time]], value_input_option="USER_ENTERED")
@@ -304,7 +314,7 @@ try:
                     config_ws.update(range_name=f"C2:D{len(rows)}", values=batch_values)
                     
                     fetch_mdm_raw_data.clear()
-                    st.success(f"Tasks reset for {new_month} {current_year}!")
+                    st.success(f"Tasks reset for {new_month} {app_year}!")
                     time.sleep(1.5)
                     st.rerun()
             except Exception as e:

@@ -30,7 +30,12 @@ client = init_connection()
 
 # Connect to the specific tabs in both databases
 try:
+    # Project Tracker Sheets
     sheet_project = client.open("BPS YTfb Videos").worksheet("Logs")
+    sheet_storage = client.open("BPS YTfb Videos").worksheet("Storage_Logs")
+    sheet_files = client.open("BPS YTfb Videos").worksheet("File_Metadata")
+    
+    # Master Routine Sheet
     sheet_master = client.open("MY ROUTINE 2026").worksheet("activity_log")
 except Exception as e:
     st.error(f"Could not open Google Sheets. Check names and permissions. Error: {e}")
@@ -70,10 +75,10 @@ def get_project_data():
 # 3. UI DASHBOARD & LOGIC
 # ==========================================
 st.title("🎥 BPS Video Workflow Tracker")
-st.markdown("Manage your video production phases and synchronize with your Master Routine.")
+st.markdown("Manage your video production phases, assets, and storage.")
 
-# Create two tabs for a cleaner interface
-tab1, tab2 = st.tabs(["▶️ Start a Phase", "⏹ Stop & Log"])
+# Create FOUR tabs for a comprehensive interface
+tab1, tab2, tab3, tab4 = st.tabs(["▶️ Start a Phase", "⏹ Stop & Log", "💾 Storage Tracker", "📁 File Metadata"])
 
 # ------------------------------------------
 # TAB 1: START A PHASE (Writes "RUNNING" to Master)
@@ -105,7 +110,7 @@ with tab1:
                 # Master Sheet Columns: Date(A), Start(B), End(C), Duration(D), Activity(E), Sub(F), Check(G), Notes(H)
                 gs_formula_master = f'=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm:ss"), ""))'
                 
-                # We save the project details into the "Notes" column temporarily so we can retrieve them when stopping
+                # Save project details into the "Notes" column temporarily
                 project_metadata = f"{event_name}|{video_phase}|{recording_device}|{editing_tool}"
 
                 row_data = [
@@ -116,12 +121,12 @@ with tab1:
                     "Video Production",     # E: Activity
                     f"{video_phase} - {event_name}", # F: Sub_Activities
                     "",                     # G: check_list
-                    project_metadata        # H: Notes (Hidden payload for Tab 2)
+                    project_metadata        # H: Notes
                 ]
                 
                 with st.spinner("Starting phase in Master Routine..."):
                     smart_append_row(sheet_master, row_data)
-                    get_master_data.clear() # Clear cache
+                    get_master_data.clear() 
                     st.success(f"Started '{video_phase}' for '{event_name}' at {start_time_str}!")
 
 
@@ -134,7 +139,6 @@ with tab2:
     # Fetch data to find "RUNNING" tasks
     master_records = sheet_master.get_all_values()
     
-    # Find the row index and data where End_Time (Column C / index 2) is "RUNNING"
     running_task = None
     running_row_index = -1
     
@@ -142,14 +146,13 @@ with tab2:
     for i in range(len(master_records)-1, 0, -1):
         if master_records[i][2] == "RUNNING" and master_records[i][4] == "Video Production":
             running_task = master_records[i]
-            running_row_index = i + 1 # +1 because Google Sheets is 1-indexed
+            running_row_index = i + 1 
             break
             
     if running_task:
-        # Extract data from the Master Sheet row
         start_time_recorded = running_task[1]
         task_label = running_task[5]
-        metadata_raw = running_task[7] # Metadata we hid in the Notes column
+        metadata_raw = running_task[7] 
         
         st.info(f"**Currently Running:** {task_label} (Started at {start_time_recorded})")
         
@@ -162,19 +165,15 @@ with tab2:
                     # --- 1. UPDATE MASTER TRACKER ---
                     gs_formula_master = f'=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm:ss"), ""))'
                     
-                    # Overwrite End_Time (Col 3) and Duration (Col 4)
                     sheet_master.update_cell(running_row_index, 3, end_time_log)
                     sheet_master.update_cell(running_row_index, 4, gs_formula_master)
 
                     # --- 2. APPEND TO PROJECT TRACKER ---
-                    # Parse the metadata we saved when starting
                     try:
                         event, phase, device, tool = metadata_raw.split("|")
                     except ValueError:
-                        # Fallback if metadata is corrupted
                         event, phase, device, tool = "Unknown", "Unknown", "Unknown", "Unknown"
 
-                    # Project Columns: Date(A), Event(B), Phase(C), Device(D), Tool(E), Start(F), End(G), Duration(H)
                     gs_formula_project = f'=IF(INDIRECT("G"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("G"&ROW())-INDIRECT("F"&ROW()), 1), "h:mm:ss"), ""))'
                     
                     project_row_data = [
@@ -202,3 +201,86 @@ with tab2:
                     st.error(f"An error occurred during logging: {e}")
     else:
         st.write("No active video production tasks found. Go to 'Start a Phase' to begin.")
+
+
+# ------------------------------------------
+# TAB 3: STORAGE TRACKER (Logs to Storage_Logs tab)
+# ------------------------------------------
+with tab3:
+    st.subheader("💾 Log Data Dumps & Storage")
+    
+    with st.form("storage_log_form"):
+        event_name_storage = st.text_input("Event Name (e.g., Annual Sports Day)", key="storage_event")
+        device_dumped = st.selectbox("Device Dumped", ["Mobile (Mi 11x)", "DJI Pocket", "PC / External Drive"])
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            storage_before = st.number_input("Storage BEFORE (GB)", min_value=0.0, step=0.1)
+        with col2:
+            storage_after = st.number_input("Storage AFTER (GB)", min_value=0.0, step=0.1)
+            
+        submit_storage = st.form_submit_button("Log Storage Data")
+        
+        if submit_storage:
+            if not event_name_storage:
+                st.error("Please enter an Event Name.")
+            else:
+                now = get_ist_time()
+                log_date = now.strftime("%Y-%m-%d")
+                
+                # Calculated Dump Size (Formula)
+                gs_formula_data_dumped = f'=IFERROR(INDIRECT("D"&ROW()) - INDIRECT("E"&ROW()), 0)'
+                
+                storage_row = [
+                    log_date,               # A: Date
+                    event_name_storage,     # B: Event
+                    device_dumped,          # C: Device
+                    storage_before,         # D: Before (GB)
+                    storage_after,          # E: After (GB)
+                    gs_formula_data_dumped  # F: Calculated Dump Size
+                ]
+                
+                smart_append_row(sheet_storage, storage_row)
+                st.success(f"Storage data logged for {device_dumped}!")
+
+
+# ------------------------------------------
+# TAB 4: FILE METADATA (Logs to File_Metadata tab)
+# ------------------------------------------
+with tab4:
+    st.subheader("📁 Log Video Assets")
+    
+    with st.form("file_metadata_form", clear_on_submit=True): 
+        event_name_file = st.text_input("Event Name", key="file_event")
+        file_type = st.radio("Asset Type", ["Raw Footage", "Rendered Final Video"], horizontal=True)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            file_name = st.text_input("File Name (e.g., DJI_001.mp4)")
+            duration = st.text_input("Video Duration (e.g., 00:15:30)")
+        with col2:
+            storage_loc = st.selectbox("Storage Location", ["PC Local Drive", "External HDD 1", "Google Drive", "Mobile Gallery"])
+            file_time = st.time_input("Time Recorded/Rendered")
+            
+        submit_file = st.form_submit_button("Save File Metadata")
+        
+        if submit_file:
+            if not file_name or not event_name_file:
+                st.error("Event Name and File Name are required.")
+            else:
+                now = get_ist_time()
+                log_date = now.strftime("%Y-%m-%d")
+                time_str = file_time.strftime("%H:%M:%S")
+                
+                file_row = [
+                    log_date,           # A: Date
+                    event_name_file,    # B: Event
+                    file_type,          # C: Raw/Rendered
+                    file_name,          # D: File Name
+                    storage_loc,        # E: Location
+                    time_str,           # F: Time
+                    duration            # G: Duration
+                ]
+                
+                smart_append_row(sheet_files, file_row)
+                st.success(f"File '{file_name}' saved to asset database!")

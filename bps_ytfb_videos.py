@@ -9,6 +9,12 @@ import time
 # ==========================================
 st.set_page_config(page_title="BPS Video Tracker", page_icon="🎥", layout="centered")
 
+# --- BACK BUTTON (STRICTLY REQUIRED HERE) ---
+if st.button("⬅️ Back to Dashboard", type="secondary"):
+    st.switch_page("dashboard.py")
+st.write("---") 
+# --------------------------------------------
+
 @st.cache_resource
 def init_connection():
     """Initializes the connection using Streamlit Secrets."""

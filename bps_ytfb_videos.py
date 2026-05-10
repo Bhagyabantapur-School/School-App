@@ -274,13 +274,8 @@ with tab5:
             df_reversed, 
             use_container_width=True, 
             column_config={
-                "Log Date": st.column_config.DateColumn("📅 Date"),
-                "Video Phase": "Phase",
-                "Device": "📷 Device", 
-                "Editing Tool": "💻 Software",
-                "YT Title": "📺 YT Title",
-                "YT Publish Time": "⏰ YT Publish Time",
-                "Duration": st.column_config.TextColumn("⏱ Duration")
+                "Video Phase": "Video Phase",
+                "Duration": st.column_config.TextColumn("Duration")
             }
         )
     else:

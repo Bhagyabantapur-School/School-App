@@ -244,7 +244,7 @@ with tab4:
                 st.success(f"File '{file_name}' saved to asset database!")
 
 # ------------------------------------------
-# TAB 5: HISTORY (Smart Column Separation)
+# TAB 5: HISTORY (Smart & Bulletproof Separation)
 # ------------------------------------------
 with tab5:
     st.subheader("📊 Recent Completed Tasks")
@@ -257,28 +257,34 @@ with tab5:
     if history_data:
         df = pd.DataFrame(history_data)
         
-        # --- SMART DATA SEPARATION ---
-        # Create empty dedicated columns for YouTube data
+        # 1. Clean invisible spaces from Google Sheet Headers
+        df.columns = df.columns.str.strip()
+        
+        # 2. Create the empty dedicated columns safely
         df["YT Title"] = ""
         df["YT Publish Time"] = ""
         
-        # Ensure the columns exist to prevent errors on empty sheets
-        if "Recording Device" in df.columns and "Editing Tool" in df.columns and "Video Phase" in df.columns:
-            # Find all rows where the phase is YouTube Publishing
+        # 3. Check if the required columns exist
+        if "Video Phase" in df.columns and "Recording Device" in df.columns and "Editing Tool" in df.columns:
+            
+            # Clean invisible spaces from the data in the Video Phase column
+            df["Video Phase"] = df["Video Phase"].astype(str).str.strip()
+            
+            # Find the YouTube rows
             yt_mask = df["Video Phase"] == "Publishing (YT)"
             
-            # Move the data into the new, correct columns
+            # Move the data into the correct columns
             df.loc[yt_mask, "YT Title"] = df.loc[yt_mask, "Recording Device"]
             df.loc[yt_mask, "YT Publish Time"] = df.loc[yt_mask, "Editing Tool"]
             
-            # Blank out the original columns with a clean dash
+            # Replace the old cells with a dash
             df.loc[yt_mask, "Recording Device"] = "-"
             df.loc[yt_mask, "Editing Tool"] = "-"
 
-        # Reverse order to show newest first
+        # Reverse the dataframe to show newest entries first
         df_reversed = df.iloc[::-1] 
         
-        # Display table with clean headers
+        # Display the table
         st.dataframe(
             df_reversed, 
             use_container_width=True, 

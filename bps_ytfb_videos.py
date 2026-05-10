@@ -8,23 +8,6 @@ import time
 # ==========================================
 # 1. PAGE SETUP & AUTHENTICATION
 # ==========================================
-st.set_page_This is a great update. Tracking which device you are using to publish (like checking if uploading from your PC W10 is faster than your Mi 11x) will give you great insights into your internet/upload bottlenecks.
-
-I have updated the code to include the **Primary Device** dropdown when you select "Publishing (YT)" (defaulting to PC W10 and Mi 11x). I also updated the data table in **Tab 5** to look for your new `"Device"` column header instead of `"Recording Device"`.
-
-Here is the fully updated code. Replace your `bps_ytfb_videos.py` with this block:
-
-```python
-import streamlit as st
-import gspread
-import pandas as pd
-from datetime import datetime
-import pytz
-import time
-
-# ==========================================
-# 1. PAGE SETUP & AUTHENTICATION
-# ==========================================
 st.set_page_config(page_title="BPS Video Tracker", page_icon="🎥", layout="wide")
 
 # --- BACK BUTTON ---
@@ -84,128 +67,6 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 
 # ------------------------------------------
 # TAB 1: START A PHASE
-# ------------------------------------------
-with tab1:
-    st.subheader("Initialize New Video Phase")
-    
-    video_phase = st.selectbox(
-        "Current Phase", 
-        ["Transferring", "Editing", "Rendering", "Publishing (YT)", "Publishing (FB)"]
-    )
-    
-    with st.form("start_task_form"):
-        event_name = st.text_input("Event Name (e.g., Annual Sports Day)")
-        
-        # Initialize variables
-        yt_title, yt_publish_time, recording_device, editing_tool = "-", "-", "-", "-"
-        
-        if video_phase == "Publishing (YT)":
-            yt_title = st.text_input("YouTube Video Title")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                # ADDED: Device selection for Publishing
-                recording_device = st.selectbox("Primary Device", ["PC W10", "Mi 11x"])
-            with col2:
-                yt_publish_time = st.time_input("Scheduled/Actual Publish Time", value=get_ist_time().time())
-                
-        else:
-            col1, col2 = st.columns(2)
-            with col1:
-                if video_phase == "Editing":
-                    device_options = ["Mi 11x", "PC W10"]
-                else:
-                    device_options = ["Mi 11x", "DJI Pocket"]
-                
-                recording_device = st.selectbox("Primary Device", device_options)
-            with col2:
-                editing_tool = st.selectbox("Editing Software", ["Shotcut", "CapCut", "Filmora", "VLLO", "None"])
-        
-        # 6-PART PAYLOAD
-        project_metadata = f"{event_name}|{video_phase}|{recording_device}|{editing_tool}|{yt_title}|{yt_publish_time}"
-
-        if st.form_submit_button("Start Phase"):
-            if not event_name:
-                st.error("Please enter an Event Name.")
-            elif video_phase == "Publishing (YT)" and yt_title == "-":
-                st.error("Please enter a VideoThis is an easy update! Now that you have properly separated the YouTube data into its own columns (I and J), we can easily bring the **Primary Device** selector back into the "Publishing (YT)" phase without breaking anything. 
-
-Since you updated Column D's header from "Recording Device" to "Device" in your Google Sheet, I have also updated the labels in the app and the History table (`pandas` mapping) to match your new database structure perfectly.
-
-### Full Updated Code (`bps_ytfb_videos.py`)
-
-Copy and paste this complete script. It includes the new Device layout for YouTube publishing and the updated column references!
-
-```python
-import streamlit as st
-import gspread
-import pandas as pd
-from datetime import datetime
-import pytz
-import time
-
-# ==========================================
-# 1. PAGE SETUP & AUTHENTICATION
-# ==========================================
-st.set_page_config(page_title="BPS Video Tracker", page_icon="🎥", layout="wide")
-
-# --- BACK BUTTON ---
-if st.button("⬅️ Back to Dashboard", type="secondary"):
-    st.switch_page("dashboard.py")
-st.write("---") 
-
-@st.cache_resource
-def init_connection():
-    try:
-        creds_dict = dict(st.secrets["gcp_service_account"])
-        client = gspread.service_account_from_dict(creds_dict)
-        return client
-    except Exception as e:
-        st.error(f"Authentication Failed: {e}")
-        st.stop()
-
-client = init_connection()
-
-try:
-    sheet_project = client.open("BPS YTfb Videos").worksheet("Logs")
-    sheet_storage = client.open("BPS YTfb Videos").worksheet("Storage_Logs")
-    sheet_files = client.open("BPS YTfb Videos").worksheet("File_Metadata")
-    sheet_master = client.open("MY ROUTINE 2026").worksheet("activity_log")
-except Exception as e:
-    st.error(f"Could not open Google Sheets. Error: {e}")
-    st.stop()
-
-# ==========================================
-# 2. ARCHITECTURE FUNCTIONS
-# ==========================================
-def get_ist_time():
-    ist = pytz.timezone('Asia/Kolkata')
-    return datetime.now(ist)
-
-def smart_append_row(sheet, row_data):
-    col_a = sheet.col_values(1)
-    next_row = len(col_a) + 1
-    sheet.update(range_name=f"A{next_row}", values=[row_data], value_input_option="USER_ENTERED")
-
-@st.cache_data(ttl=60)
-def get_master_data():
-    return sheet_master.get_all_records()
-
-@st.cache_data(ttl=60)
-def get_project_history():
-    return sheet_project.get_all_records()
-
-# ==========================================
-# 3. UI DASHBOARD & LOGIC
-# ==========================================
-st.title("🎥 BPS Video Workflow Tracker")
-
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "▶️ Start a Phase", "⏹ Stop & Log", "💾 Storage Tracker", "📁 File Metadata", "📊 History"
-])
-
-# ------------------------------------------
-# TAB 1: START A PHASE (Device added to YT)
 # ------------------------------------------
 with tab1:
     st.subheader("Initialize New Video Phase")
@@ -415,8 +276,7 @@ with tab5:
             column_config={
                 "Log Date": st.column_config.DateColumn("📅 Date"),
                 "Video Phase": "Phase",
-                "Device": "📷 Device", # Updated to match your new Google Sheet header
-                "Recording Device": "📷 Device", # Failsafe
+                "Device": "📷 Device", 
                 "Editing Tool": "💻 Software",
                 "YT Title": "📺 YT Title",
                 "YT Publish Time": "⏰ YT Publish Time",

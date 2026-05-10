@@ -15,7 +15,7 @@ if st.button("⬅️ Back to Dashboard", type="secondary"):
     st.switch_page("dashboard.py")
 st.write("---") 
 
-# --- MEMORY MODULE (Remembers Last Selections) ---
+# --- MEMORY MODULE ---
 for key, default_val in [
     ('saved_event', '➕ Create New Event...'),
     ('saved_phase', 'Transferring'),
@@ -27,12 +27,11 @@ for key, default_val in [
     if key not in st.session_state:
         st.session_state[key] = default_val
 
-# Helper function to easily find the index of a saved item
 def get_idx(opt_list, val):
     return opt_list.index(val) if val in opt_list else 0
 
 # ==========================================
-# 2. AUTHENTICATION & ARCHITECTURE
+# 2. AUTHENTICATION & AGGRESSIVE CACHING
 # ==========================================
 @st.cache_resource
 def init_connection():
@@ -44,16 +43,27 @@ def init_connection():
         st.error(f"Authentication Failed: {e}")
         st.stop()
 
-client = init_connection()
+# FIX: Cache the physical worksheet connections so they don't count against the 60/min quota!
+@st.cache_resource
+def get_worksheets():
+    client = init_connection()
+    try:
+        return {
+            "project": client.open("BPS YTfb Videos").worksheet("Logs"),
+            "storage": client.open("BPS YTfb Videos").worksheet("Storage_Logs"),
+            "files": client.open("BPS YTfb Videos").worksheet("File_Metadata"),
+            "master": client.open("MY ROUTINE 2026").worksheet("activity_log")
+        }
+    except Exception as e:
+        st.error(f"Could not open Google Sheets. Error: {e}")
+        st.stop()
 
-try:
-    sheet_project = client.open("BPS YTfb Videos").worksheet("Logs")
-    sheet_storage = client.open("BPS YTfb Videos").worksheet("Storage_Logs")
-    sheet_files = client.open("BPS YTfb Videos").worksheet("File_Metadata")
-    sheet_master = client.open("MY ROUTINE 2026").worksheet("activity_log")
-except Exception as e:
-    st.error(f"Could not open Google Sheets. Error: {e}")
-    st.stop()
+# Load cached sheets
+sheets = get_worksheets()
+sheet_project = sheets["project"]
+sheet_storage = sheets["storage"]
+sheet_files = sheets["files"]
+sheet_master = sheets["master"]
 
 def get_ist_time():
     ist = pytz.timezone('Asia/Kolkata')
@@ -64,9 +74,10 @@ def smart_append_row(sheet, row_data):
     next_row = len(col_a) + 1
     sheet.update(range_name=f"A{next_row}", values=[row_data], value_input_option="USER_ENTERED")
 
+# FIX: Cache the raw values for Tab 2 to prevent API spam
 @st.cache_data(ttl=60)
-def get_master_data():
-    return sheet_master.get_all_records()
+def get_master_values():
+    return sheet_master.get_all_values()
 
 @st.cache_data(ttl=60)
 def get_project_history():
@@ -159,12 +170,12 @@ with tab1:
                 with st.spinner("Logging to Master..."):
                     smart_append_row(sheet_master, row_data)
                     
-                    # Update Memory State!
                     st.session_state.saved_event = event_name
                     st.session_state.saved_phase = video_phase
                     st.session_state.saved_device = recording_device
                     st.session_state.saved_software = editing_tool
                     
+                    get_master_values.clear() # Clear cache so Tab 2 updates
                     st.success(f"Started {video_phase} successfully!")
                     time.sleep(1)
                     st.rerun()
@@ -174,7 +185,8 @@ with tab1:
 # ------------------------------------------
 with tab2:
     st.subheader("Active Tasks")
-    master_records = sheet_master.get_all_values()
+    # FIX: Using cached values instead of making live API request
+    master_records = get_master_values()
     active_tasks = []
     
     for i in range(1, len(master_records)):
@@ -215,6 +227,9 @@ with tab2:
                         ]
                         
                         smart_append_row(sheet_project, project_row)
+                        
+                        # Clear caches so everything updates immediately
+                        get_master_values.clear()
                         get_project_history.clear()
                         get_event_list.clear() 
                         
@@ -262,7 +277,6 @@ with tab3:
                 ]
                 smart_append_row(sheet_storage, storage_row)
                 
-                # Update Memory State!
                 st.session_state.saved_event = event_name_storage
                 st.session_state.saved_dump = device_dumped
                 
@@ -306,7 +320,6 @@ with tab4:
                 ]
                 smart_append_row(sheet_files, file_row)
                 
-                # Update Memory State!
                 st.session_state.saved_event = event_name_file
                 st.session_state.saved_loc = storage_loc
                 
@@ -318,6 +331,7 @@ with tab4:
 with tab5:
     st.subheader("📊 Recent Completed Tasks")
     if st.button("🔄 Refresh History"):
+        get_master_values.clear()
         get_project_history.clear()
         get_event_list.clear() 
         st.rerun()

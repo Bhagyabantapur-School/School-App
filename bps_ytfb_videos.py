@@ -244,7 +244,7 @@ with tab4:
                 st.success(f"File '{file_name}' saved to asset database!")
 
 # ------------------------------------------
-# TAB 5: HISTORY
+# TAB 5: HISTORY (Smart Column Separation)
 # ------------------------------------------
 with tab5:
     st.subheader("📊 Recent Completed Tasks")
@@ -256,14 +256,40 @@ with tab5:
     
     if history_data:
         df = pd.DataFrame(history_data)
-        df_reversed = df.iloc[::-1] # Show newest entries first
         
+        # --- SMART DATA SEPARATION ---
+        # Create empty dedicated columns for YouTube data
+        df["YT Title"] = ""
+        df["YT Publish Time"] = ""
+        
+        # Ensure the columns exist to prevent errors on empty sheets
+        if "Recording Device" in df.columns and "Editing Tool" in df.columns and "Video Phase" in df.columns:
+            # Find all rows where the phase is YouTube Publishing
+            yt_mask = df["Video Phase"] == "Publishing (YT)"
+            
+            # Move the data into the new, correct columns
+            df.loc[yt_mask, "YT Title"] = df.loc[yt_mask, "Recording Device"]
+            df.loc[yt_mask, "YT Publish Time"] = df.loc[yt_mask, "Editing Tool"]
+            
+            # Blank out the original columns with a clean dash
+            df.loc[yt_mask, "Recording Device"] = "-"
+            df.loc[yt_mask, "Editing Tool"] = "-"
+
+        # Reverse order to show newest first
+        df_reversed = df.iloc[::-1] 
+        
+        # Display table with clean headers
         st.dataframe(
             df_reversed, 
             use_container_width=True, 
             column_config={
-                "Duration": st.column_config.TextColumn("⏱ Duration"),
                 "Log Date": st.column_config.DateColumn("📅 Date"),
+                "Video Phase": "Phase",
+                "Recording Device": "📷 Device",
+                "Editing Tool": "💻 Software",
+                "YT Title": "📺 YT Title",
+                "YT Publish Time": "⏰ YT Publish Time",
+                "Duration": st.column_config.TextColumn("⏱ Duration")
             }
         )
     else:

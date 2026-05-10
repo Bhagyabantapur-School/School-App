@@ -59,30 +59,40 @@ st.title("🎥 BPS Video Workflow Tracker")
 tab1, tab2, tab3, tab4 = st.tabs(["▶️ Start a Phase", "⏹ Stop & Log", "💾 Storage Tracker", "📁 File Metadata"])
 
 # ------------------------------------------
-# TAB 1: START A PHASE (With Conditional YT Fields)
+# TAB 1: START A PHASE (Fixed Dynamic Fields)
 # ------------------------------------------
 with tab1:
+    st.subheader("Initialize New Video Phase")
+    
+    # MOVE THIS OUTSIDE THE FORM to trigger immediate UI updates
+    video_phase = st.selectbox(
+        "Current Phase", 
+        ["Transferring", "Editing", "Rendering", "Publishing (YT)", "Publishing (FB)"]
+    )
+    
+    # Now the form starts
     with st.form("start_task_form"):
-        st.subheader("Initialize New Video Phase")
         event_name = st.text_input("Event Name (e.g., Annual Sports Day)")
-        video_phase = st.selectbox("Current Phase", ["Transferring", "Editing", "Rendering", "Publishing (YT)", "Publishing (FB)"])
         
-        # --- CONDITIONAL LOGIC FOR YT PUBLISHING ---
+        # --- DYNAMIC FIELDS BASED ON SELECTION ---
         if video_phase == "Publishing (YT)":
             yt_title = st.text_input("YouTube Video Title")
             yt_publish_time = st.time_input("Scheduled/Actual Publish Time", value=get_ist_time().time())
-            # Hidden defaults for YT phase
+            
+            # Default values for background processing
             recording_device = "N/A"
             editing_tool = "N/A"
-            # Special Metadata Payload for YT
+            # Payload for Tab 2 logic
             project_metadata = f"{event_name}|{video_phase}|{yt_title}|{yt_publish_time}"
+        
         else:
             col1, col2 = st.columns(2)
             with col1:
                 recording_device = st.selectbox("Primary Device", ["Mi 11x", "DJI Pocket"])
             with col2:
                 editing_tool = st.selectbox("Editing Software", ["CapCut", "Filmora", "VLLO", "None"])
-            # Standard Metadata Payload
+            
+            # Standard Payload
             project_metadata = f"{event_name}|{video_phase}|{recording_device}|{editing_tool}"
 
         start_button = st.form_submit_button("Start Phase")
@@ -90,11 +100,14 @@ with tab1:
         if start_button:
             if not event_name:
                 st.error("Please enter an Event Name.")
+            elif video_phase == "Publishing (YT)" and not yt_title:
+                st.error("Please enter a Video Title for YouTube.")
             else:
                 now = get_ist_time()
                 log_date = now.strftime("%Y-%m-%d")
                 start_time_str = now.strftime("%H:%M:%S")
                 
+                # Formula for Master Routine
                 gs_formula_master = f'=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm:ss"), ""))'
                 
                 row_data = [
@@ -108,8 +121,11 @@ with tab1:
                     project_metadata        # H: Notes
                 ]
                 
-                smart_append_row(sheet_master, row_data)
-                st.success(f"Started '{video_phase}' at {start_time_str}!")
+                with st.spinner("Logging to Master..."):
+                    smart_append_row(sheet_master, row_data)
+                    st.success(f"Started {video_phase} successfully!")
+                    time.sleep(1)
+                    st.rerun()
 
 # ------------------------------------------
 # TAB 2: STOP & LOG (Handles YT Metadata)

@@ -27,6 +27,289 @@ for key, default_val in [
     if key not in st.session_state:
         st.session_state[key] = default_val
 
+# Improved helper: defaults to the first real option (idx 1) if "Add New" is idx 0
+def get_idx(opt_list, val, default_idx=0):
+    return opt_list.index(val) if val in opt_list else default_idx
+
+# ==========================================
+# 2. AUTHENTICATION & AGGRESSIVE CACHING
+# ==========================================
+@st.cache_resource
+def init_connection():
+    try:
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        client = gspread.service_account_from_dict(creds_dict)
+        return client
+    except Exception as e:
+        st.error(f"Authentication Failed: {e}")
+        st.stop()
+
+@st.cache_resource
+def get_worksheets():
+    client = init_connection()
+    try:
+        return {
+            "project": client.open("BPS YTfb Videos").worksheet("Logs"),
+            "storage": client.open("BPS YTfb Videos").worksheet("Storage_Logs"),
+            "files": client.open("BPS YTfb Videos").worksheet("File_Metadata"),
+            "master": client.open("MY ROUTINE 2026").worksheet("activity_log")
+        }
+    except Exception as e:
+        st.error(f"Could not open Google Sheets. Error: {e}")
+        st.stop()
+
+sheets = get_worksheets()
+sheet_project = sheets["project"]
+sheet_storage = sheets["storage"]
+sheet_files = sheets["files"]
+sheet_master = sheets["master"]
+
+def get_ist_time():
+    ist = pytz.timezone('Asia/Kolkata')
+    return datetime.now(ist)
+
+def smart_append_row(sheet, row_data):
+    col_a = sheet.col_values(1)
+    next_row = len(col_a) + 1
+    sheet.update(range_name=f"A{next_row}", values=[row_data], value_input_option="USER_ENTERED")
+
+@st.cache_data(ttl=60)
+def get_master_values():
+    return sheet_master.get_all_values()
+
+@st.cache_data(ttl=60)
+def get_project_history():
+    return sheet_project.get_all_records()
+
+@st.cache_data(ttl=60)
+def get_event_list():
+    history = get_project_history()
+    if history:
+        df = pd.DataFrame(history)
+        if "Event Name" in df.columns:
+            events = [str(e).strip() for e in df["Event Name"].unique() if str(e).strip()]
+            return sorted(list(set(events)))
+    return []
+
+@st.cache_data(ttl=60)
+def get_software_list():
+    history = get_project_history()
+    base_software = ["CapCut", "Filmora", "None", "Shotcut", "VLLO"] 
+    if history:
+        df = pd.DataFrame(history)
+        if "Editing Tool" in df.columns:
+            hist_soft = [str(s).strip() for s in df["Editing Tool"].unique() if str(s).strip() and str(s).strip() != "-"]
+            base_software.extend(hist_soft)
+    return sorted(list(set(base_software)))
+
+# --- NEW: Smart Transfer Path Extractor ---
+@st.cache_data(ttl=60)
+def get_transfer_path_list():
+    history = get_project_history()
+    base_paths = ["DJI Pocket to PC W10", "PC W10 to Mi 11x", "Mi 11x to PC W10"] 
+    if history:
+        df = pd.DataFrame(history)
+        if "Device" in df.columns and "Video Phase" in df.columns:
+            mask = df["Video Phase"] == "Transferring"
+            hist_paths = [str(s).strip() for s in df[mask]["Device"].unique() if str(s).strip() and str(s).strip() != "-"]
+            base_paths.extend(hist_paths)
+    return sorted(list(set(base_paths)))
+
+# ==========================================
+# 3. UI DASHBOARD & LOGIC
+# ==========================================
+st.title("🎥 BPS Video Workflow Tracker")
+
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "▶️ Start a Phase", "⏹ Stop & Log", "💾 Storage Tracker", "📁 File Metadata", "📊 History"
+])
+
+# ------------------------------------------
+# TAB 1: START A PHASE
+# ------------------------------------------
+with tab1:
+    st.subheader("Initialize New Video Phase")
+    
+    unique_events = get_event_list()
+    event_options = ["➕ Create New Event..."] + unique_events
+    phase_options = ["Transferring", "Editing", "Rendering", "Publishing (YT)", "Publishing (FB)"]
+    
+    col_evt, col_phase = st.columns(2)
+    with col_evt:
+        event_selection = st.selectbox("Select Event", event_options, index=get_idx(event_options, st.session_state.saved_event, 1))
+    with col_phase:
+        video_phase = st.selectbox("Current Phase", phase_options, index=get_idx(phase_options, st.session_state.saved_phase, 0))
+    
+    # --- DYNAMIC UI BASED ON PHASE ---
+    if video_phase == "Publishing (YT)":
+        device_opts = ["PC W10", "Mi 11x"]
+        recording_device_sel = st.selectbox("Device", device_opts, index=get_idx(device_opts, st.session_state.saved_device, 0))
+        soft_selection = "-"
+        path_selection = "-"
+        term = "Software" 
+        
+    elif video_phase == "Transferring":
+        unique_paths = get_transfer_path_list()
+        path_options = ["➕ Add New Path..."] + unique_paths
+        path_selection = st.selectbox("Transfer Path", path_options, index=get_idx(path_options, st.session_state.saved_device, 1))
+        soft_selection = "-"
+        recording_device_sel = "-"
+        term = "Software"
+        
+    else:
+        col_dev, col_soft = st.columns(2)
+        with col_dev:
+            device_opts = ["Mi 11x", "PC W10"] if video_phase == "Editing" else ["Mi 11x", "DJI Pocket"]
+            recording_device_sel = st.selectbox("Device", device_opts, index=get_idx(device_opts, st.session_state.saved_device, 0))
+        
+        with col_soft:
+            term = "Software" if recording_device_sel == "PC W10" else "App"
+            unique_software = get_software_list()
+            soft_options = [f"➕ Add New {term}..."] + unique_software
+            soft_selection = st.selectbox(f"Editing {term}", soft_options, index=get_idx(soft_options, st.session_state.saved_software, 1))
+        path_selection = "-"
+
+    # --- TEXT INPUTS & LOGGING ---
+    with st.form("start_task_form"):
+        if event_selection == "➕ Create New Event...":
+            event_name = st.text_input("Enter New Event Name (e.g., Annual Sports Day)")
+        else:
+            event_name = event_selection
+            st.info(f"Selected Event: **{event_name}**")
+        
+        yt_title, yt_publish_time, editing_tool, recording_device = "-", "-", "-", "-"
+        
+        # Phase Specific Logic
+        if video_phase == "Publishing (YT)":
+            yt_title = st.text_input("YouTube Video Title")
+            yt_publish_time = st.time_input("Scheduled/Actual Publish Time", value=get_ist_time().time())
+            recording_device = recording_device_sel
+            
+        elif video_phase == "Transferring":
+            if path_selection.startswith("➕ Add New"):
+                recording_device = st.text_input("Enter New Transfer Path (e.g., SD Card to Mac)")
+            else:
+                recording_device = path_selection
+                
+        else:
+            recording_device = recording_device_sel
+            if soft_selection.startswith("➕ Add New"):
+                editing_tool = st.text_input(f"Enter New {term} Name")
+            else:
+                editing_tool = soft_selection
+        
+        project_metadata = f"{event_name}|{video_phase}|{recording_device}|{editing_tool}|{yt_title}|{yt_publish_time}"
+
+        if st.form_submit_button("Start Phase"):
+            if not event_name:
+                st.error("Please enter an Event Name.")
+            elif video_phase == "Publishing (YT)" and not yt_title:
+                st.error("Please enter a Video Title.")
+            elif video_phase == "Transferring" and path_selection.startswith("➕ Add New") and not recording_device:
+                st.error("Please enter the name of the new transfer path.")
+            elif video_phase not in ["Publishing (YT)", "Transferring"] and soft_selection.startswith("➕ Add New") and not editing_tool:
+                st.error(f"Please enter the name of the new {term.lower()}.")
+            else:
+                now = get_ist_time()
+                log_date = now.strftime("%Y-%m-%d")
+                start_time_str = now.strftime("%H:%M:%S")
+                
+                gs_formula_master = f'=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm:ss"), ""))'
+                
+                row_data = [
+                    log_date, start_time_str, "RUNNING", gs_formula_master, 
+                    "Video Production", f"{video_phase} - {event_name}", "", project_metadata
+                ]
+                
+                with st.spinner("Logging to Master..."):
+                    smart_append_row(sheet_master, row_data)
+                    
+                    st.session_state.saved_event = event_name
+                    st.session_state.saved_phase = video_phase
+                    st.session_state.saved_device = recording_device
+                    st.session_state.saved_software = editing_tool
+                    
+                    get_master_values.clear()
+                    st.success(f"Started {video_phase} successfully!")
+                    time.sleep(1)
+                    st.rerun()
+
+# ------------------------------------------
+# TAB 2: STOP & LOG
+# ------------------------------------------
+with tab2:
+    st.subheader("Active Tasks")
+    master_records = get_master_values()
+    active_tasks = []
+    
+    for i in range(1, len(master_records)):
+        row_data = master_records[i]
+        if len(row_data) >= 8 and row_data[2] == "RUNNING" and row_data[4] == "Video Production":
+            active_tasks.append({
+                "row_index": i + 1, "start_time": row_data[1], 
+                "task_label": row_data[5], "metadata": row_data[7]
+            })
+            
+    if active_tasks:
+        for task in active_tasks:
+            with st.container(border=True):
+                st.info(f"**Running:** {task['task_label']} (Started: {task['start_time']})")
+                
+                if st.button(f"⏹ Stop & Dual-Log", key=f"stop_{task['row_index']}", type="primary"):
+                    now = get_ist_time()
+                    end_time_log = now.strftime("%H:%M:%S") 
+                    
+                    try:
+                        gs_formula_master = f'=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm:ss"), ""))'
+                        sheet_master.update_cell(task['row_index'], 3, end_time_log)
+                        sheet_master.update_cell(task['row_index'], 4, gs_formula_master)
+
+                        meta_parts = task['metadata'].split("|")
+                        if len(meta_parts) == 6:
+                            event, phase, device, tool, y_title, y_time = meta_parts
+                        else:
+                            event, phase = meta_parts[0], meta_parts[1]
+                            device, tool, y_title, y_time = "-", "-", "-", "-"
+                            
+                        gs_formula_project = f'=IF(INDIRECT("G"&ROW())="RUNNINGThis is a highly logical change. "Transferring" isn't about using a single device; it is a *bridge* between two devices. Furthermore, you certainly aren't using an editing app while moving files!
+
+I have built a new **Smart Transfer Path Extractor**. 
+When you select "Transferring," the app will automatically hide the Software/App selection. It will then transform the "Device" dropdown into a **"Transfer Path"** dropdown (e.g., `DJI Pocket to PC W10`). Just like your Events and Software, it will remember paths you've used in the past, and it includes an option to "➕ Add New Path..." if you transfer files a new way.
+
+### Full Updated Code (`bps_ytfb_videos.py`)
+
+Copy and paste this complete script. It contains all previous functionality, plus the new dynamic Transfer Path logic!
+
+```python
+import streamlit as st
+import gspread
+import pandas as pd
+from datetime import datetime
+import pytz
+import time
+
+# ==========================================
+# 1. PAGE SETUP & MEMORY STATE
+# ==========================================
+st.set_page_config(page_title="BPS Video Tracker", page_icon="🎥", layout="wide")
+
+# --- BACK BUTTON ---
+if st.button("⬅️ Back to Dashboard", type="secondary"):
+    st.switch_page("dashboard.py")
+st.write("---") 
+
+# --- MEMORY MODULE ---
+for key, default_val in [
+    ('saved_event', '➕ Create New Event...'),
+    ('saved_phase', 'Transferring'),
+    ('saved_device', 'PC W10 to Mi 11x'), # Updated default
+    ('saved_software', 'Shotcut'),
+    ('saved_dump', 'Mobile (Mi 11x)'),
+    ('saved_loc', 'PC Local Drive')
+]:
+    if key not in st.session_state:
+        st.session_state[key] = default_val
+
 def get_idx(opt_list, val):
     return opt_list.index(val) if val in opt_list else 0
 
@@ -101,6 +384,20 @@ def get_software_list():
             base_software.extend(hist_soft)
     return sorted(list(set(base_software)))
 
+# --- NEW: Smart Transfer Path Extractor ---
+@st.cache_data(ttl=60)
+def get_transfer_path_list():
+    history = get_project_history()
+    base_paths = ["DJI Pocket to PC W10", "PC W10 to Mi 11x", "Mi 11x to PC W10"] 
+    if history:
+        df = pd.DataFrame(history)
+        if "Device" in df.columns and "Video Phase" in df.columns:
+            # Look only at historical devices used during the "Transferring" phase
+            df_trans = df[df["Video Phase"] == "Transferring"]
+            hist_paths = [str(s).strip() for s in df_trans["Device"].unique() if str(s).strip() and str(s).strip() != "-"]
+            base_paths.extend(hist_paths)
+    return sorted(list(set(base_paths)))
+
 # ==========================================
 # 3. UI DASHBOARD & LOGIC
 # ==========================================
@@ -126,25 +423,40 @@ with tab1:
     with col_phase:
         video_phase = st.selectbox("Current Phase", phase_options, index=get_idx(phase_options, st.session_state.saved_phase))
     
+    # --- DYNAMIC UI SWITCHER ---
     if video_phase == "Publishing (YT)":
         device_opts = ["PC W10", "Mi 11x"]
-        recording_device = st.selectbox("Device", device_opts, index=get_idx(device_opts, st.session_state.saved_device))
+        recording_device_sel = st.selectbox("Device", device_opts, index=get_idx(device_opts, st.session_state.saved_device))
         soft_selection = "-"
-        term = "Software" # Default invisible fallback
+        term = "Software"
+        
+    elif video_phase == "Transferring":
+        unique_paths = get_transfer_path_list()
+        path_opts = ["➕ Add New Path..."] + unique_paths
+        
+        # Smart defaulting so it doesn't stay stuck on "Add New..." if memory contains an old camera name
+        default_idx = get_idx(path_opts, st.session_state.saved_device)
+        if default_idx == 0 and len(path_opts) > 1 and st.session_state.saved_device not in path_opts:
+            default_idx = 1
+            
+        transfer_selection = st.selectbox("Transfer Path", path_opts, index=default_idx)
+        recording_device_sel = transfer_selection # Map path selection to the device database column
+        soft_selection = "-" # No software needed for transfers
+        term = "Software"
+        
     else:
         col_dev, col_soft = st.columns(2)
         with col_dev:
-            device_opts = ["Mi 11x", "PC W10"] if video_phase == "Editing" else ["Mi 11x", "DJI Pocket"]
-            recording_device = st.selectbox("Device", device_opts, index=get_idx(device_opts, st.session_state.saved_device))
+            device_opts = ["Mi 11x", "PC W10"] if video_phase in ["Editing", "Rendering"] else ["Mi 11x", "DJI Pocket"]
+            recording_device_sel = st.selectbox("Device", device_opts, index=get_idx(device_opts, st.session_state.saved_device))
         
         with col_soft:
-            # --- DYNAMIC TERMINOLOGY ---
-            term = "Software" if recording_device == "PC W10" else "App"
-            
+            term = "Software" if recording_device_sel == "PC W10" else "App"
             unique_software = get_software_list()
             soft_options = [f"➕ Add New {term}..."] + unique_software
             soft_selection = st.selectbox(f"Editing {term}", soft_options, index=get_idx(soft_options, st.session_state.saved_software))
 
+    # --- TEXT INPUTS & LOGGING (Inside the form) ---
     with st.form("start_task_form"):
         if event_selection == "➕ Create New Event...":
             event_name = st.text_input("Enter New Event Name (e.g., Annual Sports Day)")
@@ -153,12 +465,20 @@ with tab1:
             st.info(f"Selected Event: **{event_name}**")
         
         yt_title, yt_publish_time, editing_tool = "-", "-", "-"
+        recording_device = recording_device_sel 
         
+        # Resolve Phase Specifics
         if video_phase == "Publishing (YT)":
             yt_title = st.text_input("YouTube Video Title")
             yt_publish_time = st.time_input("Scheduled/Actual Publish Time", value=get_ist_time().time())
+            
+        elif video_phase == "Transferring":
+            if transfer_selection.startswith("➕ Add New"):
+                recording_device = st.text_input("Enter New Transfer Path (e.g., SD Card to PC W10)")
+            else:
+                recording_device = transfer_selection
+                
         else:
-            # Catch the dynamic "Add New..." text
             if soft_selection.startswith("➕ Add New"):
                 editing_tool = st.text_input(f"Enter New {term} Name")
             else:
@@ -171,7 +491,9 @@ with tab1:
                 st.error("Please enter an Event Name.")
             elif video_phase == "Publishing (YT)" and not yt_title:
                 st.error("Please enter a Video Title.")
-            elif video_phase != "Publishing (YT)" and soft_selection.startswith("➕ Add New") and not editing_tool:
+            elif video_phase == "Transferring" and transfer_selection.startswith("➕ Add New") and not recording_device:
+                st.error("Please enter the new Transfer Path.")
+            elif video_phase not in ["Publishing (YT)", "Transferring"] and soft_selection.startswith("➕ Add New") and not editing_tool:
                 st.error(f"Please enter the name of the new {term.lower()}.")
             else:
                 now = get_ist_time()
@@ -249,6 +571,7 @@ with tab2:
                         get_project_history.clear()
                         get_event_list.clear() 
                         get_software_list.clear()
+                        get_transfer_path_list.clear() # Added new clear function
                         
                         st.success("Logged successfully!")
                         time.sleep(1)
@@ -361,6 +684,7 @@ with tab5:
             get_project_history.clear()
             get_event_list.clear() 
             get_software_list.clear()
+            get_transfer_path_list.clear()
             st.rerun()
 
     history_data = get_project_history()
@@ -421,8 +745,8 @@ with tab5:
                     "Log Date": st.column_config.DateColumn("📅 Date"),
                     "Event Name": "📋 Event", 
                     "Video Phase": "Phase",
-                    "Device": "📷 Device", 
-                    "Editing Tool": "💻 Software/App", # Updated Header!
+                    "Device": "📷 Device / Path", # Updated Header to reflect paths
+                    "Editing Tool": "💻 Software/App",
                     "YT Title": "📺 YT Title",
                     "YT Publish Time": "⏰ YT Publish Time",
                     "Duration": st.column_config.TextColumn("⏱ Duration")

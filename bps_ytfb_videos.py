@@ -178,8 +178,8 @@ with tab1:
         
         if video_phase == "Publishing (YT)":
             yt_title = st.text_input("YouTube Video Title")
-            # --- FIX: step=1 forces HH:MM:SS format in the UI ---
-            selected_publish_time = st.time_input("Scheduled/Actual Publish Time", step=1)
+            # BUG FIX: Removed 'value=get_ist_time().time()' so Streamlit doesn't force overwrite your selection!
+            selected_publish_time = st.time_input("Scheduled/Actual Publish Time")
             yt_publish_time = selected_publish_time.strftime("%H:%M:%S")
             
         elif video_phase == "Transferring":
@@ -357,8 +357,7 @@ with tab4:
         with col2:
             loc_opts = ["PC Local Drive", "External HDD 1", "Google Drive", "Mobile Gallery"]
             storage_loc = st.selectbox("Storage Location", loc_opts, index=get_idx(loc_opts, st.session_state.saved_loc, 0))
-            # --- FIX: step=1 forces HH:MM:SS format in the UI ---
-            file_time = st.time_input("Time Recorded/Rendered", step=1)
+            file_time = st.time_input("Time Recorded/Rendered")
             
         if st.form_submit_button("Save File Metadata"):
             if not file_name or not event_name_file:
@@ -459,10 +458,7 @@ with tab5:
                     "Device": "📷 Device / Path", 
                     "Editing Tool": "💻 Software/App",
                     "YT Title": "📺 YT Title",
-                    # --- FIX: Force Strict Time Formatting in UI ---
-                    "Start Time": st.column_config.TimeColumn("▶️ Start Time", format="HH:mm:ss"),
-                    "End Time": st.column_config.TimeColumn("⏹ End Time", format="HH:mm:ss"),
-                    "YT Publish Time": st.column_config.TimeColumn("⏰ YT Publish Time", format="HH:mm:ss"),
+                    "YT Publish Time": "⏰ YT Publish Time",
                     "Duration": st.column_config.TextColumn("⏱ Duration")
                 }
             )

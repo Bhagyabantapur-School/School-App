@@ -22,7 +22,7 @@ for key, default_val in [
     ('saved_device', 'PC W10 to Mi 11x'),
     ('saved_software', 'Shotcut'),
     ('saved_dump', 'Mobile (Mi 11x)'),
-    ('saved_loc', 'PC Local Drive')
+    ('saved_loc', 'PC W10') # Updated default
 ]:
     if key not in st.session_state:
         st.session_state[key] = default_val
@@ -81,6 +81,10 @@ def get_project_history():
     return sheet_project.get_all_records()
 
 @st.cache_data(ttl=60)
+def get_files_history():
+    return sheet_files.get_all_records()
+
+@st.cache_data(ttl=60)
 def get_event_list():
     history = get_project_history()
     if history:
@@ -112,6 +116,18 @@ def get_transfer_path_list():
             hist_paths = [str(s).strip() for s in df_trans["Device"].unique() if str(s).strip() and str(s).strip() != "-"]
             base_paths.extend(hist_paths)
     return sorted(list(set(base_paths)))
+
+# --- NEW: Smart Storage Extractor ---
+@st.cache_data(ttl=60)
+def get_storage_loc_list():
+    history = get_files_history()
+    base_locs = ["Mi 11x", "PC W10", "External HDD 1", "Google Drive", "Mobile Gallery"] 
+    if history:
+        df = pd.DataFrame(history)
+        if "Storage Location" in df.columns:
+            hist_locs = [str(s).strip() for s in df["Storage Location"].unique() if str(s).strip() and str(s).strip() != "-"]
+            base_locs.extend(hist_locs)
+    return sorted(list(set(base_locs)))
 
 # --- AUTO-PROJECT NAMING ENGINE ---
 def get_next_project_name(event_name):
@@ -221,7 +237,6 @@ with tab1:
         
         if video_phase == "Publishing (YT)":
             yt_title = st.text_input("YouTube Video Title")
-            # BUG FIX: Removed step=1 to prevent Streamlit crashes
             selected_publish_time = st.time_input("Scheduled/Actual Publish Time")
             yt_publish_time = selected_publish_time.strftime("%H:%M:%S")
             
@@ -402,29 +417,46 @@ with tab4:
             st.info(f"Selected Event: **{event_name_file}**")
 
         file_type = st.radio("Asset Type", ["Raw Footage", "Rendered Final Video"], horizontal=True)
+        
         col1, col2 = st.columns(2)
         with col1:
             file_name = st.text_input("File Name (e.g., DJI_001.mp4)")
             duration = st.text_input("Video Duration (e.g., 00:15:30)")
+            # --- FIX: Date Picker for Historical Logging ---
+            file_date = st.date_input("Date Recorded/Rendered", value=get_ist_time().date())
+            
         with col2:
-            loc_opts = ["PC Local Drive", "External HDD 1", "Google Drive", "Mobile Gallery"]
-            storage_loc = st.selectbox("Storage Location", loc_opts, index=get_idx(loc_opts, st.session_state.saved_loc, 0))
-            # BUG FIX: Removed step=1 to prevent Streamlit crashes
+            # --- FIX: Dynamic Storage Location Extractor ---
+            unique_locs = get_storage_loc_list()
+            loc_opts = ["➕ Add New Location..."] + unique_locs
+            loc_selection = st.selectbox("Storage Location", loc_opts, index=get_idx(loc_opts, st.session_state.saved_loc, 1))
             file_time = st.time_input("Time Recorded/Rendered")
+            
+        # Conditionally render text input if "Add New" is selected
+        if loc_selection.startswith("➕ Add New"):
+            storage_loc = st.text_input("Enter New Storage Location")
+        else:
+            storage_loc = loc_selection
             
         if st.form_submit_button("Save File Metadata"):
             if not file_name or not event_name_file:
                 st.error("Event Name and File Name are required.")
+            elif loc_selection.startswith("➕ Add New") and not storage_loc:
+                st.error("Please enter the new Storage Location.")
             else:
-                now = get_ist_time()
+                # Append exact selected Date and Time
                 file_row = [
-                    now.strftime("%Y-%m-%d"), event_name_file, file_type, file_name, 
+                    file_date.strftime("%Y-%m-%d"), event_name_file, file_type, file_name, 
                     storage_loc, file_time.strftime("%H:%M:%S"), duration
                 ]
                 smart_append_row(sheet_files, file_row)
                 
                 st.session_state.saved_event = event_name_file
                 st.session_state.saved_loc = storage_loc
+                
+                # Clear the cache so new storage locations appear instantly
+                get_files_history.clear()
+                get_storage_loc_list.clear()
                 
                 st.success(f"File '{file_name}' saved to asset database!")
 

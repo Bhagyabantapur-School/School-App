@@ -90,6 +90,17 @@ def get_event_list():
             return sorted(list(set(events)))
     return []
 
+@st.cache_data(ttl=60)
+def get_software_list():
+    history = get_project_history()
+    base_software = ["CapCut", "Filmora", "None", "Shotcut", "VLLO"] 
+    if history:
+        df = pd.DataFrame(history)
+        if "Editing Tool" in df.columns:
+            hist_soft = [str(s).strip() for s in df["Editing Tool"].unique() if str(s).strip() and str(s).strip() != "-"]
+            base_software.extend(hist_soft)
+    return sorted(list(set(base_software)))
+
 # ==========================================
 # 3. UI DASHBOARD & LOGIC
 # ==========================================
@@ -115,6 +126,25 @@ with tab1:
     with col_phase:
         video_phase = st.selectbox("Current Phase", phase_options, index=get_idx(phase_options, st.session_state.saved_phase))
     
+    if video_phase == "Publishing (YT)":
+        device_opts = ["PC W10", "Mi 11x"]
+        recording_device = st.selectbox("Device", device_opts, index=get_idx(device_opts, st.session_state.saved_device))
+        soft_selection = "-"
+        term = "Software" # Default invisible fallback
+    else:
+        col_dev, col_soft = st.columns(2)
+        with col_dev:
+            device_opts = ["Mi 11x", "PC W10"] if video_phase == "Editing" else ["Mi 11x", "DJI Pocket"]
+            recording_device = st.selectbox("Device", device_opts, index=get_idx(device_opts, st.session_state.saved_device))
+        
+        with col_soft:
+            # --- DYNAMIC TERMINOLOGY ---
+            term = "Software" if recording_device == "PC W10" else "App"
+            
+            unique_software = get_software_list()
+            soft_options = [f"➕ Add New {term}..."] + unique_software
+            soft_selection = st.selectbox(f"Editing {term}", soft_options, index=get_idx(soft_options, st.session_state.saved_software))
+
     with st.form("start_task_form"):
         if event_selection == "➕ Create New Event...":
             event_name = st.text_input("Enter New Event Name (e.g., Annual Sports Day)")
@@ -122,36 +152,27 @@ with tab1:
             event_name = event_selection
             st.info(f"Selected Event: **{event_name}**")
         
-        yt_title, yt_publish_time, recording_device, editing_tool = "-", "-", "-", "-"
+        yt_title, yt_publish_time, editing_tool = "-", "-", "-"
         
         if video_phase == "Publishing (YT)":
             yt_title = st.text_input("YouTube Video Title")
-            col1, col2 = st.columns(2)
-            with col1:
-                device_opts = ["PC W10", "Mi 11x"]
-                recording_device = st.selectbox("Device", device_opts, index=get_idx(device_opts, st.session_state.saved_device))
-            with col2:
-                yt_publish_time = st.time_input("Scheduled/Actual Publish Time", value=get_ist_time().time())
-            editing_tool = "-"
+            yt_publish_time = st.time_input("Scheduled/Actual Publish Time", value=get_ist_time().time())
         else:
-            col1, col2 = st.columns(2)
-            with col1:
-                if video_phase == "Editing":
-                    device_opts = ["Mi 11x", "PC W10"]
-                else:
-                    device_opts = ["Mi 11x", "DJI Pocket"]
-                recording_device = st.selectbox("Device", device_opts, index=get_idx(device_opts, st.session_state.saved_device))
-            with col2:
-                soft_opts = ["Shotcut", "CapCut", "Filmora", "VLLO", "None"]
-                editing_tool = st.selectbox("Editing Software", soft_opts, index=get_idx(soft_opts, st.session_state.saved_software))
+            # Catch the dynamic "Add New..." text
+            if soft_selection.startswith("➕ Add New"):
+                editing_tool = st.text_input(f"Enter New {term} Name")
+            else:
+                editing_tool = soft_selection
         
         project_metadata = f"{event_name}|{video_phase}|{recording_device}|{editing_tool}|{yt_title}|{yt_publish_time}"
 
         if st.form_submit_button("Start Phase"):
             if not event_name:
                 st.error("Please enter an Event Name.")
-            elif video_phase == "Publishing (YT)" and yt_title == "-":
+            elif video_phase == "Publishing (YT)" and not yt_title:
                 st.error("Please enter a Video Title.")
+            elif video_phase != "Publishing (YT)" and soft_selection.startswith("➕ Add New") and not editing_tool:
+                st.error(f"Please enter the name of the new {term.lower()}.")
             else:
                 now = get_ist_time()
                 log_date = now.strftime("%Y-%m-%d")
@@ -227,6 +248,7 @@ with tab2:
                         get_master_values.clear()
                         get_project_history.clear()
                         get_event_list.clear() 
+                        get_software_list.clear()
                         
                         st.success("Logged successfully!")
                         time.sleep(1)
@@ -338,23 +360,21 @@ with tab5:
             get_master_values.clear()
             get_project_history.clear()
             get_event_list.clear() 
+            get_software_list.clear()
             st.rerun()
 
     history_data = get_project_history()
     
     if history_data:
         df = pd.DataFrame(history_data)
-        # Clean hidden spaces from column headers
         df.columns = df.columns.str.strip()
         
-        # Safe check: Only filter if 'Event Name' exists
         if selected_filter != "All Events" and "Event Name" in df.columns:
             df = df[df["Event Name"] == selected_filter]
             
         if df.empty:
             st.info(f"No completed tasks found for '{selected_filter}'.")
         else:
-            # --- PHASE-WISE TIME SUMMARY (ORDERED) ---
             st.markdown("#### ⏱️ Phase-Wise Time Summary")
             
             temp_df = df.copy()
@@ -363,21 +383,13 @@ with tab5:
                 temp_df['Duration'] = temp_df['Duration'].replace(['', None, '-'], '00:00:00')
                 temp_df['Duration_td'] = pd.to_timedelta(temp_df['Duration'], errors='coerce').fillna(pd.Timedelta(seconds=0))
                 
-                # Calculate Grand Total across all phases for this event
                 grand_total_td = temp_df['Duration_td'].sum()
-                
-                # Group by phase and sum the time
                 phase_summary = temp_df.groupby("Video Phase")["Duration_td"].sum().reset_index()
 
-                # Define the chronological order for the phases
                 phase_order = ["Transferring", "Editing", "Rendering", "Publishing (YT)", "Publishing (FB)"]
-                
-                # Assign a sort value based on the custom list (unrecognized phases go to the end)
                 phase_summary['Sort_Key'] = phase_summary['Video Phase'].apply(
                     lambda x: phase_order.index(x) if x in phase_order else 99
                 )
-                
-                # Sort the dataframe by the chronological key
                 phase_summary = phase_summary.sort_values("Sort_Key")
 
                 def format_timedelta(td):
@@ -387,23 +399,18 @@ with tab5:
                     return f"{hours:02d}h {minutes:02d}m {seconds:02d}s"
 
                 if not phase_summary.empty:
-                    # Create enough columns for all present phases + 1 for the Grand Total
                     metric_cols = st.columns(len(phase_summary) + 1)
                     
-                    # Output the ordered phase times
                     for i, row in enumerate(phase_summary.itertuples()):
                         formatted_time = format_timedelta(row.Duration_td)
-                        # row._1 is the "Video Phase" column
                         metric_cols[i].metric(label=row._1, value=formatted_time)
                         
-                    # Output the Grand Total in the final rightmost column
                     metric_cols[-1].metric(label="🌟 GRAND TOTAL", value=format_timedelta(grand_total_td))
             else:
                 st.warning("⚠️ Could not calculate time summary. Please ensure column H in your 'Logs' Google Sheet is named exactly 'Duration'.")
             
             st.divider() 
             
-            # --- RECENT COMPLETED TASKS LOG ---
             st.markdown("#### 📋 Task Breakdown")
             df_reversed = df.iloc[::-1] 
             
@@ -415,7 +422,7 @@ with tab5:
                     "Event Name": "📋 Event", 
                     "Video Phase": "Phase",
                     "Device": "📷 Device", 
-                    "Editing Tool": "💻 Software",
+                    "Editing Tool": "💻 Software/App", # Updated Header!
                     "YT Title": "📺 YT Title",
                     "YT Publish Time": "⏰ YT Publish Time",
                     "Duration": st.column_config.TextColumn("⏱ Duration")

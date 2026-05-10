@@ -131,7 +131,7 @@ with tab1:
 
 
 # ------------------------------------------
-# TAB 2: STOP & LOG (Dual Logging Architecture)
+# TAB 2: STOP & LOG (Multiple Task Architecture)
 # ------------------------------------------
 with tab2:
     st.subheader("Active Tasks")
@@ -139,69 +139,76 @@ with tab2:
     # Fetch data to find "RUNNING" tasks
     master_records = sheet_master.get_all_values()
     
-    running_task = None
-    running_row_index = -1
+    # List to hold all active tasks
+    active_tasks = []
     
-    # Iterate backwards to find the most recent running task
-    for i in range(len(master_records)-1, 0, -1):
-        if master_records[i][2] == "RUNNING" and master_records[i][4] == "Video Production":
-            running_task = master_records[i]
-            running_row_index = i + 1 
-            break
+    # Iterate through all rows to find EVERY running task
+    for i in range(1, len(master_records)): # Start at 1 to skip headers
+        row_data = master_records[i]
+        # Check if End_Time (Index 2) is RUNNING and Activity (Index 4) is Video Production
+        if len(row_data) >= 8 and row_data[2] == "RUNNING" and row_data[4] == "Video Production":
+            active_tasks.append({
+                "row_index": i + 1, # Google Sheets is 1-indexed
+                "start_time": row_data[1],
+                "task_label": row_data[5],
+                "metadata": row_data[7]
+            })
             
-    if running_task:
-        start_time_recorded = running_task[1]
-        task_label = running_task[5]
-        metadata_raw = running_task[7] 
+    if active_tasks:
+        st.write(f"Found {len(active_tasks)} active task(s):")
         
-        st.info(f"**Currently Running:** {task_label} (Started at {start_time_recorded})")
-        
-        if st.button("⏹ Stop & Dual-Log Task", type="primary"):
-            now = get_ist_time()
-            end_time_log = now.strftime("%H:%M:%S") 
-            
-            with st.spinner("Writing to Master and Project databases..."):
-                try:
-                    # --- 1. UPDATE MASTER TRACKER ---
-                    gs_formula_master = f'=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm:ss"), ""))'
+        # Create a visual block and a Stop button for EACH active task
+        for task in active_tasks:
+            # Use a container to visually separate multiple tasks
+            with st.container(border=True):
+                st.info(f"**Currently Running:** {task['task_label']} (Started at {task['start_time']})")
+                
+                # The 'key' parameter is MANDATORY here so Streamlit can tell the buttons apart
+                if st.button(f"⏹ Stop & Dual-Log Task", key=f"stop_btn_{task['row_index']}", type="primary"):
+                    now = get_ist_time()
+                    end_time_log = now.strftime("%H:%M:%S") 
                     
-                    sheet_master.update_cell(running_row_index, 3, end_time_log)
-                    sheet_master.update_cell(running_row_index, 4, gs_formula_master)
+                    with st.spinner(f"Writing {task['task_label']} to databases..."):
+                        try:
+                            # --- 1. UPDATE MASTER TRACKER ---
+                            gs_formula_master = f'=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm:ss"), ""))'
+                            
+                            sheet_master.update_cell(task['row_index'], 3, end_time_log)
+                            sheet_master.update_cell(task['row_index'], 4, gs_formula_master)
 
-                    # --- 2. APPEND TO PROJECT TRACKER ---
-                    try:
-                        event, phase, device, tool = metadata_raw.split("|")
-                    except ValueError:
-                        event, phase, device, tool = "Unknown", "Unknown", "Unknown", "Unknown"
+                            # --- 2. APPEND TO PROJECT TRACKER ---
+                            try:
+                                event, phase, device, tool = task['metadata'].split("|")
+                            except ValueError:
+                                event, phase, device, tool = "Unknown", "Unknown", "Unknown", "Unknown"
 
-                    gs_formula_project = f'=IF(INDIRECT("G"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("G"&ROW())-INDIRECT("F"&ROW()), 1), "h:mm:ss"), ""))'
-                    
-                    project_row_data = [
-                        now.strftime("%Y-%m-%d"), # A: Log Date
-                        event,                    # B: Event Name
-                        phase,                    # C: Video Phase
-                        device,                   # D: Recording Device
-                        tool,                     # E: Editing Tool
-                        start_time_recorded,      # F: Start Time
-                        end_time_log,             # G: End Time
-                        gs_formula_project        # H: Duration Formula
-                    ]
-                    
-                    smart_append_row(sheet_project, project_row_data)
+                            gs_formula_project = f'=IF(INDIRECT("G"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("G"&ROW())-INDIRECT("F"&ROW()), 1), "h:mm:ss"), ""))'
+                            
+                            project_row_data = [
+                                now.strftime("%Y-%m-%d"), # A: Log Date
+                                event,                    # B: Event Name
+                                phase,                    # C: Video Phase
+                                device,                   # D: Recording Device
+                                tool,                     # E: Editing Tool
+                                task['start_time'],       # F: Start Time
+                                end_time_log,             # G: End Time
+                                gs_formula_project        # H: Duration Formula
+                            ]
+                            
+                            smart_append_row(sheet_project, project_row_data)
 
-                    # --- 3. CLEAR CACHES & RERUN ---
-                    get_master_data.clear()
-                    get_project_data.clear()
-                    
-                    st.success("Task successfully logged to both databases!")
-                    time.sleep(1.5)
-                    st.rerun()
+                            # --- 3. CLEAR CACHES & RERUN ---
+                            get_master_data.clear()
+                            get_project_data.clear()
+                            
+                            st.success(f"Task '{task['task_label']}' successfully logged!")
+                            time.sleep(1.5)
+                            st.rerun() # Refresh the page so the stopped task disappears
 
-                except Exception as e:
-                    st.error(f"An error occurred during logging: {e}")
+                        except Exception as e:
+                            st.error(f"An error occurred during logging: {e}")
     else:
         st.write("No active video production tasks found. Go to 'Start a Phase' to begin.")
-
 
 # ------------------------------------------
 # TAB 3: STORAGE TRACKER (Logs to Storage_Logs tab)

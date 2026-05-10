@@ -43,7 +43,6 @@ def init_connection():
         st.error(f"Authentication Failed: {e}")
         st.stop()
 
-# FIX: Cache the physical worksheet connections so they don't count against the 60/min quota!
 @st.cache_resource
 def get_worksheets():
     client = init_connection()
@@ -58,7 +57,6 @@ def get_worksheets():
         st.error(f"Could not open Google Sheets. Error: {e}")
         st.stop()
 
-# Load cached sheets
 sheets = get_worksheets()
 sheet_project = sheets["project"]
 sheet_storage = sheets["storage"]
@@ -74,7 +72,6 @@ def smart_append_row(sheet, row_data):
     next_row = len(col_a) + 1
     sheet.update(range_name=f"A{next_row}", values=[row_data], value_input_option="USER_ENTERED")
 
-# FIX: Cache the raw values for Tab 2 to prevent API spam
 @st.cache_data(ttl=60)
 def get_master_values():
     return sheet_master.get_all_values()
@@ -175,7 +172,7 @@ with tab1:
                     st.session_state.saved_device = recording_device
                     st.session_state.saved_software = editing_tool
                     
-                    get_master_values.clear() # Clear cache so Tab 2 updates
+                    get_master_values.clear()
                     st.success(f"Started {video_phase} successfully!")
                     time.sleep(1)
                     st.rerun()
@@ -185,7 +182,6 @@ with tab1:
 # ------------------------------------------
 with tab2:
     st.subheader("Active Tasks")
-    # FIX: Using cached values instead of making live API request
     master_records = get_master_values()
     active_tasks = []
     
@@ -228,7 +224,6 @@ with tab2:
                         
                         smart_append_row(sheet_project, project_row)
                         
-                        # Clear caches so everything updates immediately
                         get_master_values.clear()
                         get_project_history.clear()
                         get_event_list.clear() 
@@ -326,30 +321,83 @@ with tab4:
                 st.success(f"File '{file_name}' saved to asset database!")
 
 # ------------------------------------------
-# TAB 5: HISTORY
+# TAB 5: HISTORY & ANALYTICS
 # ------------------------------------------
 with tab5:
-    st.subheader("📊 Recent Completed Tasks")
-    if st.button("🔄 Refresh History"):
-        get_master_values.clear()
-        get_project_history.clear()
-        get_event_list.clear() 
-        st.rerun()
+    st.subheader("📊 Analytics & History")
+    
+    col_filter, col_refresh = st.columns([3, 1])
+    with col_filter:
+        unique_events = get_event_list()
+        filter_options = ["All Events"] + unique_events
+        selected_filter = st.selectbox("Filter by Event", filter_options, key="history_filter")
+    with col_refresh:
+        st.write("") 
+        st.write("") 
+        if st.button("🔄 Refresh Data", use_container_width=True):
+            get_master_values.clear()
+            get_project_history.clear()
+            get_event_list.clear() 
+            st.rerun()
 
     history_data = get_project_history()
     
     if history_data:
         df = pd.DataFrame(history_data)
         df.columns = df.columns.str.strip()
-        df_reversed = df.iloc[::-1] 
         
-        st.dataframe(
-            df_reversed, 
-            use_container_width=True, 
-            column_config={
-                "Video Phase": "Video Phase",
-                "Duration": st.column_config.TextColumn("Duration")
-            }
-        )
+        if selected_filter != "All Events":
+            df = df[df["Event Name"] == selected_filter]
+            
+        if df.empty:
+            st.info(f"No completed tasks found for '{selected_filter}'.")
+        else:
+            # --- NEW: PHASE-WISE TIME SUMMARY ---
+            st.markdown("#### ⏱️ Phase-Wise Time Summary")
+            
+            # Safely calculate durations
+            temp_df = df.copy()
+            # Clean missing or broken duration strings
+            temp_df['Duration'] = temp_df['Duration'].replace(['', None, '-'], '00:00:00')
+            # Convert to Pandas Timedelta objects for math
+            temp_df['Duration_td'] = pd.to_timedelta(temp_df['Duration'], errors='coerce').fillna(pd.Timedelta(seconds=0))
+            
+            # Group by phase and sum the time
+            phase_summary = temp_df.groupby("Video Phase")["Duration_td"].sum().reset_index()
+
+            # Format the time nicely for the UI (e.g., "02h 15m 30s")
+            def format_timedelta(td):
+                total_seconds = int(td.total_seconds())
+                hours, remainder = divmod(total_seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                return f"{hours:02d}h {minutes:02d}m {seconds:02d}s"
+
+            if not phase_summary.empty:
+                # Create dynamic columns based on how many phases exist in the filtered data
+                metric_cols = st.columns(len(phase_summary))
+                for i, row in phase_summary.iterrows():
+                    formatted_time = format_timedelta(row["Duration_td"])
+                    metric_cols[i].metric(label=row["Video Phase"], value=formatted_time)
+            
+            st.divider() # Visual separator
+            
+            # --- RECENT COMPLETED TASKS LOG ---
+            st.markdown("#### 📋 Task Breakdown")
+            df_reversed = df.iloc[::-1] 
+            
+            st.dataframe(
+                df_reversed, 
+                use_container_width=True, 
+                column_config={
+                    "Log Date": st.column_config.DateColumn("📅 Date"),
+                    "Event Name": "📋 Event", 
+                    "Video Phase": "Phase",
+                    "Device": "📷 Device", 
+                    "Editing Tool": "💻 Software",
+                    "YT Title": "📺 YT Title",
+                    "YT Publish Time": "⏰ YT Publish Time",
+                    "Duration": st.column_config.TextColumn("⏱ Duration")
+                }
+            )
     else:
         st.info("No completed tasks found in the history log.")

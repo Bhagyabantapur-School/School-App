@@ -113,6 +113,38 @@ def get_transfer_path_list():
             base_paths.extend(hist_paths)
     return sorted(list(set(base_paths)))
 
+# --- NEW: AUTO-PROJECT NAMING ENGINE ---
+def get_next_project_name(event_name):
+    if not event_name or event_name == "➕ Create New Event...":
+        return ""
+        
+    # 1. Create a dynamic Acronym (e.g. "Annual Sports Day" -> "ASD")
+    words = str(event_name).replace("-", " ").replace("_", " ").split()
+    acronym = "".join([w[0].upper() for w in words if w])[:4]
+    if not acronym:
+        acronym = "PROJ"
+        
+    count = 0
+    
+    # 2. Count past instances in History
+    history = get_project_history()
+    if history:
+        df = pd.DataFrame(history)
+        if "Event Name" in df.columns and "Video Phase" in df.columns:
+            past_edits = df[(df["Event Name"] == event_name) & (df["Video Phase"] == "Editing")]
+            count += len(past_edits)
+            
+    # 3. Count Active instances in Master Log
+    master_vals = get_master_values()
+    if len(master_vals) > 1:
+        for row in master_vals[1:]:
+            if len(row) >= 8 and row[2] == "RUNNING" and row[4] == "Video Production":
+                meta = row[7].split("|")
+                if len(meta) >= 2 and meta[0] == event_name and meta[1] == "Editing":
+                    count += 1
+                    
+    return f"{acronym}_v{count + 1}"
+
 # ==========================================
 # 3. UI DASHBOARD & LOGIC
 # ==========================================
@@ -126,6 +158,12 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 # TAB 1: START A PHASE
 # ------------------------------------------
 with tab1:
+    # --- POST-SUBMIT COPY NOTIFICATION ---
+    if st.session_state.get("just_started_project"):
+        st.success("✅ Phase started! Copy your project name below and save your editor file:")
+        st.code(st.session_state.just_started_project, language=None)
+        del st.session_state["just_started_project"]
+
     st.subheader("Initialize New Video Phase")
     
     unique_events = get_event_list()
@@ -137,6 +175,17 @@ with tab1:
         event_selection = st.selectbox("Select Event", event_options, index=get_idx(event_options, st.session_state.saved_event, 1))
     with col_phase:
         video_phase = st.selectbox("Current Phase", phase_options, index=get_idx(phase_options, st.session_state.saved_phase, 0))
+    
+    # Placed outside columns to give it full width and immediate reactivity
+    if event_selection == "➕ Create New Event...":
+        event_name = st.text_input("Enter New Event Name (e.g., Annual Sports Day)")
+    else:
+        event_name = event_selection
+        
+    # Auto-Calculate Project Name if Editing is selected
+    proj_name = ""
+    if video_phase == "Editing" and event_name:
+        proj_name = get_next_project_name(event_name)
     
     if video_phase == "Publishing (YT)":
         device_opts = ["PC W10", "Mi 11x"]
@@ -167,19 +216,19 @@ with tab1:
             soft_selection = st.selectbox(f"Editing {term}", soft_options, index=get_idx(soft_options, st.session_state.saved_software, 1))
 
     with st.form("start_task_form"):
-        if event_selection == "➕ Create New Event...":
-            event_name = st.text_input("Enter New Event Name (e.g., Annual Sports Day)")
-        else:
-            event_name = event_selection
+        if event_selection != "➕ Create New Event...":
             st.info(f"Selected Event: **{event_name}**")
+            
+        # Preview the generated project name
+        if video_phase == "Editing" and proj_name:
+            st.info(f"🗂️ **Auto-Generated Project Name:** `{proj_name}`")
         
         yt_title, yt_publish_time, editing_tool = "-", "-", "-"
         recording_device = recording_device_sel 
         
         if video_phase == "Publishing (YT)":
             yt_title = st.text_input("YouTube Video Title")
-            # BUG FIX: Removed 'value=get_ist_time().time()' so Streamlit doesn't force overwrite your selection!
-            selected_publish_time = st.time_input("Scheduled/Actual Publish Time")
+            selected_publish_time = st.time_input("Scheduled/Actual Publish Time", step=1)
             yt_publish_time = selected_publish_time.strftime("%H:%M:%S")
             
         elif video_phase == "Transferring":
@@ -194,7 +243,8 @@ with tab1:
             else:
                 editing_tool = soft_selection
         
-        project_metadata = f"{event_name}|{video_phase}|{recording_device}|{editing_tool}|{yt_title}|{yt_publish_time}"
+        # We silently append the proj_name to the end of the metadata string
+        project_metadata = f"{event_name}|{video_phase}|{recording_device}|{editing_tool}|{yt_title}|{yt_publish_time}|{proj_name}"
 
         if st.form_submit_button("Start Phase"):
             if not event_name:
@@ -224,6 +274,10 @@ with tab1:
                     st.session_state.saved_phase = video_phase
                     st.session_state.saved_device = recording_device
                     st.session_state.saved_software = editing_tool
+                    
+                    # Store project name in memory to trigger the copy screen
+                    if video_phase == "Editing" and proj_name:
+                        st.session_state.just_started_project = proj_name
                     
                     get_master_values.clear()
                     st.success(f"Started {video_phase} successfully!")
@@ -260,11 +314,18 @@ with tab2:
                         sheet_master.update_cell(task['row_index'], 3, end_time_log)
                         sheet_master.update_cell(task['row_index'], 4, gs_formula_master)
 
+                        # --- FIX: Safe parsing for 6+ parts due to the new proj_name data ---
                         meta_parts = task['metadata'].split("|")
-                        if len(meta_parts) == 6:
-                            event, phase, device, tool, y_title, y_time = meta_parts
+                        if len(meta_parts) >= 6:
+                            event = meta_parts[0]
+                            phase = meta_parts[1]
+                            device = meta_parts[2]
+                            tool = meta_parts[3]
+                            y_title = meta_parts[4]
+                            y_time = meta_parts[5]
                         else:
-                            event, phase = meta_parts[0], meta_parts[1]
+                            event = meta_parts[0]
+                            phase = meta_parts[1]
                             device, tool, y_title, y_time = "-", "-", "-", "-"
                             
                         gs_formula_project = f'=IF(INDIRECT("G"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("G"&ROW())-INDIRECT("F"&ROW()), 1), "h:mm:ss"), ""))'
@@ -357,7 +418,7 @@ with tab4:
         with col2:
             loc_opts = ["PC Local Drive", "External HDD 1", "Google Drive", "Mobile Gallery"]
             storage_loc = st.selectbox("Storage Location", loc_opts, index=get_idx(loc_opts, st.session_state.saved_loc, 0))
-            file_time = st.time_input("Time Recorded/Rendered")
+            file_time = st.time_input("Time Recorded/Rendered", step=1)
             
         if st.form_submit_button("Save File Metadata"):
             if not file_name or not event_name_file:
@@ -458,7 +519,9 @@ with tab5:
                     "Device": "📷 Device / Path", 
                     "Editing Tool": "💻 Software/App",
                     "YT Title": "📺 YT Title",
-                    "YT Publish Time": "⏰ YT Publish Time",
+                    "Start Time": st.column_config.TimeColumn("▶️ Start Time", format="HH:mm:ss"),
+                    "End Time": st.column_config.TimeColumn("⏹ End Time", format="HH:mm:ss"),
+                    "YT Publish Time": st.column_config.TimeColumn("⏰ YT Publish Time", format="HH:mm:ss"),
                     "Duration": st.column_config.TextColumn("⏱ Duration")
                 }
             )

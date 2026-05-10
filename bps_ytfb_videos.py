@@ -344,40 +344,45 @@ with tab5:
     
     if history_data:
         df = pd.DataFrame(history_data)
+        # Clean hidden spaces from column headers
         df.columns = df.columns.str.strip()
         
-        if selected_filter != "All Events":
+        # Safe check: Only filter if 'Event Name' exists
+        if selected_filter != "All Events" and "Event Name" in df.columns:
             df = df[df["Event Name"] == selected_filter]
             
         if df.empty:
             st.info(f"No completed tasks found for '{selected_filter}'.")
         else:
-            # --- NEW: PHASE-WISE TIME SUMMARY ---
+            # --- PHASE-WISE TIME SUMMARY ---
             st.markdown("#### ⏱️ Phase-Wise Time Summary")
             
-            # Safely calculate durations
             temp_df = df.copy()
-            # Clean missing or broken duration strings
-            temp_df['Duration'] = temp_df['Duration'].replace(['', None, '-'], '00:00:00')
-            # Convert to Pandas Timedelta objects for math
-            temp_df['Duration_td'] = pd.to_timedelta(temp_df['Duration'], errors='coerce').fillna(pd.Timedelta(seconds=0))
             
-            # Group by phase and sum the time
-            phase_summary = temp_df.groupby("Video Phase")["Duration_td"].sum().reset_index()
+            # ANTI-CRASH FIX: Verify 'Duration' and 'Video Phase' exist before doing math!
+            if "Duration" in temp_df.columns and "Video Phase" in temp_df.columns:
+                # Clean missing or broken duration strings
+                temp_df['Duration'] = temp_df['Duration'].replace(['', None, '-'], '00:00:00')
+                # Convert to Pandas Timedelta objects for math
+                temp_df['Duration_td'] = pd.to_timedelta(temp_df['Duration'], errors='coerce').fillna(pd.Timedelta(seconds=0))
+                
+                # Group by phase and sum the time
+                phase_summary = temp_df.groupby("Video Phase")["Duration_td"].sum().reset_index()
 
-            # Format the time nicely for the UI (e.g., "02h 15m 30s")
-            def format_timedelta(td):
-                total_seconds = int(td.total_seconds())
-                hours, remainder = divmod(total_seconds, 3600)
-                minutes, seconds = divmod(remainder, 60)
-                return f"{hours:02d}h {minutes:02d}m {seconds:02d}s"
+                # Format the time nicely for the UI (e.g., "02h 15m 30s")
+                def format_timedelta(td):
+                    total_seconds = int(td.total_seconds())
+                    hours, remainder = divmod(total_seconds, 3600)
+                    minutes, seconds = divmod(remainder, 60)
+                    return f"{hours:02d}h {minutes:02d}m {seconds:02d}s"
 
-            if not phase_summary.empty:
-                # Create dynamic columns based on how many phases exist in the filtered data
-                metric_cols = st.columns(len(phase_summary))
-                for i, row in phase_summary.iterrows():
-                    formatted_time = format_timedelta(row["Duration_td"])
-                    metric_cols[i].metric(label=row["Video Phase"], value=formatted_time)
+                if not phase_summary.empty:
+                    metric_cols = st.columns(len(phase_summary))
+                    for i, row in phase_summary.iterrows():
+                        formatted_time = format_timedelta(row["Duration_td"])
+                        metric_cols[i].metric(label=row["Video Phase"], value=formatted_time)
+            else:
+                st.warning("⚠️ Could not calculate time summary. Please ensure column H in your 'Logs' Google Sheet is named exactly 'Duration'.")
             
             st.divider() # Visual separator
             

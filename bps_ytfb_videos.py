@@ -1,5 +1,6 @@
 import streamlit as st
 import gspread
+import pandas as pd
 from datetime import datetime
 import pytz
 import time
@@ -7,7 +8,7 @@ import time
 # ==========================================
 # 1. PAGE SETUP & AUTHENTICATION
 # ==========================================
-st.set_page_config(page_title="BPS Video Tracker", page_icon="🎥", layout="centered")
+st.set_page_config(page_title="BPS Video Tracker", page_icon="🎥", layout="wide")
 
 # --- BACK BUTTON ---
 if st.button("⬅️ Back to Dashboard", type="secondary"):
@@ -51,20 +52,25 @@ def smart_append_row(sheet, row_data):
 def get_master_data():
     return sheet_master.get_all_records()
 
+@st.cache_data(ttl=60)
+def get_project_history():
+    return sheet_project.get_all_records()
+
 # ==========================================
 # 3. UI DASHBOARD & LOGIC
 # ==========================================
 st.title("🎥 BPS Video Workflow Tracker")
 
-tab1, tab2, tab3, tab4 = st.tabs(["▶️ Start a Phase", "⏹ Stop & Log", "💾 Storage Tracker", "📁 File Metadata"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "▶️ Start a Phase", "⏹ Stop & Log", "💾 Storage Tracker", "📁 File Metadata", "📊 History"
+])
 
 # ------------------------------------------
-# TAB 1: START A PHASE (Dynamic Device & Software)
+# TAB 1: START A PHASE
 # ------------------------------------------
 with tab1:
     st.subheader("Initialize New Video Phase")
     
-    # Selection outside form for immediate UI reactivity
     video_phase = st.selectbox(
         "Current Phase", 
         ["Transferring", "Editing", "Rendering", "Publishing (YT)", "Publishing (FB)"]
@@ -73,7 +79,6 @@ with tab1:
     with st.form("start_task_form"):
         event_name = st.text_input("Event Name (e.g., Annual Sports Day)")
         
-        # --- CONDITIONAL FIELDS ---
         if video_phase == "Publishing (YT)":
             yt_title = st.text_input("YouTube Video Title")
             yt_publish_time = st.time_input("Scheduled/Actual Publish Time", value=get_ist_time().time())
@@ -85,7 +90,6 @@ with tab1:
         else:
             col1, col2 = st.columns(2)
             with col1:
-                # Dynamic device list based on phase
                 if video_phase == "Editing":
                     device_options = ["Mi 11x", "PC W10"]
                 else:
@@ -94,7 +98,6 @@ with tab1:
                 recording_device = st.selectbox("Primary Device", device_options)
             
             with col2:
-                # Added Shotcut to the list
                 editing_tool = st.selectbox(
                     "Editing Software", 
                     ["Shotcut", "CapCut", "Filmora", "VLLO", "None"]
@@ -102,9 +105,7 @@ with tab1:
             
             project_metadata = f"{event_name}|{video_phase}|{recording_device}|{editing_tool}"
 
-        start_button = st.form_submit_button("Start Phase")
-
-        if start_button:
+        if st.form_submit_button("Start Phase"):
             if not event_name:
                 st.error("Please enter an Event Name.")
             elif video_phase == "Publishing (YT)" and not yt_title:
@@ -117,14 +118,8 @@ with tab1:
                 gs_formula_master = f'=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm:ss"), ""))'
                 
                 row_data = [
-                    log_date,               # A: Date
-                    start_time_str,         # B: Start_Time
-                    "RUNNING",              # C: End_Time
-                    gs_formula_master,      # D: Duration
-                    "Video Production",     # E: Activity
-                    f"{video_phase} - {event_name}", # F: Sub_Activities
-                    "",                     # G: check_list
-                    project_metadata        # H: Notes
+                    log_date, start_time_str, "RUNNING", gs_formula_master, 
+                    "Video Production", f"{video_phase} - {event_name}", "", project_metadata
                 ]
                 
                 with st.spinner("Logging to Master..."):
@@ -132,8 +127,9 @@ with tab1:
                     st.success(f"Started {video_phase} successfully!")
                     time.sleep(1)
                     st.rerun()
+
 # ------------------------------------------
-# TAB 2: STOP & LOG (Handles YT Metadata)
+# TAB 2: STOP & LOG
 # ------------------------------------------
 with tab2:
     st.subheader("Active Tasks")
@@ -144,10 +140,8 @@ with tab2:
         row_data = master_records[i]
         if len(row_data) >= 8 and row_data[2] == "RUNNING" and row_data[4] == "Video Production":
             active_tasks.append({
-                "row_index": i + 1,
-                "start_time": row_data[1],
-                "task_label": row_data[5],
-                "metadata": row_data[7]
+                "row_index": i + 1, "start_time": row_data[1], 
+                "task_label": row_data[5], "metadata": row_data[7]
             })
             
     if active_tasks:
@@ -160,36 +154,27 @@ with tab2:
                     end_time_log = now.strftime("%H:%M:%S") 
                     
                     try:
-                        # 1. Update Master
                         gs_formula_master = f'=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm:ss"), ""))'
                         sheet_master.update_cell(task['row_index'], 3, end_time_log)
                         sheet_master.update_cell(task['row_index'], 4, gs_formula_master)
 
-                        # 2. Append to Project Sheet
                         meta_parts = task['metadata'].split("|")
-                        event = meta_parts[0]
-                        phase = meta_parts[1]
+                        event, phase = meta_parts[0], meta_parts[1]
                         
-                        # Handle specific columns if it was a YouTube Publishing task
                         if phase == "Publishing (YT)":
-                            yt_title = meta_parts[2]
-                            yt_pub_time = meta_parts[3]
-                            # Device and Tool are recorded as the Title and Pub Time for YT phases
-                            device_or_title = yt_title 
-                            tool_or_pub = yt_pub_time
+                            device_or_title, tool_or_pub = meta_parts[2], meta_parts[3]
                         else:
-                            device_or_title = meta_parts[2]
-                            tool_or_pub = meta_parts[3]
+                            device_or_title, tool_or_pub = meta_parts[2], meta_parts[3]
 
                         gs_formula_project = f'=IF(INDIRECT("G"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("G"&ROW())-INDIRECT("F"&ROW()), 1), "h:mm:ss"), ""))'
                         
                         project_row = [
-                            now.strftime("%Y-%m-%d"), event, phase, 
-                            device_or_title, tool_or_pub, 
-                            task['start_time'], end_time_log, gs_formula_project
+                            now.strftime("%Y-%m-%d"), event, phase, device_or_title, 
+                            tool_or_pub, task['start_time'], end_time_log, gs_formula_project
                         ]
                         
                         smart_append_row(sheet_project, project_row)
+                        get_project_history.clear() # Clear history cache so new task shows up
                         st.success("Logged successfully!")
                         time.sleep(1)
                         st.rerun()
@@ -199,34 +184,87 @@ with tab2:
         st.write("No active production tasks.")
 
 # ------------------------------------------
-# TAB 3 & 4 (STORAGE & FILES)
+# TAB 3: STORAGE TRACKER
 # ------------------------------------------
 with tab3:
-    st.subheader("💾 Storage Tracker")
+    st.subheader("💾 Log Data Dumps & Storage")
+    
     with st.form("storage_log_form"):
-        event_name_storage = st.text_input("Event Name", key="storage_event")
+        event_name_storage = st.text_input("Event Name (e.g., Annual Sports Day)", key="storage_event")
         device_dumped = st.selectbox("Device Dumped", ["Mobile (Mi 11x)", "DJI Pocket", "PC / External Drive"])
-        col1, col2 = st.columns(2)
-        with col1: storage_before = st.number_input("Before (GB)", step=0.1)
-        with col2: storage_after = st.number_input("After (GB)", step=0.1)
-        if st.form_submit_button("Log Storage"):
-            if event_name_storage:
-                smart_append_row(sheet_storage, [get_ist_time().strftime("%Y-%m-%d"), event_name_storage, device_dumped, storage_before, storage_after, '=D&ROW()-E&ROW()'])
-                st.success("Logged!")
-
-with tab4:
-    st.subheader("📁 File Metadata")
-    with st.form("file_metadata_form", clear_on_submit=True):
-        event_f = st.text_input("Event Name")
-        f_type = st.radio("Type", ["Raw Footage", "Rendered Video"], horizontal=True)
+        
         col1, col2 = st.columns(2)
         with col1:
-            f_name = st.text_input("File Name")
-            f_dur = st.text_input("Duration (HH:MM:SS)")
+            storage_before = st.number_input("Storage BEFORE (GB)", min_value=0.0, step=0.1)
         with col2:
-            f_loc = st.selectbox("Location", ["PC Local", "External HDD", "Google Drive", "Mobile"])
-            f_time = st.time_input("Record/Render Time")
-        if st.form_submit_button("Save File"):
-            if f_name and event_f:
-                smart_append_row(sheet_files, [get_ist_time().strftime("%Y-%m-%d"), event_f, f_type, f_name, f_loc, f_time.strftime("%H:%M:%S"), f_dur])
-                st.success("Saved!")
+            storage_after = st.number_input("Storage AFTER (GB)", min_value=0.0, step=0.1)
+            
+        if st.form_submit_button("Log Storage Data"):
+            if not event_name_storage:
+                st.error("Please enter an Event Name.")
+            else:
+                now = get_ist_time()
+                gs_formula_data_dumped = f'=IFERROR(INDIRECT("D"&ROW()) - INDIRECT("E"&ROW()), 0)'
+                
+                storage_row = [
+                    now.strftime("%Y-%m-%d"), event_name_storage, device_dumped, 
+                    storage_before, storage_after, gs_formula_data_dumped
+                ]
+                smart_append_row(sheet_storage, storage_row)
+                st.success(f"Storage data logged for {device_dumped}!")
+
+# ------------------------------------------
+# TAB 4: FILE METADATA
+# ------------------------------------------
+with tab4:
+    st.subheader("📁 Log Video Assets")
+    
+    with st.form("file_metadata_form", clear_on_submit=True): 
+        event_name_file = st.text_input("Event Name", key="file_event")
+        file_type = st.radio("Asset Type", ["Raw Footage", "Rendered Final Video"], horizontal=True)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            file_name = st.text_input("File Name (e.g., DJI_001.mp4)")
+            duration = st.text_input("Video Duration (e.g., 00:15:30)")
+        with col2:
+            storage_loc = st.selectbox("Storage Location", ["PC Local Drive", "External HDD 1", "Google Drive", "Mobile Gallery"])
+            file_time = st.time_input("Time Recorded/Rendered")
+            
+        if st.form_submit_button("Save File Metadata"):
+            if not file_name or not event_name_file:
+                st.error("Event Name and File Name are required.")
+            else:
+                now = get_ist_time()
+                file_row = [
+                    now.strftime("%Y-%m-%d"), event_name_file, file_type, file_name, 
+                    storage_loc, file_time.strftime("%H:%M:%S"), duration
+                ]
+                smart_append_row(sheet_files, file_row)
+                st.success(f"File '{file_name}' saved to asset database!")
+
+# ------------------------------------------
+# TAB 5: HISTORY
+# ------------------------------------------
+with tab5:
+    st.subheader("📊 Recent Completed Tasks")
+    if st.button("🔄 Refresh History"):
+        get_project_history.clear()
+        st.rerun()
+
+    history_data = get_project_history()
+    
+    if history_data:
+        df = pd.DataFrame(history_data)
+        df_reversed = df.iloc[::-1] # Show newest entries first
+        
+        st.dataframe(
+            df_reversed, 
+            use_container_width=True, 
+            column_config={
+                "Duration": st.column_config.TextColumn("⏱ Duration"),
+                "Log Date": st.column_config.DateColumn("📅 Date"),
+            }
+        )
+    else:
+        st.info("No completed tasks found in the history log.")

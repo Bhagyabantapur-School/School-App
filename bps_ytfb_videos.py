@@ -66,7 +66,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 # ------------------------------------------
-# TAB 1: START A PHASE
+# TAB 1: START A PHASE (Updated Payload)
 # ------------------------------------------
 with tab1:
     st.subheader("Initialize New Video Phase")
@@ -79,36 +79,27 @@ with tab1:
     with st.form("start_task_form"):
         event_name = st.text_input("Event Name (e.g., Annual Sports Day)")
         
+        # Initialize variables so they always exist
+        yt_title, yt_publish_time, recording_device, editing_tool = "-", "-", "-", "-"
+        
         if video_phase == "Publishing (YT)":
             yt_title = st.text_input("YouTube Video Title")
             yt_publish_time = st.time_input("Scheduled/Actual Publish Time", value=get_ist_time().time())
-            
-            recording_device = "N/A"
-            editing_tool = "N/A"
-            project_metadata = f"{event_name}|{video_phase}|{yt_title}|{yt_publish_time}"
-        
         else:
             col1, col2 = st.columns(2)
             with col1:
-                if video_phase == "Editing":
-                    device_options = ["Mi 11x", "PC W10"]
-                else:
-                    device_options = ["Mi 11x", "DJI Pocket"]
-                
+                device_options = ["Mi 11x", "PC W10"] if video_phase == "Editing" else ["Mi 11x", "DJI Pocket"]
                 recording_device = st.selectbox("Primary Device", device_options)
-            
             with col2:
-                editing_tool = st.selectbox(
-                    "Editing Software", 
-                    ["Shotcut", "CapCut", "Filmora", "VLLO", "None"]
-                )
-            
-            project_metadata = f"{event_name}|{video_phase}|{recording_device}|{editing_tool}"
+                editing_tool = st.selectbox("Editing Software", ["Shotcut", "CapCut", "Filmora", "VLLO", "None"])
+        
+        # NEW 6-PART PAYLOAD: Event | Phase | Device | Tool | YT_Title | YT_Time
+        project_metadata = f"{event_name}|{video_phase}|{recording_device}|{editing_tool}|{yt_title}|{yt_publish_time}"
 
         if st.form_submit_button("Start Phase"):
             if not event_name:
                 st.error("Please enter an Event Name.")
-            elif video_phase == "Publishing (YT)" and not yt_title:
+            elif video_phase == "Publishing (YT)" and yt_title == "-":
                 st.error("Please enter a Video Title.")
             else:
                 now = get_ist_time()
@@ -129,7 +120,7 @@ with tab1:
                     st.rerun()
 
 # ------------------------------------------
-# TAB 2: STOP & LOG
+# TAB 2: STOP & LOG (Updated 10-Column DB)
 # ------------------------------------------
 with tab2:
     st.subheader("Active Tasks")
@@ -158,23 +149,35 @@ with tab2:
                         sheet_master.update_cell(task['row_index'], 3, end_time_log)
                         sheet_master.update_cell(task['row_index'], 4, gs_formula_master)
 
+                        # Parse the metadata
                         meta_parts = task['metadata'].split("|")
-                        event, phase = meta_parts[0], meta_parts[1]
                         
-                        if phase == "Publishing (YT)":
-                            device_or_title, tool_or_pub = meta_parts[2], meta_parts[3]
+                        # Fallback logic to safely handle old tasks started before this code update
+                        if len(meta_parts) == 6:
+                            event, phase, device, tool, y_title, y_time = meta_parts
                         else:
-                            device_or_title, tool_or_pub = meta_parts[2], meta_parts[3]
-
+                            event, phase = meta_parts[0], meta_parts[1]
+                            device, tool, y_title, y_time = "-", "-", "-", "-"
+                            
+                        # Project formula (F is Start, G is End)
                         gs_formula_project = f'=IF(INDIRECT("G"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("G"&ROW())-INDIRECT("F"&ROW()), 1), "h:mm:ss"), ""))'
                         
+                        # NEW 10-COLUMN ARRAY
                         project_row = [
-                            now.strftime("%Y-%m-%d"), event, phase, device_or_title, 
-                            tool_or_pub, task['start_time'], end_time_log, gs_formula_project
+                            now.strftime("%Y-%m-%d"), # A: Date
+                            event,                    # B: Event Name
+                            phase,                    # C: Phase
+                            device,                   # D: Device
+                            tool,                     # E: Tool
+                            task['start_time'],       # F: Start
+                            end_time_log,             # G: End
+                            gs_formula_project,       # H: Duration
+                            y_title,                  # I: YT Title
+                            y_time                    # J: YT Publish Time
                         ]
                         
                         smart_append_row(sheet_project, project_row)
-                        get_project_history.clear() # Clear history cache so new task shows up
+                        get_project_history.clear()
                         st.success("Logged successfully!")
                         time.sleep(1)
                         st.rerun()
@@ -188,16 +191,12 @@ with tab2:
 # ------------------------------------------
 with tab3:
     st.subheader("💾 Log Data Dumps & Storage")
-    
     with st.form("storage_log_form"):
         event_name_storage = st.text_input("Event Name (e.g., Annual Sports Day)", key="storage_event")
         device_dumped = st.selectbox("Device Dumped", ["Mobile (Mi 11x)", "DJI Pocket", "PC / External Drive"])
-        
         col1, col2 = st.columns(2)
-        with col1:
-            storage_before = st.number_input("Storage BEFORE (GB)", min_value=0.0, step=0.1)
-        with col2:
-            storage_after = st.number_input("Storage AFTER (GB)", min_value=0.0, step=0.1)
+        with col1: storage_before = st.number_input("Storage BEFORE (GB)", min_value=0.0, step=0.1)
+        with col2: storage_after = st.number_input("Storage AFTER (GB)", min_value=0.0, step=0.1)
             
         if st.form_submit_button("Log Storage Data"):
             if not event_name_storage:
@@ -205,7 +204,6 @@ with tab3:
             else:
                 now = get_ist_time()
                 gs_formula_data_dumped = f'=IFERROR(INDIRECT("D"&ROW()) - INDIRECT("E"&ROW()), 0)'
-                
                 storage_row = [
                     now.strftime("%Y-%m-%d"), event_name_storage, device_dumped, 
                     storage_before, storage_after, gs_formula_data_dumped
@@ -218,11 +216,9 @@ with tab3:
 # ------------------------------------------
 with tab4:
     st.subheader("📁 Log Video Assets")
-    
     with st.form("file_metadata_form", clear_on_submit=True): 
         event_name_file = st.text_input("Event Name", key="file_event")
         file_type = st.radio("Asset Type", ["Raw Footage", "Rendered Final Video"], horizontal=True)
-        
         col1, col2 = st.columns(2)
         with col1:
             file_name = st.text_input("File Name (e.g., DJI_001.mp4)")
@@ -244,7 +240,7 @@ with tab4:
                 st.success(f"File '{file_name}' saved to asset database!")
 
 # ------------------------------------------
-# TAB 5: HISTORY (Smart & Bulletproof Separation)
+# TAB 5: HISTORY (Clean & Simple)
 # ------------------------------------------
 with tab5:
     st.subheader("📊 Recent Completed Tasks")
@@ -257,34 +253,12 @@ with tab5:
     if history_data:
         df = pd.DataFrame(history_data)
         
-        # 1. Clean invisible spaces from Google Sheet Headers
+        # Clean column headers of any accidental spaces
         df.columns = df.columns.str.strip()
         
-        # 2. Create the empty dedicated columns safely
-        df["YT Title"] = ""
-        df["YT Publish Time"] = ""
-        
-        # 3. Check if the required columns exist
-        if "Video Phase" in df.columns and "Recording Device" in df.columns and "Editing Tool" in df.columns:
-            
-            # Clean invisible spaces from the data in the Video Phase column
-            df["Video Phase"] = df["Video Phase"].astype(str).str.strip()
-            
-            # Find the YouTube rows
-            yt_mask = df["Video Phase"] == "Publishing (YT)"
-            
-            # Move the data into the correct columns
-            df.loc[yt_mask, "YT Title"] = df.loc[yt_mask, "Recording Device"]
-            df.loc[yt_mask, "YT Publish Time"] = df.loc[yt_mask, "Editing Tool"]
-            
-            # Replace the old cells with a dash
-            df.loc[yt_mask, "Recording Device"] = "-"
-            df.loc[yt_mask, "Editing Tool"] = "-"
-
-        # Reverse the dataframe to show newest entries first
+        # Reverse to show newest first
         df_reversed = df.iloc[::-1] 
         
-        # Display the table
         st.dataframe(
             df_reversed, 
             use_container_width=True, 
@@ -294,7 +268,9 @@ with tab5:
                 "Recording Device": "📷 Device",
                 "Editing Tool": "💻 Software",
                 "YT Title": "📺 YT Title",
+                "TY Title": "📺 YT Title", # Failsafe just in case your sheet says TY Title
                 "YT Publish Time": "⏰ YT Publish Time",
+                "TY Publish Time": "⏰ YT Publish Time", # Failsafe
                 "Duration": st.column_config.TextColumn("⏱ Duration")
             }
         )

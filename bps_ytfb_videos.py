@@ -354,22 +354,32 @@ with tab5:
         if df.empty:
             st.info(f"No completed tasks found for '{selected_filter}'.")
         else:
-            # --- PHASE-WISE TIME SUMMARY ---
+            # --- PHASE-WISE TIME SUMMARY (ORDERED) ---
             st.markdown("#### ⏱️ Phase-Wise Time Summary")
             
             temp_df = df.copy()
             
-            # ANTI-CRASH FIX: Verify 'Duration' and 'Video Phase' exist before doing math!
             if "Duration" in temp_df.columns and "Video Phase" in temp_df.columns:
-                # Clean missing or broken duration strings
                 temp_df['Duration'] = temp_df['Duration'].replace(['', None, '-'], '00:00:00')
-                # Convert to Pandas Timedelta objects for math
                 temp_df['Duration_td'] = pd.to_timedelta(temp_df['Duration'], errors='coerce').fillna(pd.Timedelta(seconds=0))
+                
+                # Calculate Grand Total across all phases for this event
+                grand_total_td = temp_df['Duration_td'].sum()
                 
                 # Group by phase and sum the time
                 phase_summary = temp_df.groupby("Video Phase")["Duration_td"].sum().reset_index()
 
-                # Format the time nicely for the UI (e.g., "02h 15m 30s")
+                # Define the chronological order for the phases
+                phase_order = ["Transferring", "Editing", "Rendering", "Publishing (YT)", "Publishing (FB)"]
+                
+                # Assign a sort value based on the custom list (unrecognized phases go to the end)
+                phase_summary['Sort_Key'] = phase_summary['Video Phase'].apply(
+                    lambda x: phase_order.index(x) if x in phase_order else 99
+                )
+                
+                # Sort the dataframe by the chronological key
+                phase_summary = phase_summary.sort_values("Sort_Key")
+
                 def format_timedelta(td):
                     total_seconds = int(td.total_seconds())
                     hours, remainder = divmod(total_seconds, 3600)
@@ -377,14 +387,21 @@ with tab5:
                     return f"{hours:02d}h {minutes:02d}m {seconds:02d}s"
 
                 if not phase_summary.empty:
-                    metric_cols = st.columns(len(phase_summary))
-                    for i, row in phase_summary.iterrows():
-                        formatted_time = format_timedelta(row["Duration_td"])
-                        metric_cols[i].metric(label=row["Video Phase"], value=formatted_time)
+                    # Create enough columns for all present phases + 1 for the Grand Total
+                    metric_cols = st.columns(len(phase_summary) + 1)
+                    
+                    # Output the ordered phase times
+                    for i, row in enumerate(phase_summary.itertuples()):
+                        formatted_time = format_timedelta(row.Duration_td)
+                        # row._1 is the "Video Phase" column
+                        metric_cols[i].metric(label=row._1, value=formatted_time)
+                        
+                    # Output the Grand Total in the final rightmost column
+                    metric_cols[-1].metric(label="🌟 GRAND TOTAL", value=format_timedelta(grand_total_td))
             else:
                 st.warning("⚠️ Could not calculate time summary. Please ensure column H in your 'Logs' Google Sheet is named exactly 'Duration'.")
             
-            st.divider() # Visual separator
+            st.divider() 
             
             # --- RECENT COMPLETED TASKS LOG ---
             st.markdown("#### 📋 Task Breakdown")

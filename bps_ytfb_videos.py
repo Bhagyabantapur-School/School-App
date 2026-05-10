@@ -113,12 +113,11 @@ def get_transfer_path_list():
             base_paths.extend(hist_paths)
     return sorted(list(set(base_paths)))
 
-# --- NEW: AUTO-PROJECT NAMING ENGINE ---
+# --- AUTO-PROJECT NAMING ENGINE ---
 def get_next_project_name(event_name):
     if not event_name or event_name == "➕ Create New Event...":
         return ""
         
-    # 1. Create a dynamic Acronym (e.g. "Annual Sports Day" -> "ASD")
     words = str(event_name).replace("-", " ").replace("_", " ").split()
     acronym = "".join([w[0].upper() for w in words if w])[:4]
     if not acronym:
@@ -126,7 +125,6 @@ def get_next_project_name(event_name):
         
     count = 0
     
-    # 2. Count past instances in History
     history = get_project_history()
     if history:
         df = pd.DataFrame(history)
@@ -134,7 +132,6 @@ def get_next_project_name(event_name):
             past_edits = df[(df["Event Name"] == event_name) & (df["Video Phase"] == "Editing")]
             count += len(past_edits)
             
-    # 3. Count Active instances in Master Log
     master_vals = get_master_values()
     if len(master_vals) > 1:
         for row in master_vals[1:]:
@@ -158,7 +155,6 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 # TAB 1: START A PHASE
 # ------------------------------------------
 with tab1:
-    # --- POST-SUBMIT COPY NOTIFICATION ---
     if st.session_state.get("just_started_project"):
         st.success("✅ Phase started! Copy your project name below and save your editor file:")
         st.code(st.session_state.just_started_project, language=None)
@@ -176,13 +172,11 @@ with tab1:
     with col_phase:
         video_phase = st.selectbox("Current Phase", phase_options, index=get_idx(phase_options, st.session_state.saved_phase, 0))
     
-    # Placed outside columns to give it full width and immediate reactivity
     if event_selection == "➕ Create New Event...":
         event_name = st.text_input("Enter New Event Name (e.g., Annual Sports Day)")
     else:
         event_name = event_selection
         
-    # Auto-Calculate Project Name if Editing is selected
     proj_name = ""
     if video_phase == "Editing" and event_name:
         proj_name = get_next_project_name(event_name)
@@ -219,7 +213,6 @@ with tab1:
         if event_selection != "➕ Create New Event...":
             st.info(f"Selected Event: **{event_name}**")
             
-        # Preview the generated project name
         if video_phase == "Editing" and proj_name:
             st.info(f"🗂️ **Auto-Generated Project Name:** `{proj_name}`")
         
@@ -228,7 +221,8 @@ with tab1:
         
         if video_phase == "Publishing (YT)":
             yt_title = st.text_input("YouTube Video Title")
-            selected_publish_time = st.time_input("Scheduled/Actual Publish Time", step=1)
+            # BUG FIX: Removed step=1 to prevent Streamlit crashes
+            selected_publish_time = st.time_input("Scheduled/Actual Publish Time")
             yt_publish_time = selected_publish_time.strftime("%H:%M:%S")
             
         elif video_phase == "Transferring":
@@ -243,7 +237,6 @@ with tab1:
             else:
                 editing_tool = soft_selection
         
-        # We silently append the proj_name to the end of the metadata string
         project_metadata = f"{event_name}|{video_phase}|{recording_device}|{editing_tool}|{yt_title}|{yt_publish_time}|{proj_name}"
 
         if st.form_submit_button("Start Phase"):
@@ -275,7 +268,6 @@ with tab1:
                     st.session_state.saved_device = recording_device
                     st.session_state.saved_software = editing_tool
                     
-                    # Store project name in memory to trigger the copy screen
                     if video_phase == "Editing" and proj_name:
                         st.session_state.just_started_project = proj_name
                     
@@ -314,7 +306,6 @@ with tab2:
                         sheet_master.update_cell(task['row_index'], 3, end_time_log)
                         sheet_master.update_cell(task['row_index'], 4, gs_formula_master)
 
-                        # --- FIX: Safe parsing for 6+ parts due to the new proj_name data ---
                         meta_parts = task['metadata'].split("|")
                         if len(meta_parts) >= 6:
                             event = meta_parts[0]
@@ -418,7 +409,8 @@ with tab4:
         with col2:
             loc_opts = ["PC Local Drive", "External HDD 1", "Google Drive", "Mobile Gallery"]
             storage_loc = st.selectbox("Storage Location", loc_opts, index=get_idx(loc_opts, st.session_state.saved_loc, 0))
-            file_time = st.time_input("Time Recorded/Rendered", step=1)
+            # BUG FIX: Removed step=1 to prevent Streamlit crashes
+            file_time = st.time_input("Time Recorded/Rendered")
             
         if st.form_submit_button("Save File Metadata"):
             if not file_name or not event_name_file:

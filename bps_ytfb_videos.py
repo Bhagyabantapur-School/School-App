@@ -178,7 +178,9 @@ with tab1:
         
         if video_phase == "Publishing (YT)":
             yt_title = st.text_input("YouTube Video Title")
-            yt_publish_time = st.time_input("Scheduled/Actual Publish Time", value=get_ist_time().time())
+            # BUG FIX: Removed 'value=get_ist_time().time()' so Streamlit doesn't force overwrite your selection!
+            selected_publish_time = st.time_input("Scheduled/Actual Publish Time")
+            yt_publish_time = selected_publish_time.strftime("%H:%M:%S")
             
         elif video_phase == "Transferring":
             if transfer_selection.startswith("➕ Add New"):

@@ -56,6 +56,18 @@ def get_master_data():
 def get_project_history():
     return sheet_project.get_all_records()
 
+# --- NEW: Dynamic Event List Extractor ---
+@st.cache_data(ttl=60)
+def get_event_list():
+    history = get_project_history()
+    if history:
+        df = pd.DataFrame(history)
+        if "Event Name" in df.columns:
+            # Extract unique names, ignore empty rows, and sort alphabetically
+            events = [str(e).strip() for e in df["Event Name"].unique() if str(e).strip()]
+            return sorted(list(set(events)))
+    return []
+
 # ==========================================
 # 3. UI DASHBOARD & LOGIC
 # ==========================================
@@ -66,34 +78,42 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 # ------------------------------------------
-# TAB 1: START A PHASE
+# TAB 1: START A PHASE (Smart Dropdowns)
 # ------------------------------------------
 with tab1:
     st.subheader("Initialize New Video Phase")
     
-    video_phase = st.selectbox(
-        "Current Phase", 
-        ["Transferring", "Editing", "Rendering", "Publishing (YT)", "Publishing (FB)"]
-    )
+    unique_events = get_event_list()
+    event_options = ["➕ Create New Event..."] + unique_events
+    
+    # Placed outside the form so UI updates instantly
+    col_evt, col_phase = st.columns(2)
+    with col_evt:
+        event_selection = st.selectbox("Select Event", event_options)
+    with col_phase:
+        video_phase = st.selectbox(
+            "Current Phase", 
+            ["Transferring", "Editing", "Rendering", "Publishing (YT)", "Publishing (FB)"]
+        )
     
     with st.form("start_task_form"):
-        event_name = st.text_input("Event Name (e.g., Annual Sports Day)")
+        # Handle the New Event logic
+        if event_selection == "➕ Create New Event...":
+            event_name = st.text_input("Enter New Event Name (e.g., Annual Sports Day)")
+        else:
+            event_name = event_selection
+            st.info(f"Selected Event: **{event_name}**")
         
-        # Initialize variables so they always exist
         yt_title, yt_publish_time, recording_device, editing_tool = "-", "-", "-", "-"
         
         if video_phase == "Publishing (YT)":
             yt_title = st.text_input("YouTube Video Title")
-            
-            # Show Device and Time together for YT Publishing
             col1, col2 = st.columns(2)
             with col1:
                 recording_device = st.selectbox("Device", ["PC W10", "Mi 11x"])
             with col2:
                 yt_publish_time = st.time_input("Scheduled/Actual Publish Time", value=get_ist_time().time())
-                
-            editing_tool = "-" # Not needed for publishing
-            
+            editing_tool = "-"
         else:
             col1, col2 = st.columns(2)
             with col1:
@@ -101,12 +121,10 @@ with tab1:
                     device_options = ["Mi 11x", "PC W10"]
                 else:
                     device_options = ["Mi 11x", "DJI Pocket"]
-                
                 recording_device = st.selectbox("Device", device_options)
             with col2:
                 editing_tool = st.selectbox("Editing Software", ["Shotcut", "CapCut", "Filmora", "VLLO", "None"])
         
-        # NEW 6-PART PAYLOAD: Event | Phase | Device | Tool | YT_Title | YT_Time
         project_metadata = f"{event_name}|{video_phase}|{recording_device}|{editing_tool}|{yt_title}|{yt_publish_time}"
 
         if st.form_submit_button("Start Phase"):
@@ -162,10 +180,8 @@ with tab2:
                         sheet_master.update_cell(task['row_index'], 3, end_time_log)
                         sheet_master.update_cell(task['row_index'], 4, gs_formula_master)
 
-                        # Parse the metadata
                         meta_parts = task['metadata'].split("|")
                         
-                        # Fallback logic to safely handle old tasks
                         if len(meta_parts) == 6:
                             event, phase, device, tool, y_title, y_time = meta_parts
                         else:
@@ -175,20 +191,17 @@ with tab2:
                         gs_formula_project = f'=IF(INDIRECT("G"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("G"&ROW())-INDIRECT("F"&ROW()), 1), "h:mm:ss"), ""))'
                         
                         project_row = [
-                            now.strftime("%Y-%m-%d"), # A: Date
-                            event,                    # B: Event Name
-                            phase,                    # C: Phase
-                            device,                   # D: Device
-                            tool,                     # E: Tool
-                            task['start_time'],       # F: Start
-                            end_time_log,             # G: End
-                            gs_formula_project,       # H: Duration
-                            y_title,                  # I: YT Title
-                            y_time                    # J: YT Publish Time
+                            now.strftime("%Y-%m-%d"), event, phase, device, tool, 
+                            task['start_time'], end_time_log, gs_formula_project, 
+                            y_title, y_time
                         ]
                         
                         smart_append_row(sheet_project, project_row)
+                        
+                        # Clear both caches so the new event appears in the dropdowns!
                         get_project_history.clear()
+                        get_event_list.clear() 
+                        
                         st.success("Logged successfully!")
                         time.sleep(1)
                         st.rerun()
@@ -202,8 +215,17 @@ with tab2:
 # ------------------------------------------
 with tab3:
     st.subheader("💾 Log Data Dumps & Storage")
+    
+    unique_events = get_event_list()
+    event_selection_storage = st.selectbox("Select Event", ["➕ Create New Event..."] + unique_events, key="tab3_evt")
+        
     with st.form("storage_log_form"):
-        event_name_storage = st.text_input("Event Name (e.g., Annual Sports Day)", key="storage_event")
+        if event_selection_storage == "➕ Create New Event...":
+            event_name_storage = st.text_input("Enter New Event Name")
+        else:
+            event_name_storage = event_selection_storage
+            st.info(f"Selected Event: **{event_name_storage}**")
+
         device_dumped = st.selectbox("Device Dumped", ["Mobile (Mi 11x)", "DJI Pocket", "PC / External Drive"])
         col1, col2 = st.columns(2)
         with col1: storage_before = st.number_input("Storage BEFORE (GB)", min_value=0.0, step=0.1)
@@ -227,8 +249,17 @@ with tab3:
 # ------------------------------------------
 with tab4:
     st.subheader("📁 Log Video Assets")
+    
+    unique_events = get_event_list()
+    event_selection_file = st.selectbox("Select Event", ["➕ Create New Event..."] + unique_events, key="tab4_evt")
+        
     with st.form("file_metadata_form", clear_on_submit=True): 
-        event_name_file = st.text_input("Event Name", key="file_event")
+        if event_selection_file == "➕ Create New Event...":
+            event_name_file = st.text_input("Enter New Event Name")
+        else:
+            event_name_file = event_selection_file
+            st.info(f"Selected Event: **{event_name_file}**")
+
         file_type = st.radio("Asset Type", ["Raw Footage", "Rendered Final Video"], horizontal=True)
         col1, col2 = st.columns(2)
         with col1:
@@ -257,17 +288,14 @@ with tab5:
     st.subheader("📊 Recent Completed Tasks")
     if st.button("🔄 Refresh History"):
         get_project_history.clear()
+        get_event_list.clear() # Clear event list cache too
         st.rerun()
 
     history_data = get_project_history()
     
     if history_data:
         df = pd.DataFrame(history_data)
-        
-        # Clean column headers
         df.columns = df.columns.str.strip()
-        
-        # Reverse to show newest first
         df_reversed = df.iloc[::-1] 
         
         st.dataframe(

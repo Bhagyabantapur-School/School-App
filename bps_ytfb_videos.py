@@ -6,7 +6,7 @@ import pytz
 import time
 
 # ==========================================
-# 1. PAGE SETUP & AUTHENTICATION
+# 1. PAGE SETUP & MEMORY STATE
 # ==========================================
 st.set_page_config(page_title="BPS Video Tracker", page_icon="🎥", layout="wide")
 
@@ -15,6 +15,25 @@ if st.button("⬅️ Back to Dashboard", type="secondary"):
     st.switch_page("dashboard.py")
 st.write("---") 
 
+# --- MEMORY MODULE (Remembers Last Selections) ---
+for key, default_val in [
+    ('saved_event', '➕ Create New Event...'),
+    ('saved_phase', 'Transferring'),
+    ('saved_device', 'Mi 11x'),
+    ('saved_software', 'Shotcut'),
+    ('saved_dump', 'Mobile (Mi 11x)'),
+    ('saved_loc', 'PC Local Drive')
+]:
+    if key not in st.session_state:
+        st.session_state[key] = default_val
+
+# Helper function to easily find the index of a saved item
+def get_idx(opt_list, val):
+    return opt_list.index(val) if val in opt_list else 0
+
+# ==========================================
+# 2. AUTHENTICATION & ARCHITECTURE
+# ==========================================
 @st.cache_resource
 def init_connection():
     try:
@@ -36,9 +55,6 @@ except Exception as e:
     st.error(f"Could not open Google Sheets. Error: {e}")
     st.stop()
 
-# ==========================================
-# 2. ARCHITECTURE FUNCTIONS
-# ==========================================
 def get_ist_time():
     ist = pytz.timezone('Asia/Kolkata')
     return datetime.now(ist)
@@ -56,14 +72,12 @@ def get_master_data():
 def get_project_history():
     return sheet_project.get_all_records()
 
-# --- NEW: Dynamic Event List Extractor ---
 @st.cache_data(ttl=60)
 def get_event_list():
     history = get_project_history()
     if history:
         df = pd.DataFrame(history)
         if "Event Name" in df.columns:
-            # Extract unique names, ignore empty rows, and sort alphabetically
             events = [str(e).strip() for e in df["Event Name"].unique() if str(e).strip()]
             return sorted(list(set(events)))
     return []
@@ -78,26 +92,22 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 # ------------------------------------------
-# TAB 1: START A PHASE (Smart Dropdowns)
+# TAB 1: START A PHASE
 # ------------------------------------------
 with tab1:
     st.subheader("Initialize New Video Phase")
     
     unique_events = get_event_list()
     event_options = ["➕ Create New Event..."] + unique_events
+    phase_options = ["Transferring", "Editing", "Rendering", "Publishing (YT)", "Publishing (FB)"]
     
-    # Placed outside the form so UI updates instantly
     col_evt, col_phase = st.columns(2)
     with col_evt:
-        event_selection = st.selectbox("Select Event", event_options)
+        event_selection = st.selectbox("Select Event", event_options, index=get_idx(event_options, st.session_state.saved_event))
     with col_phase:
-        video_phase = st.selectbox(
-            "Current Phase", 
-            ["Transferring", "Editing", "Rendering", "Publishing (YT)", "Publishing (FB)"]
-        )
+        video_phase = st.selectbox("Current Phase", phase_options, index=get_idx(phase_options, st.session_state.saved_phase))
     
     with st.form("start_task_form"):
-        # Handle the New Event logic
         if event_selection == "➕ Create New Event...":
             event_name = st.text_input("Enter New Event Name (e.g., Annual Sports Day)")
         else:
@@ -110,7 +120,8 @@ with tab1:
             yt_title = st.text_input("YouTube Video Title")
             col1, col2 = st.columns(2)
             with col1:
-                recording_device = st.selectbox("Device", ["PC W10", "Mi 11x"])
+                device_opts = ["PC W10", "Mi 11x"]
+                recording_device = st.selectbox("Device", device_opts, index=get_idx(device_opts, st.session_state.saved_device))
             with col2:
                 yt_publish_time = st.time_input("Scheduled/Actual Publish Time", value=get_ist_time().time())
             editing_tool = "-"
@@ -118,12 +129,13 @@ with tab1:
             col1, col2 = st.columns(2)
             with col1:
                 if video_phase == "Editing":
-                    device_options = ["Mi 11x", "PC W10"]
+                    device_opts = ["Mi 11x", "PC W10"]
                 else:
-                    device_options = ["Mi 11x", "DJI Pocket"]
-                recording_device = st.selectbox("Device", device_options)
+                    device_opts = ["Mi 11x", "DJI Pocket"]
+                recording_device = st.selectbox("Device", device_opts, index=get_idx(device_opts, st.session_state.saved_device))
             with col2:
-                editing_tool = st.selectbox("Editing Software", ["Shotcut", "CapCut", "Filmora", "VLLO", "None"])
+                soft_opts = ["Shotcut", "CapCut", "Filmora", "VLLO", "None"]
+                editing_tool = st.selectbox("Editing Software", soft_opts, index=get_idx(soft_opts, st.session_state.saved_software))
         
         project_metadata = f"{event_name}|{video_phase}|{recording_device}|{editing_tool}|{yt_title}|{yt_publish_time}"
 
@@ -146,6 +158,13 @@ with tab1:
                 
                 with st.spinner("Logging to Master..."):
                     smart_append_row(sheet_master, row_data)
+                    
+                    # Update Memory State!
+                    st.session_state.saved_event = event_name
+                    st.session_state.saved_phase = video_phase
+                    st.session_state.saved_device = recording_device
+                    st.session_state.saved_software = editing_tool
+                    
                     st.success(f"Started {video_phase} successfully!")
                     time.sleep(1)
                     st.rerun()
@@ -181,7 +200,6 @@ with tab2:
                         sheet_master.update_cell(task['row_index'], 4, gs_formula_master)
 
                         meta_parts = task['metadata'].split("|")
-                        
                         if len(meta_parts) == 6:
                             event, phase, device, tool, y_title, y_time = meta_parts
                         else:
@@ -197,8 +215,6 @@ with tab2:
                         ]
                         
                         smart_append_row(sheet_project, project_row)
-                        
-                        # Clear both caches so the new event appears in the dropdowns!
                         get_project_history.clear()
                         get_event_list.clear() 
                         
@@ -217,7 +233,8 @@ with tab3:
     st.subheader("💾 Log Data Dumps & Storage")
     
     unique_events = get_event_list()
-    event_selection_storage = st.selectbox("Select Event", ["➕ Create New Event..."] + unique_events, key="tab3_evt")
+    event_options_storage = ["➕ Create New Event..."] + unique_events
+    event_selection_storage = st.selectbox("Select Event", event_options_storage, index=get_idx(event_options_storage, st.session_state.saved_event), key="tab3_evt")
         
     with st.form("storage_log_form"):
         if event_selection_storage == "➕ Create New Event...":
@@ -226,7 +243,9 @@ with tab3:
             event_name_storage = event_selection_storage
             st.info(f"Selected Event: **{event_name_storage}**")
 
-        device_dumped = st.selectbox("Device Dumped", ["Mobile (Mi 11x)", "DJI Pocket", "PC / External Drive"])
+        dump_opts = ["Mobile (Mi 11x)", "DJI Pocket", "PC / External Drive"]
+        device_dumped = st.selectbox("Device Dumped", dump_opts, index=get_idx(dump_opts, st.session_state.saved_dump))
+        
         col1, col2 = st.columns(2)
         with col1: storage_before = st.number_input("Storage BEFORE (GB)", min_value=0.0, step=0.1)
         with col2: storage_after = st.number_input("Storage AFTER (GB)", min_value=0.0, step=0.1)
@@ -242,6 +261,11 @@ with tab3:
                     storage_before, storage_after, gs_formula_data_dumped
                 ]
                 smart_append_row(sheet_storage, storage_row)
+                
+                # Update Memory State!
+                st.session_state.saved_event = event_name_storage
+                st.session_state.saved_dump = device_dumped
+                
                 st.success(f"Storage data logged for {device_dumped}!")
 
 # ------------------------------------------
@@ -251,7 +275,8 @@ with tab4:
     st.subheader("📁 Log Video Assets")
     
     unique_events = get_event_list()
-    event_selection_file = st.selectbox("Select Event", ["➕ Create New Event..."] + unique_events, key="tab4_evt")
+    event_options_file = ["➕ Create New Event..."] + unique_events
+    event_selection_file = st.selectbox("Select Event", event_options_file, index=get_idx(event_options_file, st.session_state.saved_event), key="tab4_evt")
         
     with st.form("file_metadata_form", clear_on_submit=True): 
         if event_selection_file == "➕ Create New Event...":
@@ -266,7 +291,8 @@ with tab4:
             file_name = st.text_input("File Name (e.g., DJI_001.mp4)")
             duration = st.text_input("Video Duration (e.g., 00:15:30)")
         with col2:
-            storage_loc = st.selectbox("Storage Location", ["PC Local Drive", "External HDD 1", "Google Drive", "Mobile Gallery"])
+            loc_opts = ["PC Local Drive", "External HDD 1", "Google Drive", "Mobile Gallery"]
+            storage_loc = st.selectbox("Storage Location", loc_opts, index=get_idx(loc_opts, st.session_state.saved_loc))
             file_time = st.time_input("Time Recorded/Rendered")
             
         if st.form_submit_button("Save File Metadata"):
@@ -279,6 +305,11 @@ with tab4:
                     storage_loc, file_time.strftime("%H:%M:%S"), duration
                 ]
                 smart_append_row(sheet_files, file_row)
+                
+                # Update Memory State!
+                st.session_state.saved_event = event_name_file
+                st.session_state.saved_loc = storage_loc
+                
                 st.success(f"File '{file_name}' saved to asset database!")
 
 # ------------------------------------------
@@ -288,7 +319,7 @@ with tab5:
     st.subheader("📊 Recent Completed Tasks")
     if st.button("🔄 Refresh History"):
         get_project_history.clear()
-        get_event_list.clear() # Clear event list cache too
+        get_event_list.clear() 
         st.rerun()
 
     history_data = get_project_history()

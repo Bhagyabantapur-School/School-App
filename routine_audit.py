@@ -11,7 +11,6 @@ from datetime import datetime, timedelta
 import pytz
 import time
 
-# Updated Page Title to match the new file name!
 st.set_page_config(page_title="Routine Audit", page_icon="⏳", layout="wide")
 
 st.markdown("""
@@ -96,6 +95,10 @@ try:
     
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist_timezone)
+    
+    # --- THIS WAS THE MISSING VARIABLE ---
+    today_str = now.strftime('%Y-%m-%d')
+    # -------------------------------------
 
     col_t, col_s = st.columns([8, 2])
     with col_t: st.markdown("<h3 style='color: #555; margin-top: 0px;'>⏳ Daily Routine Audit</h3>", unsafe_allow_html=True)

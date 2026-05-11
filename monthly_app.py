@@ -189,6 +189,10 @@ try:
                             active_row = running_match.iloc[-1]
                             sheet_row = active_row['row_index']
 
+                    # Update display status if the task is actively running
+                    display_status = "In Progress" if is_running else row['Status']
+                    status_color = "#0068c9" if is_running else border_color # Blue if running
+
                     if is_running:
                         # ==========================================
                         # POMODORO TIMER UI (Task is Running)
@@ -196,7 +200,7 @@ try:
                         st.markdown(f"""
                         <div style='background-color: {bg_color}; border-left: 5px solid {border_color}; padding: 12px; border-radius: 6px; margin-bottom: 10px;'>
                             <strong style='font-size: 16px; color: #333;'>{task_name}</strong> 
-                            <span style='color: {border_color}; font-weight: bold; font-size: 12px; margin-left: 10px;'>[{row['Status']}]</span><br>
+                            <span style='color: {status_color}; font-weight: bold; font-size: 12px; margin-left: 10px;'>[{display_status}]</span><br>
                             <span style='color: #666; font-size: 14px;'>Category: {cat} | {day_text}</span>
                         </div>
                         """, unsafe_allow_html=True)
@@ -300,44 +304,25 @@ try:
                             st.markdown(f"""
                             <div style='background-color: {bg_color}; border-left: 5px solid {border_color}; padding: 12px; border-radius: 6px; margin-bottom: 10px;'>
                                 <strong style='font-size: 16px; color: #333;'>{task_name}</strong> 
-                                <span style='color: {border_color}; font-weight: bold; font-size: 12px; margin-left: 10px;'>[{row['Status']}]</span><br>
+                                <span style='color: {status_color}; font-weight: bold; font-size: 12px; margin-left: 10px;'>[{display_status}]</span><br>
                                 <span style='color: #666; font-size: 14px;'>Category: {cat} | {day_text}</span>
                             </div>
                             """, unsafe_allow_html=True)
                             
                         with col_btns:
                             st.markdown("<br>", unsafe_allow_html=True)
-                            c1, c2 = st.columns(2)
-                            
-                            with c1:
-                                if st.button("▶️ Start Timer", key=f"start_{row['row_index']}", use_container_width=True):
-                                    log_sheet = get_sheet("activity_log")
-                                    log_sheet.append_row([
-                                        today_str, current_time_str, "RUNNING", GS_FORMULA, 
-                                        cat, task_name, "", "Monthly Task Tracking"
-                                    ], value_input_option="USER_ENTERED")
-                                    
-                                    get_activity_log.clear()
-                                    st.success(f"Started Timer for '{task_name}'!")
-                                    time.sleep(1)
-                                    st.rerun()
-                                    
-                            with c2:
-                                if st.button("✅ Quick Done", key=f"done_{row['row_index']}", use_container_width=True):
-                                    m_sheet = get_sheet("monthly_tasks")
-                                    m_sheet.update_cell(row['row_index'], 4, today_str)
-                                    
-                                    log_sheet = get_sheet("activity_log")
-                                    log_sheet.append_row([
-                                        today_str, current_time_str, current_time_str, GS_FORMULA, 
-                                        cat, task_name, "", "Monthly Task Completed (Quick)"
-                                    ], value_input_option="USER_ENTERED")
-                                    
-                                    get_monthly_tasks.clear()
-                                    get_activity_log.clear()
-                                    st.success(f"Marked '{task_name}' as done!")
-                                    time.sleep(1)
-                                    st.rerun()
+                            # Start Timer button now takes the full width of the column
+                            if st.button("▶️ Start Timer", key=f"start_{row['row_index']}", use_container_width=True):
+                                log_sheet = get_sheet("activity_log")
+                                log_sheet.append_row([
+                                    today_str, current_time_str, "RUNNING", GS_FORMULA, 
+                                    cat, task_name, "", "Monthly Task Tracking"
+                                ], value_input_option="USER_ENTERED")
+                                
+                                get_activity_log.clear()
+                                st.success(f"Started Timer for '{task_name}'!")
+                                time.sleep(1)
+                                st.rerun()
                                     
             st.markdown("<br>", unsafe_allow_html=True)
 

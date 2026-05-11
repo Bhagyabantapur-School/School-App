@@ -109,7 +109,7 @@ with col_title:
     st.title("🚀 My Personal Dashboard")
     st.markdown("Welcome back! Here is a summary of your systems:")
 with col_count:
-    st.metric("Total Active Apps", "11") # <-- Updated metric to 11
+    st.metric("Total Active Apps", "13") # <-- Updated metric to 13
 st.write("---") 
 
 # ROW 1
@@ -148,11 +148,24 @@ with r3_col3:
     st.markdown(create_card("⏱️", "Daily Routine", "Next Session", "Yoga", "#FFF8E1", "#FFB300", "#FF8F00", tracker_data), unsafe_allow_html=True)
     if st.button("Open App", key="btn9", use_container_width=True): log_and_open("Daily Routine", "routine_app.py")
 
-# ROW 4 (MDM & NEW YT/FB APP)
+# ROW 4 (Routine Expansion & MDM)
 r4_col1, r4_col2, r4_col3 = st.columns(3)
 with r4_col1:
-    st.markdown(create_card("📦", "MDM Returns", "Sync", "Ready", "#E8F5E9", "#43A047", "#2E7D32", tracker_data), unsafe_allow_html=True)
-    if st.button("Open App", key="btn10", use_container_width=True): log_and_open("MDM Returns", "mdm_return_log.py")
+    st.markdown(create_card("🔍", "Routine Audit", "Analysis", "Live", "#F3E5F5", "#8E24AA", "#6A1B9A", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn10", use_container_width=True): log_and_open("Routine Audit", "routine_audit.py")
 with r4_col2:
+    st.markdown(create_card("✏️", "Routine Editor", "Manage", "Active", "#E8EAF6", "#3949AB", "#283593", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn11", use_container_width=True): log_and_open("Routine Editor", "routine_editor.py")
+with r4_col3:
+    st.markdown(create_card("📦", "MDM Returns", "Sync", "Ready", "#E8F5E9", "#43A047", "#2E7D32", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn12", use_container_width=True): log_and_open("MDM Returns", "mdm_return_log.py")
+
+# ROW 5 (Media & Projects)
+r5_col1, r5_col2, r5_col3 = st.columns(3)
+with r5_col1:
     st.markdown(create_card("🎬", "Video Manager", "Platform", "YT / FB", "#FFEBEE", "#E53935", "#C62828", tracker_data), unsafe_allow_html=True)
-    if st.button("Open App", key="btn11", use_container_width=True): log_and_open("Video Manager", "bps_ytfb_videos.py")
+    if st.button("Open App", key="btn13", use_container_width=True): log_and_open("Video Manager", "bps_ytfb_videos.py")
+with r5_col2:
+    st.empty() # Placeholder for your 14th app!
+with r5_col3:
+    st.empty() # Placeholder for your 15th app!

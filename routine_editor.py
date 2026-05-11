@@ -1,7 +1,7 @@
 import streamlit as st
 # --- BACK BUTTON ---
 if st.button("⬅️ Back to Dashboard", type="secondary"):
-    st.switch_page("main.py") 
+    st.switch_page("dashboard.py") 
 st.write("---") 
 # -------------------
 import gspread

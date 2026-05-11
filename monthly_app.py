@@ -169,6 +169,9 @@ try:
             # --- PENDING TASKS SECTION ---
             st.markdown("<h4 style='color: #d84315;'>⏳ Action Required This Month</h4>", unsafe_allow_html=True)
             
+            # NEW: Instruction added here!
+            st.info("💡 **Reminder:** Only use the buttons below to log your monthly tasks. Do NOT mark them as done from the Daily Routine app!")
+            
             if pending_tasks.empty:
                 st.success("🎉 All monthly tasks are complete! Great job!")
             else:

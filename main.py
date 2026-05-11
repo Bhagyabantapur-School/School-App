@@ -34,8 +34,10 @@ money_tracker = st.Page("money_tracker.py", title="Money Tracker", icon="💵")
 health = st.Page("health_app.py", title="Health Tracker", icon="❤️")
 backup = st.Page("backup_tracker_app.py", title="Backup Tracker", icon="💾")
 routine = st.Page("routine_app.py", title="Daily Routine", icon="⏱️")
+routine_audit = st.Page("routine_audit.py", title="Routine Audit", icon="🔍") # <-- NEW
+routine_editor = st.Page("routine_editor.py", title="Routine Editor", icon="✏️") # <-- NEW
 mdm_return = st.Page("mdm_return_log.py", title="MDM Returns", icon="📦")
-ytfb_videos = st.Page("bps_ytfb_videos.py", title="Video Manager", icon="🎬") # <-- NEW APP
+ytfb_videos = st.Page("bps_ytfb_videos.py", title="Video Manager", icon="🎬")
 
 # --- BPS Digital Pages ---
 bps_dashboard = st.Page("bps_dashboard.py", title="Main Dashboard", icon="🏫", default=(system_choice == 'BPS Digital System'))
@@ -56,7 +58,9 @@ if st.session_state.active_system == 'Personal Hub':
     pg = st.navigation({
         "My Personal Hub": [
             personal_dashboard, money_location, strong, project, election, 
-            monthly, money_tracker, health, backup, routine, mdm_return, ytfb_videos # <-- ADDED HERE
+            monthly, money_tracker, health, backup, routine, 
+            routine_audit, routine_editor, # <-- ADDED AFTER ROUTINE
+            mdm_return, ytfb_videos
         ]
     })
     st.sidebar.caption("🔒 Personal Workspace Active")

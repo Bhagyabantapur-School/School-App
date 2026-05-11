@@ -4,6 +4,8 @@ if st.button("⬅️ Back to Dashboard", type="secondary"):
     st.switch_page("dashboard.py") 
 st.write("---") 
 # -------------------
+import streamlit.components.v1 as components
+from streamlit_autorefresh import st_autorefresh
 import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
@@ -15,6 +17,15 @@ import time
 # 1. Configuration & Styling
 # ==========================================
 st.set_page_config(page_title="Monthly Tasks", page_icon="📆", layout="wide")
+
+# Track Pomodoro states for audio beeps & setup auto-refresh
+if 'pomodoro_state' not in st.session_state:
+    st.session_state.pomodoro_state = {}
+
+st_autorefresh(interval=120000, key="monthly_refresh")
+
+# Master Formula for Activity Log
+GS_FORMULA = '=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm"), ""))'
 
 st.markdown("""
     <style>
@@ -80,8 +91,12 @@ def get_activity_log():
     sheet = get_sheet("activity_log")
     data = sheet.get_all_values()
     if len(data) <= 1:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=["Date", "Start_Time", "End_Time", "Duration", "Category", "Task_Name", "Checklist", "Notes", "row_index"])
     df = pd.DataFrame(data[1:], columns=data[0])
+    while df.shape[1] < 8: df[df.shape[1]] = ""
+    df = df.iloc[:, :8]
+    df.columns = ["Date", "Start_Time", "End_Time", "Duration", "Category", "Task_Name", "Checklist", "Notes"]
+    df['row_index'] = df.index + 2 # Keep track of row for updating RUNNING tasks
     return df
 
 # ==========================================
@@ -101,12 +116,15 @@ with col2:
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🔄 Sync", use_container_width=True):
         get_monthly_tasks.clear()
+        get_activity_log.clear()
         st.toast("Synced with Google Sheets!")
         time.sleep(0.5)
         st.rerun()
 
 try:
     df_tasks = get_monthly_tasks()
+    log_df = get_activity_log()
+    running_tasks = log_df[log_df['End_Time'] == 'RUNNING'] if not log_df.empty else pd.DataFrame()
     
     if not df_tasks.empty:
         # --- DATA PROCESSING ---
@@ -153,40 +171,173 @@ try:
                 bg_color = "#fff3e0" if row['Status'] == 'Pending' else "#ffebee"
                 border_color = row['Color']
                 day_text = f"Target: {row['Target Day']}th" if str(row['Target Day']).strip() else "No specific date"
+                task_name = row['Task Name']
+                cat = row['Category'].upper() if row['Category'] else "WORK"
                 
-                col_info, col_btn = st.columns([4, 1])
-                
-                with col_info:
+                # Check if this task is currently running in the Activity Log
+                is_running = False
+                sheet_row = None
+                if not running_tasks.empty:
+                    running_match = running_tasks[(running_tasks['Task_Name'] == task_name) & (running_tasks['Category'] == cat)]
+                    if not running_match.empty:
+                        is_running = True
+                        active_row = running_match.iloc[-1]
+                        sheet_row = active_row['row_index']
+
+                if is_running:
+                    # ==========================================
+                    # POMODORO TIMER UI (Task is Running)
+                    # ==========================================
                     st.markdown(f"""
                     <div style='background-color: {bg_color}; border-left: 5px solid {border_color}; padding: 12px; border-radius: 6px; margin-bottom: 10px;'>
-                        <strong style='font-size: 16px; color: #333;'>{row['Task Name']}</strong> 
+                        <strong style='font-size: 16px; color: #333;'>{task_name}</strong> 
                         <span style='color: {border_color}; font-weight: bold; font-size: 12px; margin-left: 10px;'>[{row['Status']}]</span><br>
-                        <span style='color: #666; font-size: 14px;'>Category: {row['Category']} | {day_text}</span>
+                        <span style='color: #666; font-size: 14px;'>Category: {cat} | {day_text}</span>
                     </div>
                     """, unsafe_allow_html=True)
+
+                    # Calculate elapsed time
+                    try:
+                        start_dt_str = f"{active_row['Date']} {active_row['Start_Time']}"
+                        dt_naive = datetime.strptime(start_dt_str, "%Y-%m-%d %H:%M")
+                        active_start_time = ist_timezone.localize(dt_naive)
+                        elapsed_time = now - active_start_time
+                        mins_elapsed = int(elapsed_time.total_seconds() // 60)
+                    except: mins_elapsed = 0 
                     
-                with col_btn:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button("✅ Mark Done", key=f"done_{row['row_index']}", use_container_width=True):
-                        # 1. Update Monthly Tasks Sheet
-                        sheet = get_sheet("monthly_tasks")
-                        sheet.update_cell(row['row_index'], 4, today_str)
+                    cycle_minute = mins_elapsed % 30
+                    pomodoro_count = (mins_elapsed // 30) + 1
+                    current_state = "Focus" if cycle_minute < 25 else "Break"
+                    task_id = f"mtask_{sheet_row}"
+                    
+                    # Beep Logic
+                    if task_id in st.session_state.pomodoro_state:
+                        if st.session_state.pomodoro_state[task_id] != current_state:
+                            components.html("""
+                                <script>
+                                    try {
+                                        var ctx = new (window.AudioContext || window.webkitAudioContext)();
+                                        function playBeep(freq, time, dur) {
+                                            var osc = ctx.createOscillator();
+                                            var gain = ctx.createGain();
+                                            osc.connect(gain);
+                                            gain.connect(ctx.destination);
+                                            osc.frequency.value = freq;
+                                            osc.type = "square";
+                                            gain.gain.setValueAtTime(0.1, time);
+                                            gain.gain.exponentialRampToValueAtTime(0.001, time + dur);
+                                            osc.start(time);
+                                            osc.stop(time + dur);
+                                        }
+                                        playBeep(600, ctx.currentTime, 0.2);
+                                        playBeep(800, ctx.currentTime + 0.2, 0.3);
+                                    } catch(e) {}
+                                </script>
+                            """, height=0, width=0)
+                            
+                    st.session_state.pomodoro_state[task_id] = current_state
+
+                    if current_state == "Focus":
+                        p_state = "🍅 Focus Time"
+                        p_color = "#d84315" 
+                        p_left = 25 - cycle_minute
+                        p_prog = cycle_minute / 25.0
+                    else:
+                        p_state = "☕ Break Time"
+                        p_color = "#2e7b32" 
+                        p_left = 30 - cycle_minute
+                        p_prog = (cycle_minute - 25) / 5.0
+
+                    st.markdown(f"""
+                    <div style='background-color: #f8f9fa; border-left: 5px solid {p_color}; padding: 12px; border-radius: 6px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);'>
+                        <div style='margin-top: 4px; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;'>
+                            <span style='color: {p_color}; font-weight: bold; font-size: 14px;'>{p_state} (Cycle {pomodoro_count})</span>
+                            <span style='color: #555; font-size: 13px; font-weight: bold;'>{p_left}m left (Total: {mins_elapsed}m)</span>
+                        </div>
+                        <div style='width: 100%; background-color: #e0e0e0; border-radius: 4px; height: 6px;'>
+                            <div style='width: {p_prog * 100}%; background-color: {p_color}; height: 6px; border-radius: 4px; transition: width 0.5s ease;'></div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    col_stop, col_cancel = st.columns(2)
+                    with col_stop:
+                        if st.button("🛑 FINISH & MARK DONE", key=f"save_{row['row_index']}", use_container_width=True, type="primary"):
+                            # 1. Update End Time in Activity Log
+                            log_sheet = get_sheet("activity_log")
+                            log_sheet.update_cell(sheet_row, 3, current_time_str) 
+                            log_sheet.update_cell(sheet_row, 4, GS_FORMULA) 
+                            
+                            # 2. Update Monthly Task as Completed
+                            m_sheet = get_sheet("monthly_tasks")
+                            m_sheet.update_cell(row['row_index'], 4, today_str)
+
+                            get_monthly_tasks.clear()
+                            get_activity_log.clear()
+                            st.success(f"Finished & Logged '{task_name}'!")
+                            time.sleep(1)
+                            st.rerun()
+
+                    with col_cancel:
+                        if st.button("❌ CANCEL TIMER", key=f"cancel_{row['row_index']}", use_container_width=True):
+                            log_sheet = get_sheet("activity_log")
+                            log_sheet.delete_rows(int(sheet_row))
+                            get_activity_log.clear()
+                            st.warning(f"Timer Cancelled for '{task_name}'")
+                            time.sleep(1)
+                            st.rerun()
+                            
+                else:
+                    # ==========================================
+                    # STANDARD UI (Task Not Running)
+                    # ==========================================
+                    col_info, col_btns = st.columns([3, 2])
+                    
+                    with col_info:
+                        st.markdown(f"""
+                        <div style='background-color: {bg_color}; border-left: 5px solid {border_color}; padding: 12px; border-radius: 6px; margin-bottom: 10px;'>
+                            <strong style='font-size: 16px; color: #333;'>{task_name}</strong> 
+                            <span style='color: {border_color}; font-weight: bold; font-size: 12px; margin-left: 10px;'>[{row['Status']}]</span><br>
+                            <span style='color: #666; font-size: 14px;'>Category: {cat} | {day_text}</span>
+                        </div>
+                        """, unsafe_allow_html=True)
                         
-                        # 2. Log to Activity Log (Integrates with your Timeline!)
-                        log_sheet = get_sheet("activity_log")
-                        cat = row['Category'].upper() if row['Category'] else "WORK"
-                        gs_formula = '=IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm"), "")'
-                        log_sheet.append_row([
-                            today_str, current_time_str, current_time_str, gs_formula, 
-                            cat, row['Task Name'], "", "Monthly Task Completed"
-                        ], value_input_option="USER_ENTERED")
+                    with col_btns:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        c1, c2 = st.columns(2)
                         
-                        get_monthly_tasks.clear()
-                        get_activity_log.clear()
-                        st.success(f"Marked '{row['Task Name']}' as done!")
-                        time.sleep(1)
-                        st.rerun()
-                        
+                        with c1:
+                            if st.button("▶️ Start Timer", key=f"start_{row['row_index']}", use_container_width=True):
+                                log_sheet = get_sheet("activity_log")
+                                log_sheet.append_row([
+                                    today_str, current_time_str, "RUNNING", GS_FORMULA, 
+                                    cat, task_name, "", "Monthly Task Tracking"
+                                ], value_input_option="USER_ENTERED")
+                                
+                                get_activity_log.clear()
+                                st.success(f"Started Timer for '{task_name}'!")
+                                time.sleep(1)
+                                st.rerun()
+                                
+                        with c2:
+                            if st.button("✅ Quick Done", key=f"done_{row['row_index']}", use_container_width=True):
+                                # 1. Update Monthly Tasks Sheet
+                                m_sheet = get_sheet("monthly_tasks")
+                                m_sheet.update_cell(row['row_index'], 4, today_str)
+                                
+                                # 2. Instant Activity Log Update
+                                log_sheet = get_sheet("activity_log")
+                                log_sheet.append_row([
+                                    today_str, current_time_str, current_time_str, GS_FORMULA, 
+                                    cat, task_name, "", "Monthly Task Completed (Quick)"
+                                ], value_input_option="USER_ENTERED")
+                                
+                                get_monthly_tasks.clear()
+                                get_activity_log.clear()
+                                st.success(f"Marked '{task_name}' as done!")
+                                time.sleep(1)
+                                st.rerun()
+                                
         st.markdown("<br>", unsafe_allow_html=True)
 
         # --- COMPLETED TASKS SECTION ---

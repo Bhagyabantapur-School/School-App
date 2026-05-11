@@ -7,11 +7,8 @@ st.write("---")
 import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
-from datetime import datetime, timedelta
-import pytz
+from datetime import datetime
 import time
-
-GS_FORMULA = '=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm"), ""))'
 
 st.set_page_config(page_title="Routine Editor", page_icon="⚙️", layout="wide")
 
@@ -38,7 +35,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# Database Connection & Caching Helpers
+# Database Connection
 # ==========================================
 @st.cache_resource
 def init_connection():
@@ -46,22 +43,8 @@ def init_connection():
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
     return gspread.authorize(creds)
 
-def get_main_spreadsheet():
-    return init_connection().open("MY ROUTINE 2026")
-
-def get_money_spreadsheet():
-    return init_connection().open("sk_money_location")
-
 def get_sheet(tab_name):
-    return get_main_spreadsheet().worksheet(tab_name)
-
-def smart_append_row(sheet, row_data):
-    col_a = sheet.col_values(1)
-    next_row = len(col_a) + 1
-    try:
-        sheet.update(range_name=f"A{next_row}", values=[row_data], value_input_option="USER_ENTERED")
-    except TypeError:
-        sheet.update(f"A{next_row}", [row_data], value_input_option="USER_ENTERED")
+    return init_connection().open("MY ROUTINE 2026").worksheet(tab_name)
 
 @st.cache_data(ttl=300) 
 def get_routine_data():
@@ -73,476 +56,216 @@ def get_routine_data():
     df = df[df["Day"].astype(str).str.strip() != ""]
     return df
 
-@st.cache_data(ttl=300)
-def get_activity_log():
-    data = get_sheet("activity_log").get_all_values()
-    if len(data) <= 1: return pd.DataFrame(columns=["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"])
-    df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 8: df[df.shape[1]] = ""
-    df = df.iloc[:, :8]
-    df.columns = ["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"]
-    df = df[df["Date"].astype(str).str.strip() != ""] 
-    return df
-
-@st.cache_data(ttl=300)
-def get_location_data():
-    try: sheet = get_money_spreadsheet().worksheet("LOCATION_DATA")
-    except Exception: return pd.DataFrame(columns=["Date", "Time", "Move", "Place", "People", "Remark"])
-    data = sheet.get_all_values()
-    if len(data) <= 1: return pd.DataFrame(columns=["Date", "Time", "Move", "Place", "People", "Remark"])
-    df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 6: df[df.shape[1]] = ""
-    df = df.iloc[:, :6]
-    df.columns = ["Date", "Time", "Move", "Place", "People", "Remark"]
-    df = df[df["Date"].astype(str).str.strip() != ""] 
-    return df
-
-@st.cache_data(ttl=300)
-def get_visited_places():
-    try:
-        data = get_money_spreadsheet().worksheet("VISITED_PLACES").get_all_values()
-        if len(data) <= 1: return pd.DataFrame(columns=["Place", "Purpose"])
-        return pd.DataFrame(data[1:], columns=data[0])
-    except Exception: return pd.DataFrame(columns=["Place", "Purpose"])
-
 def parse_duration_to_minutes(dur_str):
     try:
         h, m = map(int, str(dur_str).strip().split(':'))
         return (h * 60) + m
     except: return 0
 
-def get_short_stop_label(place):
-    p = str(place).upper()
-    if "HOME" in p: return "🏠 Home Base"
-    if "KARIM" in p: return "🔑 Key Drop / Pickup"
-    if any(k in p for k in ["FRUIT", "SHOP", "STORE", "MARKET", "MALL"]): return "🛒 Quick Errand"
-    if any(k in p for k in ["BUS", "STAND", "STATION", "STOP"]): return "🚏 Transit Wait"
-    if any(k in p for k in ["SCHOOL", "MADRASA"]): return "🏫 School / Education"
-    return "📍 General Visit"
-
 # ==========================================
 # Main App UI
 # ==========================================
 try:
     df = get_routine_data()
-    log_df = get_activity_log() 
-    loc_df = get_location_data() 
-    visited_places_df = get_visited_places()
-    
-    ist_timezone = pytz.timezone('Asia/Kolkata')
-    now = datetime.now(ist_timezone)
+    now = datetime.now()
     current_day = now.strftime('%A')
-    today_str = now.strftime('%Y-%m-%d')
     days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Holiday"]
 
-    tab1, tab2 = st.tabs(["📅 Schedule Manager", "⏳ Timeline Audit"])
+    col_title, col_sync = st.columns([8, 2])
+    with col_title: st.markdown("<h3 style='color: #555; margin-top: 0px;'>📅 Smart Schedule Manager</h3>", unsafe_allow_html=True)
+    with col_sync:
+        if st.button("🔄 Sync Editor", use_container_width=True):
+            get_routine_data.clear()
+            st.toast("Synced!")
+            time.sleep(1.0)
+            st.rerun()
 
-    # ==========================================
-    # TAB 1: SCHEDULE MANAGER
-    # ==========================================
-    with tab1:
-        col_title, col_sync = st.columns([8, 2])
-        with col_title: st.markdown("<h3 style='color: #555;'>📅 Smart Schedule Manager</h3>", unsafe_allow_html=True)
-        with col_sync:
-            if st.button("🔄 Sync Editor", use_container_width=True):
-                get_routine_data.clear()
-                st.toast("Synced!")
-                time.sleep(1.0)
-                st.rerun()
-
-        with st.expander("🛠️ Advanced Tools: Batch Add, Replace & Free Time", expanded=False):
-            tool_mode = st.radio("Select Tool:", ["🔍 Find Free Time", "➕ Batch Add Task", "🔄 Find & Replace"], horizontal=True)
+    with st.expander("🛠️ Advanced Tools: Batch Add, Replace & Free Time", expanded=False):
+        tool_mode = st.radio("Select Tool:", ["🔍 Find Free Time", "➕ Batch Add Task", "🔄 Find & Replace"], horizontal=True)
+        
+        if tool_mode == "🔍 Find Free Time":
+            st.markdown("#### Find Gaps in Your Routine")
+            free_day = st.selectbox("Select Day to Analyze", days_of_week, key="free_day")
+            day_df_free = df[df['Day'].str.strip().str.title() == free_day.title()].copy()
             
-            if tool_mode == "🔍 Find Free Time":
-                st.markdown("#### Find Gaps in Your Routine")
-                free_day = st.selectbox("Select Day to Analyze", days_of_week, key="free_day")
-                day_df_free = df[df['Day'].str.strip().str.title() == free_day.title()].copy()
+            if not day_df_free.empty:
+                time_blocks = []
+                for _, r in day_df_free.iterrows():
+                    try:
+                        st_m = int(r['Start_Time'].split(':')[0])*60 + int(r['Start_Time'].split(':')[1])
+                        et_m = 24 * 60 if r['End_Time'].strip() in ['0:00', '00:00'] else int(r['End_Time'].split(':')[0])*60 + int(r['End_Time'].split(':')[1])
+                        time_blocks.append((st_m, et_m, r['Activity']))
+                    except: pass
                 
-                if not day_df_free.empty:
-                    time_blocks = []
-                    for _, r in day_df_free.iterrows():
-                        try:
-                            st_m = int(r['Start_Time'].split(':')[0])*60 + int(r['Start_Time'].split(':')[1])
-                            et_m = 24 * 60 if r['End_Time'].strip() in ['0:00', '00:00'] else int(r['End_Time'].split(':')[0])*60 + int(r['End_Time'].split(':')[1])
-                            time_blocks.append((st_m, et_m, r['Activity']))
-                        except: pass
+                time_blocks.sort(key=lambda x: x[0])
+                free_slots = []
+                current_min = 0
+                for block in time_blocks:
+                    if block[0] > current_min: free_slots.append((current_min, block[0]))
+                    current_min = max(current_min, block[1])
+                if current_min < 24 * 60: free_slots.append((current_min, 24 * 60))
                     
-                    time_blocks.sort(key=lambda x: x[0])
-                    free_slots = []
-                    current_min = 0
-                    for block in time_blocks:
-                        if block[0] > current_min: free_slots.append((current_min, block[0]))
-                        current_min = max(current_min, block[1])
-                    if current_min < 24 * 60: free_slots.append((current_min, 24 * 60))
-                        
-                    if free_slots:
-                        st.success(f"Found {len(free_slots)} free time slots on {free_day}:")
-                        for start, end in free_slots:
-                            s_str = datetime.strptime(f"{start//60:02d}:{start%60:02d}", '%H:%M').strftime('%I:%M %p')
-                            e_str = "12:00 AM" if end == 24*60 else datetime.strptime(f"{end//60:02d}:{end%60:02d}", '%H:%M').strftime('%I:%M %p')
-                            st.markdown(f"- **{s_str} to {e_str}** ({end - start} mins available)")
-                    else: st.info("This day is completely fully scheduled!")
-                else: st.info("No routine set for this day. The whole day is free!")
+                if free_slots:
+                    st.success(f"Found {len(free_slots)} free time slots on {free_day}:")
+                    for start, end in free_slots:
+                        s_str = datetime.strptime(f"{start//60:02d}:{start%60:02d}", '%H:%M').strftime('%I:%M %p')
+                        e_str = "12:00 AM" if end == 24*60 else datetime.strptime(f"{end//60:02d}:{end%60:02d}", '%H:%M').strftime('%I:%M %p')
+                        st.markdown(f"- **{s_str} to {e_str}** ({end - start} mins available)")
+                else: st.info("This day is completely fully scheduled!")
+            else: st.info("No routine set for this day. The whole day is free!")
 
-            elif tool_mode == "➕ Batch Add Task":
-                st.markdown("#### Add Task to Multiple Days")
-                b_days = st.multiselect("Select Days", days_of_week, default=[current_day], key="b_days")
-                col1, col2 = st.columns(2)
-                with col1: b_start = st.time_input("Start Time", value=datetime.strptime('09:00', '%H:%M').time(), key="b_start")
-                with col2: b_end = st.time_input("End Time", value=datetime.strptime('10:00', '%H:%M').time(), key="b_end")
-                b_act = st.text_input("Activity Name (e.g. PYTHON CODING)").upper()
-                b_sub = st.text_input("Sub-Activities (comma separated)")
-                b_chk = st.text_input("Checklist (comma separated)")
-                b_overwrite = st.checkbox("⚠️ Overwrite existing tasks in this time slot?", value=False)
-                
-                if st.button("Apply to Selected Days", type="primary"):
-                    if not b_days or not b_act: st.error("Please provide both Days and an Activity Name.")
-                    else:
-                        ns_min, ne_min = b_start.hour * 60 + b_start.minute, b_end.hour * 60 + b_end.minute
-                        if ne_min == 0: ne_min = 24 * 60
-                        
-                        if ne_min <= ns_min: st.error("End time must be after start time.")
-                        else:
-                            full_df = df.copy()
-                            rows_to_keep = []
-                            for _, r in full_df.iterrows():
-                                if str(r['Day']).strip().title() in [d.title() for d in b_days] and b_overwrite:
-                                    try:
-                                        rs_min = int(r['Start_Time'].split(':')[0])*60 + int(r['Start_Time'].split(':')[1])
-                                        re_min = 24*60 if r['End_Time'].strip() in ['0:00', '00:00'] else int(r['End_Time'].split(':')[0])*60 + int(r['End_Time'].split(':')[1])
-                                        if max(ns_min, rs_min) < min(ne_min, re_min): continue 
-                                    except: pass
-                                rows_to_keep.append(r)
-                            
-                            filtered_df = pd.DataFrame(rows_to_keep, columns=full_df.columns)
-                            new_rows = [{"Day": d, "Start_Time": b_start.strftime('%H:%M'), "End_Time": b_end.strftime('%H:%M'), "Duration": f"{(ne_min - ns_min)//60}:{(ne_min - ns_min)%60:02d}", "Activity": b_act, "Sub_Activities": b_sub, "check_list": b_chk} for d in b_days]
-                            final_df = pd.concat([filtered_df, pd.DataFrame(new_rows)], ignore_index=True)
-                            
-                            day_map = {d: i for i, d in enumerate(days_of_week)}
-                            final_df['Day_Idx'] = final_df['Day'].str.title().map(day_map)
-                            final_df['ST_Min'] = final_df['Start_Time'].apply(lambda x: int(x.split(':')[0])*60 + int(x.split(':')[1]) if ':' in x else 0)
-                            final_df = final_df.sort_values(['Day_Idx', 'ST_Min']).drop(columns=['Day_Idx', 'ST_Min'])
-                            
-                            routine_sheet = get_sheet("routine_master")
-                            routine_sheet.clear()
-                            routine_sheet.update(values=[final_df.columns.values.tolist()] + final_df.values.tolist(), range_name="A1")
-                            
-                            get_routine_data.clear()
-                            st.success(f"Added '{b_act}' to {len(b_days)} days!")
-                            time.sleep(1.5)
-                            st.rerun()
-
-            elif tool_mode == "🔄 Find & Replace":
-                st.markdown("#### Replace Items Across Schedule")
-                r_days = st.multiselect("Select Days to Search", days_of_week, default=days_of_week, key="r_days")
-                target_col = st.radio("What do you want to replace?", ["Activity", "Sub-Activity", "Checklist"], horizontal=True)
-                
-                if target_col == "Activity": unique_vals = sorted(list(set([a.strip().upper() for a in df['Activity'] if a.strip()])))
-                elif target_col == "Sub-Activity":
-                    all_items = []
-                    for val in df['Sub_Activities']: all_items.extend([s.strip() for s in str(val).split(',') if s.strip()])
-                    unique_vals = sorted(list(set(all_items)))
-                else: 
-                    all_items = []
-                    for val in df['check_list']: all_items.extend([c.strip() for c in str(val).split(',') if c.strip()])
-                    unique_vals = sorted(list(set(all_items)))
-                
-                old_val = st.selectbox("Target Item to Replace", unique_vals) if unique_vals else None
-                new_val = st.text_input("New Item Name")
-                
-                if st.button("Replace Item", type="primary"):
-                    if not r_days or not new_val or not old_val: st.error("Please fill all fields.")
+        elif tool_mode == "➕ Batch Add Task":
+            st.markdown("#### Add Task to Multiple Days")
+            b_days = st.multiselect("Select Days", days_of_week, default=[current_day], key="b_days")
+            col1, col2 = st.columns(2)
+            with col1: b_start = st.time_input("Start Time", value=datetime.strptime('09:00', '%H:%M').time(), key="b_start")
+            with col2: b_end = st.time_input("End Time", value=datetime.strptime('10:00', '%H:%M').time(), key="b_end")
+            b_act = st.text_input("Activity Name (e.g. PYTHON CODING)").upper()
+            b_sub = st.text_input("Sub-Activities (comma separated)")
+            b_chk = st.text_input("Checklist (comma separated)")
+            b_overwrite = st.checkbox("⚠️ Overwrite existing tasks in this time slot?", value=False)
+            
+            if st.button("Apply to Selected Days", type="primary"):
+                if not b_days or not b_act: st.error("Please provide both Days and an Activity Name.")
+                else:
+                    ns_min, ne_min = b_start.hour * 60 + b_start.minute, b_end.hour * 60 + b_end.minute
+                    if ne_min == 0: ne_min = 24 * 60
+                    
+                    if ne_min <= ns_min: st.error("End time must be after start time.")
                     else:
                         full_df = df.copy()
-                        count = 0
-                        for idx, r in full_df.iterrows():
-                            if str(r['Day']).strip().title() in [d.title() for d in r_days]:
-                                if target_col == "Activity" and str(r['Activity']).strip().upper() == old_val.upper():
-                                    full_df.at[idx, 'Activity'] = new_val.upper()
-                                    count += 1
-                                elif target_col in ["Sub-Activity", "Checklist"]:
-                                    col_name = "Sub_Activities" if target_col == "Sub-Activity" else "check_list"
-                                    items = [s.strip() for s in str(r[col_name]).split(',') if s.strip()]
-                                    if old_val in items:
-                                        full_df.at[idx, col_name] = ", ".join([new_val if x == old_val else x for x in items])
-                                        count += 1
+                        rows_to_keep = []
+                        for _, r in full_df.iterrows():
+                            if str(r['Day']).strip().title() in [d.title() for d in b_days] and b_overwrite:
+                                try:
+                                    rs_min = int(r['Start_Time'].split(':')[0])*60 + int(r['Start_Time'].split(':')[1])
+                                    re_min = 24*60 if r['End_Time'].strip() in ['0:00', '00:00'] else int(r['End_Time'].split(':')[0])*60 + int(r['End_Time'].split(':')[1])
+                                    if max(ns_min, rs_min) < min(ne_min, re_min): continue 
+                                except: pass
+                            rows_to_keep.append(r)
                         
-                        if count > 0:
-                            routine_sheet = get_sheet("routine_master")
-                            routine_sheet.clear()
-                            routine_sheet.update(values=[full_df.columns.values.tolist()] + full_df.values.tolist(), range_name="A1")
-                            get_routine_data.clear()
-                            st.success(f"Replaced {count} instances of '{old_val}'!")
-                            time.sleep(1.5)
-                            st.rerun()
-                        else: st.info(f"No instances found.")
-
-        st.markdown("---")
-        target_day = st.selectbox("Select Day to Edit Manually", days_of_week, index=days_of_week.index(current_day if current_day in days_of_week else "Monday"))
-        
-        target_full_df = df[df['Day'].str.strip().str.title() == target_day.title()].copy()
-        
-        if not target_full_df.empty:
-            edit_df = target_full_df[['Start_Time', 'End_Time', 'Activity', 'Sub_Activities', 'check_list']].copy()
-            def convert_to_time(t_str):
-                try: return datetime.strptime('00:00', '%H:%M').time() if t_str.strip() == '0:00' else datetime.strptime(t_str.strip(), '%H:%M').time()
-                except: return datetime.strptime('00:00', '%H:%M').time()
-            edit_df['Start_Time'] = edit_df['Start_Time'].apply(convert_to_time)
-            edit_df['End_Time'] = edit_df['End_Time'].apply(convert_to_time)
-            
-            edited_schedule = st.data_editor(
-                edit_df,
-                column_config={
-                    "Start_Time": st.column_config.TimeColumn("Start", format="HH:mm", step=60, required=True),
-                    "End_Time": st.column_config.TimeColumn("End", format="HH:mm", step=60, required=True),
-                    "Activity": st.column_config.TextColumn("Activity", required=True),
-                    "Sub_Activities": st.column_config.TextColumn("Sub List"),
-                    "check_list": st.column_config.TextColumn("Checklist")
-                },
-                hide_index=True, use_container_width=True, num_rows="dynamic", key="schedule_editor"
-            )
-            
-            if st.button(f"💾 Save Changes for {target_day}", use_container_width=True):
-                with st.spinner("Syncing to Google Sheets..."):
-                    new_rows = []
-                    for _, row in edited_schedule.iterrows():
-                        if pd.isna(row['Activity']) or str(row['Activity']).strip() == "": continue
-                        if pd.isna(row['Start_Time']) or pd.isna(row['End_Time']): continue
+                        filtered_df = pd.DataFrame(rows_to_keep, columns=full_df.columns)
+                        new_rows = [{"Day": d, "Start_Time": b_start.strftime('%H:%M'), "End_Time": b_end.strftime('%H:%M'), "Duration": f"{(ne_min - ns_min)//60}:{(ne_min - ns_min)%60:02d}", "Activity": b_act, "Sub_Activities": b_sub, "check_list": b_chk} for d in b_days]
+                        final_df = pd.concat([filtered_df, pd.DataFrame(new_rows)], ignore_index=True)
                         
-                        s_dt = datetime.combine(now.date(), row['Start_Time'])
-                        e_dt = datetime.combine(now.date(), row['End_Time'])
-                        if row['End_Time'].strftime('%H:%M') in ['00:00', '0:00'] or e_dt < s_dt: e_dt = e_dt.replace(day=e_dt.day + 1)
-                        h, m = divmod((e_dt - s_dt).seconds, 3600)
+                        day_map = {d: i for i, d in enumerate(days_of_week)}
+                        final_df['Day_Idx'] = final_df['Day'].str.title().map(day_map)
+                        final_df['ST_Min'] = final_df['Start_Time'].apply(lambda x: int(x.split(':')[0])*60 + int(x.split(':')[1]) if ':' in x else 0)
+                        final_df = final_df.sort_values(['Day_Idx', 'ST_Min']).drop(columns=['Day_Idx', 'ST_Min'])
                         
-                        sub_act = "" if str(row.get('Sub_Activities', '')).strip() == 'nan' else str(row.get('Sub_Activities', '')).strip()
-                        chk_act = "" if str(row.get('check_list', '')).strip() == 'nan' else str(row.get('check_list', '')).strip()
-                        new_rows.append([target_day, row['Start_Time'].strftime('%H:%M'), row['End_Time'].strftime('%H:%M'), f"{h}:{m//60:02d}", str(row['Activity']).strip().upper(), sub_act, chk_act])
-
-                    full_df = df.copy()
-                    other_days_df = full_df[full_df['Day'].str.strip().str.title() != target_day.title()]
-                    final_df = pd.concat([other_days_df, pd.DataFrame(new_rows, columns=["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list"])], ignore_index=True)
-                    
-                    routine_sheet = get_sheet("routine_master")
-                    routine_sheet.clear() 
-                    routine_sheet.update(values=[final_df.columns.values.tolist()] + final_df.values.tolist(), range_name="A1")
-                    get_routine_data.clear() 
-                    st.success("Schedule successfully updated!")
-                    time.sleep(1.5)
-                    st.rerun()
-
-            target_full_df['Total_Minutes'] = target_full_df['Duration'].apply(parse_duration_to_minutes)
-            schedule_summary = target_full_df.groupby('Activity')['Total_Minutes'].sum().sort_values(ascending=False)
-            st.markdown("<br><h5>📈 Scheduled Summary</h5>", unsafe_allow_html=True)
-            cols_sched = st.columns(min(len(schedule_summary), 4))
-            for idx, (act, total_mins) in enumerate(schedule_summary.items()):
-                with cols_sched[idx % 4]: st.metric(label=act, value=f"{int(total_mins // 60)}:{int(total_mins % 60):02d}")
-        else: st.info(f"No routine scheduled for {target_day}. Add one using the tools above.")
-
-    # ==========================================
-    # TAB 2: TIMELINE AUDIT
-    # ==========================================
-    with tab2:
-        col_t, col_s = st.columns([8, 2])
-        with col_t: st.markdown("<h3 style='color: #555;'>⏳ Daily Activity Timeline</h3>", unsafe_allow_html=True)
-        with col_s:
-            if st.button("🔄 Sync Log", use_container_width=True):
-                get_activity_log.clear()
-                get_location_data.clear()
-                st.rerun()
-                
-        selected_timeline_date = st.date_input("Select Date to Review", value=now.date(), key="timeline_date_sel")
-        selected_date_str = selected_timeline_date.strftime('%Y-%m-%d')
-        formatted_target_date = selected_timeline_date.strftime('%d.%m.%y') 
-        prev_date_str = (selected_timeline_date - timedelta(days=1)).strftime('%Y-%m-%d')
-        
-        def get_gap_label(dur, loc, visited_df, start_dt, end_dt):
-            if "HOME" in str(loc).upper(): return get_short_stop_label(loc) if dur < 5 else "Unlogged Time / Break"
-            found_purposes = []
-            if not visited_df.empty:
-                matches = visited_df[visited_df['Place'].str.strip().str.upper() == str(loc).strip().upper()]
-                if not matches.empty:
-                    if 'Visit Dates & Times' in matches.columns:
-                        for _, m_row in matches.iterrows():
-                            visit_times_str = str(m_row['Visit Dates & Times'])
-                            if pd.notna(visit_times_str) and visit_times_str.strip() != "":
-                                for t_str in visit_times_str.split('\n'):
-                                    if t_str.strip():
-                                        try:
-                                            if (start_dt - pd.Timedelta(minutes=1)) <= pd.to_datetime(t_str.strip(), format="%d.%m.%y %H:%M") <= (end_dt + pd.Timedelta(minutes=1)):
-                                                if str(m_row['Purpose']).strip() and str(m_row['Purpose']).strip() not in found_purposes: found_purposes.append(str(m_row['Purpose']).strip())
-                                        except: pass
-                    if found_purposes: return " + ".join(found_purposes)
-                    if 'Visit Dates & Times' in matches.columns:
-                        for _, m_row in matches.iterrows():
-                            if pd.notna(m_row['Visit Dates & Times']) and formatted_target_date in str(m_row['Visit Dates & Times']):
-                                if pd.notna(m_row['Purpose']) and str(m_row['Purpose']).strip(): return str(m_row['Purpose']).strip()
-                    if pd.notna(matches.iloc[0]['Purpose']) and str(matches.iloc[0]['Purpose']).strip(): return str(matches.iloc[0]['Purpose']).strip()
-            return get_short_stop_label(loc) if dur < 5 else "Unlogged Time / Break"
-        
-        day_logs_raw = log_df[(log_df['Date'].isin([selected_date_str, prev_date_str])) & (log_df['End_Time'] != 'RUNNING')].copy()
-        day_start_dt, day_end_dt = pd.to_datetime(selected_date_str + ' 00:00:00'), pd.to_datetime(selected_date_str + ' 23:59:59')
-        
-        if day_logs_raw.empty: day_logs = pd.DataFrame(columns=['Date', 'Start_Time', 'End_Time', 'Duration', 'Activity', 'Sub_Activities', 'check_list', 'Notes', 'Start_DT', 'End_DT', 'Display_Start', 'Display_End'])
-        else:
-            day_logs_raw['Start_DT'] = pd.to_datetime(day_logs_raw['Date'] + ' ' + day_logs_raw['Start_Time'], errors='coerce')
-            day_logs_raw['End_DT'] = pd.to_datetime(day_logs_raw['Date'] + ' ' + day_logs_raw['End_Time'], errors='coerce')
-            mask = day_logs_raw['End_DT'] < day_logs_raw['Start_DT']
-            day_logs_raw.loc[mask, 'End_DT'] = day_logs_raw.loc[mask, 'End_DT'] + pd.Timedelta(days=1)
-            day_logs = day_logs_raw[(day_logs_raw['End_DT'] > day_start_dt) & (day_logs_raw['Start_DT'] <= day_end_dt)].copy()
-            day_logs['Display_Start'], day_logs['Display_End'] = day_logs['Start_DT'].clip(lower=day_start_dt), day_logs['End_DT'].clip(upper=day_end_dt)
-            day_logs = day_logs.sort_values('Display_Start').dropna(subset=['Display_Start', 'Display_End'])
-
-        end_marker_dt = pd.to_datetime(now.strftime('%Y-%m-%d %H:%M')) if selected_date_str == today_str else pd.to_datetime(selected_date_str + ' 23:59:00')
-        dummy_row = pd.DataFrame([{'Start_DT': end_marker_dt, 'End_DT': end_marker_dt, 'Display_Start': end_marker_dt, 'Display_End': end_marker_dt, 'Activity': 'CURRENT_TIME_MARKER', 'Sub_Activities': '', 'check_list': '', 'Notes': '', 'Date': selected_date_str, 'Start_Time': end_marker_dt.strftime('%H:%M'), 'End_Time': end_marker_dt.strftime('%H:%M'), 'Duration': '0:00'}])
-        day_logs = pd.concat([day_logs, dummy_row], ignore_index=True).sort_values('Display_Start')
-
-        loc_df_safe = loc_df.copy()
-        def parse_custom_date(date_str):
-            try: return datetime.strptime(str(date_str).strip().split(' ')[0], '%d.%m.%y').date()
-            except:
-                try: return pd.to_datetime(str(date_str).strip(), dayfirst=True).date()
-                except: return None
-
-        loc_df_safe['Parsed_Date'] = loc_df_safe['Date'].apply(parse_custom_date)
-        day_locs = loc_df_safe[loc_df_safe['Parsed_Date'] == selected_timeline_date].copy()
-        
-        if not day_locs.empty:
-            def parse_custom_dt(row):
-                try: return datetime.strptime(f"{str(row['Date']).strip().split(' ')[0]} {str(row['Time']).strip()}", '%d.%m.%y %H:%M')
-                except: return pd.NaT
-            day_locs['Loc_DT'] = day_locs.apply(parse_custom_dt, axis=1)
-            
-            def parse_loc_row(row):
-                m_raw, p_raw = str(row['Move']).strip(), str(row['Place']).strip()
-                if any(k in m_raw.upper() for k in ['BIKE', 'WALK', 'TOTO', 'AUTO', 'BUS', 'CAR', 'TRAIN', 'CYCLE', 'SCOOTER', 'VAN']): return pd.Series([m_raw, p_raw])
-                if "- STATIONARY -" in m_raw.upper(): return pd.Series(["- Stationary -", p_raw])
-                return pd.Series(["- Stationary -", p_raw]) if p_raw and p_raw.upper() not in ["I", "NAN", "NONE"] else pd.Series(["- Stationary -", m_raw])
-
-            day_locs[['Clean_Move', 'Clean_Place']] = day_locs.apply(parse_loc_row, axis=1)
-            day_locs['Move'], day_locs['Place'] = day_locs['Clean_Move'], day_locs['Clean_Place']
-            day_locs = day_locs[day_locs.apply(lambda r: str(r['Move']).strip().upper() != "- STATIONARY -" or (len(str(r['Place']).strip()) > 1 and str(r['Place']).strip().upper() not in ["I", "NAN", "NONE"]), axis=1)].dropna(subset=['Loc_DT']).sort_values('Loc_DT')
-        
-        start_time_limit = pd.to_datetime(selected_date_str + ' 05:00')
-        if not day_locs.empty and day_locs['Loc_DT'].min() < start_time_limit: start_time_limit = day_locs['Loc_DT'].min()
-        if not day_logs.empty and day_logs.iloc[0]['Display_Start'] < start_time_limit and day_logs.iloc[0]['Activity'] != 'CURRENT_TIME_MARKER': start_time_limit = day_logs.iloc[0]['Display_Start']
-
-        last_end_time = start_time_limit
-        timeline_events = []
-        
-        for _, row in day_logs.iterrows():
-            current_start, current_end = row['Display_Start'], row['Display_End']
-            
-            if last_end_time and current_start > last_end_time:
-                gap_duration = (current_start - last_end_time).total_seconds() / 60
-                if gap_duration > 0:
-                    if gap_duration <= 5: 
-                        timeline_events.append({'type': 'transition', 'start': last_end_time.strftime('%I:%M %p'), 'end': current_start.strftime('%I:%M %p'), 'duration': int(gap_duration), 'activity': 'Transition', 'sub': '', 'notes': '', 'place': '', 'move': ''})
-                    else: 
-                        gap_start_dt, gap_end_dt = last_end_time, current_start
-                        locs_in_gap = day_locs[(day_locs['Loc_DT'] > gap_start_dt) & (day_locs['Loc_DT'] < gap_end_dt)] if not day_locs.empty else pd.DataFrame()
-                            
-                        def get_loc_state_at_time(t):
-                            if day_locs.empty: return "", "- Stationary -"
-                            past = day_locs[day_locs['Loc_DT'] <= t]
-                            return (past.iloc[-1]['Place'], past.iloc[-1]['Move']) if not past.empty else (day_locs.iloc[0]['Place'], day_locs.iloc[0]['Move'])
-                            
-                        curr_gap_start = gap_start_dt
-                        curr_loc, curr_move = get_loc_state_at_time(curr_gap_start)
-                        transit_modes = [curr_move] if curr_move.upper() != "- STATIONARY -" else []
+                        routine_sheet = get_sheet("routine_master")
+                        routine_sheet.clear()
+                        routine_sheet.update(values=[final_df.columns.values.tolist()] + final_df.values.tolist(), range_name="A1")
                         
-                        if locs_in_gap.empty:
-                            act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else get_gap_label(gap_duration, curr_loc, visited_places_df, gap_start_dt, gap_end_dt)
-                            timeline_events.append({'type': 'gap', 'start': gap_start_dt.strftime('%I:%M %p'), 'end': gap_end_dt.strftime('%I:%M %p'), 'duration': int(gap_duration), 'activity': act_label, 'sub': '', 'notes': '', 'place': str(curr_loc).strip(), 'move': ""})
-                        else:
-                            for _, l_row in locs_in_gap.iterrows():
-                                split_time, new_move, new_loc = l_row['Loc_DT'], str(l_row['Move']).strip(), str(l_row['Place']).strip()
-                                is_new_stat, is_curr_stat = new_move.upper() == "- STATIONARY -", curr_move.upper() == "- STATIONARY -"
-                                
-                                if is_new_stat:
-                                    if not is_curr_stat:
-                                        sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
-                                        if sub_gap_dur >= 0: timeline_events.append({'type': 'gap', 'start': curr_gap_start.strftime('%I:%M %p'), 'end': split_time.strftime('%I:%M %p'), 'duration': int(sub_gap_dur), 'activity': f"On the way ({' + '.join(transit_modes)})" if transit_modes else "On the way", 'sub': '', 'notes': '', 'place': str(curr_loc).strip(), 'move': ""})
-                                        curr_gap_start, curr_loc, curr_move, transit_modes = split_time, new_loc, new_move, []
-                                    elif new_loc.upper() != curr_loc.upper() and curr_loc != "":
-                                        sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
-                                        if sub_gap_dur >= 0: timeline_events.append({'type': 'gap', 'start': curr_gap_start.strftime('%I:%M %p'), 'end': split_time.strftime('%I:%M %p'), 'duration': int(sub_gap_dur), 'activity': get_gap_label(sub_gap_dur, curr_loc, visited_places_df, curr_gap_start, split_time), 'sub': '', 'notes': '', 'place': str(curr_loc).strip(), 'move': ""})
-                                        curr_gap_start, curr_loc, curr_move = split_time, new_loc, new_move
-                                else: 
-                                    if is_curr_stat:
-                                        sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
-                                        if sub_gap_dur >= 0: timeline_events.append({'type': 'gap', 'start': curr_gap_start.strftime('%I:%M %p'), 'end': split_time.strftime('%I:%M %p'), 'duration': int(sub_gap_dur), 'activity': get_gap_label(sub_gap_dur, curr_loc, visited_places_df, curr_gap_start, split_time), 'sub': '', 'notes': '', 'place': str(curr_loc).strip(), 'move': ""})
-                                        curr_gap_start, curr_move, transit_modes = split_time, new_move, [new_move]
-                                    else:
-                                        if new_move not in transit_modes: transit_modes.append(new_move)
-                                        curr_move = new_move
+                        get_routine_data.clear()
+                        st.success(f"Added '{b_act}' to {len(b_days)} days!")
+                        time.sleep(1.5)
+                        st.rerun()
 
-                            final_dur = (gap_end_dt - curr_gap_start).total_seconds() / 60
-                            if final_dur > 0:
-                                act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else get_gap_label(final_dur, curr_loc, visited_places_df, curr_gap_start, gap_end_dt) if curr_move.upper() == "- STATIONARY -" else f"On the way"
-                                timeline_events.append({'type': 'gap', 'start': curr_gap_start.strftime('%I:%M %p'), 'end': gap_end_dt.strftime('%I:%M %p'), 'duration': int(final_dur), 'activity': act_label, 'sub': '', 'notes': '', 'place': str(curr_loc).strip(), 'move': ""})
+        elif tool_mode == "🔄 Find & Replace":
+            st.markdown("#### Replace Items Across Schedule")
+            r_days = st.multiselect("Select Days to Search", days_of_week, default=days_of_week, key="r_days")
+            target_col = st.radio("What do you want to replace?", ["Activity", "Sub-Activity", "Checklist"], horizontal=True)
             
-            current_loc, current_move = "", ""
-            if not day_locs.empty:
-                past_locs = day_locs[day_locs['Loc_DT'] <= current_start]
-                current_loc, current_move = (past_locs.iloc[-1]['Place'], past_locs.iloc[-1]['Move']) if not past_locs.empty else (day_locs.iloc[0]['Place'], day_locs.iloc[0]['Move'])
-
-            if row['Activity'] != 'CURRENT_TIME_MARKER':
-                dur_mins = (current_end - current_start).total_seconds() / 60
-                sub_str, chk_str = str(row['Sub_Activities']).strip().title(), str(row['check_list']).strip()
-                display_sub = f"☑️ {chk_str}" if chk_str and not sub_str else (f"{sub_str} | ☑️ {chk_str}" if chk_str and sub_str else sub_str)
-
-                timeline_events.append({'type': 'task', 'start': current_start.strftime('%I:%M %p'), 'end': current_end.strftime('%I:%M %p'), 'duration': int(dur_mins), 'activity': str(row['Activity']).upper(), 'sub': display_sub, 'notes': str(row['Notes']), 'place': str(current_loc).strip(), 'move': str(current_move).strip()})
+            if target_col == "Activity": unique_vals = sorted(list(set([a.strip().upper() for a in df['Activity'] if a.strip()])))
+            elif target_col == "Sub-Activity":
+                all_items = []
+                for val in df['Sub_Activities']: all_items.extend([s.strip() for s in str(val).split(',') if s.strip()])
+                unique_vals = sorted(list(set(all_items)))
+            else: 
+                all_items = []
+                for val in df['check_list']: all_items.extend([c.strip() for c in str(val).split(',') if c.strip()])
+                unique_vals = sorted(list(set(all_items)))
             
-            if last_end_time is None or current_end > last_end_time: last_end_time = current_end
-        
-        for event in timeline_events:
-            eh, em = divmod(event['duration'], 60)
-            dur_display = f"{eh}h {em}m" if eh > 0 and em > 0 else (f"{eh}h" if eh > 0 else (f"{em}m" if em > 0 else "<1m"))
-
-            if event['type'] == 'transition':
-                st.markdown(f"<div style='background-color: #fff3e0; border: 1px solid #ffb74d; padding: 8px; border-radius: 6px; margin-bottom: 10px; text-align: center; color: #e65100; font-size: 14px;'><b>{event['start']} - {event['end']}</b> | ⏳ Transition Time: {dur_display}</div>", unsafe_allow_html=True)
-            elif event['type'] == 'gap':
-                if event['activity'].startswith('On the way'):
-                    st.markdown(f"<div style='background-color: #e0f7fa; border-left: 6px solid #00838f; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'><div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({dur_display})</div><div style='color: #00838f; font-weight: bold; font-size: 16px;'>🛣️ {event['activity']}</div></div>", unsafe_allow_html=True)
-                elif event['duration'] < 5:
-                    place_str = str(event.get('place', '')).strip()
-                    loc_html_gap = f"<div style='color: #0097a7; font-size: 14px; font-weight: 500; margin-top: 4px;'>📍 {place_str}</div>" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else ""
-                    st.markdown(f"<div style='background-color: #e0f2f1; border-left: 6px solid #00acc1; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'><div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({dur_display})</div><div style='color: #00acc1; font-weight: bold; font-size: 16px;'>{event['activity']}</div>{loc_html_gap}</div>", unsafe_allow_html=True)
+            old_val = st.selectbox("Target Item to Replace", unique_vals) if unique_vals else None
+            new_val = st.text_input("New Item Name")
+            
+            if st.button("Replace Item", type="primary"):
+                if not r_days or not new_val or not old_val: st.error("Please fill all fields.")
                 else:
-                    place_str = str(event.get('place', '')).strip()
-                    loc_html_gap = f"<br><span style='color: #d32f2f; font-size: 13px; font-weight: 500;'>📍 {place_str}</span>" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else ""
-                    st.markdown(f"<div style='background-color: #fafafa; border: 2px dashed #cccccc; padding: 10px; border-radius: 8px; margin-bottom: 10px; text-align: center; color: #888;'><b>{event['start']} - {event['end']}</b> (Gap: {dur_display})<br><span style='color: #00acc1; font-weight: bold; font-size: 16px;'>{event['activity']}</span>{loc_html_gap}</div>", unsafe_allow_html=True)
-            else:
-                cat = event['activity']
-                border_color = "#ff4b4b" if cat in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"] else ("#0068c9" if cat in ["WORK", "REPORT", "TASK"] else ("#2e7b32" if cat == "HEALTH" else ("#ff9f36" if cat in ["SLEEP", "PRE", "TEA", "OUT"] else ("#29b6f6" if cat == "FREE TIME" else "#555555"))))
-                sub_text = f"<br><b>{event['sub']}</b>" if event['sub'] else ""
-                note_val = str(event.get('notes', '')).strip()
-                note_text = f"<br><span style='font-size: 13px; color: #666;'>{note_val}</span>" if note_val and note_val not in ["Checked off", "Auto-logged via Timer"] else ""
-                
-                place_str, move_str = str(event.get('place', '')).strip(), str(event.get('move', '')).strip()
-                loc_text = (f"🛣️ On the way ({move_str}) near {place_str}" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else f"🛣️ On the way ({move_str})") if move_str and move_str.upper() != "- STATIONARY -" else (f"📍 {place_str}" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else "")
-                loc_html = f"<div style='color: #d32f2f; font-size: 13px; font-weight: 500; margin-top: 4px;'>{loc_text}</div>" if loc_text else ""
-                
-                st.markdown(f"<div style='background-color: white; border-left: 6px solid {border_color}; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'><div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({dur_display})</div><div style='color: {border_color}; font-weight: bold; font-size: 16px;'>{event['activity']}</div><div style='color: #333;'>{sub_text}{note_text}</div>{loc_html}</div>", unsafe_allow_html=True)
-                
-        st.markdown("---")
-        st.markdown("<h4 style='text-align: center; color: #555;'>📊 Daily Summary</h4>", unsafe_allow_html=True)
-        total_tracked = sum(e['duration'] for e in timeline_events if e['type'] == 'task')
-        total_gap = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and e['activity'] == 'Unlogged Time / Break')
-        total_transit = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and e['activity'] != 'Unlogged Time / Break')
+                    full_df = df.copy()
+                    count = 0
+                    for idx, r in full_df.iterrows():
+                        if str(r['Day']).strip().title() in [d.title() for d in r_days]:
+                            if target_col == "Activity" and str(r['Activity']).strip().upper() == old_val.upper():
+                                full_df.at[idx, 'Activity'] = new_val.upper()
+                                count += 1
+                            elif target_col in ["Sub-Activity", "Checklist"]:
+                                col_name = "Sub_Activities" if target_col == "Sub-Activity" else "check_list"
+                                items = [s.strip() for s in str(r[col_name]).split(',') if s.strip()]
+                                if old_val in items:
+                                    full_df.at[idx, col_name] = ", ".join([new_val if x == old_val else x for x in items])
+                                    count += 1
+                    
+                    if count > 0:
+                        routine_sheet = get_sheet("routine_master")
+                        routine_sheet.clear()
+                        routine_sheet.update(values=[full_df.columns.values.tolist()] + full_df.values.tolist(), range_name="A1")
+                        get_routine_data.clear()
+                        st.success(f"Replaced {count} instances of '{old_val}'!")
+                        time.sleep(1.5)
+                        st.rerun()
+                    else: st.info(f"No instances found.")
+
+    st.markdown("---")
+    target_day = st.selectbox("Select Day to Edit Manually", days_of_week, index=days_of_week.index(current_day if current_day in days_of_week else "Monday"))
+    
+    target_full_df = df[df['Day'].str.strip().str.title() == target_day.title()].copy()
+    
+    if not target_full_df.empty:
+        edit_df = target_full_df[['Start_Time', 'End_Time', 'Activity', 'Sub_Activities', 'check_list']].copy()
+        def convert_to_time(t_str):
+            try: return datetime.strptime('00:00', '%H:%M').time() if t_str.strip() == '0:00' else datetime.strptime(t_str.strip(), '%H:%M').time()
+            except: return datetime.strptime('00:00', '%H:%M').time()
+        edit_df['Start_Time'] = edit_df['Start_Time'].apply(convert_to_time)
+        edit_df['End_Time'] = edit_df['End_Time'].apply(convert_to_time)
         
-        col_s1, col_s2, col_s3 = st.columns(3)
-        with col_s1: st.metric(label="Total Tracked Time", value=f"{int(total_tracked // 60)}h {int(total_tracked % 60)}m")
-        with col_s2: st.metric(label="Total Unlogged Time", value=f"{int(total_gap // 60)}h {int(total_gap % 60)}m")
-        with col_s3: st.metric(label="Total Transit & Stops", value=f"{int(total_transit // 60)}h {int(total_transit % 60)}m")
-            
-        category_totals = {e['activity']: category_totals.get(e['activity'], 0) + e['duration'] for e in timeline_events if e['type'] == 'task'}
-        if total_transit > 0: category_totals['TRANSIT & STOPS'] = total_transit
-            
-        if category_totals:
-            cat_df = pd.DataFrame(list(category_totals.items()), columns=['Category', 'Minutes']).sort_values(by='Minutes', ascending=False)
-            cat_cols = st.columns(min(len(cat_df), 4))
-            for idx, row in cat_df.iterrows():
-                with cat_cols[idx % 4 if len(cat_df) >= 4 else idx]: st.markdown(f"<div style='background-color:#f0f2f6; padding:10px; border-radius:8px; text-align:center; margin-bottom:10px;'><b style='color:#333;'>{row['Category']}</b><br><span style='color:#0068c9;'>{int(row['Minutes'] // 60)}h {int(row['Minutes'] % 60)}m</span></div>", unsafe_allow_html=True)
+        edited_schedule = st.data_editor(
+            edit_df,
+            column_config={
+                "Start_Time": st.column_config.TimeColumn("Start", format="HH:mm", step=60, required=True),
+                "End_Time": st.column_config.TimeColumn("End", format="HH:mm", step=60, required=True),
+                "Activity": st.column_config.TextColumn("Activity", required=True),
+                "Sub_Activities": st.column_config.TextColumn("Sub List"),
+                "check_list": st.column_config.TextColumn("Checklist")
+            },
+            hide_index=True, use_container_width=True, num_rows="dynamic", key="schedule_editor"
+        )
+        
+        if st.button(f"💾 Save Changes for {target_day}", use_container_width=True):
+            with st.spinner("Syncing to Google Sheets..."):
+                new_rows = []
+                for _, row in edited_schedule.iterrows():
+                    if pd.isna(row['Activity']) or str(row['Activity']).strip() == "": continue
+                    if pd.isna(row['Start_Time']) or pd.isna(row['End_Time']): continue
+                    
+                    s_dt = datetime.combine(now.date(), row['Start_Time'])
+                    e_dt = datetime.combine(now.date(), row['End_Time'])
+                    if row['End_Time'].strftime('%H:%M') in ['00:00', '0:00'] or e_dt < s_dt: e_dt = e_dt.replace(day=e_dt.day + 1)
+                    h, m = divmod((e_dt - s_dt).seconds, 3600)
+                    
+                    sub_act = "" if str(row.get('Sub_Activities', '')).strip() == 'nan' else str(row.get('Sub_Activities', '')).strip()
+                    chk_act = "" if str(row.get('check_list', '')).strip() == 'nan' else str(row.get('check_list', '')).strip()
+                    new_rows.append([target_day, row['Start_Time'].strftime('%H:%M'), row['End_Time'].strftime('%H:%M'), f"{h}:{m//60:02d}", str(row['Activity']).strip().upper(), sub_act, chk_act])
+
+                full_df = df.copy()
+                other_days_df = full_df[full_df['Day'].str.strip().str.title() != target_day.title()]
+                final_df = pd.concat([other_days_df, pd.DataFrame(new_rows, columns=["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list"])], ignore_index=True)
+                
+                routine_sheet = get_sheet("routine_master")
+                routine_sheet.clear() 
+                routine_sheet.update(values=[final_df.columns.values.tolist()] + final_df.values.tolist(), range_name="A1")
+                get_routine_data.clear() 
+                st.success("Schedule successfully updated!")
+                time.sleep(1.5)
+                st.rerun()
+
+        target_full_df['Total_Minutes'] = target_full_df['Duration'].apply(parse_duration_to_minutes)
+        schedule_summary = target_full_df.groupby('Activity')['Total_Minutes'].sum().sort_values(ascending=False)
+        st.markdown("<br><h5>📈 Scheduled Summary</h5>", unsafe_allow_html=True)
+        cols_sched = st.columns(min(len(schedule_summary), 4))
+        for idx, (act, total_mins) in enumerate(schedule_summary.items()):
+            with cols_sched[idx % 4]: st.metric(label=act, value=f"{int(total_mins // 60)}:{int(total_mins % 60):02d}")
+    else: st.info(f"No routine scheduled for {target_day}. Add one using the tools above.")
 
 except Exception as e: st.error(f"System Error: {e}")

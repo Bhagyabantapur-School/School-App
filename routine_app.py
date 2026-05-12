@@ -609,7 +609,7 @@ try:
                     st.rerun()
                 else: st.error("Please enter task details.")
 
-    # --- UPDATED MANUAL LOG SECTION WITH DEPENDENT DROPDOWNS ---
+    # --- UPDATED MANUAL LOG SECTION WITH 1-MINUTE TIME STEPS ---
     with st.expander("📝 Manual Log Activity"):
         # 1. Dynamically scan routine_master for unique categories
         unique_acts = sorted(list(set([a.strip().upper() for a in df['Activity'] if a.strip()])))
@@ -640,8 +640,9 @@ try:
                 log_sub_activity = ""
             
         col1, col2 = st.columns(2)
-        with col1: log_start = st.time_input("Started At", value=clean_now, key="log_start")
-        with col2: log_end = st.time_input("Ended At", value=clean_now, key="log_end")
+        # ADDED step=60 to allow 1-minute intervals and free typing!
+        with col1: log_start = st.time_input("Started At", value=clean_now, step=60, key="log_start")
+        with col2: log_end = st.time_input("Ended At", value=clean_now, step=60, key="log_end")
         
         log_chk = st.text_input("Checklist Item (Optional)", key="log_chk")    
         log_notes = st.text_area("Notes", key="log_notes")

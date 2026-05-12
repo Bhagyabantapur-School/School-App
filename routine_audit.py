@@ -196,7 +196,6 @@ try:
 
         loc_df_safe['Parsed_Date'] = loc_df_safe['Date'].apply(parse_custom_date)
         
-        # FIX: Include BOTH today and yesterday so early morning tasks grab correct prior location
         day_locs = loc_df_safe[loc_df_safe['Parsed_Date'].isin([selected_timeline_date, selected_timeline_date - timedelta(days=1)])].copy()
         
         if not day_locs.empty:
@@ -288,7 +287,6 @@ try:
             
             if last_end_time is None or current_end > last_end_time: last_end_time = current_end
         
-        # --- NEW SIDE-BY-SIDE RENDERER FOR TIMELINE CARDS ---
         for event in timeline_events:
             eh, em = divmod(event['duration'], 60)
             dur_display = f"{eh}h {em}m" if eh > 0 and em > 0 else (f"{eh}h" if eh > 0 else (f"{em}m" if em > 0 else "<1m"))
@@ -483,12 +481,11 @@ try:
                             )
                             st.markdown(html, unsafe_allow_html=True)
                             
-            # Add Unlogged Time to the end of the cards
-            last_col = col_left if len(summary_data) % 2 == 0 else col_right
-            with last_col:
-                h_un, m_un = divmod(unlogged_day, 60)
-                with st.expander(f"🕳️ UNLOGGED TIME | {int(h_un)}h {int(m_un):02d}m"):
-                    st.markdown("<div style='text-align: center; padding: 15px; color: #888;'><i>This time includes your transit, breaks, and untracked gaps.</i></div>", unsafe_allow_html=True)
+            # --- FIX: Place UNLOGGED TIME outside the columns so it stretches fully across the bottom ---
+            st.markdown("<br>", unsafe_allow_html=True)
+            h_un, m_un = divmod(unlogged_day, 60)
+            with st.expander(f"🕳️ UNLOGGED TIME | {int(h_un)}h {int(m_un):02d}m"):
+                st.markdown("<div style='text-align: center; padding: 15px; color: #888;'><i>This time includes your transit, breaks, and untracked gaps.</i></div>", unsafe_allow_html=True)
 
         else:
             st.info(f"No completed activities found for {summary_date.strftime('%d %b %Y')}.")

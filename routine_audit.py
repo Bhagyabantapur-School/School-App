@@ -15,7 +15,6 @@ st.set_page_config(page_title="Routine Audit", page_icon="📊", layout="wide")
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
-    
     footer {visibility: hidden;}
     .block-container {padding-top: 4rem; padding-bottom: 2rem;}
     div[data-testid="metric-container"] {
@@ -107,6 +106,12 @@ def get_short_stop_label(place):
     if any(k in p for k in ["SCHOOL", "MADRASA"]): return "🏫 School / Education"
     return "📍 General Visit"
 
+def parse_duration_to_minutes(dur_str):
+    try:
+        h, m = map(int, str(dur_str).strip().split(':'))
+        return (h * 60) + m
+    except: return 0
+
 # ==========================================
 # Main App UI
 # ==========================================
@@ -122,8 +127,8 @@ try:
 
     st.markdown("<h2 style='text-align: center; color: #555; margin-top: 0px;'>📊 Daily Data & Audit Hub</h2>", unsafe_allow_html=True)
     
-    # --- ADDED NEW WEEKLY REPORT TAB ---
-    tab1, tab2, tab3, tab4 = st.tabs(["⏳ Timeline Audit", "📊 Weekly Report", "💧 Hydration", "📍 Places Database"])
+    # --- TABS: Replaced Weekly Report with Summary ---
+    tab1, tab2, tab3, tab4 = st.tabs(["⏳ Timeline Audit", "📋 Summary", "💧 Hydration", "📍 Places Database"])
 
     # ==========================================
     # TAB 1: TIMELINE AUDIT
@@ -137,7 +142,7 @@ try:
                 get_location_data.clear()
                 st.rerun()
                 
-        selected_timeline_date = st.date_input("Select Date to Review", value=now.date(), key="timeline_date_sel")
+        selected_timeline_date = st.date_input("Select Date to Review Timeline", value=now.date(), key="timeline_date_sel")
         selected_date_str = selected_timeline_date.strftime('%Y-%m-%d')
         formatted_target_date = selected_timeline_date.strftime('%d.%m.%y') 
         prev_date_str = (selected_timeline_date - timedelta(days=1)).strftime('%Y-%m-%d')
@@ -312,13 +317,13 @@ try:
                 
                 st.markdown(f"<div style='background-color: white; border-left: 6px solid {border_color}; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'><div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({dur_display})</div><div style='color: {border_color}; font-weight: bold; font-size: 16px;'>{event['activity']}</div><div style='color: #333;'>{sub_text}{note_text}</div>{loc_html}</div>", unsafe_allow_html=True)
                 
-        # --- 1. UPDATED DAILY SUMMARY (GROUPED DATA & 24H TRACKING) ---
+        # --- 1. DAILY SUMMARY (TIMELINE OVERVIEW) ---
         st.markdown("---")
         st.markdown("<h4 style='text-align: center; color: #555;'>📊 Daily Summary (24 Hours)</h4>", unsafe_allow_html=True)
         total_tracked = sum(e['duration'] for e in timeline_events if e['type'] == 'task')
         total_transit = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and e['activity'] != 'Unlogged Time / Break')
         
-        # Calculate Unlogged time for 24 hours
+        # Calculate exactly how much time is unaccounted for out of the 1440 minutes in a day
         unlogged_24h = max(0, 1440 - total_tracked - total_transit)
         
         col_s1, col_s2, col_s3 = st.columns(3)
@@ -337,6 +342,7 @@ try:
         if category_totals:
             cat_df = pd.DataFrame(list(category_totals.items()), columns=['Category', 'Minutes']).sort_values(by='Minutes', ascending=False)
             
+            # Using Plotly for a beautiful Donut chart breakdown of the 24 hours
             import plotly.graph_objects as go
             fig = go.Figure(data=[go.Pie(
                 labels=cat_df['Category'], 
@@ -346,57 +352,83 @@ try:
                 hoverinfo='label+value+percent'
             )])
             fig.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=350, showlegend=True)
-            st.plotly_chart(fig, use_container_width=True)
-
-            cat_cols = st.columns(min(len(cat_df), 4))
-            for idx, row in cat_df.iterrows():
-                with cat_cols[idx % 4 if len(cat_df) >= 4 else idx]: 
-                    st.markdown(f"<div style='background-color:#f0f2f6; padding:10px; border-radius:8px; text-align:center; margin-bottom:10px;'><b style='color:#333;'>{row['Category']}</b><br><span style='color:#0068c9;'>{int(row['Minutes'] // 60)}h {int(row['Minutes'] % 60)}m</span></div>", unsafe_allow_html=True)
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     # ==========================================
-    # TAB 2: WEEKLY REPORT
+    # TAB 2: SUMMARY (COMPACT ACTIVITY CARDS)
     # ==========================================
     with tab2:
-        st.markdown("<h3 style='text-align: center; color: #555; margin-top: 0px;'>📊 Weekly Activity Report</h3>", unsafe_allow_html=True)
+        col_t2, col_d2 = st.columns([7, 3])
+        with col_t2: 
+            st.markdown("<h3 style='color: #555; margin-top: 0px;'>📋 Today's Overview</h3>", unsafe_allow_html=True)
+        with col_d2:
+            summary_date = st.date_input("Select Date for Overview", value=now.date(), key="summary_date")
+            
+        summary_date_str = summary_date.strftime('%Y-%m-%d')
         
-        # Get the last 7 dates
-        last_7_dates = [(now.date() - timedelta(days=i)).strftime('%Y-%m-%d') for i in range(7)]
-        weekly_logs = log_df[(log_df['Date'].isin(last_7_dates)) & (log_df['Duration'] != 'RUNNING')].copy()
+        # Pull all logs for the selected day, ensuring we ignore 'RUNNING' open timers
+        day_logs = log_df[(log_df['Date'] == summary_date_str) & (log_df['End_Time'] != 'RUNNING')].copy()
         
-        if not weekly_logs.empty:
-            def parse_duration_to_hours(dur_str):
-                try:
-                    h, m = map(int, str(dur_str).strip().split(':'))
-                    return h + (m / 60.0)
-                except: return 0
+        if not day_logs.empty:
+            day_logs['Total_Minutes'] = day_logs['Duration'].apply(parse_duration_to_minutes)
+            
+            # Group by activity
+            grouped = day_logs.groupby('Activity')
+            summary_data = []
+            
+            for act_name, group in grouped:
+                total_mins = group['Total_Minutes'].sum()
+                summary_data.append({
+                    'Activity': act_name,
+                    'Total_Minutes': total_mins,
+                    'Count': len(group),
+                    'Group': group.sort_values('Start_Time')
+                })
                 
-            weekly_logs['Hours'] = weekly_logs['Duration'].apply(parse_duration_to_hours)
+            # Sort by highest duration first
+            summary_data.sort(key=lambda x: x['Total_Minutes'], reverse=True)
             
-            # Pivot table for stacked bar chart
-            weekly_pivot = weekly_logs.pivot_table(index="Date", columns="Activity", values="Hours", aggfunc="sum").fillna(0)
-            weekly_pivot = weekly_pivot.sort_index()
+            # Use 2 columns for a visually appealing, compact layout
+            col_left, col_right = st.columns(2)
             
-            st.markdown("#### ⏳ Time Tracked per Day (Hours)")
-            st.bar_chart(weekly_pivot)
-            
-            # 7-Day Activity Totals
-            st.markdown("#### 📈 7-Day Activity Totals")
-            weekly_totals = weekly_logs.groupby('Activity')['Hours'].sum().sort_values(ascending=False).reset_index()
-            
-            total_tracked_week = weekly_totals['Hours'].sum()
-            untracked_week = max(0, (7 * 24) - total_tracked_week)
-            
-            col_w1, col_w2, col_w3 = st.columns(3)
-            with col_w1: st.metric("Total Tracked (7 Days)", f"{int(total_tracked_week)}h {int((total_tracked_week%1)*60)}m")
-            with col_w2: st.metric("Total Untracked (7 Days)", f"{int(untracked_week)}h {int((untracked_week%1)*60)}m")
-            with col_w3: st.metric("Total Hours (7 Days)", "168h 0m")
-            
-            cat_cols_w = st.columns(min(len(weekly_totals), 4))
-            for idx, row in weekly_totals.iterrows():
-                with cat_cols_w[idx % 4 if len(weekly_totals) >= 4 else idx]: 
-                    st.markdown(f"<div style='background-color:#f0f2f6; padding:10px; border-radius:8px; text-align:center; margin-bottom:10px;'><b style='color:#333;'>{row['Activity']}</b><br><span style='color:#0068c9;'>{int(row['Hours'])}h {int((row['Hours']%1)*60)}m</span></div>", unsafe_allow_html=True)
+            for idx, item in enumerate(summary_data):
+                target_col = col_left if idx % 2 == 0 else col_right
+                with target_col:
+                    h, m = divmod(item['Total_Minutes'], 60)
+                    act_name = item['Activity']
+                    count = item['Count']
+                    
+                    # Assign a contextual icon based on the category type
+                    cat = act_name.upper()
+                    if cat in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"]: icon = "❤️"
+                    elif cat in ["WORK", "REPORT", "TASK"]: icon = "💼"
+                    elif cat == "HEALTH": icon = "🏃"
+                    elif cat in ["SLEEP", "PRE", "TEA", "OUT"]: icon = "☕"
+                    else: icon = "📌"
+                    
+                    # Formatting the Expandable Card Title
+                    exp_title = f"{icon} {act_name} | {int(h)}h {int(m):02d}m | {count} items"
+                    
+                    with st.expander(exp_title):
+                        # Generate HTML to display internal rows nicely
+                        html_content = "<div style='display: flex; flex-direction: column; gap: 8px;'>"
+                        for _, row in item['Group'].iterrows():
+                            sub = str(row['Sub_Activities']).strip()
+                            if not sub: sub = "General Task"
+                            
+                            chk = str(row['check_list']).strip()
+                            if chk: sub += f" <span style='color: #0068c9;'>(☑️ {chk})</span>"
+                            
+                            html_content += f"""
+                            <div style='display: flex; justify-content: space-between; align-items: center; background-color: #f8f9fa; padding: 8px 12px; border-radius: 6px; border-left: 3px solid #ccc; margin-bottom: 6px;'>
+                                <div style='font-size: 14px; font-weight: 500; color: #333;'>{sub}</div>
+                                <div style='font-size: 12px; color: #666; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 4px; white-space: nowrap;'>{row['Start_Time']} - {row['End_Time']} &nbsp;|&nbsp; <span style='color:#0068c9;'>{row['Duration']}</span></div>
+                            </div>
+                            """
+                        html_content += "</div>"
+                        st.markdown(html_content, unsafe_allow_html=True)
         else:
-            st.info("No completed activities found for the last 7 days.")
+            st.info(f"No completed activities found for {summary_date.strftime('%d %b %Y')}.")
 
     # ==========================================
     # TAB 3: HYDRATION

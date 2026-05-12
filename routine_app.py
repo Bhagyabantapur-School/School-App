@@ -609,22 +609,55 @@ try:
                     st.rerun()
                 else: st.error("Please enter task details.")
 
-    with st.expander("📝 Manual Log Activity"):
-        with st.form("log_activity_form", clear_on_submit=True):
-            log_date = st.date_input("Date", value=now.date(), key="log_date")
-            col_act1, col_act2 = st.columns(2)
-            with col_act1: log_activity = st.text_input("Main Category", value=current_activity if current_activity != "FREE TIME" else "", key="log_act")
-            with col_act2: log_sub_activity = st.text_input("Sub-Activity", placeholder="e.g., YOGA", key="log_sub")
-            col1, col2 = st.columns(2)
-            with col1: log_start = st.time_input("Started At", value=clean_now, key="log_start")
-            with col2: log_end = st.time_input("Ended At", value=clean_now, key="log_end")
-            log_chk = st.text_input("Checklist Item (Optional)", key="log_chk")    
-            log_notes = st.text_area("Notes", key="log_notes")
-            if st.form_submit_button("Save to Activity Log", use_container_width=True):
-                if log_activity:
-                    smart_append_row(get_sheet("activity_log"), [log_date.strftime('%Y-%m-%d'), log_start.strftime('%H:%M'), log_end.strftime('%H:%M'), GS_FORMULA, log_activity.upper().strip(), log_sub_activity.upper().strip(), log_chk.strip(), log_notes])
-                    get_activity_log.clear() 
-                    st.rerun()
-                else: st.error("Please enter a Main Category.")
+   with st.expander("📝 Manual Log Activity"):
+        # 1. Dynamically scan routine_master for unique categories and sub-activities
+        unique_acts = sorted(list(set([a.strip().upper() for a in df['Activity'] if a.strip()])))
+        
+        all_subs = []
+        for s in df['Sub_Activities']:
+            all_subs.extend([x.strip().title() for x in str(s).split(',') if x.strip()])
+        unique_subs = sorted(list(set(all_subs)))
+        
+        log_date = st.date_input("Date", value=now.date(), key="log_date")
+        
+        # 2. Hybrid Dropdowns (Select existing OR type a new one)
+        col_act1, col_act2 = st.columns(2)
+        with col_act1: 
+            # Smart default: Pre-select current_activity if it's in the list
+            default_act_idx = unique_acts.index(current_activity) + 1 if current_activity in unique_acts else 0
+            sel_act = st.selectbox("Main Category", ["-- Type Custom --"] + unique_acts, index=default_act_idx, key="sel_act")
+            log_activity = st.text_input("Type Custom Category", key="txt_act") if sel_act == "-- Type Custom --" else sel_act
+            
+        with col_act2: 
+            sel_sub = st.selectbox("Sub-Activity", ["-- None / Type Custom --"] + unique_subs, index=0, key="sel_sub")
+            log_sub_activity = st.text_input("Type Custom Sub-Activity", key="txt_sub") if sel_sub == "-- None / Type Custom --" else sel_sub
+            if sel_sub == "-- None / Type Custom --" and not log_sub_activity: 
+                log_sub_activity = ""
+            
+        col1, col2 = st.columns(2)
+        with col1: log_start = st.time_input("Started At", value=clean_now, key="log_start")
+        with col2: log_end = st.time_input("Ended At", value=clean_now, key="log_end")
+        
+        log_chk = st.text_input("Checklist Item (Optional)", key="log_chk")    
+        log_notes = st.text_area("Notes", key="log_notes")
+        
+        if st.button("💾 Save to Activity Log", use_container_width=True, type="primary"):
+            if log_activity:
+                smart_append_row(get_sheet("activity_log"), [
+                    log_date.strftime('%Y-%m-%d'), 
+                    log_start.strftime('%H:%M'), 
+                    log_end.strftime('%H:%M'), 
+                    GS_FORMULA, 
+                    log_activity.upper().strip(), 
+                    log_sub_activity.title().strip(), 
+                    log_chk.strip(), 
+                    log_notes
+                ])
+                get_activity_log.clear() 
+                st.success("Activity Logged!")
+                time.sleep(1.0)
+                st.rerun()
+            else: 
+                st.error("Please provide a Main Category.")
 
 except Exception as e: st.error(f"System Error: {e}")

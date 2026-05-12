@@ -609,7 +609,7 @@ try:
                     st.rerun()
                 else: st.error("Please enter task details.")
 
-   with st.expander("📝 Manual Log Activity"):
+    with st.expander("📝 Manual Log Activity"):
         # 1. Dynamically scan routine_master for unique categories and sub-activities
         unique_acts = sorted(list(set([a.strip().upper() for a in df['Activity'] if a.strip()])))
         

@@ -410,8 +410,7 @@ try:
                     exp_title = f"{icon} {act_name} | {int(h)}h {int(m):02d}m | {count} items"
                     
                     with st.expander(exp_title):
-                        # Generate HTML to display internal rows nicely
-                        html_content = "<div style='display: flex; flex-direction: column; gap: 8px;'>"
+                        # Generate HTML to display internal rows nicely WITH st.markdown() ensuring rendering
                         for _, row in item['Group'].iterrows():
                             sub = str(row['Sub_Activities']).strip()
                             if not sub: sub = "General Task"
@@ -419,14 +418,12 @@ try:
                             chk = str(row['check_list']).strip()
                             if chk: sub += f" <span style='color: #0068c9;'>(☑️ {chk})</span>"
                             
-                            html_content += f"""
+                            st.markdown(f"""
                             <div style='display: flex; justify-content: space-between; align-items: center; background-color: #f8f9fa; padding: 8px 12px; border-radius: 6px; border-left: 3px solid #ccc; margin-bottom: 6px;'>
                                 <div style='font-size: 14px; font-weight: 500; color: #333;'>{sub}</div>
                                 <div style='font-size: 12px; color: #666; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 4px; white-space: nowrap;'>{row['Start_Time']} - {row['End_Time']} &nbsp;|&nbsp; <span style='color:#0068c9;'>{row['Duration']}</span></div>
                             </div>
-                            """
-                        html_content += "</div>"
-                        st.markdown(html_content, unsafe_allow_html=True)
+                            """, unsafe_allow_html=True)
         else:
             st.info(f"No completed activities found for {summary_date.strftime('%d %b %Y')}.")
 

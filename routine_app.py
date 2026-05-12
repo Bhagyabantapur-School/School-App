@@ -25,7 +25,6 @@ st_autorefresh(interval=120000, key="routine_refresh")
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
     footer {visibility: hidden;}
     .block-container {padding-top: 2rem; padding-bottom: 2rem;}
     div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {

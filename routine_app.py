@@ -609,7 +609,7 @@ try:
                     st.rerun()
                 else: st.error("Please enter task details.")
 
-    # --- UPDATED MANUAL LOG SECTION WITH 1-MINUTE TIME STEPS ---
+    # --- UPDATED MANUAL LOG SECTION WITH 1-MINUTE DROPDOWNS ---
     with st.expander("📝 Manual Log Activity"):
         # 1. Dynamically scan routine_master for unique categories
         unique_acts = sorted(list(set([a.strip().upper() for a in df['Activity'] if a.strip()])))
@@ -619,13 +619,11 @@ try:
         # 2. Dependent Hybrid Dropdowns
         col_act1, col_act2 = st.columns(2)
         with col_act1: 
-            # Smart default: Pre-select current_activity if it's in the list
             default_act_idx = unique_acts.index(current_activity) + 1 if current_activity in unique_acts else 0
             sel_act = st.selectbox("Activity", ["-- Type Custom --"] + unique_acts, index=default_act_idx, key="sel_act")
             log_activity = st.text_input("Type Custom Activity", key="txt_act") if sel_act == "-- Type Custom --" else sel_act
             
         with col_act2: 
-            # Dependent logic: find sub-activities ONLY for the chosen log_activity
             dependent_subs = []
             if log_activity in unique_acts:
                 filtered_df = df[df['Activity'].str.strip().str.upper() == log_activity]
@@ -639,10 +637,24 @@ try:
             if sel_sub == "-- None / Type Custom --" and not log_sub_activity: 
                 log_sub_activity = ""
             
+        # 3. Fast Time Picker (Hours & Minutes separated)
+        hours = [f"{i:02d}" for i in range(24)]
+        minutes = [f"{i:02d}" for i in range(60)]
+        curr_h = int(clean_now.strftime('%H'))
+        curr_m = int(clean_now.strftime('%M'))
+        
         col1, col2 = st.columns(2)
-        # ADDED step=60 to allow 1-minute intervals and free typing!
-        with col1: log_start = st.time_input("Started At", value=clean_now, step=60, key="log_start")
-        with col2: log_end = st.time_input("Ended At", value=clean_now, step=60, key="log_end")
+        with col1: 
+            st.markdown("<div style='font-size: 14px; font-weight: bold; margin-bottom: 5px; color: #333;'>Started At (HH : MM)</div>", unsafe_allow_html=True)
+            c_sh, c_sm = st.columns(2)
+            s_hour = c_sh.selectbox("Start Hour", hours, index=curr_h, key="s_hour", label_visibility="collapsed")
+            s_min = c_sm.selectbox("Start Min", minutes, index=curr_m, key="s_min", label_visibility="collapsed")
+            
+        with col2: 
+            st.markdown("<div style='font-size: 14px; font-weight: bold; margin-bottom: 5px; color: #333;'>Ended At (HH : MM)</div>", unsafe_allow_html=True)
+            c_eh, c_em = st.columns(2)
+            e_hour = c_eh.selectbox("End Hour", hours, index=curr_h, key="e_hour", label_visibility="collapsed")
+            e_min = c_em.selectbox("End Min", minutes, index=curr_m, key="e_min", label_visibility="collapsed")
         
         log_chk = st.text_input("Checklist Item (Optional)", key="log_chk")    
         log_notes = st.text_area("Notes", key="log_notes")
@@ -651,8 +663,8 @@ try:
             if log_activity:
                 smart_append_row(get_sheet("activity_log"), [
                     log_date.strftime('%Y-%m-%d'), 
-                    log_start.strftime('%H:%M'), 
-                    log_end.strftime('%H:%M'), 
+                    f"{s_hour}:{s_min}", 
+                    f"{e_hour}:{e_min}", 
                     GS_FORMULA, 
                     log_activity.upper().strip(), 
                     log_sub_activity.title().strip(), 

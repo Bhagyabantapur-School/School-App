@@ -609,27 +609,32 @@ try:
                     st.rerun()
                 else: st.error("Please enter task details.")
 
+    # --- UPDATED MANUAL LOG SECTION WITH DEPENDENT DROPDOWNS ---
     with st.expander("📝 Manual Log Activity"):
-        # 1. Dynamically scan routine_master for unique categories and sub-activities
+        # 1. Dynamically scan routine_master for unique categories
         unique_acts = sorted(list(set([a.strip().upper() for a in df['Activity'] if a.strip()])))
-        
-        all_subs = []
-        for s in df['Sub_Activities']:
-            all_subs.extend([x.strip().title() for x in str(s).split(',') if x.strip()])
-        unique_subs = sorted(list(set(all_subs)))
         
         log_date = st.date_input("Date", value=now.date(), key="log_date")
         
-        # 2. Hybrid Dropdowns (Select existing OR type a new one)
+        # 2. Dependent Hybrid Dropdowns
         col_act1, col_act2 = st.columns(2)
         with col_act1: 
             # Smart default: Pre-select current_activity if it's in the list
             default_act_idx = unique_acts.index(current_activity) + 1 if current_activity in unique_acts else 0
-            sel_act = st.selectbox("Main Category", ["-- Type Custom --"] + unique_acts, index=default_act_idx, key="sel_act")
-            log_activity = st.text_input("Type Custom Category", key="txt_act") if sel_act == "-- Type Custom --" else sel_act
+            sel_act = st.selectbox("Activity", ["-- Type Custom --"] + unique_acts, index=default_act_idx, key="sel_act")
+            log_activity = st.text_input("Type Custom Activity", key="txt_act") if sel_act == "-- Type Custom --" else sel_act
             
         with col_act2: 
-            sel_sub = st.selectbox("Sub-Activity", ["-- None / Type Custom --"] + unique_subs, index=0, key="sel_sub")
+            # Dependent logic: find sub-activities ONLY for the chosen log_activity
+            dependent_subs = []
+            if log_activity in unique_acts:
+                filtered_df = df[df['Activity'].str.strip().str.upper() == log_activity]
+                sub_list = []
+                for s in filtered_df['Sub_Activities']:
+                    sub_list.extend([x.strip().title() for x in str(s).split(',') if x.strip()])
+                dependent_subs = sorted(list(set(sub_list)))
+
+            sel_sub = st.selectbox("Sub-Activity", ["-- None / Type Custom --"] + dependent_subs, index=0, key="sel_sub")
             log_sub_activity = st.text_input("Type Custom Sub-Activity", key="txt_sub") if sel_sub == "-- None / Type Custom --" else sel_sub
             if sel_sub == "-- None / Type Custom --" and not log_sub_activity: 
                 log_sub_activity = ""
@@ -658,6 +663,6 @@ try:
                 time.sleep(1.0)
                 st.rerun()
             else: 
-                st.error("Please provide a Main Category.")
+                st.error("Please provide an Activity.")
 
 except Exception as e: st.error(f"System Error: {e}")

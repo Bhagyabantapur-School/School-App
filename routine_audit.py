@@ -127,8 +127,8 @@ try:
 
     st.markdown("<h2 style='text-align: center; color: #555; margin-top: 0px;'>📊 Daily Data & Audit Hub</h2>", unsafe_allow_html=True)
     
-    # --- TABS: Replaced Weekly Report with Summary ---
-    tab1, tab2, tab3, tab4 = st.tabs(["⏳ Timeline Audit", "📋 Summary", "💧 Hydration", "📍 Places Database"])
+    # --- TABS INC. WEEKLY MATRIX ---
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["⏳ Timeline Audit", "📋 Daily Summary", "📅 Weekly Summary", "💧 Hydration", "📍 Places"])
 
     # ==========================================
     # TAB 1: TIMELINE AUDIT
@@ -355,12 +355,12 @@ try:
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     # ==========================================
-    # TAB 2: SUMMARY (COMPACT ACTIVITY CARDS)
+    # TAB 2: DAILY SUMMARY (COMPACT ACTIVITY CARDS)
     # ==========================================
     with tab2:
         col_t2, col_d2 = st.columns([7, 3])
         with col_t2: 
-            st.markdown("<h3 style='color: #555; margin-top: 0px;'>📋 Today's Overview</h3>", unsafe_allow_html=True)
+            st.markdown("<h3 style='color: #555; margin-top: 0px;'>📋 Daily Overview</h3>", unsafe_allow_html=True)
         with col_d2:
             summary_date = st.date_input("Select Date for Overview", value=now.date(), key="summary_date")
             
@@ -371,6 +371,8 @@ try:
         
         if not day_logs.empty:
             day_logs['Total_Minutes'] = day_logs['Duration'].apply(parse_duration_to_minutes)
+            total_tracked_day = day_logs['Total_Minutes'].sum()
+            unlogged_day = max(0, 1440 - total_tracked_day)
             
             # Group by activity
             grouped = day_logs.groupby('Activity')
@@ -424,13 +426,74 @@ try:
                                 <div style='font-size: 12px; color: #666; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 4px; white-space: nowrap;'>{row['Start_Time']} - {row['End_Time']} &nbsp;|&nbsp; <span style='color:#0068c9;'>{row['Duration']}</span></div>
                             </div>
                             """, unsafe_allow_html=True)
+                            
+            # Add Unlogged Time to the end of the cards
+            last_col = col_left if len(summary_data) % 2 == 0 else col_right
+            with last_col:
+                h_un, m_un = divmod(unlogged_day, 60)
+                with st.expander(f"🕳️ UNLOGGED TIME | {int(h_un)}h {int(m_un):02d}m"):
+                    st.markdown("<div style='text-align: center; padding: 15px; color: #888;'><i>This time includes your transit, breaks, and untracked gaps.</i></div>", unsafe_allow_html=True)
+
         else:
             st.info(f"No completed activities found for {summary_date.strftime('%d %b %Y')}.")
 
     # ==========================================
-    # TAB 3: HYDRATION
+    # TAB 3: WEEKLY SUMMARY (MATRIX)
     # ==========================================
     with tab3:
+        st.markdown("<h3 style='text-align: center; color: #555; margin-top: 0px;'>📅 Weekly Activity Matrix</h3>", unsafe_allow_html=True)
+        
+        # Get the last 7 dates chronologically
+        last_7_dates = sorted([(now.date() - timedelta(days=i)).strftime('%Y-%m-%d') for i in range(7)])
+        weekly_logs = log_df[(log_df['Date'].isin(last_7_dates)) & (log_df['End_Time'] != 'RUNNING')].copy()
+        
+        if not weekly_logs.empty:
+            # Convert string duration 'H:M' to decimal hours
+            weekly_logs['Hours'] = weekly_logs['Duration'].apply(lambda x: parse_duration_to_minutes(x) / 60.0)
+            
+            # Pivot into a Matrix: Rows=Activities, Columns=Dates
+            pivot = weekly_logs.pivot_table(index="Activity", columns="Date", values="Hours", aggfunc="sum").fillna(0)
+            
+            # Make sure all 7 columns exist, even if a day had zero logs
+            for d in last_7_dates:
+                if d not in pivot.columns:
+                    pivot[d] = 0.0
+            
+            # Sort columns in date order
+            pivot = pivot[last_7_dates]
+            
+            # Calculate Unlogged time per day (24 hours - total tracked that day)
+            unlogged_row = {}
+            for d in last_7_dates:
+                tracked_that_day = pivot[d].sum()
+                unlogged_row[d] = max(0.0, 24.0 - tracked_that_day)
+                
+            # Append Unlogged Time as the final row
+            pivot.loc["🕳️ UNLOGGED TIME"] = unlogged_row
+            
+            # Formatter function to convert decimal hours to nice "Xh Ym" text
+            def format_matrix_hours(h):
+                if h <= 0.01: return "-"
+                ih = int(h)
+                im = int(round((h - ih) * 60))
+                if im == 60:
+                    ih += 1
+                    im = 0
+                if ih > 0 and im > 0: return f"{ih}h {im}m"
+                elif ih > 0: return f"{ih}h"
+                else: return f"{im}m"
+                
+            formatted_pivot = pivot.applymap(format_matrix_hours)
+            
+            # Display matrix
+            st.dataframe(formatted_pivot, use_container_width=True, height=550)
+        else:
+            st.info("No completed activities found for the last 7 days.")
+
+    # ==========================================
+    # TAB 4: HYDRATION
+    # ==========================================
+    with tab4:
         st.markdown("<h3 style='text-align: center; color: #0288d1;'>💧 Hydration Tracker</h3>", unsafe_allow_html=True)
         col_w1, col_w2, col_w3 = st.columns(3)
         with col_w1:
@@ -464,9 +527,9 @@ try:
             if not this_month.empty: st.line_chart(this_month.groupby(this_month['Date_dt'].dt.day)['Amount_ml'].sum(), color="#0288d1")
 
     # ==========================================
-    # TAB 4: PLACES DATABASE
+    # TAB 5: PLACES DATABASE
     # ==========================================
-    with tab4:
+    with tab5:
         st.markdown("<h3 style='text-align: center; color: #555;'>📍 Visited Places Database</h3>", unsafe_allow_html=True)
         if st.button("🔄 Generate & Sync to Google Sheets", type="primary", use_container_width=True):
             with st.spinner("Analyzing location history and syncing..."):

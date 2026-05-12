@@ -109,63 +109,64 @@ with col_title:
     st.title("🚀 My Personal Dashboard")
     st.markdown("Welcome back! Here is a summary of your systems:")
 with col_count:
-    st.metric("Total Active Apps", "13") # <-- Updated metric to 13
+    st.metric("Total Active Apps", "14") # <-- Updated metric to 14
 st.write("---") 
 
-# ROW 1
+# ROW 1 (Finance & Core Focus)
 r1_col1, r1_col2, r1_col3 = st.columns(3)
 with r1_col1:
     st.markdown(create_card("📍", "Money & Location", "Latest Log", "Bhagyabantapur", "#E3F2FD", "#1E88E5", "#1565C0", tracker_data), unsafe_allow_html=True)
     if st.button("Open App", key="btn1", use_container_width=True): log_and_open("Money & Location", "money_location.py")
 with r1_col2:
-    st.markdown(create_card("💪", "Strong Tracker", "Current Streak", "12 Days", "#FFEBEE", "#E53935", "#C62828", tracker_data), unsafe_allow_html=True)
-    if st.button("Open App", key="btn2", use_container_width=True): log_and_open("Strong Tracker", "strong.py")
+    st.markdown(create_card("💳", "Money Utilities", "Tools", "Active", "#E0F2F1", "#00897B", "#00695C", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn2", use_container_width=True): log_and_open("Money Utilities", "money_utilities.py")
 with r1_col3:
-    st.markdown(create_card("🚀", "Project App", "Tasks", "85%", "#F3E5F5", "#8E24AA", "#6A1B9A", tracker_data), unsafe_allow_html=True)
-    if st.button("Open App", key="btn3", use_container_width=True): log_and_open("Project App", "project_app.py")
+    st.markdown(create_card("💪", "Strong Tracker", "Current Streak", "12 Days", "#FFEBEE", "#E53935", "#C62828", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn3", use_container_width=True): log_and_open("Strong Tracker", "strong.py")
 
-# ROW 2
+# ROW 2 (Projects & Trackers)
 r2_col1, r2_col2, r2_col3 = st.columns(3)
 with r2_col1:
-    st.markdown(create_card("🗳️", "Election Duty", "Status", "Assigned", "#E8EAF6", "#3949AB", "#283593", tracker_data), unsafe_allow_html=True)
-    if st.button("Open App", key="btn4", use_container_width=True): log_and_open("Election Duty", "election_duty.py")
+    st.markdown(create_card("🚀", "Project App", "Tasks", "85%", "#F3E5F5", "#8E24AA", "#6A1B9A", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn4", use_container_width=True): log_and_open("Project App", "project_app.py")
 with r2_col2:
-    st.markdown(create_card("📆", "Monthly Tracker", "Month", "May 2026", "#E0F2F1", "#00897B", "#00695C", tracker_data), unsafe_allow_html=True)
-    if st.button("Open App", key="btn5", use_container_width=True): log_and_open("Monthly Tracker", "monthly_app.py")
+    st.markdown(create_card("🗳️", "Election Duty", "Status", "Assigned", "#E8EAF6", "#3949AB", "#283593", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn5", use_container_width=True): log_and_open("Election Duty", "election_duty.py")
 with r2_col3:
-    st.markdown(create_card("💵", "Money Tracker", "Wallet", "₹ 4,250", "#E8F5E9", "#43A047", "#2E7D32", tracker_data), unsafe_allow_html=True)
-    if st.button("Open App", key="btn6", use_container_width=True): log_and_open("Money Tracker", "money_tracker.py")
+    st.markdown(create_card("📆", "Monthly Tracker", "Month", "May 2026", "#E8F5E9", "#43A047", "#2E7D32", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn6", use_container_width=True): log_and_open("Monthly Tracker", "monthly_app.py")
 
-# ROW 3
+# ROW 3 (Health & Infrastructure)
 r3_col1, r3_col2, r3_col3 = st.columns(3)
 with r3_col1:
-    st.markdown(create_card("❤️", "Health Hub", "Status", "Active", "#FCE4EC", "#D81B60", "#AD1457", tracker_data), unsafe_allow_html=True)
-    if st.button("Open App", key="btn7", use_container_width=True): log_and_open("Health Hub", "health_app.py")
+    st.markdown(create_card("💵", "Money Tracker", "Wallet", "₹ 4,250", "#FFF3E0", "#FB8C00", "#EF6C00", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn7", use_container_width=True): log_and_open("Money Tracker", "money_tracker.py")
 with r3_col2:
-    st.markdown(create_card("💾", "Backup Tracker", "Last Backup", "2 Hours Ago", "#FFF3E0", "#FB8C00", "#EF6C00", tracker_data), unsafe_allow_html=True)
-    if st.button("Open App", key="btn8", use_container_width=True): log_and_open("Backup Tracker", "backup_tracker_app.py")
+    st.markdown(create_card("❤️", "Health Hub", "Status", "Active", "#FCE4EC", "#D81B60", "#AD1457", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn8", use_container_width=True): log_and_open("Health Hub", "health_app.py")
 with r3_col3:
-    st.markdown(create_card("⏱️", "Daily Routine", "Next Session", "Yoga", "#FFF8E1", "#FFB300", "#FF8F00", tracker_data), unsafe_allow_html=True)
-    if st.button("Open App", key="btn9", use_container_width=True): log_and_open("Daily Routine", "routine_app.py")
+    st.markdown(create_card("💾", "Backup Tracker", "Last Backup", "2 Hours Ago", "#FFF8E1", "#FFB300", "#FF8F00", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn9", use_container_width=True): log_and_open("Backup Tracker", "backup_tracker_app.py")
 
-# ROW 4 (Routine Expansion & MDM)
+# ROW 4 (Routine Expansion)
 r4_col1, r4_col2, r4_col3 = st.columns(3)
 with r4_col1:
-    st.markdown(create_card("🔍", "Routine Audit", "Analysis", "Live", "#F3E5F5", "#8E24AA", "#6A1B9A", tracker_data), unsafe_allow_html=True)
-    if st.button("Open App", key="btn10", use_container_width=True): log_and_open("Routine Audit", "routine_audit.py")
+    st.markdown(create_card("⏱️", "Daily Routine", "Next Session", "Yoga", "#F5F5F5", "#9E9E9E", "#616161", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn10", use_container_width=True): log_and_open("Daily Routine", "routine_app.py")
 with r4_col2:
-    st.markdown(create_card("✏️", "Routine Editor", "Manage", "Active", "#E8EAF6", "#3949AB", "#283593", tracker_data), unsafe_allow_html=True)
-    if st.button("Open App", key="btn11", use_container_width=True): log_and_open("Routine Editor", "routine_editor.py")
+    st.markdown(create_card("🔍", "Routine Audit", "Analysis", "Live", "#F3E5F5", "#8E24AA", "#6A1B9A", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn11", use_container_width=True): log_and_open("Routine Audit", "routine_audit.py")
 with r4_col3:
-    st.markdown(create_card("📦", "MDM Returns", "Sync", "Ready", "#E8F5E9", "#43A047", "#2E7D32", tracker_data), unsafe_allow_html=True)
-    if st.button("Open App", key="btn12", use_container_width=True): log_and_open("MDM Returns", "mdm_return_log.py")
+    st.markdown(create_card("✏️", "Routine Editor", "Manage", "Active", "#E8EAF6", "#3949AB", "#283593", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn12", use_container_width=True): log_and_open("Routine Editor", "routine_editor.py")
 
-# ROW 5 (Media & Projects)
+# ROW 5 (MDM & Video)
 r5_col1, r5_col2, r5_col3 = st.columns(3)
 with r5_col1:
-    st.markdown(create_card("🎬", "Video Manager", "Platform", "YT / FB", "#FFEBEE", "#E53935", "#C62828", tracker_data), unsafe_allow_html=True)
-    if st.button("Open App", key="btn13", use_container_width=True): log_and_open("Video Manager", "bps_ytfb_videos.py")
+    st.markdown(create_card("📦", "MDM Returns", "Sync", "Ready", "#E8F5E9", "#43A047", "#2E7D32", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn13", use_container_width=True): log_and_open("MDM Returns", "mdm_return_log.py")
 with r5_col2:
-    st.empty() # Placeholder for your 14th app!
+    st.markdown(create_card("🎬", "Video Manager", "Platform", "YT / FB", "#FFEBEE", "#E53935", "#C62828", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn14", use_container_width=True): log_and_open("Video Manager", "bps_ytfb_videos.py")
 with r5_col3:
-    st.empty() # Placeholder for your 15th app!
+    st.empty() # Placeholder for App #15!

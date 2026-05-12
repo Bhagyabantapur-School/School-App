@@ -316,43 +316,6 @@ try:
                 loc_html = f"<div style='color: #d32f2f; font-size: 13px; font-weight: 500; margin-top: 4px;'>{loc_text}</div>" if loc_text else ""
                 
                 st.markdown(f"<div style='background-color: white; border-left: 6px solid {border_color}; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'><div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({dur_display})</div><div style='color: {border_color}; font-weight: bold; font-size: 16px;'>{event['activity']}</div><div style='color: #333;'>{sub_text}{note_text}</div>{loc_html}</div>", unsafe_allow_html=True)
-                
-        # --- 1. DAILY SUMMARY (TIMELINE OVERVIEW) ---
-        st.markdown("---")
-        st.markdown("<h4 style='text-align: center; color: #555;'>📊 Daily Summary (24 Hours)</h4>", unsafe_allow_html=True)
-        total_tracked = sum(e['duration'] for e in timeline_events if e['type'] == 'task')
-        total_transit = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and e['activity'] != 'Unlogged Time / Break')
-        
-        # Calculate exactly how much time is unaccounted for out of the 1440 minutes in a day
-        unlogged_24h = max(0, 1440 - total_tracked - total_transit)
-        
-        col_s1, col_s2, col_s3 = st.columns(3)
-        with col_s1: st.metric(label="Total Tracked Time", value=f"{int(total_tracked // 60)}h {int(total_tracked % 60)}m")
-        with col_s2: st.metric(label="Total Transit & Stops", value=f"{int(total_transit // 60)}h {int(total_transit % 60)}m")
-        with col_s3: st.metric(label="Unlogged / Free Time", value=f"{int(unlogged_24h // 60)}h {int(unlogged_24h % 60)}m")
-            
-        category_totals = {}
-        for e in timeline_events:
-            if e['type'] == 'task':
-                category_totals[e['activity']] = category_totals.get(e['activity'], 0) + e['duration']
-                
-        if total_transit > 0: category_totals['TRANSIT & STOPS'] = total_transit
-        if unlogged_24h > 0: category_totals['UNLOGGED TIME'] = unlogged_24h
-            
-        if category_totals:
-            cat_df = pd.DataFrame(list(category_totals.items()), columns=['Category', 'Minutes']).sort_values(by='Minutes', ascending=False)
-            
-            # Using Plotly for a beautiful Donut chart breakdown of the 24 hours
-            import plotly.graph_objects as go
-            fig = go.Figure(data=[go.Pie(
-                labels=cat_df['Category'], 
-                values=cat_df['Minutes'], 
-                hole=0.4,
-                textinfo='label+percent',
-                hoverinfo='label+value+percent'
-            )])
-            fig.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=350, showlegend=True)
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     # ==========================================
     # TAB 2: DAILY SUMMARY (COMPACT ACTIVITY CARDS)
@@ -483,7 +446,8 @@ try:
                 elif ih > 0: return f"{ih}h"
                 else: return f"{im}m"
                 
-            formatted_pivot = pivot.applymap(format_matrix_hours)
+            # CHANGED: map() instead of applymap() for Pandas compatibility
+            formatted_pivot = pivot.map(format_matrix_hours)
             
             # Display matrix
             st.dataframe(formatted_pivot, use_container_width=True, height=550)

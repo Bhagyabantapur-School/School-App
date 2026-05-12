@@ -26,6 +26,7 @@ st.sidebar.markdown("---")
 # --- Personal Pages ---
 personal_dashboard = st.Page("dashboard.py", title="Visual Dashboard", icon="🚀", default=(system_choice == 'Personal Hub'))
 money_location = st.Page("money_location.py", title="Money & Location", icon="📍")
+money_utilities = st.Page("money_utilities.py", title="Money Utilities", icon="💳") # <-- NEW APP ADDED HERE
 strong = st.Page("strong.py", title="Strong Tracker", icon="💪")
 project = st.Page("project_app.py", title="Project Tracker", icon="🚀")
 election = st.Page("election_duty.py", title="Election Duty", icon="🗳️")
@@ -34,8 +35,8 @@ money_tracker = st.Page("money_tracker.py", title="Money Tracker", icon="💵")
 health = st.Page("health_app.py", title="Health Tracker", icon="❤️")
 backup = st.Page("backup_tracker_app.py", title="Backup Tracker", icon="💾")
 routine = st.Page("routine_app.py", title="Daily Routine", icon="⏱️")
-routine_audit = st.Page("routine_audit.py", title="Routine Audit", icon="🔍") # <-- NEW
-routine_editor = st.Page("routine_editor.py", title="Routine Editor", icon="✏️") # <-- NEW
+routine_audit = st.Page("routine_audit.py", title="Routine Audit", icon="🔍")
+routine_editor = st.Page("routine_editor.py", title="Routine Editor", icon="✏️")
 mdm_return = st.Page("mdm_return_log.py", title="MDM Returns", icon="📦")
 ytfb_videos = st.Page("bps_ytfb_videos.py", title="Video Manager", icon="🎬")
 
@@ -57,9 +58,9 @@ if st.session_state.active_system == 'Personal Hub':
     # Load only the Personal Apps into the sidebar
     pg = st.navigation({
         "My Personal Hub": [
-            personal_dashboard, money_location, strong, project, election, 
-            monthly, money_tracker, health, backup, routine, 
-            routine_audit, routine_editor, # <-- ADDED AFTER ROUTINE
+            personal_dashboard, money_location, money_utilities, # <-- UPDATED ORDER
+            strong, project, election, monthly, money_tracker, 
+            health, backup, routine, routine_audit, routine_editor, 
             mdm_return, ytfb_videos
         ]
     })

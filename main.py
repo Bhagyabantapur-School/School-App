@@ -24,9 +24,10 @@ st.sidebar.markdown("---")
 
 # 4. DEFINE ALL PAGES
 # --- Personal Pages ---
-personal_dashboard = st.Page("dashboard.py", title="Visual Dashboard", icon="🚀", default=(system_choice == 'Personal Hub'))
+# NOTE: routine_app.py is now the default Hub!
+routine_hub = st.Page("routine_app.py", title="Live Routine Hub", icon="⏱️", default=(system_choice == 'Personal Hub'))
 money_location = st.Page("money_location.py", title="Money & Location", icon="📍")
-money_utilities = st.Page("money_utilities.py", title="Money Utilities", icon="💳") # <-- NEW APP ADDED HERE
+money_utilities = st.Page("money_utilities.py", title="Money Utilities", icon="💳") 
 strong = st.Page("strong.py", title="Strong Tracker", icon="💪")
 project = st.Page("project_app.py", title="Project Tracker", icon="🚀")
 election = st.Page("election_duty.py", title="Election Duty", icon="🗳️")
@@ -34,7 +35,6 @@ monthly = st.Page("monthly_app.py", title="Monthly Tracker", icon="📆")
 money_tracker = st.Page("money_tracker.py", title="Money Tracker", icon="💵")
 health = st.Page("health_app.py", title="Health Tracker", icon="❤️")
 backup = st.Page("backup_tracker_app.py", title="Backup Tracker", icon="💾")
-routine = st.Page("routine_app.py", title="Daily Routine", icon="⏱️")
 routine_audit = st.Page("routine_audit.py", title="Routine Audit", icon="🔍")
 routine_editor = st.Page("routine_editor.py", title="Routine Editor", icon="✏️")
 mdm_return = st.Page("mdm_return_log.py", title="MDM Returns", icon="📦")
@@ -55,19 +55,16 @@ staff_portal = st.Page("bps_digital_sk.py", title="Staff Portal", icon="🔐")
 
 # 5. DYNAMIC NAVIGATION LOGIC
 if st.session_state.active_system == 'Personal Hub':
-    # Load only the Personal Apps into the sidebar
     pg = st.navigation({
         "My Personal Hub": [
-            personal_dashboard, money_location, money_utilities, # <-- UPDATED ORDER
+            routine_hub, money_location, money_utilities, 
             strong, project, election, monthly, money_tracker, 
-            health, backup, routine, routine_audit, routine_editor, 
+            health, backup, routine_audit, routine_editor, 
             mdm_return, ytfb_videos
         ]
     })
     st.sidebar.caption("🔒 Personal Workspace Active")
-
 else:
-    # Load only the BPS Apps into the sidebar
     pg = st.navigation({
         "System Home": [bps_dashboard],
         "Staff & Admin": [staff_portal],

@@ -15,7 +15,7 @@ st.set_page_config(page_title="Routine Audit", page_icon="📊", layout="wide")
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
+    
     footer {visibility: hidden;}
     .block-container {padding-top: 4rem; padding-bottom: 2rem;}
     div[data-testid="metric-container"] {

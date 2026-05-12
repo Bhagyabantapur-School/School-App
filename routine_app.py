@@ -1,9 +1,4 @@
 import streamlit as st
-# --- BACK BUTTON ---
-if st.button("⬅️ Back to Dashboard", type="secondary"):
-    st.switch_page("dashboard.py") 
-st.write("---") 
-# -------------------
 import streamlit.components.v1 as components
 import gspread
 from google.oauth2.service_account import Credentials
@@ -15,7 +10,7 @@ from streamlit_autorefresh import st_autorefresh
 
 GS_FORMULA = '=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm"), ""))'
 
-st.set_page_config(page_title="Live Routine", page_icon="⏱️", layout="centered")
+st.set_page_config(page_title="Live Routine Hub", page_icon="⏱️", layout="centered")
 
 if 'active_main_task' not in st.session_state:
     st.session_state.active_main_task = None
@@ -82,6 +77,14 @@ def smart_append_row(sheet, row_data):
     next_row = len(col_a) + 1
     try: sheet.update(range_name=f"A{next_row}", values=[row_data], value_input_option="USER_ENTERED")
     except TypeError: sheet.update(f"A{next_row}", [row_data], value_input_option="USER_ENTERED")
+
+@st.cache_data(ttl=600)
+def get_tracker_data():
+    try:
+        sheet = init_connection().open("Personal_Dashboard_Data").worksheet("Tracker")
+        records = sheet.get_all_records()
+        return {row['App Name']: str(row['Last Opened']) for row in records}
+    except Exception: return {}
 
 @st.cache_data(ttl=300) 
 def get_routine_data():
@@ -194,6 +197,31 @@ def get_last_done_str(item_name, log_df, now, col_name='Sub_Activities'):
     elif diff.seconds >= 60: return f"{diff.seconds // 60}m ago"
     else: return "Just now"
 
+def get_app_time_str(app_name, tracker_data, now_dt):
+    val = tracker_data.get(app_name, "")
+    if not val: return "Never"
+    try:
+        dt_naive = datetime.strptime(val, "%Y-%m-%d %H:%M:%S")
+        dt_aware = now_dt.tzinfo.localize(dt_naive)
+        diff = now_dt - dt_aware
+        if diff.days > 0: return f"{diff.days}d ago"
+        elif diff.seconds >= 3600: return f"{diff.seconds // 3600}h ago"
+        elif diff.seconds >= 60: return f"{diff.seconds // 60}m ago"
+        else: return "Just now"
+    except: return "N/A"
+
+def log_and_open_app(app_name, target_file, cached_data, now_dt):
+    now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        sheet = init_connection().open("Personal_Dashboard_Data").worksheet("Tracker") 
+        cell = sheet.find(app_name)
+        if cell: sheet.update_cell(cell.row, 2, now_str)
+        else: sheet.append_row([app_name, now_str])
+    except Exception as e: print(f"Silent log failure: {e}")
+        
+    cached_data[app_name] = now_str 
+    st.switch_page(target_file)
+
 # ==========================================
 # Main Logic
 # ==========================================
@@ -204,6 +232,7 @@ try:
     holidays_df = get_holidays()
     payment_df = get_payment_checklist()
     must_do_df = get_must_do_tasks()
+    tracker_data = get_tracker_data()
     
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist_timezone)
@@ -236,9 +265,38 @@ try:
             get_holidays.clear()
             get_payment_checklist.clear()
             get_must_do_tasks.clear()
+            get_tracker_data.clear()
             st.toast("✅ Force Synced with Google Sheets!")
             time.sleep(1.0)
             st.rerun()
+
+    # --- APP LAUNCHPAD INJECTION ---
+    st.markdown("---")
+    st.markdown("<h4 style='text-align: center; color: #333;'>🚀 Application Launchpad</h4>", unsafe_allow_html=True)
+    
+    app_list = [
+        ("Money & Location", "money_location.py", "📍"),
+        ("Money Utilities", "money_utilities.py", "💳"),
+        ("Strong Tracker", "strong.py", "💪"),
+        ("Project App", "project_app.py", "🚀"),
+        ("Election Duty", "election_duty.py", "🗳️"),
+        ("Monthly Tracker", "monthly_app.py", "📆"),
+        ("Money Tracker", "money_tracker.py", "💵"),
+        ("Health Hub", "health_app.py", "❤️"),
+        ("Backup Tracker", "backup_tracker_app.py", "💾"),
+        ("Routine Audit", "routine_audit.py", "🔍"),
+        ("Routine Editor", "routine_editor.py", "✏️"),
+        ("MDM Returns", "mdm_return_log.py", "📦"),
+        ("Video Manager", "bps_ytfb_videos.py", "🎬")
+    ]
+    
+    app_cols = st.columns(3)
+    for idx, (app_name, file_name, icon) in enumerate(app_list):
+        last_str = get_app_time_str(app_name, tracker_data, now)
+        with app_cols[idx % 3]:
+            if st.button(f"{icon} {app_name}\n(Last: {last_str})", key=f"app_{idx}", use_container_width=True):
+                log_and_open_app(app_name, file_name, tracker_data, now)
+    st.markdown("---")
 
     # PRE-PROCESS ALL PAYMENTS 
     all_alert_pays = []
@@ -609,73 +667,22 @@ try:
                     st.rerun()
                 else: st.error("Please enter task details.")
 
-    # --- UPDATED MANUAL LOG SECTION WITH 1-MINUTE DROPDOWNS ---
     with st.expander("📝 Manual Log Activity"):
-        # 1. Dynamically scan routine_master for unique categories
-        unique_acts = sorted(list(set([a.strip().upper() for a in df['Activity'] if a.strip()])))
-        
-        log_date = st.date_input("Date", value=now.date(), key="log_date")
-        
-        # 2. Dependent Hybrid Dropdowns
-        col_act1, col_act2 = st.columns(2)
-        with col_act1: 
-            default_act_idx = unique_acts.index(current_activity) + 1 if current_activity in unique_acts else 0
-            sel_act = st.selectbox("Activity", ["-- Type Custom --"] + unique_acts, index=default_act_idx, key="sel_act")
-            log_activity = st.text_input("Type Custom Activity", key="txt_act") if sel_act == "-- Type Custom --" else sel_act
-            
-        with col_act2: 
-            dependent_subs = []
-            if log_activity in unique_acts:
-                filtered_df = df[df['Activity'].str.strip().str.upper() == log_activity]
-                sub_list = []
-                for s in filtered_df['Sub_Activities']:
-                    sub_list.extend([x.strip().title() for x in str(s).split(',') if x.strip()])
-                dependent_subs = sorted(list(set(sub_list)))
-
-            sel_sub = st.selectbox("Sub-Activity", ["-- None / Type Custom --"] + dependent_subs, index=0, key="sel_sub")
-            log_sub_activity = st.text_input("Type Custom Sub-Activity", key="txt_sub") if sel_sub == "-- None / Type Custom --" else sel_sub
-            if sel_sub == "-- None / Type Custom --" and not log_sub_activity: 
-                log_sub_activity = ""
-            
-        # 3. Fast Time Picker (Hours & Minutes separated)
-        hours = [f"{i:02d}" for i in range(24)]
-        minutes = [f"{i:02d}" for i in range(60)]
-        curr_h = int(clean_now.strftime('%H'))
-        curr_m = int(clean_now.strftime('%M'))
-        
-        col1, col2 = st.columns(2)
-        with col1: 
-            st.markdown("<div style='font-size: 14px; font-weight: bold; margin-bottom: 5px; color: #333;'>Started At (HH : MM)</div>", unsafe_allow_html=True)
-            c_sh, c_sm = st.columns(2)
-            s_hour = c_sh.selectbox("Start Hour", hours, index=curr_h, key="s_hour", label_visibility="collapsed")
-            s_min = c_sm.selectbox("Start Min", minutes, index=curr_m, key="s_min", label_visibility="collapsed")
-            
-        with col2: 
-            st.markdown("<div style='font-size: 14px; font-weight: bold; margin-bottom: 5px; color: #333;'>Ended At (HH : MM)</div>", unsafe_allow_html=True)
-            c_eh, c_em = st.columns(2)
-            e_hour = c_eh.selectbox("End Hour", hours, index=curr_h, key="e_hour", label_visibility="collapsed")
-            e_min = c_em.selectbox("End Min", minutes, index=curr_m, key="e_min", label_visibility="collapsed")
-        
-        log_chk = st.text_input("Checklist Item (Optional)", key="log_chk")    
-        log_notes = st.text_area("Notes", key="log_notes")
-        
-        if st.button("💾 Save to Activity Log", use_container_width=True, type="primary"):
-            if log_activity:
-                smart_append_row(get_sheet("activity_log"), [
-                    log_date.strftime('%Y-%m-%d'), 
-                    f"{s_hour}:{s_min}", 
-                    f"{e_hour}:{e_min}", 
-                    GS_FORMULA, 
-                    log_activity.upper().strip(), 
-                    log_sub_activity.title().strip(), 
-                    log_chk.strip(), 
-                    log_notes
-                ])
-                get_activity_log.clear() 
-                st.success("Activity Logged!")
-                time.sleep(1.0)
-                st.rerun()
-            else: 
-                st.error("Please provide an Activity.")
+        with st.form("log_activity_form", clear_on_submit=True):
+            log_date = st.date_input("Date", value=now.date(), key="log_date")
+            col_act1, col_act2 = st.columns(2)
+            with col_act1: log_activity = st.text_input("Main Category", value=current_activity if current_activity != "FREE TIME" else "", key="log_act")
+            with col_act2: log_sub_activity = st.text_input("Sub-Activity", placeholder="e.g., YOGA", key="log_sub")
+            col1, col2 = st.columns(2)
+            with col1: log_start = st.time_input("Started At", value=clean_now, key="log_start")
+            with col2: log_end = st.time_input("Ended At", value=clean_now, key="log_end")
+            log_chk = st.text_input("Checklist Item (Optional)", key="log_chk")    
+            log_notes = st.text_area("Notes", key="log_notes")
+            if st.form_submit_button("Save to Activity Log", use_container_width=True):
+                if log_activity:
+                    smart_append_row(get_sheet("activity_log"), [log_date.strftime('%Y-%m-%d'), log_start.strftime('%H:%M'), log_end.strftime('%H:%M'), GS_FORMULA, log_activity.upper().strip(), log_sub_activity.upper().strip(), log_chk.strip(), log_notes])
+                    get_activity_log.clear() 
+                    st.rerun()
+                else: st.error("Please enter a Main Category.")
 
 except Exception as e: st.error(f"System Error: {e}")

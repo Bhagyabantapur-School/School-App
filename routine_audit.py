@@ -127,8 +127,7 @@ try:
 
     st.markdown("<h2 style='text-align: center; color: #555; margin-top: 0px;'>📊 Daily Data & Audit Hub</h2>", unsafe_allow_html=True)
     
-    # --- TABS INC. WEEKLY MATRIX ---
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["⏳ Timeline Audit", "📋 Daily Summary", "📅 Weekly Summary", "💧 Hydration", "📍 Places"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["⏳ Timeline Audit", "📋 Daily Summary", "📅 Weekly Matrix", "💧 Hydration", "📍 Places"])
 
     # ==========================================
     # TAB 1: TIMELINE AUDIT
@@ -196,7 +195,9 @@ try:
                 except: return None
 
         loc_df_safe['Parsed_Date'] = loc_df_safe['Date'].apply(parse_custom_date)
-        day_locs = loc_df_safe[loc_df_safe['Parsed_Date'] == selected_timeline_date].copy()
+        
+        # FIX: Include BOTH today and yesterday so early morning tasks grab correct prior location
+        day_locs = loc_df_safe[loc_df_safe['Parsed_Date'].isin([selected_timeline_date, selected_timeline_date - timedelta(days=1)])].copy()
         
         if not day_locs.empty:
             def parse_custom_dt(row):
@@ -287,35 +288,126 @@ try:
             
             if last_end_time is None or current_end > last_end_time: last_end_time = current_end
         
+        # --- NEW SIDE-BY-SIDE RENDERER FOR TIMELINE CARDS ---
         for event in timeline_events:
             eh, em = divmod(event['duration'], 60)
             dur_display = f"{eh}h {em}m" if eh > 0 and em > 0 else (f"{eh}h" if eh > 0 else (f"{em}m" if em > 0 else "<1m"))
 
             if event['type'] == 'transition':
-                st.markdown(f"<div style='background-color: #fff3e0; border: 1px solid #ffb74d; padding: 8px; border-radius: 6px; margin-bottom: 10px; text-align: center; color: #e65100; font-size: 14px;'><b>{event['start']} - {event['end']}</b> | ⏳ Transition Time: {dur_display}</div>", unsafe_allow_html=True)
+                html = (
+                    f"<div style='display: flex; justify-content: center; align-items: center; background-color: #fff3e0; border: 1px solid #ffb74d; padding: 6px 12px; border-radius: 20px; margin-bottom: 10px; margin-left: 20%; margin-right: 20%;'>"
+                    f"<span style='color: #e65100; font-size: 13px; font-weight: 500;'>⏳ Transition: {event['start']} - {event['end']} ({dur_display})</span>"
+                    f"</div>"
+                )
+                st.markdown(html, unsafe_allow_html=True)
             elif event['type'] == 'gap':
                 if event['activity'].startswith('On the way'):
-                    st.markdown(f"<div style='background-color: #e0f7fa; border-left: 6px solid #00838f; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'><div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({dur_display})</div><div style='color: #00838f; font-weight: bold; font-size: 16px;'>🛣️ {event['activity']}</div></div>", unsafe_allow_html=True)
+                    html = (
+                        f"<div style='display: flex; justify-content: space-between; align-items: center; background-color: #e0f7fa; border-left: 5px solid #00838f; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px;'>"
+                        f"<div style='flex: 1; font-size: 15px; font-weight: bold; color: #00838f;'>🛣️ {event['activity']}</div>"
+                        f"<div style='text-align: right; min-width: 110px;'>"
+                        f"<div style='font-size: 13px; font-weight: 600; color: #006064;'>{event['start']} - {event['end']}</div>"
+                        f"<div style='font-size: 12px; color: #00838f; background: #b2ebf2; display: inline-block; padding: 2px 8px; border-radius: 12px; margin-top: 4px;'>⏱️ {dur_display}</div>"
+                        f"</div>"
+                        f"</div>"
+                    )
                 elif event['duration'] < 5:
                     place_str = str(event.get('place', '')).strip()
-                    loc_html_gap = f"<div style='color: #0097a7; font-size: 14px; font-weight: 500; margin-top: 4px;'>📍 {place_str}</div>" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else ""
-                    st.markdown(f"<div style='background-color: #e0f2f1; border-left: 6px solid #00acc1; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'><div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({dur_display})</div><div style='color: #00acc1; font-weight: bold; font-size: 16px;'>{event['activity']}</div>{loc_html_gap}</div>", unsafe_allow_html=True)
+                    loc_html_gap = f"<div style='font-size: 12px; color: #0097a7; font-weight: 500; margin-top: 4px;'>📍 {place_str}</div>" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else ""
+                    html = (
+                        f"<div style='display: flex; justify-content: space-between; align-items: center; background-color: #e0f2f1; border-left: 5px solid #00acc1; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px;'>"
+                        f"<div style='flex: 1;'>"
+                        f"<div style='font-size: 15px; font-weight: bold; color: #00acc1;'>{event['activity']}</div>"
+                        f"{loc_html_gap}"
+                        f"</div>"
+                        f"<div style='text-align: right; min-width: 110px;'>"
+                        f"<div style='font-size: 13px; font-weight: 600; color: #00695c;'>{event['start']} - {event['end']}</div>"
+                        f"<div style='font-size: 12px; color: #00acc1; background: #b2dfdb; display: inline-block; padding: 2px 8px; border-radius: 12px; margin-top: 4px;'>⏱️ {dur_display}</div>"
+                        f"</div>"
+                        f"</div>"
+                    )
                 else:
                     place_str = str(event.get('place', '')).strip()
-                    loc_html_gap = f"<br><span style='color: #d32f2f; font-size: 13px; font-weight: 500;'>📍 {place_str}</span>" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else ""
-                    st.markdown(f"<div style='background-color: #fafafa; border: 2px dashed #cccccc; padding: 10px; border-radius: 8px; margin-bottom: 10px; text-align: center; color: #888;'><b>{event['start']} - {event['end']}</b> (Gap: {dur_display})<br><span style='color: #00acc1; font-weight: bold; font-size: 16px;'>{event['activity']}</span>{loc_html_gap}</div>", unsafe_allow_html=True)
+                    loc_html_gap = f"<div style='font-size: 12px; color: #d32f2f; font-weight: 500; margin-top: 4px;'>📍 {place_str}</div>" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else ""
+                    html = (
+                        f"<div style='display: flex; justify-content: space-between; align-items: center; background-color: #fafafa; border: 2px dashed #ccc; padding: 12px 16px; border-radius: 8px; margin-bottom: 10px;'>"
+                        f"<div style='flex: 1;'>"
+                        f"<div style='font-size: 15px; font-weight: bold; color: #888;'>{event['activity']}</div>"
+                        f"{loc_html_gap}"
+                        f"</div>"
+                        f"<div style='text-align: right; min-width: 110px;'>"
+                        f"<div style='font-size: 13px; font-weight: 600; color: #666;'>{event['start']} - {event['end']}</div>"
+                        f"<div style='font-size: 12px; color: #888; background: #eee; display: inline-block; padding: 2px 8px; border-radius: 12px; margin-top: 4px;'>⏱️ {dur_display}</div>"
+                        f"</div>"
+                        f"</div>"
+                    )
+                st.markdown(html, unsafe_allow_html=True)
             else:
                 cat = event['activity']
                 border_color = "#ff4b4b" if cat in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"] else ("#0068c9" if cat in ["WORK", "REPORT", "TASK"] else ("#2e7b32" if cat == "HEALTH" else ("#ff9f36" if cat in ["SLEEP", "PRE", "TEA", "OUT"] else ("#29b6f6" if cat == "FREE TIME" else "#555555"))))
-                sub_text = f"<br><b>{event['sub']}</b>" if event['sub'] else ""
+                
+                sub_text = f"<span style='color: #555; font-size: 14px; font-weight: 500;'>{event['sub']}</span>" if event['sub'] else ""
                 note_val = str(event.get('notes', '')).strip()
-                note_text = f"<br><span style='font-size: 13px; color: #666;'>{note_val}</span>" if note_val and note_val not in ["Checked off", "Auto-logged via Timer"] else ""
+                note_text = f"<div style='font-size: 12px; color: #888; margin-top: 4px;'>📝 {note_val}</div>" if note_val and note_val not in ["Checked off", "Auto-logged via Timer"] else ""
                 
                 place_str, move_str = str(event.get('place', '')).strip(), str(event.get('move', '')).strip()
                 loc_text = (f"🛣️ On the way ({move_str}) near {place_str}" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else f"🛣️ On the way ({move_str})") if move_str and move_str.upper() != "- STATIONARY -" else (f"📍 {place_str}" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else "")
-                loc_html = f"<div style='color: #d32f2f; font-size: 13px; font-weight: 500; margin-top: 4px;'>{loc_text}</div>" if loc_text else ""
+                loc_html = f"<div style='font-size: 12px; color: #0288d1; margin-top: 4px; font-weight: 500;'>{loc_text}</div>" if loc_text else ""
                 
-                st.markdown(f"<div style='background-color: white; border-left: 6px solid {border_color}; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'><div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({dur_display})</div><div style='color: {border_color}; font-weight: bold; font-size: 16px;'>{event['activity']}</div><div style='color: #333;'>{sub_text}{note_text}</div>{loc_html}</div>", unsafe_allow_html=True)
+                html = (
+                    f"<div style='display: flex; justify-content: space-between; align-items: center; background-color: white; border-left: 5px solid {border_color}; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 12px 16px; border-radius: 6px; margin-bottom: 10px;'>"
+                    f"<div style='flex: 1; padding-right: 15px;'>"
+                    f"<div style='display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;'>"
+                    f"<span style='font-size: 16px; font-weight: 700; color: {border_color};'>{event['activity']}</span>"
+                    f"{sub_text}"
+                    f"</div>"
+                    f"{note_text}"
+                    f"{loc_html}"
+                    f"</div>"
+                    f"<div style='text-align: right; min-width: 110px;'>"
+                    f"<div style='font-size: 13px; font-weight: 600; color: #333;'>{event['start']} - {event['end']}</div>"
+                    f"<div style='font-size: 12px; color: #666; background: #f0f2f6; display: inline-block; padding: 2px 8px; border-radius: 12px; margin-top: 4px;'>⏱️ {dur_display}</div>"
+                    f"</div>"
+                    f"</div>"
+                )
+                st.markdown(html, unsafe_allow_html=True)
+                
+        # --- 1. DAILY SUMMARY (TIMELINE OVERVIEW) ---
+        st.markdown("---")
+        st.markdown("<h4 style='text-align: center; color: #555;'>📊 Daily Summary (24 Hours)</h4>", unsafe_allow_html=True)
+        total_tracked = sum(e['duration'] for e in timeline_events if e['type'] == 'task')
+        total_transit = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and e['activity'] != 'Unlogged Time / Break')
+        
+        # Calculate exactly how much time is unaccounted for out of the 1440 minutes in a day
+        unlogged_24h = max(0, 1440 - total_tracked - total_transit)
+        
+        col_s1, col_s2, col_s3 = st.columns(3)
+        with col_s1: st.metric(label="Total Tracked Time", value=f"{int(total_tracked // 60)}h {int(total_tracked % 60)}m")
+        with col_s2: st.metric(label="Total Transit & Stops", value=f"{int(total_transit // 60)}h {int(total_transit % 60)}m")
+        with col_s3: st.metric(label="Unlogged / Free Time", value=f"{int(unlogged_24h // 60)}h {int(unlogged_24h % 60)}m")
+            
+        category_totals = {}
+        for e in timeline_events:
+            if e['type'] == 'task':
+                category_totals[e['activity']] = category_totals.get(e['activity'], 0) + e['duration']
+                
+        if total_transit > 0: category_totals['TRANSIT & STOPS'] = total_transit
+        if unlogged_24h > 0: category_totals['UNLOGGED TIME'] = unlogged_24h
+            
+        if category_totals:
+            cat_df = pd.DataFrame(list(category_totals.items()), columns=['Category', 'Minutes']).sort_values(by='Minutes', ascending=False)
+            
+            # Using Plotly for a beautiful Donut chart breakdown of the 24 hours
+            import plotly.graph_objects as go
+            fig = go.Figure(data=[go.Pie(
+                labels=cat_df['Category'], 
+                values=cat_df['Minutes'], 
+                hole=0.4,
+                textinfo='label+percent',
+                hoverinfo='label+value+percent'
+            )])
+            fig.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=350, showlegend=True)
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     # ==========================================
     # TAB 2: DAILY SUMMARY (COMPACT ACTIVITY CARDS)
@@ -375,7 +467,7 @@ try:
                     exp_title = f"{icon} {act_name} | {int(h)}h {int(m):02d}m | {count} items"
                     
                     with st.expander(exp_title):
-                        # Generate HTML to display internal rows nicely WITH st.markdown() ensuring rendering
+                        # Generate SINGLE LINE HTML to avoid markdown `<pre>` tags
                         for _, row in item['Group'].iterrows():
                             sub = str(row['Sub_Activities']).strip()
                             if not sub: sub = "General Task"
@@ -383,12 +475,13 @@ try:
                             chk = str(row['check_list']).strip()
                             if chk: sub += f" <span style='color: #0068c9;'>(☑️ {chk})</span>"
                             
-                            st.markdown(f"""
-                            <div style='display: flex; justify-content: space-between; align-items: center; background-color: #f8f9fa; padding: 8px 12px; border-radius: 6px; border-left: 3px solid #ccc; margin-bottom: 6px;'>
-                                <div style='font-size: 14px; font-weight: 500; color: #333;'>{sub}</div>
-                                <div style='font-size: 12px; color: #666; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 4px; white-space: nowrap;'>{row['Start_Time']} - {row['End_Time']} &nbsp;|&nbsp; <span style='color:#0068c9;'>{row['Duration']}</span></div>
-                            </div>
-                            """, unsafe_allow_html=True)
+                            html = (
+                                f"<div style='display: flex; justify-content: space-between; align-items: center; background-color: #f8f9fa; padding: 8px 12px; border-radius: 6px; border-left: 3px solid #ccc; margin-bottom: 6px;'>"
+                                f"<div style='font-size: 14px; font-weight: 500; color: #333;'>{sub}</div>"
+                                f"<div style='font-size: 12px; color: #666; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 4px; white-space: nowrap;'>{row['Start_Time']} - {row['End_Time']} &nbsp;|&nbsp; <span style='color:#0068c9;'>{row['Duration']}</span></div>"
+                                f"</div>"
+                            )
+                            st.markdown(html, unsafe_allow_html=True)
                             
             # Add Unlogged Time to the end of the cards
             last_col = col_left if len(summary_data) % 2 == 0 else col_right
@@ -446,7 +539,6 @@ try:
                 elif ih > 0: return f"{ih}h"
                 else: return f"{im}m"
                 
-            # CHANGED: map() instead of applymap() for Pandas compatibility
             formatted_pivot = pivot.map(format_matrix_hours)
             
             # Display matrix

@@ -122,7 +122,8 @@ try:
 
     st.markdown("<h2 style='text-align: center; color: #555; margin-top: 0px;'>📊 Daily Data & Audit Hub</h2>", unsafe_allow_html=True)
     
-    tab1, tab2, tab3 = st.tabs(["⏳ Timeline Audit", "💧 Hydration", "📍 Places Database"])
+    # --- ADDED NEW WEEKLY REPORT TAB ---
+    tab1, tab2, tab3, tab4 = st.tabs(["⏳ Timeline Audit", "📊 Weekly Report", "💧 Hydration", "📍 Places Database"])
 
     # ==========================================
     # TAB 1: TIMELINE AUDIT
@@ -311,16 +312,19 @@ try:
                 
                 st.markdown(f"<div style='background-color: white; border-left: 6px solid {border_color}; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 10px 15px; border-radius: 4px; margin-bottom: 10px;'><div style='color: #888; font-size: 14px;'>{event['start']} - {event['end']} ({dur_display})</div><div style='color: {border_color}; font-weight: bold; font-size: 16px;'>{event['activity']}</div><div style='color: #333;'>{sub_text}{note_text}</div>{loc_html}</div>", unsafe_allow_html=True)
                 
+        # --- 1. UPDATED DAILY SUMMARY (GROUPED DATA & 24H TRACKING) ---
         st.markdown("---")
-        st.markdown("<h4 style='text-align: center; color: #555;'>📊 Daily Summary</h4>", unsafe_allow_html=True)
+        st.markdown("<h4 style='text-align: center; color: #555;'>📊 Daily Summary (24 Hours)</h4>", unsafe_allow_html=True)
         total_tracked = sum(e['duration'] for e in timeline_events if e['type'] == 'task')
-        total_gap = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and e['activity'] == 'Unlogged Time / Break')
         total_transit = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and e['activity'] != 'Unlogged Time / Break')
+        
+        # Calculate Unlogged time for 24 hours
+        unlogged_24h = max(0, 1440 - total_tracked - total_transit)
         
         col_s1, col_s2, col_s3 = st.columns(3)
         with col_s1: st.metric(label="Total Tracked Time", value=f"{int(total_tracked // 60)}h {int(total_tracked % 60)}m")
-        with col_s2: st.metric(label="Total Unlogged Time", value=f"{int(total_gap // 60)}h {int(total_gap % 60)}m")
-        with col_s3: st.metric(label="Total Transit & Stops", value=f"{int(total_transit // 60)}h {int(total_transit % 60)}m")
+        with col_s2: st.metric(label="Total Transit & Stops", value=f"{int(total_transit // 60)}h {int(total_transit % 60)}m")
+        with col_s3: st.metric(label="Unlogged / Free Time", value=f"{int(unlogged_24h // 60)}h {int(unlogged_24h % 60)}m")
             
         category_totals = {}
         for e in timeline_events:
@@ -328,17 +332,76 @@ try:
                 category_totals[e['activity']] = category_totals.get(e['activity'], 0) + e['duration']
                 
         if total_transit > 0: category_totals['TRANSIT & STOPS'] = total_transit
+        if unlogged_24h > 0: category_totals['UNLOGGED TIME'] = unlogged_24h
             
         if category_totals:
             cat_df = pd.DataFrame(list(category_totals.items()), columns=['Category', 'Minutes']).sort_values(by='Minutes', ascending=False)
+            
+            import plotly.graph_objects as go
+            fig = go.Figure(data=[go.Pie(
+                labels=cat_df['Category'], 
+                values=cat_df['Minutes'], 
+                hole=0.4,
+                textinfo='label+percent',
+                hoverinfo='label+value+percent'
+            )])
+            fig.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=350, showlegend=True)
+            st.plotly_chart(fig, use_container_width=True)
+
             cat_cols = st.columns(min(len(cat_df), 4))
             for idx, row in cat_df.iterrows():
-                with cat_cols[idx % 4 if len(cat_df) >= 4 else idx]: st.markdown(f"<div style='background-color:#f0f2f6; padding:10px; border-radius:8px; text-align:center; margin-bottom:10px;'><b style='color:#333;'>{row['Category']}</b><br><span style='color:#0068c9;'>{int(row['Minutes'] // 60)}h {int(row['Minutes'] % 60)}m</span></div>", unsafe_allow_html=True)
+                with cat_cols[idx % 4 if len(cat_df) >= 4 else idx]: 
+                    st.markdown(f"<div style='background-color:#f0f2f6; padding:10px; border-radius:8px; text-align:center; margin-bottom:10px;'><b style='color:#333;'>{row['Category']}</b><br><span style='color:#0068c9;'>{int(row['Minutes'] // 60)}h {int(row['Minutes'] % 60)}m</span></div>", unsafe_allow_html=True)
 
     # ==========================================
-    # TAB 2: HYDRATION
+    # TAB 2: WEEKLY REPORT
     # ==========================================
     with tab2:
+        st.markdown("<h3 style='text-align: center; color: #555; margin-top: 0px;'>📊 Weekly Activity Report</h3>", unsafe_allow_html=True)
+        
+        # Get the last 7 dates
+        last_7_dates = [(now.date() - timedelta(days=i)).strftime('%Y-%m-%d') for i in range(7)]
+        weekly_logs = log_df[(log_df['Date'].isin(last_7_dates)) & (log_df['Duration'] != 'RUNNING')].copy()
+        
+        if not weekly_logs.empty:
+            def parse_duration_to_hours(dur_str):
+                try:
+                    h, m = map(int, str(dur_str).strip().split(':'))
+                    return h + (m / 60.0)
+                except: return 0
+                
+            weekly_logs['Hours'] = weekly_logs['Duration'].apply(parse_duration_to_hours)
+            
+            # Pivot table for stacked bar chart
+            weekly_pivot = weekly_logs.pivot_table(index="Date", columns="Activity", values="Hours", aggfunc="sum").fillna(0)
+            weekly_pivot = weekly_pivot.sort_index()
+            
+            st.markdown("#### ⏳ Time Tracked per Day (Hours)")
+            st.bar_chart(weekly_pivot)
+            
+            # 7-Day Activity Totals
+            st.markdown("#### 📈 7-Day Activity Totals")
+            weekly_totals = weekly_logs.groupby('Activity')['Hours'].sum().sort_values(ascending=False).reset_index()
+            
+            total_tracked_week = weekly_totals['Hours'].sum()
+            untracked_week = max(0, (7 * 24) - total_tracked_week)
+            
+            col_w1, col_w2, col_w3 = st.columns(3)
+            with col_w1: st.metric("Total Tracked (7 Days)", f"{int(total_tracked_week)}h {int((total_tracked_week%1)*60)}m")
+            with col_w2: st.metric("Total Untracked (7 Days)", f"{int(untracked_week)}h {int((untracked_week%1)*60)}m")
+            with col_w3: st.metric("Total Hours (7 Days)", "168h 0m")
+            
+            cat_cols_w = st.columns(min(len(weekly_totals), 4))
+            for idx, row in weekly_totals.iterrows():
+                with cat_cols_w[idx % 4 if len(weekly_totals) >= 4 else idx]: 
+                    st.markdown(f"<div style='background-color:#f0f2f6; padding:10px; border-radius:8px; text-align:center; margin-bottom:10px;'><b style='color:#333;'>{row['Activity']}</b><br><span style='color:#0068c9;'>{int(row['Hours'])}h {int((row['Hours']%1)*60)}m</span></div>", unsafe_allow_html=True)
+        else:
+            st.info("No completed activities found for the last 7 days.")
+
+    # ==========================================
+    # TAB 3: HYDRATION
+    # ==========================================
+    with tab3:
         st.markdown("<h3 style='text-align: center; color: #0288d1;'>💧 Hydration Tracker</h3>", unsafe_allow_html=True)
         col_w1, col_w2, col_w3 = st.columns(3)
         with col_w1:
@@ -372,9 +435,9 @@ try:
             if not this_month.empty: st.line_chart(this_month.groupby(this_month['Date_dt'].dt.day)['Amount_ml'].sum(), color="#0288d1")
 
     # ==========================================
-    # TAB 3: PLACES DATABASE
+    # TAB 4: PLACES DATABASE
     # ==========================================
-    with tab3:
+    with tab4:
         st.markdown("<h3 style='text-align: center; color: #555;'>📍 Visited Places Database</h3>", unsafe_allow_html=True)
         if st.button("🔄 Generate & Sync to Google Sheets", type="primary", use_container_width=True):
             with st.spinner("Analyzing location history and syncing..."):
@@ -392,7 +455,7 @@ try:
                     
                 if valid_visits:
                     v_df = pd.DataFrame(valid_visits)
-                    grouped = v_df.groupby(['Place', 'Purpose'])['Visit_DateTime'].apply(lambda x: '\n'.join(list(dict.fromkeys(x)))).reset_index()
+                    grouped = v_df.groupby(['Place', 'Purpose'])['Visit_DateTime'].apply(lambda x: '\\n'.join(list(dict.fromkeys(x)))).reset_index()
                     try:
                         client = init_connection()
                         ss = client.open("sk_money_location")

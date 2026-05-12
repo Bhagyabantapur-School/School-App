@@ -16,7 +16,7 @@ st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    .block-container {padding-top: 2rem; padding-bottom: 2rem;}
+    .block-container {padding-top: 4rem; padding-bottom: 2rem;}
     div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {
         border-radius: 0px !important;
         border: 1px solid #cccccc !important;

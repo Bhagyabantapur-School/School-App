@@ -11,8 +11,8 @@ import time
 st.set_page_config(page_title="BPS Video Tracker", page_icon="🎥", layout="wide")
 
 # --- BACK BUTTON ---
-if st.button("⬅️ Back to Dashboard", type="secondary"):
-    st.switch_page("dashboard.py")
+if st.button("⬅️ Back to Hub", type="secondary"):
+    st.switch_page("routine_app.py")
 st.write("---") 
 
 # --- MEMORY MODULE ---

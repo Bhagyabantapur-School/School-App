@@ -17,8 +17,8 @@ MDM_GS_FORMULA = '=IF(INDIRECT("E"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD
 st.set_page_config(page_title="MDM Return Logger", page_icon="📦", layout="wide")
 
 # --- BACK BUTTON (PRESERVED IN STRICT LOCATION) ---
-if st.button("⬅️ Back to Dashboard", type="secondary"):
-    st.switch_page("dashboard.py")
+if st.button("⬅️ Back to Hub", type="secondary"):
+    st.switch_page("routine_app.py")
 st.write("---") 
 # --------------------------------------------------
 

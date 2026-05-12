@@ -1,7 +1,7 @@
 import streamlit as st
 # --- BACK BUTTON ---
-if st.button("⬅️ Back to Dashboard", type="secondary"):
-    st.switch_page("dashboard.py") 
+if st.button("⬅️ Back to Hub", type="secondary"):
+    st.switch_page("routine_app.py") 
 st.write("---") 
 # -------------------
 import streamlit.components.v1 as components

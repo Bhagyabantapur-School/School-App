@@ -1012,7 +1012,7 @@ with tab_location:
         </style>
     """, unsafe_allow_html=True)
     
-    # --- CONTEXT AWARE BUTTON: SUBORNO BOARDED BUS ---
+    # --- CONTEXT AWARE BUTTON: SUBORNO BOARDED BUS (MORNING) ---
     if current_loc == "Girishmore Bus Stop" and "Suborno" in st.session_state.current_people and not st.session_state.route_active:
         if st.button("🚌 Suborno Boarded Bus", use_container_width=True, type="primary"):
             try:
@@ -1025,6 +1025,28 @@ with tab_location:
                 st.session_state.current_people = "I"
                 load_location_data.clear()
                 st.success(f"Logged Suborno boarding bus at {time_str}. You are now traveling alone.")
+                st.rerun()
+            except Exception as e: st.error(f"Error: {e}")
+
+    # --- CONTEXT AWARE BUTTON: RECEIVED SUBORNO FROM BUS (AFTERNOON) ---
+    time_now_for_btn = get_ist_now()
+    if current_loc == "Girishmore Bus Stop" and "Suborno" not in st.session_state.current_people and not st.session_state.route_active and (13 <= time_now_for_btn.hour <= 14):
+        if st.button("👦 Received Suborno from Bus", use_container_width=True, type="primary"):
+            try:
+                time_now = get_ist_now()
+                today_str = time_now.strftime("%d.%m.%y")
+                time_str = time_now.strftime("%H:%M")
+                
+                # Automatically append Suborno to whoever is currently waiting at the bus stop
+                current_p = st.session_state.current_people
+                new_people = current_p + ", Suborno" if current_p else "I, Suborno"
+                
+                sh.worksheet("LOCATION_DATA").append_row([
+                    today_str, time_str, "- Stationary -", "Girishmore Bus Stop", new_people, "Received Suborno from school bus"
+                ])
+                st.session_state.current_people = new_people
+                load_location_data.clear()
+                st.success(f"Logged Suborno arriving at {time_str}. Companions updated to: {new_people}")
                 st.rerun()
             except Exception as e: st.error(f"Error: {e}")
     

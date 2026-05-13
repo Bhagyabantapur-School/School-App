@@ -1022,7 +1022,12 @@ with tab_location:
                 sh.worksheet("LOCATION_DATA").append_row([
                     today_str, time_str, "- Stationary -", "Girishmore Bus Stop", "I", "Suborno boarded bus to school"
                 ])
+                
+                # Force update the background state AND the UI Dropdowns
                 st.session_state.current_people = "I"
+                if "dyn_people" in st.session_state: st.session_state.dyn_people = "I"
+                if "exp_people" in st.session_state: st.session_state.exp_people = "I"
+                
                 load_location_data.clear()
                 st.success(f"Logged Suborno boarding bus at {time_str}. You are now traveling alone.")
                 st.rerun()
@@ -1044,7 +1049,12 @@ with tab_location:
                 sh.worksheet("LOCATION_DATA").append_row([
                     today_str, time_str, "- Stationary -", "Girishmore Bus Stop", new_people, "Received Suborno from school bus"
                 ])
+                
+                # Force update the background state AND the UI Dropdowns
                 st.session_state.current_people = new_people
+                if "dyn_people" in st.session_state: st.session_state.dyn_people = new_people
+                if "exp_people" in st.session_state: st.session_state.exp_people = new_people
+                
                 load_location_data.clear()
                 st.success(f"Logged Suborno arriving at {time_str}. Companions updated to: {new_people}")
                 st.rerun()

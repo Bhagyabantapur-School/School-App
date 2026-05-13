@@ -8,6 +8,7 @@ from fpdf import FPDF
 import tempfile
 import os
 from datetime import datetime
+import pytz  # <-- Added pytz import here
 from PIL import Image
 
 # ==========================================
@@ -206,9 +207,14 @@ with tab1:
                     next_id_num = len(records) + 1
                     
                     rows_to_append = []
-                    dt_now = datetime.now()
+                    
+                    # --- ADDED: IST Timezone Logic ---
+                    ist_timezone = pytz.timezone('Asia/Kolkata')
+                    dt_now = datetime.now(ist_timezone)
+                    
                     date_str = dt_now.strftime("%d-%b-%Y")
                     time_str = dt_now.strftime("%H:%M")
+                    # ---------------------------------
                     
                     for i in range(quantity):
                         code = f"{PREFIXES[category]}-{next_id_num + i:03d}"

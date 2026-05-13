@@ -42,27 +42,26 @@ except Exception as e:
 TABS = ["Files", "Devices", "Things", "Other"]
 PREFIXES = {"Files": "FIL", "Devices": "DEV", "Things": "THI", "Other": "OTH"}
 
-@st.cache_data(ttl=10)
+# Increased TTL to 120 seconds to protect Google API quota
+@st.cache_data(ttl=120)
 def get_category_data(category):
     try:
         return spreadsheet.worksheet(category).get_all_records()
     except Exception:
         return []
 
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=120)
 def get_all_inventory_data():
     all_data = []
     for tab in TABS:
-        try:
-            records = spreadsheet.worksheet(tab).get_all_records()
-            for r in records:
-                r['Category'] = tab 
-                all_data.append(r)
-        except Exception:
-            pass
+        records = get_category_data(tab)
+        for r in records:
+            row_data = r.copy() 
+            row_data['Category'] = tab 
+            all_data.append(row_data)
     return list(reversed(all_data))
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=120)
 def get_all_locations():
     locations = set()
     for tab_name in TABS:
@@ -75,10 +74,9 @@ def get_all_locations():
     return sorted(list(locations))
 
 def hex_to_rgb(hex_code):
-    """Converts a HEX color string to an RGB tuple."""
     hex_code = str(hex_code).lstrip('#')
     if len(hex_code) != 6:
-        return (255, 255, 255) # Default to white if invalid
+        return (255, 255, 255)
     return tuple(int(hex_code[i:i+2], 16) for i in (0, 2, 4))
 
 def generate_label_pdf_from_mixed_data(items):
@@ -115,7 +113,6 @@ def generate_label_pdf_from_mixed_data(items):
             pdf.rect(x, y, LABEL_W, LABEL_H)
             
             # --- COLOR CODING STRIP ---
-            # Draws a 4mm colored rectangle on the left edge of the sticker
             r, g, b = hex_to_rgb(item_color)
             pdf.set_fill_color(r, g, b)
             pdf.rect(x, y, 4, LABEL_H, style="F") 
@@ -129,7 +126,6 @@ def generate_label_pdf_from_mixed_data(items):
                 qr.save(qr_path)
 
                 qr_size = LABEL_H - 15 
-                # Shift QR code slightly right to make room for color strip
                 pdf.image(qr_path, x=x + 6, y=y + 2, w=qr_size, h=qr_size)
 
                 pdf.set_font("helvetica", size=8)
@@ -160,8 +156,8 @@ tab1, tab2, tab3, tab4 = st.tabs(["📝 Add Data", "🖨️ Universal Print Stud
 with tab1:
     st.subheader("Register New Asset")
     
-    # 1. Camera Color Capture Engine
-    detected_color_hex = "#FFFFFF" # Default white
+    # Camera Color Capture Engine
+    detected_color_hex = "#FFFFFF" 
     
     with st.expander("🎨 Color Coding (Camera)"):
         st.write("Take a picture of the item. The app will automatically extract its average color for your label.")
@@ -170,28 +166,25 @@ with tab1:
         if enable_camera:
             cam_pic = st.camera_input("Capture Color")
             if cam_pic is not None:
-                # Convert image, resize to 1x1 pixel to get the absolute average color instantly
                 img = Image.open(cam_pic).convert('RGB')
                 img_1x1 = img.resize((1, 1))
                 r, g, b = img_1x1.getpixel((0, 0))
                 detected_color_hex = f"#{r:02x}{g:02x}{b:02x}"
                 st.success(f"Color Detected: {detected_color_hex}")
     
-    # 2. Main Data Form
     with st.form("data_entry_form"):
         col1, col2 = st.columns(2)
         
         with col1:
             category = st.selectbox("Category (Select Tab)", TABS)
-            description = st.text_input("Contain / Description", placeholder="e.g., Python Course Files")
+            description = st.text_input("Contain / Description", placeholder="e.g., DJI Mic Mini TX unit")
             
             existing_locations = get_all_locations()
             loc_choice = st.selectbox("Location", existing_locations + ["+ Add New Location (Type Below)"])
-            new_location = st.text_input("New Location Name (if '+ Add New...' selected)", placeholder="e.g., GF002")
+            new_location = st.text_input("New Location Name (if '+ Add New...' selected)", placeholder="e.g., School Office - Cabinet A")
             
         with col2:
             qr_yes_no = st.selectbox("Include QR Code on Label?", ["Yes", "No"])
-            # Let user fine-tune the color if the camera got it slightly wrong
             final_color = st.color_picker("Item Color (Adjust if needed)", value=detected_color_hex)
             quantity = st.number_input("Quantity to Register", min_value=1, value=1, step=1)
             
@@ -215,12 +208,12 @@ with tab1:
                     
                     for i in range(quantity):
                         code = f"{PREFIXES[category]}-{next_id_num + i:03d}"
-                        # IMPORTANT: Added 'Color' as the 7th column to be saved to Google Sheets
                         rows_to_append.append([date_str, time_str, description, final_location, code, qr_yes_no, final_color])
                     
                     worksheet.append_rows(rows_to_append)
                     st.success(f"✅ Successfully saved {quantity} item(s) to the '{category}' tab!")
                     
+                    # Clear caches instantly so the print queue updates
                     get_category_data.clear()
                     get_all_inventory_data.clear()
                     get_all_locations.clear()
@@ -287,7 +280,6 @@ with tab2:
                             item = page_items[i + j]
                             col_hex = item.get('Color', '#FFFFFF')
                             with cols[j]:
-                                # Use Streamlit HTML to preview the color block!
                                 st.markdown(
                                     f"""
                                     <div style="border: 1px solid #ddd; padding: 10px; border-radius: 5px; display: flex;">
@@ -301,7 +293,7 @@ with tab2:
                                     """, 
                                     unsafe_allow_html=True
                                 )
-                st.write("") # Spacing 
+                st.write("") 
     else:
         st.info("Your inventory is currently empty across all categories.")
 

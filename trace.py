@@ -88,7 +88,8 @@ def generate_label_pdf(item_type, description, location, quantity):
             pdf.text(x=text_x, y=text_y + 8, text=f"{short_desc}")
             pdf.text(x=text_x, y=text_y + 12, text=f"Loc: {location[:15]}")
 
-    return pdf.output(dest="S")
+    # FIX: Convert the bytearray returned by fpdf2 into standard bytes for Streamlit
+    return bytes(pdf.output())
 
 # ==========================================
 # 4. APP LAYOUT & UI
@@ -96,8 +97,8 @@ def generate_label_pdf(item_type, description, location, quantity):
 st.title("📦 trace.py")
 st.markdown("### Physical Asset & Equipment Manager")
 
-# Create the tabs
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "📷 Scanner", "🖨️ Label Generator", "📁 CSV Importer"])
+# Create the tabs (CSV Importer removed)
+tab1, tab2, tab3 = st.tabs(["📊 Dashboard", "📷 Scanner", "🖨️ Label Generator"])
 
 # --- TAB 1: DASHBOARD ---
 with tab1:
@@ -121,8 +122,7 @@ with tab1:
 with tab2:
     st.subheader("Mobile QR Scanner")
     st.info("This module uses your device camera to check items in and out.")
-    st.warning("To enable live scanning, ensure the app is accessed via HTTPS (Streamlit Cloud handles this automatically).")
-    # You can integrate streamlit-qrcode-scanner logic here when ready
+    st.warning("To enable live scanning, ensure the app is accessed via HTTPS.")
 
 # --- TAB 3: LABEL GENERATOR ---
 with tab3:
@@ -171,38 +171,3 @@ with tab3:
         )
     elif generate_btn:
         st.error("Please fill in the Item Type and Description.")
-
-# --- TAB 4: CSV IMPORTER ---
-with tab4:
-    st.subheader("Bulk Import Data to Google Sheets")
-    st.write("Upload a CSV file. A new tab will be created in your 'Trace' Google Sheet automatically.")
-    
-    uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
-    
-    if uploaded_file is not None:
-        try:
-            df_upload = pd.read_csv(uploaded_file)
-            st.write("Preview of data:")
-            st.dataframe(df_upload.head())
-            
-            # Use the filename (without .csv) as the new tab name
-            tab_name = uploaded_file.name.replace(".csv", "")
-            
-            if st.button(f"Create Tab '{tab_name}' & Upload Data"):
-                with st.spinner("Connecting to Google Sheets..."):
-                    try:
-                        # Try to find the tab, if it exists, don't overwrite blindly
-                        spreadsheet.worksheet(tab_name)
-                        st.error(f"A tab named '{tab_name}' already exists in your Google Sheet. Please rename the file and try again.")
-                    except gspread.exceptions.WorksheetNotFound:
-                        # Create the new tab
-                        rows, cols = df_upload.shape
-                        # Add a little buffer to row/col count
-                        new_sheet = spreadsheet.add_worksheet(title=tab_name, rows=str(rows+10), cols=str(cols+5))
-                        
-                        # Upload the data
-                        new_sheet.update([df_upload.columns.values.tolist()] + df_upload.values.tolist())
-                        st.success(f"✅ Data successfully uploaded to a new tab named '{tab_name}'!")
-                        
-        except Exception as e:
-            st.error(f"Error processing the CSV: {e}")

@@ -196,6 +196,7 @@ try:
 
         loc_df_safe['Parsed_Date'] = loc_df_safe['Date'].apply(parse_custom_date)
         
+        # Load both yesterday and today's location data to catch late-night state changes
         day_locs = loc_df_safe[loc_df_safe['Parsed_Date'].isin([selected_timeline_date, selected_timeline_date - timedelta(days=1)])].copy()
         
         if not day_locs.empty:
@@ -214,11 +215,24 @@ try:
             day_locs['Move'], day_locs['Place'] = day_locs['Clean_Move'], day_locs['Clean_Place']
             day_locs = day_locs[day_locs.apply(lambda r: str(r['Move']).strip().upper() != "- STATIONARY -" or (len(str(r['Place']).strip()) > 1 and str(r['Place']).strip().upper() not in ["I", "NAN", "NONE"]), axis=1)].dropna(subset=['Loc_DT']).sort_values('Loc_DT')
         
+        
+        # --- THE FIX: Ensuring the timeline limit never falls into yesterday ---
         start_time_limit = pd.to_datetime(selected_date_str + ' 05:00')
-        if not day_locs.empty and day_locs['Loc_DT'].min() < start_time_limit: start_time_limit = day_locs['Loc_DT'].min()
-        if not day_logs.empty and day_logs.iloc[0]['Display_Start'] < start_time_limit and day_logs.iloc[0]['Activity'] != 'CURRENT_TIME_MARKER': start_time_limit = day_logs.iloc[0]['Display_Start']
+        today_locs = day_locs[day_locs['Parsed_Date'] == selected_timeline_date] if not day_locs.empty else pd.DataFrame()
+        
+        if not today_locs.empty and today_locs['Loc_DT'].min() < start_time_limit: 
+            start_time_limit = today_locs['Loc_DT'].min()
+            
+        if not day_logs.empty and day_logs.iloc[0]['Display_Start'] < start_time_limit and day_logs.iloc[0]['Activity'] != 'CURRENT_TIME_MARKER': 
+            start_time_limit = day_logs.iloc[0]['Display_Start']
+            
+        # SAFETY CATCH: Force the minimum boundary to 12:00 AM of the selected day
+        if start_time_limit < day_start_dt:
+            start_time_limit = day_start_dt
 
         last_end_time = start_time_limit
+        # ----------------------------------------------------------------------
+        
         timeline_events = []
         
         for _, row in day_logs.iterrows():
@@ -481,7 +495,7 @@ try:
                             )
                             st.markdown(html, unsafe_allow_html=True)
                             
-            # --- FIX: Place UNLOGGED TIME outside the columns so it stretches fully across the bottom ---
+            # Add Unlogged Time to the end of the cards
             st.markdown("<br>", unsafe_allow_html=True)
             h_un, m_un = divmod(unlogged_day, 60)
             with st.expander(f"🕳️ UNLOGGED TIME | {int(h_un)}h {int(m_un):02d}m"):

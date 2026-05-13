@@ -24,7 +24,6 @@ st.sidebar.markdown("---")
 
 # 4. DEFINE ALL PAGES
 # --- Personal Pages ---
-# NOTE: routine_app.py is now the default Hub!
 routine_hub = st.Page("routine_app.py", title="Live Routine Hub", icon="⏱️", default=(system_choice == 'Personal Hub'))
 money_location = st.Page("money_location.py", title="Money & Location", icon="📍")
 money_utilities = st.Page("money_utilities.py", title="Money Utilities", icon="💳") 
@@ -39,6 +38,7 @@ routine_audit = st.Page("routine_audit.py", title="Routine Audit", icon="🔍")
 routine_editor = st.Page("routine_editor.py", title="Routine Editor", icon="✏️")
 mdm_return = st.Page("mdm_return_log.py", title="MDM Returns", icon="📦")
 ytfb_videos = st.Page("bps_ytfb_videos.py", title="Video Manager", icon="🎬")
+trace_app = st.Page("trace.py", title="Trace Inventory", icon="🏷️") # <-- NEW APP
 
 # --- BPS Digital Pages ---
 bps_dashboard = st.Page("bps_dashboard.py", title="Main Dashboard", icon="🏫", default=(system_choice == 'BPS Digital System'))
@@ -60,7 +60,7 @@ if st.session_state.active_system == 'Personal Hub':
             routine_hub, money_location, money_utilities, 
             strong, project, election, monthly, money_tracker, 
             health, backup, routine_audit, routine_editor, 
-            mdm_return, ytfb_videos
+            mdm_return, ytfb_videos, trace_app # <-- ADDED HERE
         ]
     })
     st.sidebar.caption("🔒 Personal Workspace Active")

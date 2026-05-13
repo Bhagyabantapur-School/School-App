@@ -41,12 +41,27 @@ except Exception as e:
 TABS = ["Files", "Devices", "Things", "Other"]
 PREFIXES = {"Files": "FIL", "Devices": "DEV", "Things": "THI", "Other": "OTH"}
 
-@st.cache_data(ttl=10) # Short cache so it refreshes quickly after adding data
+@st.cache_data(ttl=10)
 def get_category_data(category):
     try:
         return spreadsheet.worksheet(category).get_all_records()
     except Exception:
         return []
+
+@st.cache_data(ttl=10)
+def get_all_inventory_data():
+    """Fetches data from ALL tabs and tags them with their category."""
+    all_data = []
+    for tab in TABS:
+        try:
+            records = spreadsheet.worksheet(tab).get_all_records()
+            for r in records:
+                r['Category'] = tab # Inject the category name for the PDF
+                all_data.append(r)
+        except Exception:
+            pass
+    # Reverse the list so the newest entries appear at the top of the print queue
+    return list(reversed(all_data))
 
 @st.cache_data(ttl=30)
 def get_all_locations():
@@ -60,7 +75,7 @@ def get_all_locations():
         locations.add("GF001")
     return sorted(list(locations))
 
-def generate_label_pdf_from_data(items, category):
+def generate_label_pdf_from_mixed_data(items):
     LABELS_PER_ROW, ROWS_PER_PAGE = 3, 7
     LABELS_PER_PAGE = LABELS_PER_ROW * ROWS_PER_PAGE
     A4_WIDTH, A4_HEIGHT = 210, 297
@@ -83,7 +98,9 @@ def generate_label_pdf_from_data(items, category):
             x = MARGIN_X + (col * LABEL_W)
             y = MARGIN_Y + (row * LABEL_H)
 
+            # Extract data dynamically from each mixed item
             unique_id = item.get('Code', '')
+            category = item.get('Category', 'Unknown')
             description = str(item.get('Contain/Description', ''))
             location = str(item.get('Location', ''))
             include_qr = str(item.get('QR Code', 'No')).strip().lower() == 'yes'
@@ -124,7 +141,7 @@ def generate_label_pdf_from_data(items, category):
 st.title("📦 trace.py")
 st.markdown("### Physical Asset & Equipment Manager")
 
-tab1, tab2, tab3, tab4 = st.tabs(["📝 Add Data", "🖨️ Print & Preview", "📊 Dashboard", "📷 Scanner"])
+tab1, tab2, tab3, tab4 = st.tabs(["📝 Add Data", "🖨️ Universal Print Studio", "📊 Dashboard", "📷 Scanner"])
 
 # --- TAB 1: ADD DATA ---
 with tab1:
@@ -145,7 +162,6 @@ with tab1:
             qr_yes_no = st.selectbox("Include QR Code on Label?", ["Yes", "No"])
             quantity = st.number_input("Quantity to Register", min_value=1, value=1, step=1)
             
-        # Replaced the dual-purpose button with a database-only button
         submit_btn = st.form_submit_button("Save to Database")
 
     if submit_btn:
@@ -169,83 +185,87 @@ with tab1:
                         rows_to_append.append([date_str, time_str, description, final_location, code, qr_yes_no])
                     
                     worksheet.append_rows(rows_to_append)
-                    st.success(f"✅ Successfully saved {quantity} item(s) to the '{category}' tab! Switch to the **Print & Preview** tab to generate your labels.")
+                    st.success(f"✅ Successfully saved {quantity} item(s) to the '{category}' tab! Switch to the **Universal Print Studio** to generate your labels.")
                     
                     # Clear caches so the print tab immediately sees the new data
                     get_category_data.clear()
+                    get_all_inventory_data.clear()
                     get_all_locations.clear()
 
                 except Exception as e:
                     st.error(f"Error updating database: {e}")
 
-# --- TAB 2: PRINT & PREVIEW (NEW) ---
+# --- TAB 2: UNIVERSAL PRINT STUDIO (UPDATED) ---
 with tab2:
-    st.subheader("Print Labels")
+    st.subheader("Universal Print Queue")
+    st.write("Check the boxes in the **'🖨️ Print?'** column to add items to your print batch. The newest items are at the top.")
     
-    print_category = st.selectbox("Select Category to Print", TABS, key="print_cat")
-    data = get_category_data(print_category)
+    all_items = get_all_inventory_data()
     
-    if data:
-        st.markdown("**Select ID Range to Print:**")
-        codes = [str(d.get('Code', '')) for d in data]
+    if all_items:
+        df_print = pd.DataFrame(all_items)
         
-        # Select range of items to print
-        col_start, col_end = st.columns(2)
-        start_idx = col_start.selectbox("From ID:", range(len(codes)), format_func=lambda x: codes[x], index=max(0, len(codes)-1))
-        end_idx = col_end.selectbox("To ID:", range(len(codes)), format_func=lambda x: codes[x], index=len(codes)-1)
+        # Add a checkbox column to the front of the table, default is False
+        df_print.insert(0, "🖨️ Print?", False)
         
-        if start_idx <= end_idx:
-            selected_items = data[start_idx : end_idx + 1]
-            total_labels = len(selected_items)
+        # Use an interactive data editor
+        edited_df = st.data_editor(
+            df_print,
+            hide_index=True,
+            use_container_width=True,
+            disabled=df_print.columns.drop("🖨️ Print?").tolist(), # Lock all columns except the checkbox
+            height=400
+        )
+        
+        # Filter down to only the items the user checked
+        selected_df = edited_df[edited_df["🖨️ Print?"] == True]
+        selected_items = selected_df.to_dict('records')
+        total_labels = len(selected_items)
+        
+        if total_labels > 0:
             pages_needed = math.ceil(total_labels / 21)
             
             # Print Metrics
             st.markdown("---")
             m1, m2 = st.columns(2)
-            m1.metric("Labels to Print", total_labels)
+            m1.metric("Labels Selected for Print", total_labels)
             m2.metric("A4 Pages Required", pages_needed)
             
-            # PDF Generation Button
-            if st.button("Generate PDF from Selection", type="primary"):
-                with st.spinner("Building PDF..."):
-                    pdf_bytes = generate_label_pdf_from_data(selected_items, print_category)
-                    st.session_state['ready_pdf'] = pdf_bytes
-                    st.session_state['ready_pdf_name'] = f"Labels_{print_category}_{codes[start_idx]}_to_{codes[end_idx]}.pdf"
+            if st.button("Generate Mixed PDF", type="primary"):
+                with st.spinner("Building your custom PDF..."):
+                    pdf_bytes = generate_label_pdf_from_mixed_data(selected_items)
+                    st.session_state['mixed_pdf'] = pdf_bytes
             
-            if 'ready_pdf' in st.session_state:
+            if 'mixed_pdf' in st.session_state:
                 st.download_button(
                     label="📄 Download Ready PDF",
-                    data=st.session_state['ready_pdf'],
-                    file_name=st.session_state['ready_pdf_name'],
+                    data=st.session_state['mixed_pdf'],
+                    file_name="Trace_Mixed_Batch_Labels.pdf",
                     mime="application/pdf"
                 )
 
             st.markdown("---")
             st.markdown("### Visual Layout Preview")
             
-            # Label Preview Engine (Draws 3x7 grids separated by page breaks)
+            # Label Preview Engine
             for page in range(pages_needed):
                 st.markdown(f"**📄 Page {page + 1}**")
                 page_items = selected_items[page * 21 : (page + 1) * 21]
                 
-                # Render 3 columns per row
                 for i in range(0, len(page_items), 3):
                     cols = st.columns(3)
                     for j in range(3):
                         if i + j < len(page_items):
                             item = page_items[i + j]
                             with cols[j]:
-                                # CSS style to make it look like a physical label card
                                 st.info(
-                                    f"**{item.get('Code', '')}** \n"
-                                    f"*{item.get('Contain/Description', '')[:25]}*...  \n"
+                                    f"**{item.get('Code', '')}** ({item.get('Category', '')})\n"
+                                    f"*{str(item.get('Contain/Description', ''))[:25]}*...  \n"
                                     f"📍 {item.get('Location', '')} | QR: {item.get('QR Code', 'No')}"
                                 )
-                st.divider() # Visual separation between A4 pages
-        else:
-            st.error("Start ID cannot be greater than End ID.")
+                st.divider() 
     else:
-        st.info(f"No data found in the '{print_category}' tab yet.")
+        st.info("Your inventory is currently empty across all categories.")
 
 # --- TAB 3: DASHBOARD ---
 with tab3:

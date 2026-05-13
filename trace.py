@@ -14,7 +14,11 @@ from PIL import Image
 # 1. PAGE CONFIGURATION & SETUP
 # ==========================================
 st.set_page_config(page_title="Trace Inventory", page_icon="📦", layout="wide")
-
+# --- BACK BUTTON (STRICTLY REQUIRED) ---
+if st.button("⬅️ Back to Hub", type="secondary"):
+    st.switch_page("routine_app.py")
+st.write("---") 
+# ---------------------------------------
 # ==========================================
 # 2. GOOGLE SHEETS AUTHENTICATION
 # ==========================================

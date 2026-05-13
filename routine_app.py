@@ -25,6 +25,7 @@ st_autorefresh(interval=120000, key="routine_refresh")
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
     footer {visibility: hidden;}
     .block-container {padding-top: 2rem; padding-bottom: 2rem;}
     div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {
@@ -289,12 +290,16 @@ try:
         ("Video Manager", "bps_ytfb_videos.py", "🎬")
     ]
     
-    app_cols = st.columns(3)
-    for idx, (app_name, file_name, icon) in enumerate(app_list):
-        last_str = get_app_time_str(app_name, tracker_data, now)
-        with app_cols[idx % 3]:
-            if st.button(f"{icon} {app_name}\n(Last: {last_str})", key=f"app_{idx}", use_container_width=True):
-                log_and_open_app(app_name, file_name, tracker_data, now)
+    # ROW-BY-ROW COLUMN RENDERING FOR PERFECT MOBILE STACKING
+    for i in range(0, len(app_list), 3):
+        cols = st.columns(3)
+        for j in range(3):
+            if i + j < len(app_list):
+                app_name, file_name, icon = app_list[i + j]
+                last_str = get_app_time_str(app_name, tracker_data, now)
+                with cols[j]:
+                    if st.button(f"{icon} {app_name}\n(Last: {last_str})", key=f"app_{i+j}", use_container_width=True):
+                        log_and_open_app(app_name, file_name, tracker_data, now)
     st.markdown("---")
 
     # PRE-PROCESS ALL PAYMENTS 
@@ -609,13 +614,18 @@ try:
         avail_subs = [t for t in sub_list if t not in running_tasks['Sub_Activities'].tolist()]
         if avail_subs:
             st.markdown("<div style='margin-top: 15px; margin-bottom: 5px; color: #333;'><b>▶️ Routine Tasks:</b></div>", unsafe_allow_html=True)
-            cols = st.columns(3)
-            for idx, task in enumerate(avail_subs):
-                with cols[idx % 3]:
-                    if st.button(f"▶️ {task}" + ("" if "[Due:" in task else f"\n(Last: {get_last_done_str(task, log_df, now, col_name='Sub_Activities')})"), key=f"btn_{idx}_{task}", use_container_width=True):
-                        smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, current_activity, task, "", "Auto-logged via Timer"])
-                        get_activity_log.clear() 
-                        st.rerun()
+            
+            # PERFECT MOBILE STACKING FOR AVAILABLE TASKS
+            for i in range(0, len(avail_subs), 3):
+                cols = st.columns(3)
+                for j in range(3):
+                    if i + j < len(avail_subs):
+                        task = avail_subs[i+j]
+                        with cols[j]:
+                            if st.button(f"▶️ {task}" + ("" if "[Due:" in task else f"\n(Last: {get_last_done_str(task, log_df, now, col_name='Sub_Activities')})"), key=f"btn_{i+j}_{task}", use_container_width=True):
+                                smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, current_activity, task, "", "Auto-logged via Timer"])
+                                get_activity_log.clear() 
+                                st.rerun()
 
         st.markdown("<div style='margin-top: 15px; margin-bottom: 5px; color: #ff4b4b;'><b>👥 Meeting / Visitor Tracker:</b></div>", unsafe_allow_html=True)
         if st.button("⚡ Quick Start (Update Details Later)", use_container_width=True):

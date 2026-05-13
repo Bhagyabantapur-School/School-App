@@ -8,6 +8,7 @@ from fpdf import FPDF
 import tempfile
 import os
 from datetime import datetime
+from PIL import Image
 
 # ==========================================
 # 1. PAGE CONFIGURATION & SETUP
@@ -50,17 +51,15 @@ def get_category_data(category):
 
 @st.cache_data(ttl=10)
 def get_all_inventory_data():
-    """Fetches data from ALL tabs and tags them with their category."""
     all_data = []
     for tab in TABS:
         try:
             records = spreadsheet.worksheet(tab).get_all_records()
             for r in records:
-                r['Category'] = tab # Inject the category name for the PDF
+                r['Category'] = tab 
                 all_data.append(r)
         except Exception:
             pass
-    # Reverse the list so the newest entries appear at the top of the print queue
     return list(reversed(all_data))
 
 @st.cache_data(ttl=30)
@@ -74,6 +73,13 @@ def get_all_locations():
     if not locations:
         locations.add("GF001")
     return sorted(list(locations))
+
+def hex_to_rgb(hex_code):
+    """Converts a HEX color string to an RGB tuple."""
+    hex_code = str(hex_code).lstrip('#')
+    if len(hex_code) != 6:
+        return (255, 255, 255) # Default to white if invalid
+    return tuple(int(hex_code[i:i+2], 16) for i in (0, 2, 4))
 
 def generate_label_pdf_from_mixed_data(items):
     LABELS_PER_ROW, ROWS_PER_PAGE = 3, 7
@@ -98,15 +104,21 @@ def generate_label_pdf_from_mixed_data(items):
             x = MARGIN_X + (col * LABEL_W)
             y = MARGIN_Y + (row * LABEL_H)
 
-            # Extract data dynamically from each mixed item
             unique_id = item.get('Code', '')
             category = item.get('Category', 'Unknown')
             description = str(item.get('Contain/Description', ''))
             location = str(item.get('Location', ''))
             include_qr = str(item.get('QR Code', 'No')).strip().lower() == 'yes'
+            item_color = str(item.get('Color', '#FFFFFF'))
 
-            # Draw label boundary
+            # Draw outer label boundary
             pdf.rect(x, y, LABEL_W, LABEL_H)
+            
+            # --- COLOR CODING STRIP ---
+            # Draws a 4mm colored rectangle on the left edge of the sticker
+            r, g, b = hex_to_rgb(item_color)
+            pdf.set_fill_color(r, g, b)
+            pdf.rect(x, y, 4, LABEL_H, style="F") 
             
             short_desc = description[:22] + "..." if len(description) > 22 else description
             
@@ -117,21 +129,22 @@ def generate_label_pdf_from_mixed_data(items):
                 qr.save(qr_path)
 
                 qr_size = LABEL_H - 15 
-                pdf.image(qr_path, x=x + 2, y=y + 2, w=qr_size, h=qr_size)
+                # Shift QR code slightly right to make room for color strip
+                pdf.image(qr_path, x=x + 6, y=y + 2, w=qr_size, h=qr_size)
 
                 pdf.set_font("helvetica", size=8)
-                text_x, text_y = x + qr_size + 4, y + 8
+                text_x, text_y = x + qr_size + 8, y + 8
                 pdf.text(x=text_x, y=text_y, text=f"ID: {unique_id}")
                 pdf.text(x=text_x, y=text_y + 4, text=f"{category}")
                 pdf.text(x=text_x, y=text_y + 8, text=f"{short_desc}")
                 pdf.text(x=text_x, y=text_y + 12, text=f"Loc: {location[:15]}")
             else:
                 pdf.set_font("helvetica", "B", 12)
-                pdf.text(x=x + 5, y=y + 10, text=f"ID: {unique_id}")
+                pdf.text(x=x + 8, y=y + 10, text=f"ID: {unique_id}")
                 pdf.set_font("helvetica", "", 10)
-                pdf.text(x=x + 5, y=y + 18, text=f"Cat: {category}")
-                pdf.text(x=x + 5, y=y + 26, text=f"Desc: {short_desc}")
-                pdf.text(x=x + 5, y=y + 34, text=f"Loc: {location}")
+                pdf.text(x=x + 8, y=y + 18, text=f"Cat: {category}")
+                pdf.text(x=x + 8, y=y + 26, text=f"Desc: {short_desc}")
+                pdf.text(x=x + 8, y=y + 34, text=f"Loc: {location}")
 
     return bytes(pdf.output())
 
@@ -147,6 +160,24 @@ tab1, tab2, tab3, tab4 = st.tabs(["📝 Add Data", "🖨️ Universal Print Stud
 with tab1:
     st.subheader("Register New Asset")
     
+    # 1. Camera Color Capture Engine
+    detected_color_hex = "#FFFFFF" # Default white
+    
+    with st.expander("🎨 Color Coding (Camera)"):
+        st.write("Take a picture of the item. The app will automatically extract its average color for your label.")
+        enable_camera = st.checkbox("Turn on Camera")
+        
+        if enable_camera:
+            cam_pic = st.camera_input("Capture Color")
+            if cam_pic is not None:
+                # Convert image, resize to 1x1 pixel to get the absolute average color instantly
+                img = Image.open(cam_pic).convert('RGB')
+                img_1x1 = img.resize((1, 1))
+                r, g, b = img_1x1.getpixel((0, 0))
+                detected_color_hex = f"#{r:02x}{g:02x}{b:02x}"
+                st.success(f"Color Detected: {detected_color_hex}")
+    
+    # 2. Main Data Form
     with st.form("data_entry_form"):
         col1, col2 = st.columns(2)
         
@@ -160,6 +191,8 @@ with tab1:
             
         with col2:
             qr_yes_no = st.selectbox("Include QR Code on Label?", ["Yes", "No"])
+            # Let user fine-tune the color if the camera got it slightly wrong
+            final_color = st.color_picker("Item Color (Adjust if needed)", value=detected_color_hex)
             quantity = st.number_input("Quantity to Register", min_value=1, value=1, step=1)
             
         submit_btn = st.form_submit_button("Save to Database")
@@ -182,12 +215,12 @@ with tab1:
                     
                     for i in range(quantity):
                         code = f"{PREFIXES[category]}-{next_id_num + i:03d}"
-                        rows_to_append.append([date_str, time_str, description, final_location, code, qr_yes_no])
+                        # IMPORTANT: Added 'Color' as the 7th column to be saved to Google Sheets
+                        rows_to_append.append([date_str, time_str, description, final_location, code, qr_yes_no, final_color])
                     
                     worksheet.append_rows(rows_to_append)
-                    st.success(f"✅ Successfully saved {quantity} item(s) to the '{category}' tab! Switch to the **Universal Print Studio** to generate your labels.")
+                    st.success(f"✅ Successfully saved {quantity} item(s) to the '{category}' tab!")
                     
-                    # Clear caches so the print tab immediately sees the new data
                     get_category_data.clear()
                     get_all_inventory_data.clear()
                     get_all_locations.clear()
@@ -195,29 +228,26 @@ with tab1:
                 except Exception as e:
                     st.error(f"Error updating database: {e}")
 
-# --- TAB 2: UNIVERSAL PRINT STUDIO (UPDATED) ---
+# --- TAB 2: UNIVERSAL PRINT STUDIO ---
 with tab2:
     st.subheader("Universal Print Queue")
-    st.write("Check the boxes in the **'🖨️ Print?'** column to add items to your print batch. The newest items are at the top.")
-    
     all_items = get_all_inventory_data()
     
     if all_items:
         df_print = pd.DataFrame(all_items)
-        
-        # Add a checkbox column to the front of the table, default is False
         df_print.insert(0, "🖨️ Print?", False)
         
-        # Use an interactive data editor
         edited_df = st.data_editor(
             df_print,
             hide_index=True,
             use_container_width=True,
-            disabled=df_print.columns.drop("🖨️ Print?").tolist(), # Lock all columns except the checkbox
-            height=400
+            disabled=df_print.columns.drop("🖨️ Print?").tolist(),
+            height=400,
+            column_config={
+                "Color": st.column_config.TextColumn("Color")
+            }
         )
         
-        # Filter down to only the items the user checked
         selected_df = edited_df[edited_df["🖨️ Print?"] == True]
         selected_items = selected_df.to_dict('records')
         total_labels = len(selected_items)
@@ -225,7 +255,6 @@ with tab2:
         if total_labels > 0:
             pages_needed = math.ceil(total_labels / 21)
             
-            # Print Metrics
             st.markdown("---")
             m1, m2 = st.columns(2)
             m1.metric("Labels Selected for Print", total_labels)
@@ -247,7 +276,6 @@ with tab2:
             st.markdown("---")
             st.markdown("### Visual Layout Preview")
             
-            # Label Preview Engine
             for page in range(pages_needed):
                 st.markdown(f"**📄 Page {page + 1}**")
                 page_items = selected_items[page * 21 : (page + 1) * 21]
@@ -257,13 +285,23 @@ with tab2:
                     for j in range(3):
                         if i + j < len(page_items):
                             item = page_items[i + j]
+                            col_hex = item.get('Color', '#FFFFFF')
                             with cols[j]:
-                                st.info(
-                                    f"**{item.get('Code', '')}** ({item.get('Category', '')})\n"
-                                    f"*{str(item.get('Contain/Description', ''))[:25]}*...  \n"
-                                    f"📍 {item.get('Location', '')} | QR: {item.get('QR Code', 'No')}"
+                                # Use Streamlit HTML to preview the color block!
+                                st.markdown(
+                                    f"""
+                                    <div style="border: 1px solid #ddd; padding: 10px; border-radius: 5px; display: flex;">
+                                        <div style="background-color: {col_hex}; width: 10px; height: 80px; margin-right: 10px; border-radius: 2px;"></div>
+                                        <div>
+                                            <strong>{item.get('Code', '')}</strong> ({item.get('Category', '')})<br>
+                                            <em>{str(item.get('Contain/Description', ''))[:25]}...</em><br>
+                                            📍 {item.get('Location', '')} | QR: {item.get('QR Code', 'No')}
+                                        </div>
+                                    </div>
+                                    """, 
+                                    unsafe_allow_html=True
                                 )
-                st.divider() 
+                st.write("") # Spacing 
     else:
         st.info("Your inventory is currently empty across all categories.")
 

@@ -1,128 +1,208 @@
 import streamlit as st
+import gspread
+from google.oauth2.service_account import Credentials
+import pandas as pd
 import math
 import qrcode
 from fpdf import FPDF
 import tempfile
 import os
 
-# --- Layout Configuration for A4 Paper ---
-# Standard A4 size is 210mm x 297mm
-LABELS_PER_ROW = 3
-ROWS_PER_PAGE = 7
-LABELS_PER_PAGE = LABELS_PER_ROW * ROWS_PER_PAGE
+# ==========================================
+# 1. PAGE CONFIGURATION & SETUP
+# ==========================================
+st.set_page_config(page_title="Trace Inventory", page_icon="📦", layout="wide")
 
-A4_WIDTH = 210
-A4_HEIGHT = 297
-MARGIN_X = 10
-MARGIN_Y = 10
+# ==========================================
+# 2. GOOGLE SHEETS AUTHENTICATION
+# ==========================================
+@st.cache_resource
+def init_connection():
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    client = gspread.authorize(creds)
+    return client
 
-# Calculate individual label dimensions
-LABEL_W = (A4_WIDTH - (2 * MARGIN_X)) / LABELS_PER_ROW
-LABEL_H = (A4_HEIGHT - (2 * MARGIN_Y)) / ROWS_PER_PAGE
+try:
+    client = init_connection()
+    spreadsheet = client.open("Trace")
+except Exception as e:
+    st.error(f"Failed to connect to Google Sheets. Check your secrets.toml. Error: {e}")
+    st.stop()
+
+# ==========================================
+# 3. HELPER FUNCTIONS
+# ==========================================
+@st.cache_data(ttl=60)
+def load_main_inventory():
+    try:
+        sheet = spreadsheet.sheet1
+        return sheet.get_all_records()
+    except Exception as e:
+        return None
 
 def generate_label_pdf(item_type, description, location, quantity):
+    # A4 Layout Configuration
+    LABELS_PER_ROW, ROWS_PER_PAGE = 3, 7
+    LABELS_PER_PAGE = LABELS_PER_ROW * ROWS_PER_PAGE
+    A4_WIDTH, A4_HEIGHT = 210, 297
+    MARGIN_X, MARGIN_Y = 10, 10
+    LABEL_W = (A4_WIDTH - (2 * MARGIN_X)) / LABELS_PER_ROW
+    LABEL_H = (A4_HEIGHT - (2 * MARGIN_Y)) / ROWS_PER_PAGE
+
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.set_auto_page_break(auto=False)
     pdf.add_page()
     pdf.set_font("helvetica", size=8)
 
-    # Use a temporary directory to store the QR code images before embedding them
     with tempfile.TemporaryDirectory() as temp_dir:
         for i in range(quantity):
-            # Calculate current row, column, and page
             current_label_on_page = i % LABELS_PER_PAGE
             if i > 0 and current_label_on_page == 0:
                 pdf.add_page()
 
             col = current_label_on_page % LABELS_PER_ROW
             row = current_label_on_page // LABELS_PER_ROW
-
-            # Calculate X and Y coordinates on the A4 page
             x = MARGIN_X + (col * LABEL_W)
             y = MARGIN_Y + (row * LABEL_H)
 
-            # Generate unique QR Code data (e.g., adding a sequential ID for batch printing)
             unique_id = f"{item_type[:3].upper()}-{i+1:03d}"
             qr_data = f"ID: {unique_id}\nType: {item_type}\nDesc: {description}\nLoc: {location}"
             
-            # Create and save the QR code image
             qr = qrcode.make(qr_data)
             qr_path = os.path.join(temp_dir, f"qr_{i}.png")
             qr.save(qr_path)
 
-            # Draw a subtle border for the label (optional, helps with cutting)
             pdf.rect(x, y, LABEL_W, LABEL_H)
-
-            # Place the QR Code (sizing it to fit nicely inside the label)
             qr_size = LABEL_H - 15 
             pdf.image(qr_path, x=x + 2, y=y + 2, w=qr_size, h=qr_size)
 
-            # Place the Text next to the QR code
-            text_x = x + qr_size + 4
-            text_y = y + 8
+            text_x, text_y = x + qr_size + 4, y + 8
             pdf.text(x=text_x, y=text_y, text=f"ID: {unique_id}")
-            pdf.text(x=text_x, y=text_y + 4, text=f"{item_type}")
-            
-            # Handle slightly longer descriptions
-            short_desc = description[:20] + "..." if len(description) > 20 else description
+            pdf.text(x=text_x, y=text_y + 4, text=f"{item_type[:15]}")
+            short_desc = description[:18] + "..." if len(description) > 18 else description
             pdf.text(x=text_x, y=text_y + 8, text=f"{short_desc}")
-            pdf.text(x=text_x, y=text_y + 12, text=f"Loc: {location}")
+            pdf.text(x=text_x, y=text_y + 12, text=f"Loc: {location[:15]}")
 
-    # Output the PDF as bytes
     return pdf.output(dest="S")
 
-# --- Streamlit UI ---
-st.subheader("Generate QR Asset Labels")
+# ==========================================
+# 4. APP LAYOUT & UI
+# ==========================================
+st.title("📦 trace.py")
+st.markdown("### Physical Asset & Equipment Manager")
 
-with st.form("batch_label_form"):
-    col1, col2 = st.columns(2)
-    with col1:
-        item_type = st.text_input("Item Type", placeholder="e.g., Wireless Audio")
-        description = st.text_input("Description", placeholder="e.g., DJI Mic Mini TX unit")
-    with col2:
-        # Pre-populate with locations relevant to your setup
-        location = st.selectbox("Storage Location", [
-            "Studio Gear Box 1", 
-            "School Office - Cabinet A", 
-            "Computer Lab", 
-            "Everyday Carry (Backpack)"
-        ])
-        quantity = st.number_input("Quantity to Generate", min_value=1, value=10, step=1)
-    
-    generate_btn = st.form_submit_button("Preview & Generate PDF")
+# Create the tabs
+tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "📷 Scanner", "🖨️ Label Generator", "📁 CSV Importer"])
 
-if generate_btn and item_type and description:
-    # --- Math for UI Feedback ---
-    pages_needed = math.ceil(quantity / LABELS_PER_PAGE)
-    slots_filled_on_last_page = quantity % LABELS_PER_PAGE
+# --- TAB 1: DASHBOARD ---
+with tab1:
+    st.subheader("Current Inventory Overview")
+    data = load_main_inventory()
     
-    if slots_filled_on_last_page == 0:
-        slots_filled_on_last_page = LABELS_PER_PAGE # It perfectly divided
+    if data:
+        df = pd.DataFrame(data)
+        st.dataframe(df, use_container_width=True)
         
-    is_fully_completed = slots_filled_on_last_page == LABELS_PER_PAGE
-    empty_slots = LABELS_PER_PAGE - slots_filled_on_last_page
-
-    # --- Display Metrics ---
-    st.markdown("### Print Job Summary")
-    m1, m2, m3 = st.columns(3)
-    m1.metric("A4 Pages Required", pages_needed)
-    m2.metric("Total Labels", quantity)
-    
-    if is_fully_completed:
-        m3.success("✅ The final A4 page is perfectly full!")
+        # Simple metrics
+        st.markdown("### Quick Stats")
+        col1, col2 = st.columns(2)
+        col1.metric("Total Items Tracked", len(df))
+        if 'Category' in df.columns:
+            col2.metric("Categories", df['Category'].nunique())
     else:
-        m3.warning(f"⚠️ Last page has {empty_slots} blank sticker slots.")
+        st.info("The main 'Trace' sheet is empty or headers are missing. Add data to Row 1 of your Google Sheet!")
 
-    # --- Generate PDF ---
-    with st.spinner("Generating PDF with QR codes..."):
-        pdf_bytes = generate_label_pdf(item_type, description, location, quantity)
+# --- TAB 2: SCANNER ---
+with tab2:
+    st.subheader("Mobile QR Scanner")
+    st.info("This module uses your device camera to check items in and out.")
+    st.warning("To enable live scanning, ensure the app is accessed via HTTPS (Streamlit Cloud handles this automatically).")
+    # You can integrate streamlit-qrcode-scanner logic here when ready
+
+# --- TAB 3: LABEL GENERATOR ---
+with tab3:
+    st.subheader("Generate A4 QR Asset Labels")
+    
+    with st.form("batch_label_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            item_type = st.text_input("Item Type", placeholder="e.g., Wireless Audio")
+            description = st.text_input("Description", placeholder="e.g., DJI Mic Mini TX unit")
+        with col2:
+            location = st.selectbox("Storage Location", [
+                "Studio Gear Box 1", 
+                "School Office - Cabinet A", 
+                "Computer Lab", 
+                "Everyday Carry"
+            ])
+            quantity = st.number_input("Quantity to Generate", min_value=1, value=21, step=1)
         
-    st.download_button(
-        label="📄 Download A4 Print Sheet (PDF)",
-        data=pdf_bytes,
-        file_name=f"Trace_Labels_{item_type.replace(' ', '_')}.pdf",
-        mime="application/pdf",
-        type="primary"
-    )
-elif generate_btn:
-    st.error("Please fill in the Item Type and Description.")
+        generate_btn = st.form_submit_button("Preview & Generate PDF")
+
+    if generate_btn and item_type and description:
+        LABELS_PER_PAGE = 21 # 3x7 grid
+        pages_needed = math.ceil(quantity / LABELS_PER_PAGE)
+        slots_filled = quantity % LABELS_PER_PAGE
+        if slots_filled == 0: slots_filled = LABELS_PER_PAGE
+        
+        st.markdown("### Print Job Summary")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("A4 Pages Required", pages_needed)
+        m2.metric("Total Labels", quantity)
+        if slots_filled == LABELS_PER_PAGE:
+            m3.success("✅ Pages perfectly full!")
+        else:
+            m3.warning(f"⚠️ Last page has {LABELS_PER_PAGE - slots_filled} blank slots.")
+
+        with st.spinner("Generating PDF with QR codes..."):
+            pdf_bytes = generate_label_pdf(item_type, description, location, quantity)
+            
+        st.download_button(
+            label="📄 Download A4 Print Sheet (PDF)",
+            data=pdf_bytes,
+            file_name=f"Trace_Labels_{item_type.replace(' ', '_')}.pdf",
+            mime="application/pdf",
+            type="primary"
+        )
+    elif generate_btn:
+        st.error("Please fill in the Item Type and Description.")
+
+# --- TAB 4: CSV IMPORTER ---
+with tab4:
+    st.subheader("Bulk Import Data to Google Sheets")
+    st.write("Upload a CSV file. A new tab will be created in your 'Trace' Google Sheet automatically.")
+    
+    uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
+    
+    if uploaded_file is not None:
+        try:
+            df_upload = pd.read_csv(uploaded_file)
+            st.write("Preview of data:")
+            st.dataframe(df_upload.head())
+            
+            # Use the filename (without .csv) as the new tab name
+            tab_name = uploaded_file.name.replace(".csv", "")
+            
+            if st.button(f"Create Tab '{tab_name}' & Upload Data"):
+                with st.spinner("Connecting to Google Sheets..."):
+                    try:
+                        # Try to find the tab, if it exists, don't overwrite blindly
+                        spreadsheet.worksheet(tab_name)
+                        st.error(f"A tab named '{tab_name}' already exists in your Google Sheet. Please rename the file and try again.")
+                    except gspread.exceptions.WorksheetNotFound:
+                        # Create the new tab
+                        rows, cols = df_upload.shape
+                        # Add a little buffer to row/col count
+                        new_sheet = spreadsheet.add_worksheet(title=tab_name, rows=str(rows+10), cols=str(cols+5))
+                        
+                        # Upload the data
+                        new_sheet.update([df_upload.columns.values.tolist()] + df_upload.values.tolist())
+                        st.success(f"✅ Data successfully uploaded to a new tab named '{tab_name}'!")
+                        
+        except Exception as e:
+            st.error(f"Error processing the CSV: {e}")

@@ -287,7 +287,8 @@ try:
         ("Routine Audit", "routine_audit.py", "🔍"),
         ("Routine Editor", "routine_editor.py", "✏️"),
         ("MDM Returns", "mdm_return_log.py", "📦"),
-        ("Video Manager", "bps_ytfb_videos.py", "🎬")
+        ("Video Manager", "bps_ytfb_videos.py", "🎬"),
+        ("Trace Inventory", "trace.py", "🏷️") # <-- ADDED NEW APP
     ]
     
     # ROW-BY-ROW COLUMN RENDERING FOR PERFECT MOBILE STACKING

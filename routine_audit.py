@@ -36,17 +36,8 @@ def init_connection():
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
     return gspread.authorize(creds)
 
-def get_main_spreadsheet():
-    return init_connection().open("MY ROUTINE 2026")
-
-def get_money_spreadsheet():
-    return init_connection().open("sk_money_location")
-
-def smart_append_row(sheet, row_data):
-    col_a = sheet.col_values(1)
-    next_row = len(col_a) + 1
-    try: sheet.update(range_name=f"A{next_row}", values=[row_data], value_input_option="USER_ENTERED")
-    except TypeError: sheet.update(f"A{next_row}", [row_data], value_input_option="USER_ENTERED")
+def get_main_spreadsheet(): return init_connection().open("MY ROUTINE 2026")
+def get_money_spreadsheet(): return init_connection().open("sk_money_location")
 
 @st.cache_data(ttl=300)
 def get_activity_log():
@@ -80,23 +71,6 @@ def get_visited_places():
         return pd.DataFrame(data[1:], columns=data[0])
     except Exception: return pd.DataFrame(columns=["Place", "Purpose"])
 
-@st.cache_data(ttl=300)
-def get_water_log():
-    ss = get_main_spreadsheet()
-    try: sheet = ss.worksheet("water_log")
-    except gspread.exceptions.WorksheetNotFound:
-        sheet = ss.add_worksheet(title="water_log", rows="1000", cols="3")
-        smart_append_row(sheet, ["Date", "Time", "Amount_ml"])
-    data = sheet.get_all_values()
-    if len(data) <= 1: return pd.DataFrame(columns=["Date", "Time", "Amount_ml"])
-    df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 3: df[df.shape[1]] = ""
-    df = df.iloc[:, :3]
-    df.columns = ["Date", "Time", "Amount_ml"]
-    df = df[df["Date"].astype(str).str.strip() != ""] 
-    df['Amount_ml'] = pd.to_numeric(df['Amount_ml'], errors='coerce').fillna(0)
-    return df
-
 def get_short_stop_label(place):
     p = str(place).upper()
     if "HOME" in p: return "🏠 Home Base"
@@ -119,7 +93,6 @@ try:
     log_df = get_activity_log() 
     loc_df = get_location_data() 
     visited_places_df = get_visited_places()
-    water_df = get_water_log()
     
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist_timezone)
@@ -127,7 +100,7 @@ try:
 
     st.markdown("<h2 style='text-align: center; color: #555; margin-top: 0px;'>📊 Daily Data & Audit Hub</h2>", unsafe_allow_html=True)
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["⏳ Timeline Audit", "📋 Daily Summary", "📅 Weekly Matrix", "💧 Hydration", "📍 Places"])
+    tab1, tab2, tab3, tab4 = st.tabs(["⏳ Timeline Audit", "📋 Daily Summary", "📅 Weekly Matrix", "📍 Places"])
 
     # ==========================================
     # TAB 1: TIMELINE AUDIT
@@ -196,7 +169,6 @@ try:
 
         loc_df_safe['Parsed_Date'] = loc_df_safe['Date'].apply(parse_custom_date)
         
-        # Load both yesterday and today's location data to catch late-night state changes
         day_locs = loc_df_safe[loc_df_safe['Parsed_Date'].isin([selected_timeline_date, selected_timeline_date - timedelta(days=1)])].copy()
         
         if not day_locs.empty:
@@ -215,8 +187,6 @@ try:
             day_locs['Move'], day_locs['Place'] = day_locs['Clean_Move'], day_locs['Clean_Place']
             day_locs = day_locs[day_locs.apply(lambda r: str(r['Move']).strip().upper() != "- STATIONARY -" or (len(str(r['Place']).strip()) > 1 and str(r['Place']).strip().upper() not in ["I", "NAN", "NONE"]), axis=1)].dropna(subset=['Loc_DT']).sort_values('Loc_DT')
         
-        
-        # --- THE FIX: Ensuring the timeline limit never falls into yesterday ---
         start_time_limit = pd.to_datetime(selected_date_str + ' 05:00')
         today_locs = day_locs[day_locs['Parsed_Date'] == selected_timeline_date] if not day_locs.empty else pd.DataFrame()
         
@@ -226,13 +196,10 @@ try:
         if not day_logs.empty and day_logs.iloc[0]['Display_Start'] < start_time_limit and day_logs.iloc[0]['Activity'] != 'CURRENT_TIME_MARKER': 
             start_time_limit = day_logs.iloc[0]['Display_Start']
             
-        # SAFETY CATCH: Force the minimum boundary to 12:00 AM of the selected day
         if start_time_limit < day_start_dt:
             start_time_limit = day_start_dt
 
         last_end_time = start_time_limit
-        # ----------------------------------------------------------------------
-        
         timeline_events = []
         
         for _, row in day_logs.iterrows():
@@ -384,42 +351,16 @@ try:
                 )
                 st.markdown(html, unsafe_allow_html=True)
                 
-        # --- 1. DAILY SUMMARY (TIMELINE OVERVIEW) ---
         st.markdown("---")
         st.markdown("<h4 style='text-align: center; color: #555;'>📊 Daily Summary (24 Hours)</h4>", unsafe_allow_html=True)
         total_tracked = sum(e['duration'] for e in timeline_events if e['type'] == 'task')
         total_transit = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and e['activity'] != 'Unlogged Time / Break')
-        
-        # Calculate exactly how much time is unaccounted for out of the 1440 minutes in a day
         unlogged_24h = max(0, 1440 - total_tracked - total_transit)
         
         col_s1, col_s2, col_s3 = st.columns(3)
         with col_s1: st.metric(label="Total Tracked Time", value=f"{int(total_tracked // 60)}h {int(total_tracked % 60)}m")
         with col_s2: st.metric(label="Total Transit & Stops", value=f"{int(total_transit // 60)}h {int(total_transit % 60)}m")
         with col_s3: st.metric(label="Unlogged / Free Time", value=f"{int(unlogged_24h // 60)}h {int(unlogged_24h % 60)}m")
-            
-        category_totals = {}
-        for e in timeline_events:
-            if e['type'] == 'task':
-                category_totals[e['activity']] = category_totals.get(e['activity'], 0) + e['duration']
-                
-        if total_transit > 0: category_totals['TRANSIT & STOPS'] = total_transit
-        if unlogged_24h > 0: category_totals['UNLOGGED TIME'] = unlogged_24h
-            
-        if category_totals:
-            cat_df = pd.DataFrame(list(category_totals.items()), columns=['Category', 'Minutes']).sort_values(by='Minutes', ascending=False)
-            
-            # Using Plotly for a beautiful Donut chart breakdown of the 24 hours
-            import plotly.graph_objects as go
-            fig = go.Figure(data=[go.Pie(
-                labels=cat_df['Category'], 
-                values=cat_df['Minutes'], 
-                hole=0.4,
-                textinfo='label+percent',
-                hoverinfo='label+value+percent'
-            )])
-            fig.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=350, showlegend=True)
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     # ==========================================
     # TAB 2: DAILY SUMMARY (COMPACT ACTIVITY CARDS)
@@ -433,7 +374,6 @@ try:
             
         summary_date_str = summary_date.strftime('%Y-%m-%d')
         
-        # Pull all logs for the selected day, ensuring we ignore 'RUNNING' open timers
         day_logs = log_df[(log_df['Date'] == summary_date_str) & (log_df['End_Time'] != 'RUNNING')].copy()
         
         if not day_logs.empty:
@@ -441,7 +381,6 @@ try:
             total_tracked_day = day_logs['Total_Minutes'].sum()
             unlogged_day = max(0, 1440 - total_tracked_day)
             
-            # Group by activity
             grouped = day_logs.groupby('Activity')
             summary_data = []
             
@@ -454,12 +393,9 @@ try:
                     'Group': group.sort_values('Start_Time')
                 })
                 
-            # Sort by highest duration first
             summary_data.sort(key=lambda x: x['Total_Minutes'], reverse=True)
             
-            # Use 2 columns for a visually appealing, compact layout
             col_left, col_right = st.columns(2)
-            
             for idx, item in enumerate(summary_data):
                 target_col = col_left if idx % 2 == 0 else col_right
                 with target_col:
@@ -467,7 +403,6 @@ try:
                     act_name = item['Activity']
                     count = item['Count']
                     
-                    # Assign a contextual icon based on the category type
                     cat = act_name.upper()
                     if cat in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"]: icon = "❤️"
                     elif cat in ["WORK", "REPORT", "TASK"]: icon = "💼"
@@ -475,15 +410,11 @@ try:
                     elif cat in ["SLEEP", "PRE", "TEA", "OUT"]: icon = "☕"
                     else: icon = "📌"
                     
-                    # Formatting the Expandable Card Title
                     exp_title = f"{icon} {act_name} | {int(h)}h {int(m):02d}m | {count} items"
-                    
                     with st.expander(exp_title):
-                        # Generate SINGLE LINE HTML to avoid markdown `<pre>` tags
                         for _, row in item['Group'].iterrows():
                             sub = str(row['Sub_Activities']).strip()
                             if not sub: sub = "General Task"
-                            
                             chk = str(row['check_list']).strip()
                             if chk: sub += f" <span style='color: #0068c9;'>(☑️ {chk})</span>"
                             
@@ -495,7 +426,6 @@ try:
                             )
                             st.markdown(html, unsafe_allow_html=True)
                             
-            # Add Unlogged Time to the end of the cards
             st.markdown("<br>", unsafe_allow_html=True)
             h_un, m_un = divmod(unlogged_day, 60)
             with st.expander(f"🕳️ UNLOGGED TIME | {int(h_un)}h {int(m_un):02d}m"):
@@ -510,35 +440,25 @@ try:
     with tab3:
         st.markdown("<h3 style='text-align: center; color: #555; margin-top: 0px;'>📅 Weekly Activity Matrix</h3>", unsafe_allow_html=True)
         
-        # Get the last 7 dates chronologically
         last_7_dates = sorted([(now.date() - timedelta(days=i)).strftime('%Y-%m-%d') for i in range(7)])
         weekly_logs = log_df[(log_df['Date'].isin(last_7_dates)) & (log_df['End_Time'] != 'RUNNING')].copy()
         
         if not weekly_logs.empty:
-            # Convert string duration 'H:M' to decimal hours
             weekly_logs['Hours'] = weekly_logs['Duration'].apply(lambda x: parse_duration_to_minutes(x) / 60.0)
-            
-            # Pivot into a Matrix: Rows=Activities, Columns=Dates
             pivot = weekly_logs.pivot_table(index="Activity", columns="Date", values="Hours", aggfunc="sum").fillna(0)
             
-            # Make sure all 7 columns exist, even if a day had zero logs
             for d in last_7_dates:
                 if d not in pivot.columns:
                     pivot[d] = 0.0
             
-            # Sort columns in date order
             pivot = pivot[last_7_dates]
-            
-            # Calculate Unlogged time per day (24 hours - total tracked that day)
             unlogged_row = {}
             for d in last_7_dates:
                 tracked_that_day = pivot[d].sum()
                 unlogged_row[d] = max(0.0, 24.0 - tracked_that_day)
                 
-            # Append Unlogged Time as the final row
             pivot.loc["🕳️ UNLOGGED TIME"] = unlogged_row
             
-            # Formatter function to convert decimal hours to nice "Xh Ym" text
             def format_matrix_hours(h):
                 if h <= 0.01: return "-"
                 ih = int(h)
@@ -551,52 +471,14 @@ try:
                 else: return f"{im}m"
                 
             formatted_pivot = pivot.map(format_matrix_hours)
-            
-            # Display matrix
             st.dataframe(formatted_pivot, use_container_width=True, height=550)
         else:
             st.info("No completed activities found for the last 7 days.")
 
     # ==========================================
-    # TAB 4: HYDRATION
+    # TAB 4: PLACES DATABASE
     # ==========================================
     with tab4:
-        st.markdown("<h3 style='text-align: center; color: #0288d1;'>💧 Hydration Tracker</h3>", unsafe_allow_html=True)
-        col_w1, col_w2, col_w3 = st.columns(3)
-        with col_w1:
-            if st.button("🥃 + 250 ml", use_container_width=True):
-                smart_append_row(get_main_spreadsheet().worksheet("water_log"), [today_str, now.strftime('%H:%M'), 250])
-                get_water_log.clear() 
-                st.rerun()
-        with col_w2:
-            if st.button("🚰 + 500 ml", use_container_width=True):
-                smart_append_row(get_main_spreadsheet().worksheet("water_log"), [today_str, now.strftime('%H:%M'), 500])
-                get_water_log.clear() 
-                st.rerun()
-        with col_w3:
-            if st.button("🥛 + 1000 ml", use_container_width=True):
-                smart_append_row(get_main_spreadsheet().worksheet("water_log"), [today_str, now.strftime('%H:%M'), 1000])
-                get_water_log.clear() 
-                st.rerun()
-
-        water_df['Date_dt'] = pd.to_datetime(water_df['Date'], errors='coerce')
-        t_day, t_week, t_month = st.tabs(["Today", "Past 7 Days", "This Month"])
-        with t_day:
-            today_sum = water_df[water_df['Date'] == today_str]['Amount_ml'].sum()
-            st.markdown(f"<h2 style='text-align: center; color: #0288d1;'>{int(today_sum)} ml logged today</h2>", unsafe_allow_html=True)
-            st.progress(min(today_sum / 3500.0, 1.0))
-            if not water_df[water_df['Date'] == today_str].empty: st.dataframe(water_df[water_df['Date'] == today_str][['Time', 'Amount_ml']].sort_values('Time', ascending=False), use_container_width=True, hide_index=True)
-        with t_week:
-            last_7 = water_df[water_df['Date_dt'] >= (pd.to_datetime(today_str) - timedelta(days=6))].copy()
-            if not last_7.empty: st.bar_chart(last_7.groupby(last_7['Date_dt'].dt.strftime('%a, %b %d'))['Amount_ml'].sum(), color="#29b6f6")
-        with t_month:
-            this_month = water_df[water_df['Date_dt'].dt.month == pd.to_datetime(today_str).month].copy()
-            if not this_month.empty: st.line_chart(this_month.groupby(this_month['Date_dt'].dt.day)['Amount_ml'].sum(), color="#0288d1")
-
-    # ==========================================
-    # TAB 5: PLACES DATABASE
-    # ==========================================
-    with tab5:
         st.markdown("<h3 style='text-align: center; color: #555;'>📍 Visited Places Database</h3>", unsafe_allow_html=True)
         if st.button("🔄 Generate & Sync to Google Sheets", type="primary", use_container_width=True):
             with st.spinner("Analyzing location history and syncing..."):

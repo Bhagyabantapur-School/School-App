@@ -753,11 +753,13 @@ with tab_location:
                     
                     # If it's a complex (doesn't end with "route"), default to WALK
                     # Default to the last used travel mode
+                    # Always default to the last used vehicle found in memory
                     pre_mode = st.session_state.get('current_move', 'BIKE')
                     base_fare = 0.0
                     
                     if current_pair in transit_rules:
-                        if transit_rules[current_pair]['mode']:
+                        # Only override your personal vehicle if the Config sheet explicitly requires a specific paid transit (like BUS or AUTO)
+                        if transit_rules[current_pair]['mode'] and transit_rules[current_pair]['mode'] not in ['WALK', 'BIKE', 'BIKE + WALK']:
                             pre_mode = transit_rules[current_pair]['mode']
                         base_fare = transit_rules[current_pair]['fare']
 

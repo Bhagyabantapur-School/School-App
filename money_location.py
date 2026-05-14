@@ -741,7 +741,8 @@ with tab_location:
                     current_pair = frozenset([str(current_loc).strip(), str(dyn_next_stop).strip()]) if current_loc else None
                     
                     # If it's a complex (doesn't end with "route"), default to WALK
-                    pre_mode = "WALK" if not is_sequential else "BIKE"
+                    # Default to the last used travel mode
+                    pre_mode = st.session_state.get('current_move', 'BIKE')
                     base_fare = 0.0
                     
                     if current_pair in transit_rules:

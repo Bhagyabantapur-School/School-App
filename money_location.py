@@ -1077,15 +1077,15 @@ with tab_location:
     # ==========================================
     # QUICK ACTION BUTTONS
     # ==========================================
+    time_now_for_btn = get_ist_now()
     
-    # --- CONTEXT AWARE BUTTON: SUBORNO BOARDED BUS (MORNING) ---
-    if current_loc == "Girishmore Bus Stop" and "Suborno" in st.session_state.current_people and not st.session_state.route_active:
+    # --- CONTEXT AWARE BUTTON: SUBORNO BOARDED BUS (MORNING 8:00 - 8:59) ---
+    if current_loc == "Girishmore Bus Stop" and "Suborno" in st.session_state.current_people and not st.session_state.route_active and (time_now_for_btn.hour == 8):
         if st.button("🚌 Suborno Boarded Bus", use_container_width=True, type="primary", on_click=cb_board_bus):
             st.success("Logged Suborno boarding bus. You are now traveling alone.")
 
-    # --- CONTEXT AWARE BUTTON: RECEIVED SUBORNO FROM BUS (AFTERNOON) ---
-    time_now_for_btn = get_ist_now()
-    if current_loc == "Girishmore Bus Stop" and "Suborno" not in st.session_state.current_people and not st.session_state.route_active and (13 <= time_now_for_btn.hour <= 14):
+    # --- CONTEXT AWARE BUTTON: RECEIVED SUBORNO FROM BUS (AFTERNOON 13:00 - 14:59) ---
+    if current_loc == "Girishmore Bus Stop" and "Suborno" not in st.session_state.current_people and not st.session_state.route_active and (13 <= time_now_for_btn.hour <= 16):
         if st.button("👦 Received Suborno from Bus", use_container_width=True, type="primary", on_click=cb_receive_suborno):
             st.success("Logged Suborno arriving! Companions updated.")
     

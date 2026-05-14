@@ -1011,74 +1011,88 @@ with tab_location:
         div:has(.green-btn-hook) + div + div button:hover { background-color: #218838 !important; border-color: #1e7e34 !important; }
         </style>
     """, unsafe_allow_html=True)
-    
-    # --- CONTEXT AWARE BUTTON: SUBORNO BOARDED BUS (MORNING) ---
-    if current_loc == "Girishmore Bus Stop" and "Suborno" in st.session_state.current_people and not st.session_state.route_active:
-        if st.button("🚌 Suborno Boarded Bus", use_container_width=True, type="primary"):
-            try:
-                time_now = get_ist_now()
-                today_str = time_now.strftime("%d.%m.%y")
-                time_str = time_now.strftime("%H:%M")
-                sh.worksheet("LOCATION_DATA").append_row([
-                    today_str, time_str, "- Stationary -", "Girishmore Bus Stop", "I", "Suborno boarded bus to school"
-                ])
-                
-                # Force update the background state AND the UI Dropdowns
-                st.session_state.current_people = "I"
-                if "dyn_people" in st.session_state: st.session_state.dyn_people = "I"
-                if "exp_people" in st.session_state: st.session_state.exp_people = "I"
-                
-                load_location_data.clear()
-                st.success(f"Logged Suborno boarding bus at {time_str}. You are now traveling alone.")
-                st.rerun()
-            except Exception as e: st.error(f"Error: {e}")
 
-    # --- CONTEXT AWARE BUTTON: RECEIVED SUBORNO FROM BUS (AFTERNOON) ---
-    time_now_for_btn = get_ist_now()
-    if current_loc == "Girishmore Bus Stop" and "Suborno" not in st.session_state.current_people and not st.session_state.route_active and (13 <= time_now_for_btn.hour <= 14):
-        if st.button("👦 Received Suborno from Bus", use_container_width=True, type="primary"):
-            try:
-                time_now = get_ist_now()
-                today_str = time_now.strftime("%d.%m.%y")
-                time_str = time_now.strftime("%H:%M")
-                
-                # Automatically append Suborno to whoever is currently waiting at the bus stop
-                current_p = st.session_state.current_people
-                new_people = current_p + ", Suborno" if current_p else "I, Suborno"
-                
-                sh.worksheet("LOCATION_DATA").append_row([
-                    today_str, time_str, "- Stationary -", "Girishmore Bus Stop", new_people, "Received Suborno from school bus"
-                ])
-                
-                # Force update the background state AND the UI Dropdowns
-                st.session_state.current_people = new_people
-                if "dyn_people" in st.session_state: st.session_state.dyn_people = new_people
-                if "exp_people" in st.session_state: st.session_state.exp_people = new_people
-                
-                load_location_data.clear()
-                st.success(f"Logged Suborno arriving at {time_str}. Companions updated to: {new_people}")
-                st.rerun()
-            except Exception as e: st.error(f"Error: {e}")
-    
-    if st.button("🏠 Arrived HOME Now", use_container_width=True):
+    # ==========================================
+    # QUICK ACTION CALLBACKS (Runs BEFORE screen redraws)
+    # ==========================================
+    def cb_board_bus():
+        try:
+            time_now = get_ist_now()
+            today_str = time_now.strftime("%d.%m.%y")
+            time_str = time_now.strftime("%H:%M")
+            sh.worksheet("LOCATION_DATA").append_row([
+                today_str, time_str, "- Stationary -", "Girishmore Bus Stop", "I", "Suborno boarded bus to school"
+            ])
+            # Safely update the background state and the UI dropdowns
+            st.session_state.current_people = "I"
+            st.session_state.dyn_people = "I"
+            st.session_state.exp_people = "I"
+            load_location_data.clear()
+        except Exception as e:
+            st.session_state.quick_err = str(e)
+
+    def cb_receive_suborno():
         try:
             time_now = get_ist_now()
             today_str = time_now.strftime("%d.%m.%y")
             time_str = time_now.strftime("%H:%M")
             
-            final_arr_people = get_home_occupants(st.session_state.current_people)
+            current_p = st.session_state.current_people
+            new_people = current_p + ", Suborno" if current_p else "I, Suborno"
             
-            sh.worksheet("LOCATION_DATA").append_row([today_str, time_str, "- Stationary -", "HOME", final_arr_people, "Quick Home Log"])
+            sh.worksheet("LOCATION_DATA").append_row([
+                today_str, time_str, "- Stationary -", "Girishmore Bus Stop", new_people, "Received Suborno from school bus"
+            ])
+            # Safely update the background state and the UI dropdowns
+            st.session_state.current_people = new_people
+            st.session_state.dyn_people = new_people
+            st.session_state.exp_people = new_people
+            load_location_data.clear()
+        except Exception as e:
+            st.session_state.quick_err = str(e)
+            
+    def cb_home():
+        try:
+            time_now = get_ist_now()
+            today_str = time_now.strftime("%d.%m.%y")
+            time_str = time_now.strftime("%H:%M")
+            final_arr_people = get_home_occupants(st.session_state.current_people)
+            sh.worksheet("LOCATION_DATA").append_row([
+                today_str, time_str, "- Stationary -", "HOME", final_arr_people, "Quick Home Log"
+            ])
             st.session_state.route_active = False
             st.session_state.route_type = None
             st.session_state.current_people = "I"
+            st.session_state.dyn_people = "I"  # Resets dropdown for next trip
+            st.session_state.exp_people = "I"  # Resets dropdown for next trip
             load_location_data.clear()
-            st.success(f"Welcome Home! Logged at {time_str}")
-            st.rerun()
-        except Exception as e: st.error(f"Error logging Home: {e}")
+        except Exception as e:
+            st.session_state.quick_err = str(e)
 
-    st.divider()
+    # Check for background errors
+    if "quick_err" in st.session_state:
+        st.error(f"Google Sheets Error: {st.session_state.quick_err}")
+        del st.session_state.quick_err
 
+    # ==========================================
+    # QUICK ACTION BUTTONS
+    # ==========================================
+    
+    # --- CONTEXT AWARE BUTTON: SUBORNO BOARDED BUS (MORNING) ---
+    if current_loc == "Girishmore Bus Stop" and "Suborno" in st.session_state.current_people and not st.session_state.route_active:
+        if st.button("🚌 Suborno Boarded Bus", use_container_width=True, type="primary", on_click=cb_board_bus):
+            st.success("Logged Suborno boarding bus. You are now traveling alone.")
+
+    # --- CONTEXT AWARE BUTTON: RECEIVED SUBORNO FROM BUS (AFTERNOON) ---
+    time_now_for_btn = get_ist_now()
+    if current_loc == "Girishmore Bus Stop" and "Suborno" not in st.session_state.current_people and not st.session_state.route_active and (13 <= time_now_for_btn.hour <= 14):
+        if st.button("👦 Received Suborno from Bus", use_container_width=True, type="primary", on_click=cb_receive_suborno):
+            st.success("Logged Suborno arriving! Companions updated.")
+    
+    # --- UNIVERSAL HOME BUTTON ---
+    if st.button("🏠 Arrived HOME Now", use_container_width=True, on_click=cb_home):
+        st.success("Welcome Home!")
+        
     st.markdown("### 📝 Manual Location Log")
     location_logic = get_location_logic()
     loc_date = st.date_input("Log Date", value=st.session_state.locked_date)

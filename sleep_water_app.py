@@ -17,7 +17,7 @@ st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    .block-container {padding-top: 2rem; padding-bottom: 2rem;}
+    .block-container {padding-top: 4rem; padding-bottom: 2rem;}
     div[data-testid="metric-container"] {
         text-align: center; 
         background-color: #f0f2f6; 

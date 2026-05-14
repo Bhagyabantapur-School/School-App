@@ -218,9 +218,22 @@ try:
                     if gap_duration <= 10: 
                         timeline_events.append({'type': 'transition', 'start': last_end_time.strftime('%I:%M %p'), 'end': current_start.strftime('%I:%M %p'), 'duration': int(gap_duration), 'activity': 'Bio Break / Preparation', 'sub': '', 'notes': '', 'place': '', 'move': ''})
                     else: 
-                        # SPLIT THE GAP
-                        gap_start_dt = last_end_time
-                        gap_end_dt = current_start - timedelta(minutes=10)
+                        # --- NEW LOGIC: FIRST 10 MIN BIO BREAK ---
+                        prep_start_dt = last_end_time
+                        prep_end_dt = last_end_time + timedelta(minutes=10)
+                        
+                        timeline_events.append({
+                            'type': 'transition', 
+                            'start': prep_start_dt.strftime('%I:%M %p'), 
+                            'end': prep_end_dt.strftime('%I:%M %p'), 
+                            'duration': 10, 
+                            'activity': 'Bio Break / Preparation', 
+                            'sub': '', 'notes': '', 'place': '', 'move': ''
+                        })
+                        
+                        # The remaining gap starts after the 10 min prep
+                        gap_start_dt = prep_end_dt
+                        gap_end_dt = current_start
                         
                         locs_in_gap = day_locs[(day_locs['Loc_DT'] > gap_start_dt) & (day_locs['Loc_DT'] < gap_end_dt)] if not day_locs.empty else pd.DataFrame()
                             
@@ -264,16 +277,6 @@ try:
                             if final_dur > 0:
                                 act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else get_gap_label(final_dur, curr_loc, visited_places_df, curr_gap_start, gap_end_dt, is_long_gap=True) if curr_move.upper() == "- STATIONARY -" else f"On the way"
                                 timeline_events.append({'type': 'gap', 'start': curr_gap_start.strftime('%I:%M %p'), 'end': gap_end_dt.strftime('%I:%M %p'), 'duration': int(final_dur), 'activity': act_label, 'sub': '', 'notes': '', 'place': str(curr_loc).strip(), 'move': ""})
-
-                        # APPEND THE PREP TIME
-                        timeline_events.append({
-                            'type': 'transition', 
-                            'start': gap_end_dt.strftime('%I:%M %p'), 
-                            'end': current_start.strftime('%I:%M %p'), 
-                            'duration': 10, 
-                            'activity': 'Bio Break / Preparation', 
-                            'sub': '', 'notes': '', 'place': '', 'move': ''
-                        })
             
             current_loc, current_move = "", ""
             if not day_locs.empty:
@@ -379,12 +382,13 @@ try:
         total_transit = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and e['activity'] != 'Unlogged / Free Time')
         total_bio_break = sum(e['duration'] for e in timeline_events if e['type'] == 'transition')
         
+        # Calculate exactly how much time is unaccounted for out of the 1440 minutes in a day
         unlogged_24h = max(0, 1440 - total_tracked - total_transit - total_bio_break)
         
         col_s1, col_s2, col_s3, col_s4 = st.columns(4)
         with col_s1: st.metric(label="Total Tracked", value=f"{int(total_tracked // 60)}h {int(total_tracked % 60)}m")
         with col_s2: st.metric(label="Transit & Stops", value=f"{int(total_transit // 60)}h {int(total_transit % 60)}m")
-        with col_s3: st.metric(label="Bio Break/Prep", value=f"{int(total_bio_break // 60)}h {int(total_bio_break % 60)}m")
+        with col_s3: st.metric(label="Bio Break / Prep", value=f"{int(total_bio_break // 60)}h {int(total_bio_break % 60)}m")
         with col_s4: st.metric(label="Unlogged / Free", value=f"{int(unlogged_24h // 60)}h {int(unlogged_24h % 60)}m")
             
         category_totals = {}

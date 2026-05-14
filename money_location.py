@@ -1085,7 +1085,7 @@ with tab_location:
 
     # --- CONTEXT AWARE BUTTON: RECEIVED SUBORNO FROM BUS (AFTERNOON) ---
     time_now_for_btn = get_ist_now()
-    if current_loc == "Girishmore Bus Stop" and "Suborno" not in st.session_state.current_people and not st.session_state.route_active and (13 <= time_now_for_btn.hour <= 14):
+    if current_loc == "Girishmore Bus Stop" and "Suborno" not in st.session_state.current_people and not st.session_state.route_active and (13 <= time_now_for_btn.hour <= 16):
         if st.button("👦 Received Suborno from Bus", use_container_width=True, type="primary", on_click=cb_receive_suborno):
             st.success("Logged Suborno arriving! Companions updated.")
     

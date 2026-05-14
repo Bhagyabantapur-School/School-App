@@ -262,6 +262,18 @@ def sync_journey_state():
     if 'state_synced' not in st.session_state:
         df_loc = load_location_data()
         if not df_loc.empty:
+            
+            # --- NEW MEMORY ENGINE ---
+            # Looks backwards through history to find the last actual vehicle used
+            last_move_val = "BIKE"
+            for i in range(len(df_loc)-1, -1, -1):
+                m = str(df_loc.iloc[i].get('Move', '')).strip()
+                if m not in ["", "- Stationary -", "nan"]:
+                    last_move_val = m
+                    break
+            st.session_state.current_move = last_move_val
+            # --------------------------
+
             recent_route = None
             if 'Remark' in df_loc.columns:
                 for remark in reversed(df_loc['Remark'].tolist()):
@@ -279,7 +291,6 @@ def sync_journey_state():
             
             if move_val not in ["", "- Stationary -", "nan"]:
                 st.session_state.route_active = True
-                st.session_state.current_move = move_val
                 
                 rem = str(last_record.get('Remark', ''))
                 if "Started Route:" in rem:

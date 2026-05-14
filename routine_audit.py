@@ -128,8 +128,14 @@ try:
         formatted_target_date = selected_timeline_date.strftime('%d.%m.%y') 
         prev_date_str = (selected_timeline_date - timedelta(days=1)).strftime('%Y-%m-%d')
         
-        def get_gap_label(dur, loc, visited_df, start_dt, end_dt, is_long_gap=False):
-            if "HOME" in str(loc).upper(): return get_short_stop_label(loc) if not is_long_gap and dur <= 10 else "Unlogged / Free Time"
+        # --- REFINED GAP LABEL GENERATOR ---
+        def get_gap_label(dur, loc, visited_df, start_dt, end_dt):
+            loc_upper = str(loc).upper()
+            
+            # If at home, any gap remaining after Bio Break is Free Time
+            if "HOME" in loc_upper or str(loc).strip() == "": 
+                return "Unlogged / Free Time"
+                
             found_purposes = []
             if not visited_df.empty:
                 matches = visited_df[visited_df['Place'].str.strip().str.upper() == str(loc).strip().upper()]
@@ -150,7 +156,8 @@ try:
                             if pd.notna(m_row['Visit Dates & Times']) and formatted_target_date in str(m_row['Visit Dates & Times']):
                                 if pd.notna(m_row['Purpose']) and str(m_row['Purpose']).strip(): return str(m_row['Purpose']).strip()
                     if pd.notna(matches.iloc[0]['Purpose']) and str(matches.iloc[0]['Purpose']).strip(): return str(matches.iloc[0]['Purpose']).strip()
-            return get_short_stop_label(loc) if not is_long_gap and dur <= 10 else "Unlogged / Free Time"
+            
+            return get_short_stop_label(loc)
         
         day_logs_raw = log_df[(log_df['Date'].isin([selected_date_str, prev_date_str])) & (log_df['End_Time'] != 'RUNNING')].copy()
         day_start_dt, day_end_dt = pd.to_datetime(selected_date_str + ' 00:00:00'), pd.to_datetime(selected_date_str + ' 23:59:59')
@@ -209,99 +216,85 @@ try:
         last_end_time = start_time_limit
         timeline_events = []
         
+        # --- NEW TIMELINE GAP ENGINE ---
         for _, row in day_logs.iterrows():
             current_start, current_end = row['Display_Start'], row['Display_End']
             
             if last_end_time and current_start > last_end_time:
-                gap_start_dt = last_end_time
-                gap_end_dt = current_start
+                gap_duration = (current_start - last_end_time).total_seconds() / 60
+                
+                if gap_duration > 0:
+                    def get_loc_state_at_time(t):
+                        if day_locs.empty: return "", "- Stationary -"
+                        past = day_locs[day_locs['Loc_DT'] <= t]
+                        return (past.iloc[-1]['Place'], past.iloc[-1]['Move']) if not past.empty else (day_locs.iloc[0]['Place'], day_locs.iloc[0]['Move'])
+                        
+                    curr_gap_start = last_end_time
+                    curr_gap_end = current_start
+                    
+                    curr_loc, curr_move = get_loc_state_at_time(curr_gap_start)
+                    is_home_and_stationary = ("HOME" in str(curr_loc).upper() or str(curr_loc).strip() == "") and (curr_move.upper() == "- STATIONARY -")
+                    
+                    # Carve out Bio Break immediately AFTER the task, IF at Home
+                    if is_home_and_stationary:
+                        prep_end_dt = curr_gap_start + timedelta(minutes=10)
+                        
+                        # Prevent the Bio Break from overlapping the next task
+                        if prep_end_dt > curr_gap_end:
+                            prep_end_dt = curr_gap_end
+                            
+                        # Prevent the Bio Break from ignoring a location change (e.g., getting on a BIKE)
+                        early_locs = day_locs[(day_locs['Loc_DT'] > curr_gap_start) & (day_locs['Loc_DT'] < prep_end_dt)] if not day_locs.empty else pd.DataFrame()
+                        if not early_locs.empty:
+                            prep_end_dt = early_locs.iloc[0]['Loc_DT']
+                            
+                        prep_dur = (prep_end_dt - curr_gap_start).total_seconds() / 60
+                        
+                        if prep_dur > 0:
+                            timeline_events.append({
+                                'type': 'transition', 'start': curr_gap_start.strftime('%I:%M %p'), 'end': prep_end_dt.strftime('%I:%M %p'), 
+                                'duration': int(prep_dur), 'activity': 'Bio Break / Preparation', 'sub': '', 'notes': '', 'place': '', 'move': ''
+                            })
+                            curr_gap_start = prep_end_dt
 
-                # Step 1: Map raw segments based purely on location
-                raw_events = []
-                locs_in_gap = day_locs[(day_locs['Loc_DT'] > gap_start_dt) & (day_locs['Loc_DT'] < gap_end_dt)] if not day_locs.empty else pd.DataFrame()
-
-                def get_loc_state_at_time(t):
-                    if day_locs.empty: return "", "- Stationary -"
-                    past = day_locs[day_locs['Loc_DT'] <= t]
-                    return (past.iloc[-1]['Place'], past.iloc[-1]['Move']) if not past.empty else (day_locs.iloc[0]['Place'], day_locs.iloc[0]['Move'])
-
-                curr_gap_start = gap_start_dt
-                curr_loc, curr_move = get_loc_state_at_time(curr_gap_start)
-                transit_modes = [curr_move] if curr_move.upper() != "- STATIONARY -" else []
-
-                if locs_in_gap.empty:
-                    dur_left = (gap_end_dt - curr_gap_start).total_seconds() / 60
-                    if dur_left > 0:
-                        raw_events.append({'start_dt': curr_gap_start, 'end_dt': gap_end_dt, 'duration': dur_left, 'loc': curr_loc, 'is_transit': len(transit_modes) > 0, 'transit_modes': transit_modes})
-                else:
-                    for _, l_row in locs_in_gap.iterrows():
-                        split_time = l_row['Loc_DT']
-                        new_move = str(l_row['Move']).strip()
-                        new_loc = str(l_row['Place']).strip()
-
-                        is_new_stat = (new_move.upper() == "- STATIONARY -")
-                        is_curr_stat = (curr_move.upper() == "- STATIONARY -")
-
-                        if is_new_stat:
-                            if not is_curr_stat:
-                                sub_dur = (split_time - curr_gap_start).total_seconds() / 60
-                                if sub_dur > 0: raw_events.append({'start_dt': curr_gap_start, 'end_dt': split_time, 'duration': sub_dur, 'loc': curr_loc, 'is_transit': True, 'transit_modes': transit_modes})
-                                curr_gap_start, curr_loc, curr_move, transit_modes = split_time, new_loc, new_move, []
-                            elif new_loc.upper() != curr_loc.upper() and curr_loc != "":
-                                sub_dur = (split_time - curr_gap_start).total_seconds() / 60
-                                if sub_dur > 0: raw_events.append({'start_dt': curr_gap_start, 'end_dt': split_time, 'duration': sub_dur, 'loc': curr_loc, 'is_transit': False, 'transit_modes': []})
-                                curr_gap_start, curr_loc, curr_move = split_time, new_loc, new_move
+                    # Now, process whatever remains of the gap (Unlogged Time, Transit, or Other Places)
+                    if curr_gap_start < curr_gap_end:
+                        curr_loc, curr_move = get_loc_state_at_time(curr_gap_start)
+                        transit_modes = [curr_move] if curr_move.upper() != "- STATIONARY -" else []
+                        
+                        locs_in_gap = day_locs[(day_locs['Loc_DT'] > curr_gap_start) & (day_locs['Loc_DT'] < curr_gap_end)] if not day_locs.empty else pd.DataFrame()
+                        
+                        if locs_in_gap.empty:
+                            dur_left = (curr_gap_end - curr_gap_start).total_seconds() / 60
+                            act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else get_gap_label(dur_left, curr_loc, visited_places_df, curr_gap_start, curr_gap_end)
+                            timeline_events.append({'type': 'gap', 'start': curr_gap_start.strftime('%I:%M %p'), 'end': curr_gap_end.strftime('%I:%M %p'), 'duration': int(dur_left), 'activity': act_label, 'sub': '', 'notes': '', 'place': str(curr_loc).strip(), 'move': ""})
                         else:
-                            if is_curr_stat:
-                                sub_dur = (split_time - curr_gap_start).total_seconds() / 60
-                                if sub_dur > 0: raw_events.append({'start_dt': curr_gap_start, 'end_dt': split_time, 'duration': sub_dur, 'loc': curr_loc, 'is_transit': False, 'transit_modes': []})
-                                curr_gap_start, curr_move, transit_modes = split_time, new_move, [new_move]
-                            else:
-                                if new_move not in transit_modes: transit_modes.append(new_move)
-                                curr_move = new_move
+                            for _, l_row in locs_in_gap.iterrows():
+                                split_time, new_move, new_loc = l_row['Loc_DT'], str(l_row['Move']).strip(), str(l_row['Place']).strip()
+                                is_new_stat, is_curr_stat = new_move.upper() == "- STATIONARY -", curr_move.upper() == "- STATIONARY -"
+                                
+                                if is_new_stat:
+                                    if not is_curr_stat:
+                                        sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
+                                        if sub_gap_dur > 0: timeline_events.append({'type': 'gap', 'start': curr_gap_start.strftime('%I:%M %p'), 'end': split_time.strftime('%I:%M %p'), 'duration': int(sub_gap_dur), 'activity': f"On the way ({' + '.join(transit_modes)})" if transit_modes else "On the way", 'sub': '', 'notes': '', 'place': str(curr_loc).strip(), 'move': ""})
+                                        curr_gap_start, curr_loc, curr_move, transit_modes = split_time, new_loc, new_move, []
+                                    elif new_loc.upper() != curr_loc.upper() and curr_loc != "":
+                                        sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
+                                        if sub_gap_dur > 0: timeline_events.append({'type': 'gap', 'start': curr_gap_start.strftime('%I:%M %p'), 'end': split_time.strftime('%I:%M %p'), 'duration': int(sub_gap_dur), 'activity': get_gap_label(sub_gap_dur, curr_loc, visited_places_df, curr_gap_start, split_time), 'sub': '', 'notes': '', 'place': str(curr_loc).strip(), 'move': ""})
+                                        curr_gap_start, curr_loc, curr_move = split_time, new_loc, new_move
+                                else: 
+                                    if is_curr_stat:
+                                        sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
+                                        if sub_gap_dur > 0: timeline_events.append({'type': 'gap', 'start': curr_gap_start.strftime('%I:%M %p'), 'end': split_time.strftime('%I:%M %p'), 'duration': int(sub_gap_dur), 'activity': get_gap_label(sub_gap_dur, curr_loc, visited_places_df, curr_gap_start, split_time), 'sub': '', 'notes': '', 'place': str(curr_loc).strip(), 'move': ""})
+                                        curr_gap_start, curr_move, transit_modes = split_time, new_move, [new_move]
+                                    else:
+                                        if new_move not in transit_modes: transit_modes.append(new_move)
+                                        curr_move = new_move
 
-                    final_dur = (gap_end_dt - curr_gap_start).total_seconds() / 60
-                    if final_dur > 0:
-                        raw_events.append({'start_dt': curr_gap_start, 'end_dt': gap_end_dt, 'duration': final_dur, 'loc': curr_loc, 'is_transit': len(transit_modes) > 0, 'transit_modes': transit_modes})
-
-                # Step 2: Inject "Bio Break / Prep" to the LAST 10 mins of any stationary segment
-                for re in raw_events:
-                    s_dt = re['start_dt']
-                    e_dt = re['end_dt']
-                    dur = re['duration']
-
-                    if re['is_transit']:
-                        act_label = f"On the way ({' + '.join(re['transit_modes'])})"
-                        timeline_events.append({
-                            'type': 'gap', 'start': s_dt.strftime('%I:%M %p'), 'end': e_dt.strftime('%I:%M %p'),
-                            'duration': int(dur), 'activity': act_label, 'sub': '', 'notes': '', 'place': str(re['loc']).strip(), 'move': ""
-                        })
-                    else:
-                        if dur <= 10:
-                            # Full gap is Bio Break
-                            timeline_events.append({
-                                'type': 'transition', 'start': s_dt.strftime('%I:%M %p'), 'end': e_dt.strftime('%I:%M %p'),
-                                'duration': int(dur), 'activity': 'Bio Break / Preparation', 'sub': '', 'notes': '', 'place': '', 'move': ''
-                            })
-                        else:
-                            # Split: First part is Unlogged/Place, Last 10 mins is Bio Break
-                            rem_dur = dur - 10
-                            rem_start = s_dt
-                            rem_end = s_dt + timedelta(minutes=rem_dur)
-
-                            prep_start = rem_end
-                            prep_end = e_dt
-
-                            act_label = get_gap_label(rem_dur, re['loc'], visited_places_df, rem_start, rem_end, is_long_gap=True)
-                            timeline_events.append({
-                                'type': 'gap', 'start': rem_start.strftime('%I:%M %p'), 'end': rem_end.strftime('%I:%M %p'),
-                                'duration': int(rem_dur), 'activity': act_label, 'sub': '', 'notes': '', 'place': str(re['loc']).strip(), 'move': ""
-                            })
-
-                            timeline_events.append({
-                                'type': 'transition', 'start': prep_start.strftime('%I:%M %p'), 'end': prep_end.strftime('%I:%M %p'),
-                                'duration': 10, 'activity': 'Bio Break / Preparation', 'sub': '', 'notes': '', 'place': '', 'move': ''
-                            })
+                            final_dur = (curr_gap_end - curr_gap_start).total_seconds() / 60
+                            if final_dur > 0:
+                                act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else get_gap_label(final_dur, curr_loc, visited_places_df, curr_gap_start, curr_gap_end) if curr_move.upper() == "- STATIONARY -" else f"On the way"
+                                timeline_events.append({'type': 'gap', 'start': curr_gap_start.strftime('%I:%M %p'), 'end': curr_gap_end.strftime('%I:%M %p'), 'duration': int(final_dur), 'activity': act_label, 'sub': '', 'notes': '', 'place': str(curr_loc).strip(), 'move': ""})
             
             current_loc, current_move = "", ""
             if not day_locs.empty:

@@ -25,7 +25,6 @@ st_autorefresh(interval=120000, key="routine_refresh")
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
     footer {visibility: hidden;}
     .block-container {padding-top: 2rem; padding-bottom: 2rem;}
     div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {
@@ -288,7 +287,8 @@ try:
         ("Routine Editor", "routine_editor.py", "✏️"),
         ("MDM Returns", "mdm_return_log.py", "📦"),
         ("Video Manager", "bps_ytfb_videos.py", "🎬"),
-        ("Trace Inventory", "trace.py", "🏷️") # <-- ADDED NEW APP
+        ("Trace Inventory", "trace.py", "🏷️"),
+        ("Sleep & Water", "sleep_water_app.py", "💧") # <-- NEW APP ADDED HERE
     ]
     
     # ROW-BY-ROW COLUMN RENDERING FOR PERFECT MOBILE STACKING

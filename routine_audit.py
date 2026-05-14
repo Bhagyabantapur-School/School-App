@@ -36,8 +36,17 @@ def init_connection():
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
     return gspread.authorize(creds)
 
-def get_main_spreadsheet(): return init_connection().open("MY ROUTINE 2026")
-def get_money_spreadsheet(): return init_connection().open("sk_money_location")
+def get_main_spreadsheet():
+    return init_connection().open("MY ROUTINE 2026")
+
+def get_money_spreadsheet():
+    return init_connection().open("sk_money_location")
+
+def smart_append_row(sheet, row_data):
+    col_a = sheet.col_values(1)
+    next_row = len(col_a) + 1
+    try: sheet.update(range_name=f"A{next_row}", values=[row_data], value_input_option="USER_ENTERED")
+    except TypeError: sheet.update(f"A{next_row}", [row_data], value_input_option="USER_ENTERED")
 
 @st.cache_data(ttl=300)
 def get_activity_log():
@@ -119,8 +128,8 @@ try:
         formatted_target_date = selected_timeline_date.strftime('%d.%m.%y') 
         prev_date_str = (selected_timeline_date - timedelta(days=1)).strftime('%Y-%m-%d')
         
-        def get_gap_label(dur, loc, visited_df, start_dt, end_dt):
-            if "HOME" in str(loc).upper(): return get_short_stop_label(loc) if dur < 5 else "Unlogged Time / Break"
+        def get_gap_label(dur, loc, visited_df, start_dt, end_dt, is_long_gap=False):
+            if "HOME" in str(loc).upper(): return get_short_stop_label(loc) if not is_long_gap and dur <= 10 else "Unlogged / Free Time"
             found_purposes = []
             if not visited_df.empty:
                 matches = visited_df[visited_df['Place'].str.strip().str.upper() == str(loc).strip().upper()]
@@ -141,7 +150,7 @@ try:
                             if pd.notna(m_row['Visit Dates & Times']) and formatted_target_date in str(m_row['Visit Dates & Times']):
                                 if pd.notna(m_row['Purpose']) and str(m_row['Purpose']).strip(): return str(m_row['Purpose']).strip()
                     if pd.notna(matches.iloc[0]['Purpose']) and str(matches.iloc[0]['Purpose']).strip(): return str(matches.iloc[0]['Purpose']).strip()
-            return get_short_stop_label(loc) if dur < 5 else "Unlogged Time / Break"
+            return get_short_stop_label(loc) if not is_long_gap and dur <= 10 else "Unlogged / Free Time"
         
         day_logs_raw = log_df[(log_df['Date'].isin([selected_date_str, prev_date_str])) & (log_df['End_Time'] != 'RUNNING')].copy()
         day_start_dt, day_end_dt = pd.to_datetime(selected_date_str + ' 00:00:00'), pd.to_datetime(selected_date_str + ' 23:59:59')
@@ -168,7 +177,6 @@ try:
                 except: return None
 
         loc_df_safe['Parsed_Date'] = loc_df_safe['Date'].apply(parse_custom_date)
-        
         day_locs = loc_df_safe[loc_df_safe['Parsed_Date'].isin([selected_timeline_date, selected_timeline_date - timedelta(days=1)])].copy()
         
         if not day_locs.empty:
@@ -189,7 +197,6 @@ try:
         
         start_time_limit = pd.to_datetime(selected_date_str + ' 05:00')
         today_locs = day_locs[day_locs['Parsed_Date'] == selected_timeline_date] if not day_locs.empty else pd.DataFrame()
-        
         if not today_locs.empty and today_locs['Loc_DT'].min() < start_time_limit: 
             start_time_limit = today_locs['Loc_DT'].min()
             
@@ -208,10 +215,13 @@ try:
             if last_end_time and current_start > last_end_time:
                 gap_duration = (current_start - last_end_time).total_seconds() / 60
                 if gap_duration > 0:
-                    if gap_duration <= 5: 
-                        timeline_events.append({'type': 'transition', 'start': last_end_time.strftime('%I:%M %p'), 'end': current_start.strftime('%I:%M %p'), 'duration': int(gap_duration), 'activity': 'Transition', 'sub': '', 'notes': '', 'place': '', 'move': ''})
+                    if gap_duration <= 10: 
+                        timeline_events.append({'type': 'transition', 'start': last_end_time.strftime('%I:%M %p'), 'end': current_start.strftime('%I:%M %p'), 'duration': int(gap_duration), 'activity': 'Bio Break / Preparation', 'sub': '', 'notes': '', 'place': '', 'move': ''})
                     else: 
-                        gap_start_dt, gap_end_dt = last_end_time, current_start
+                        # SPLIT THE GAP
+                        gap_start_dt = last_end_time
+                        gap_end_dt = current_start - timedelta(minutes=10)
+                        
                         locs_in_gap = day_locs[(day_locs['Loc_DT'] > gap_start_dt) & (day_locs['Loc_DT'] < gap_end_dt)] if not day_locs.empty else pd.DataFrame()
                             
                         def get_loc_state_at_time(t):
@@ -224,8 +234,9 @@ try:
                         transit_modes = [curr_move] if curr_move.upper() != "- STATIONARY -" else []
                         
                         if locs_in_gap.empty:
-                            act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else get_gap_label(gap_duration, curr_loc, visited_places_df, gap_start_dt, gap_end_dt)
-                            timeline_events.append({'type': 'gap', 'start': gap_start_dt.strftime('%I:%M %p'), 'end': gap_end_dt.strftime('%I:%M %p'), 'duration': int(gap_duration), 'activity': act_label, 'sub': '', 'notes': '', 'place': str(curr_loc).strip(), 'move': ""})
+                            dur_left = (gap_end_dt - gap_start_dt).total_seconds() / 60
+                            act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else get_gap_label(dur_left, curr_loc, visited_places_df, gap_start_dt, gap_end_dt, is_long_gap=True)
+                            timeline_events.append({'type': 'gap', 'start': gap_start_dt.strftime('%I:%M %p'), 'end': gap_end_dt.strftime('%I:%M %p'), 'duration': int(dur_left), 'activity': act_label, 'sub': '', 'notes': '', 'place': str(curr_loc).strip(), 'move': ""})
                         else:
                             for _, l_row in locs_in_gap.iterrows():
                                 split_time, new_move, new_loc = l_row['Loc_DT'], str(l_row['Move']).strip(), str(l_row['Place']).strip()
@@ -234,16 +245,16 @@ try:
                                 if is_new_stat:
                                     if not is_curr_stat:
                                         sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
-                                        if sub_gap_dur >= 0: timeline_events.append({'type': 'gap', 'start': curr_gap_start.strftime('%I:%M %p'), 'end': split_time.strftime('%I:%M %p'), 'duration': int(sub_gap_dur), 'activity': f"On the way ({' + '.join(transit_modes)})" if transit_modes else "On the way", 'sub': '', 'notes': '', 'place': str(curr_loc).strip(), 'move': ""})
+                                        if sub_gap_dur > 0: timeline_events.append({'type': 'gap', 'start': curr_gap_start.strftime('%I:%M %p'), 'end': split_time.strftime('%I:%M %p'), 'duration': int(sub_gap_dur), 'activity': f"On the way ({' + '.join(transit_modes)})" if transit_modes else "On the way", 'sub': '', 'notes': '', 'place': str(curr_loc).strip(), 'move': ""})
                                         curr_gap_start, curr_loc, curr_move, transit_modes = split_time, new_loc, new_move, []
                                     elif new_loc.upper() != curr_loc.upper() and curr_loc != "":
                                         sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
-                                        if sub_gap_dur >= 0: timeline_events.append({'type': 'gap', 'start': curr_gap_start.strftime('%I:%M %p'), 'end': split_time.strftime('%I:%M %p'), 'duration': int(sub_gap_dur), 'activity': get_gap_label(sub_gap_dur, curr_loc, visited_places_df, curr_gap_start, split_time), 'sub': '', 'notes': '', 'place': str(curr_loc).strip(), 'move': ""})
+                                        if sub_gap_dur > 0: timeline_events.append({'type': 'gap', 'start': curr_gap_start.strftime('%I:%M %p'), 'end': split_time.strftime('%I:%M %p'), 'duration': int(sub_gap_dur), 'activity': get_gap_label(sub_gap_dur, curr_loc, visited_places_df, curr_gap_start, split_time, is_long_gap=True), 'sub': '', 'notes': '', 'place': str(curr_loc).strip(), 'move': ""})
                                         curr_gap_start, curr_loc, curr_move = split_time, new_loc, new_move
                                 else: 
                                     if is_curr_stat:
                                         sub_gap_dur = (split_time - curr_gap_start).total_seconds() / 60
-                                        if sub_gap_dur >= 0: timeline_events.append({'type': 'gap', 'start': curr_gap_start.strftime('%I:%M %p'), 'end': split_time.strftime('%I:%M %p'), 'duration': int(sub_gap_dur), 'activity': get_gap_label(sub_gap_dur, curr_loc, visited_places_df, curr_gap_start, split_time), 'sub': '', 'notes': '', 'place': str(curr_loc).strip(), 'move': ""})
+                                        if sub_gap_dur > 0: timeline_events.append({'type': 'gap', 'start': curr_gap_start.strftime('%I:%M %p'), 'end': split_time.strftime('%I:%M %p'), 'duration': int(sub_gap_dur), 'activity': get_gap_label(sub_gap_dur, curr_loc, visited_places_df, curr_gap_start, split_time, is_long_gap=True), 'sub': '', 'notes': '', 'place': str(curr_loc).strip(), 'move': ""})
                                         curr_gap_start, curr_move, transit_modes = split_time, new_move, [new_move]
                                     else:
                                         if new_move not in transit_modes: transit_modes.append(new_move)
@@ -251,8 +262,18 @@ try:
 
                             final_dur = (gap_end_dt - curr_gap_start).total_seconds() / 60
                             if final_dur > 0:
-                                act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else get_gap_label(final_dur, curr_loc, visited_places_df, curr_gap_start, gap_end_dt) if curr_move.upper() == "- STATIONARY -" else f"On the way"
+                                act_label = f"On the way ({' + '.join(transit_modes)})" if transit_modes else get_gap_label(final_dur, curr_loc, visited_places_df, curr_gap_start, gap_end_dt, is_long_gap=True) if curr_move.upper() == "- STATIONARY -" else f"On the way"
                                 timeline_events.append({'type': 'gap', 'start': curr_gap_start.strftime('%I:%M %p'), 'end': gap_end_dt.strftime('%I:%M %p'), 'duration': int(final_dur), 'activity': act_label, 'sub': '', 'notes': '', 'place': str(curr_loc).strip(), 'move': ""})
+
+                        # APPEND THE PREP TIME
+                        timeline_events.append({
+                            'type': 'transition', 
+                            'start': gap_end_dt.strftime('%I:%M %p'), 
+                            'end': current_start.strftime('%I:%M %p'), 
+                            'duration': 10, 
+                            'activity': 'Bio Break / Preparation', 
+                            'sub': '', 'notes': '', 'place': '', 'move': ''
+                        })
             
             current_loc, current_move = "", ""
             if not day_locs.empty:
@@ -274,38 +295,13 @@ try:
 
             if event['type'] == 'transition':
                 html = (
-                    f"<div style='display: flex; justify-content: center; align-items: center; background-color: #fff3e0; border: 1px solid #ffb74d; padding: 6px 12px; border-radius: 20px; margin-bottom: 10px; margin-left: 20%; margin-right: 20%;'>"
-                    f"<span style='color: #e65100; font-size: 13px; font-weight: 500;'>⏳ Transition: {event['start']} - {event['end']} ({dur_display})</span>"
+                    f"<div style='display: flex; justify-content: center; align-items: center; background-color: #fff3e0; border: 1px solid #ffb74d; padding: 6px 12px; border-radius: 20px; margin-bottom: 10px; margin-left: 10%; margin-right: 10%;'>"
+                    f"<span style='color: #e65100; font-size: 13px; font-weight: 500;'>⏳ Bio Break / Preparation: {event['start']} - {event['end']} ({dur_display})</span>"
                     f"</div>"
                 )
                 st.markdown(html, unsafe_allow_html=True)
             elif event['type'] == 'gap':
-                if event['activity'].startswith('On the way'):
-                    html = (
-                        f"<div style='display: flex; justify-content: space-between; align-items: center; background-color: #e0f7fa; border-left: 5px solid #00838f; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px;'>"
-                        f"<div style='flex: 1; font-size: 15px; font-weight: bold; color: #00838f;'>🛣️ {event['activity']}</div>"
-                        f"<div style='text-align: right; min-width: 110px;'>"
-                        f"<div style='font-size: 13px; font-weight: 600; color: #006064;'>{event['start']} - {event['end']}</div>"
-                        f"<div style='font-size: 12px; color: #00838f; background: #b2ebf2; display: inline-block; padding: 2px 8px; border-radius: 12px; margin-top: 4px;'>⏱️ {dur_display}</div>"
-                        f"</div>"
-                        f"</div>"
-                    )
-                elif event['duration'] < 5:
-                    place_str = str(event.get('place', '')).strip()
-                    loc_html_gap = f"<div style='font-size: 12px; color: #0097a7; font-weight: 500; margin-top: 4px;'>📍 {place_str}</div>" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else ""
-                    html = (
-                        f"<div style='display: flex; justify-content: space-between; align-items: center; background-color: #e0f2f1; border-left: 5px solid #00acc1; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px;'>"
-                        f"<div style='flex: 1;'>"
-                        f"<div style='font-size: 15px; font-weight: bold; color: #00acc1;'>{event['activity']}</div>"
-                        f"{loc_html_gap}"
-                        f"</div>"
-                        f"<div style='text-align: right; min-width: 110px;'>"
-                        f"<div style='font-size: 13px; font-weight: 600; color: #00695c;'>{event['start']} - {event['end']}</div>"
-                        f"<div style='font-size: 12px; color: #00acc1; background: #b2dfdb; display: inline-block; padding: 2px 8px; border-radius: 12px; margin-top: 4px;'>⏱️ {dur_display}</div>"
-                        f"</div>"
-                        f"</div>"
-                    )
-                else:
+                if event['activity'] == 'Unlogged / Free Time':
                     place_str = str(event.get('place', '')).strip()
                     loc_html_gap = f"<div style='font-size: 12px; color: #d32f2f; font-weight: 500; margin-top: 4px;'>📍 {place_str}</div>" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else ""
                     html = (
@@ -317,6 +313,31 @@ try:
                         f"<div style='text-align: right; min-width: 110px;'>"
                         f"<div style='font-size: 13px; font-weight: 600; color: #666;'>{event['start']} - {event['end']}</div>"
                         f"<div style='font-size: 12px; color: #888; background: #eee; display: inline-block; padding: 2px 8px; border-radius: 12px; margin-top: 4px;'>⏱️ {dur_display}</div>"
+                        f"</div>"
+                        f"</div>"
+                    )
+                elif event['activity'].startswith('On the way'):
+                    html = (
+                        f"<div style='display: flex; justify-content: space-between; align-items: center; background-color: #e0f7fa; border-left: 5px solid #00838f; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px;'>"
+                        f"<div style='flex: 1; font-size: 15px; font-weight: bold; color: #00838f;'>🛣️ {event['activity']}</div>"
+                        f"<div style='text-align: right; min-width: 110px;'>"
+                        f"<div style='font-size: 13px; font-weight: 600; color: #006064;'>{event['start']} - {event['end']}</div>"
+                        f"<div style='font-size: 12px; color: #00838f; background: #b2ebf2; display: inline-block; padding: 2px 8px; border-radius: 12px; margin-top: 4px;'>⏱️ {dur_display}</div>"
+                        f"</div>"
+                        f"</div>"
+                    )
+                else:
+                    place_str = str(event.get('place', '')).strip()
+                    loc_html_gap = f"<div style='font-size: 12px; color: #0097a7; font-weight: 500; margin-top: 4px;'>📍 {place_str}</div>" if place_str and place_str.upper() not in ["I", "NAN", "NONE"] else ""
+                    html = (
+                        f"<div style='display: flex; justify-content: space-between; align-items: center; background-color: #e0f2f1; border-left: 5px solid #00acc1; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px;'>"
+                        f"<div style='flex: 1;'>"
+                        f"<div style='font-size: 15px; font-weight: bold; color: #00acc1;'>{event['activity']}</div>"
+                        f"{loc_html_gap}"
+                        f"</div>"
+                        f"<div style='text-align: right; min-width: 110px;'>"
+                        f"<div style='font-size: 13px; font-weight: 600; color: #00695c;'>{event['start']} - {event['end']}</div>"
+                        f"<div style='font-size: 12px; color: #00acc1; background: #b2dfdb; display: inline-block; padding: 2px 8px; border-radius: 12px; margin-top: 4px;'>⏱️ {dur_display}</div>"
                         f"</div>"
                         f"</div>"
                     )
@@ -351,16 +372,43 @@ try:
                 )
                 st.markdown(html, unsafe_allow_html=True)
                 
+        # --- 1. DAILY SUMMARY (TIMELINE OVERVIEW) ---
         st.markdown("---")
         st.markdown("<h4 style='text-align: center; color: #555;'>📊 Daily Summary (24 Hours)</h4>", unsafe_allow_html=True)
         total_tracked = sum(e['duration'] for e in timeline_events if e['type'] == 'task')
-        total_transit = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and e['activity'] != 'Unlogged Time / Break')
-        unlogged_24h = max(0, 1440 - total_tracked - total_transit)
+        total_transit = sum(e['duration'] for e in timeline_events if e['type'] == 'gap' and e['activity'] != 'Unlogged / Free Time')
+        total_bio_break = sum(e['duration'] for e in timeline_events if e['type'] == 'transition')
         
-        col_s1, col_s2, col_s3 = st.columns(3)
-        with col_s1: st.metric(label="Total Tracked Time", value=f"{int(total_tracked // 60)}h {int(total_tracked % 60)}m")
-        with col_s2: st.metric(label="Total Transit & Stops", value=f"{int(total_transit // 60)}h {int(total_transit % 60)}m")
-        with col_s3: st.metric(label="Unlogged / Free Time", value=f"{int(unlogged_24h // 60)}h {int(unlogged_24h % 60)}m")
+        unlogged_24h = max(0, 1440 - total_tracked - total_transit - total_bio_break)
+        
+        col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+        with col_s1: st.metric(label="Total Tracked", value=f"{int(total_tracked // 60)}h {int(total_tracked % 60)}m")
+        with col_s2: st.metric(label="Transit & Stops", value=f"{int(total_transit // 60)}h {int(total_transit % 60)}m")
+        with col_s3: st.metric(label="Bio Break/Prep", value=f"{int(total_bio_break // 60)}h {int(total_bio_break % 60)}m")
+        with col_s4: st.metric(label="Unlogged / Free", value=f"{int(unlogged_24h // 60)}h {int(unlogged_24h % 60)}m")
+            
+        category_totals = {}
+        for e in timeline_events:
+            if e['type'] == 'task':
+                category_totals[e['activity']] = category_totals.get(e['activity'], 0) + e['duration']
+                
+        if total_transit > 0: category_totals['TRANSIT & STOPS'] = total_transit
+        if total_bio_break > 0: category_totals['BIO BREAK / PREP'] = total_bio_break
+        if unlogged_24h > 0: category_totals['UNLOGGED TIME'] = unlogged_24h
+            
+        if category_totals:
+            cat_df = pd.DataFrame(list(category_totals.items()), columns=['Category', 'Minutes']).sort_values(by='Minutes', ascending=False)
+            
+            import plotly.graph_objects as go
+            fig = go.Figure(data=[go.Pie(
+                labels=cat_df['Category'], 
+                values=cat_df['Minutes'], 
+                hole=0.4,
+                textinfo='label+percent',
+                hoverinfo='label+value+percent'
+            )])
+            fig.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=350, showlegend=True)
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     # ==========================================
     # TAB 2: DAILY SUMMARY (COMPACT ACTIVITY CARDS)

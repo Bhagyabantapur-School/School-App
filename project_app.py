@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 import pytz
 import time
 import plotly.express as px
-import calendar # <-- NEW: Added calendar import for the month selector
+import calendar 
 
 # --- Master Google Sheets Formula for Duration ---
 GS_FORMULA = '=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm"), ""))'
@@ -73,16 +73,17 @@ def get_project_tasks():
     try:
         sheet = ss.worksheet("project_tasks")
     except gspread.exceptions.WorksheetNotFound:
-        sheet = ss.add_worksheet(title="project_tasks", rows="200", cols="5")
-        sheet.append_row(["Task Name", "Project Name", "Status", "Start Date", "End Date"])
+        # UPDATED: Now creates 6 columns
+        sheet = ss.add_worksheet(title="project_tasks", rows="200", cols="6")
+        sheet.append_row(["Task Name", "Project Name", "Activity", "Status", "Start Date", "End Date"])
     data = sheet.get_all_values()
     if len(data) <= 1:
-        return pd.DataFrame(columns=["Task Name", "Project Name", "Status", "Start Date", "End Date", "row_index"])
+        return pd.DataFrame(columns=["Task Name", "Project Name", "Activity", "Status", "Start Date", "End Date", "row_index"])
     
     df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 5: df[df.shape[1]] = ""
-    df = df.iloc[:, :5]
-    df.columns = ["Task Name", "Project Name", "Status", "Start Date", "End Date"]
+    while df.shape[1] < 6: df[df.shape[1]] = "" # UPDATED to 6 columns
+    df = df.iloc[:, :6]
+    df.columns = ["Task Name", "Project Name", "Activity", "Status", "Start Date", "End Date"]
     df['row_index'] = df.index + 2 
     return df
 
@@ -125,7 +126,6 @@ def get_activity_log():
 def render_sk_sync_tracker(sk_sync_tasks, today_str, now, gs_formula):
     st.markdown("### 🔄 Project SK-Sync Progress")
     
-    # --- NEW: Target Month & Year Selectors ---
     col_m, col_y = st.columns(2)
     with col_m:
         selected_month = st.selectbox("Target Data Month", list(calendar.month_name)[1:], key="sksync_target_month")
@@ -138,13 +138,11 @@ def render_sk_sync_tracker(sk_sync_tasks, today_str, now, gs_formula):
         st.info("No SK-Sync tasks found. Paste your data into the 'sk_sync_project' tab.")
         return
         
-    # Calculate progress
     completed_tasks = len(sk_sync_tasks[sk_sync_tasks['Status'].str.strip().str.title() == 'Done'])
     progress_pct = int((completed_tasks / total_tasks) * 100)
     
     st.progress(progress_pct / 100.0, text=f"Completion: {progress_pct}% ({completed_tasks}/{total_tasks} Tasks Migrated)")
     
-    # Identify the next pending task
     pending = sk_sync_tasks[sk_sync_tasks['Status'].str.strip().str.title() == 'Pending']
     
     if not pending.empty:
@@ -156,7 +154,6 @@ def render_sk_sync_tracker(sk_sync_tasks, today_str, now, gs_formula):
         
         st.info(f"**🎯 Next Action [{phase_name}]:** {task_name} (~{est_time}) for {selected_month} {selected_year}")
         
-        # --- TIME TRACKER & COMPLETION UI ---
         with st.container(border=True):
             st.markdown("**⏱️ Session Time Tracker**")
             col1, col2 = st.columns([1, 1])
@@ -164,11 +161,7 @@ def render_sk_sync_tracker(sk_sync_tasks, today_str, now, gs_formula):
             with col1:
                 if st.button("▶️ Start Live Timer", use_container_width=True, type="primary", key="sksync_start_btn"):
                     log_sheet = get_sheet("activity_log")
-                    
-                    # NEW: Injects the specific month and year into your sub-activity log!
-                    # Formatted to keep your raw task matching perfectly intact later
                     detailed_task_log = f"{task_name} (SK-Sync: {selected_month} {selected_year})"
-                    
                     log_sheet.append_row([
                         today_str, now.strftime('%H:%M'), "RUNNING", gs_formula,    
                         "WORK", detailed_task_log, "", "SK-Sync Tracking"
@@ -191,8 +184,6 @@ def render_sk_sync_tracker(sk_sync_tasks, today_str, now, gs_formula):
                         st.error(f"Failed to update task: {e}")
     else:
         st.success("🎉 Project SK-Sync is 100% Complete! Your ecosystem is fully synced.")
-        
-        # Calculate total time invested
         if 'Actual Time (Mins)' in sk_sync_tasks.columns:
             total_minutes = pd.to_numeric(sk_sync_tasks['Actual Time (Mins)'], errors='coerce').fillna(0).sum()
             hours, mins = divmod(int(total_minutes), 60)
@@ -210,11 +201,9 @@ try:
     log_df = get_activity_log()
     sksync_df = get_sk_sync_tasks()
     
-    # Filter for currently running Project Tasks (Standard + SK-Sync)
     running_tasks = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Notes'].str.strip().isin(['Project Tracking', 'SK-Sync Tracking']))]
     active_count = len(running_tasks)
 
-    # --- HEADER & SYNC ---
     col1, col2 = st.columns([5, 1])
     with col1:
         st.title("📊 Project Tracking Dashboard")
@@ -228,7 +217,6 @@ try:
             time.sleep(0.5)
             st.rerun()
 
-    # --- FLOATING ACTIVE BADGE ---
     if active_count > 0:
         st.markdown(f"""
             <div style='position: fixed; bottom: 30px; left: 20px; background-color: #ff4b4b; color: white; padding: 8px 16px; border-radius: 20px; box-shadow: 0px 4px 12px rgba(0,0,0,0.3); font-weight: bold; font-size: 16px; z-index: 9999; pointer-events: none; display: flex; align-items: center; justify-content: center;'>
@@ -247,7 +235,6 @@ try:
         st.markdown("### ⏱️ Live Time Tracking")
         st.markdown("---")
         
-        # 1. RENDER RUNNING PROJECT TASKS
         if active_count > 0:
             st.markdown("<div style='margin-bottom: 10px; color: #d84315;'><b>🟢 Currently Running:</b></div>", unsafe_allow_html=True)
             for idx, active_row in running_tasks.iterrows():
@@ -263,7 +250,6 @@ try:
                     mins_elapsed = int(elapsed_time.total_seconds() // 60)
                 except: mins_elapsed = 0 
                 
-                # --- POMODORO LOGIC & BEEP TRIGGER ---
                 cycle_minute = mins_elapsed % 30
                 pomodoro_count = (mins_elapsed // 30) + 1
                 current_state = "Focus" if cycle_minute < 25 else "Break"
@@ -297,12 +283,12 @@ try:
 
                 if current_state == "Focus":
                     p_state = "🍅 Focus Time"
-                    p_color = "#d84315" # Deep Orange
+                    p_color = "#d84315"
                     p_left = 25 - cycle_minute
                     p_prog = cycle_minute / 25.0
                 else:
                     p_state = "☕ Break Time"
-                    p_color = "#2e7b32" # Green
+                    p_color = "#2e7b32"
                     p_left = 30 - cycle_minute
                     p_prog = (cycle_minute - 25) / 5.0
                 
@@ -322,7 +308,6 @@ try:
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Determine if this is an SK-Sync task or Normal Project Task
                 is_sksync = (str(active_row['Notes']).strip() == 'SK-Sync Tracking')
                 raw_task_name = active_sub.split(" (")[0].strip()
                 
@@ -371,7 +356,8 @@ try:
                             if not p_matches.empty:
                                 p_idx = int(p_matches.iloc[0]['row_index'])
                                 psheet = get_sheet("project_tasks")
-                                psheet.update_cell(p_idx, 3, new_proj_status)
+                                # UPDATED: Status moved to Column 4 (D) because Activity is Column 3 (C)
+                                psheet.update_cell(p_idx, 4, new_proj_status)
                                 get_project_tasks.clear() 
                                 
                         get_activity_log.clear() 
@@ -389,7 +375,6 @@ try:
                         st.rerun()
             st.markdown("<br>", unsafe_allow_html=True)
 
-        # 2. START A NEW TASK TIMER
         if not pending_projs.empty:
             running_subs = running_tasks['Sub_Activities'].tolist()
             avail_projs = pending_projs[~pending_projs['Task Name'].isin([x.split(" (")[0] for x in running_subs])]
@@ -426,18 +411,28 @@ try:
                     )
                     if st.button("▶️ Start Timer", key="start_proj", use_container_width=True):
                         selected_p_task_full = f"{selected_task} ({selected_project})"
-                        r_idx = int(proj_df[(proj_df['Task Name'] == selected_task) & (proj_df['Project Name'] == selected_project)]['row_index'].values[0])
+                        
+                        task_row = proj_df[(proj_df['Task Name'] == selected_task) & (proj_df['Project Name'] == selected_project)].iloc[0]
+                        r_idx = int(task_row['row_index'])
+                        curr_stat = task_row['Status'].strip().title()
+                        
+                        # UPDATED: Fetch the Activity mapped to this project task
+                        task_activity = str(task_row['Activity']).strip().upper()
+                        if not task_activity: 
+                            task_activity = "WORK" # Fallback if empty
+                        
                         psheet = get_sheet("project_tasks")
-                        curr_stat = proj_df[(proj_df['Task Name'] == selected_task) & (proj_df['Project Name'] == selected_project)]['Status'].values[0].strip().title()
                         
                         if curr_stat == "Not Started":
-                            psheet.update_cell(r_idx, 3, "In Progress")
+                            # UPDATED: Status moved to Column 4 (D)
+                            psheet.update_cell(r_idx, 4, "In Progress")
                             get_project_tasks.clear() 
                             
                         log_sheet = get_sheet("activity_log")
+                        # UPDATED: Logs dynamically into column E ("Activity") instead of hardcoded "WORK"
                         log_sheet.append_row([
                             today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
-                            "WORK", selected_p_task_full, "", "Project Tracking"
+                            task_activity, selected_p_task_full, "", "Project Tracking"
                         ], value_input_option="USER_ENTERED")
                         get_activity_log.clear() 
                         st.rerun()
@@ -464,7 +459,6 @@ try:
         plot_df = plot_df.dropna(subset=['Start Date', 'End Date'])
         
         if not plot_df.empty:
-            # --- OVERALL PROGRESS CARDS ---
             st.markdown("### 📈 Overall Progress")
             project_stats = plot_df.groupby('Project Name').apply(
                 lambda x: (x['Status'].str.strip().str.title() == 'Completed').sum() / len(x)
@@ -485,7 +479,6 @@ try:
             
             st.markdown("---")
             
-            # --- CHARTS SECTION ---
             col_gantt, col_pie = st.columns([2, 1])
             
             with col_gantt:
@@ -523,14 +516,25 @@ try:
         with st.form("add_project_task", clear_on_submit=True):
             p_task = st.text_input("Task Name")
             
+            # --- FETCH EXISTING DROPDOWNS ---
             if not proj_df.empty:
                 existing_projects = ["-- Select Existing Project --"] + sorted(list(set(proj_df['Project Name'].dropna().tolist())))
             else:
                 existing_projects = ["-- Select Existing Project --"]
+                
+            if not log_df.empty:
+                existing_activities = ["-- Select Existing Activity --"] + sorted(list(set([a for a in log_df['Activity'].unique().tolist() if a])))
+            else:
+                existing_activities = ["-- Select Existing Activity --", "WORK", "LEARN", "HEALTH", "CHORES"]
             
             col_p1, col_p2 = st.columns(2)
             with col_p1: p_name_sel = st.selectbox("Existing Project", existing_projects)
             with col_p2: p_name_new = st.text_input("OR New Project Name", placeholder="Type new name here")
+            
+            # --- NEW: ACTIVITY SELECTORS ---
+            col_a1, col_a2 = st.columns(2)
+            with col_a1: p_activity_sel = st.selectbox("Existing Activity (From Log)", existing_activities)
+            with col_a2: p_activity_new = st.text_input("OR New Activity Tag", placeholder="e.g., WORK, LEARN")
             
             col_s, col_d1, col_d2 = st.columns(3)
             with col_s: p_status = st.selectbox("Status", ["Not Started", "In Progress", "Completed"])
@@ -540,11 +544,15 @@ try:
             if st.form_submit_button("Add Task", type="primary", use_container_width=True):
                 final_p_name = p_name_new.strip() if p_name_new.strip() else (p_name_sel if p_name_sel != "-- Select Existing Project --" else "")
                 
+                # Resolving which Activity the user provided
+                final_p_activity = p_activity_new.strip().upper() if p_activity_new.strip() else (p_activity_sel if p_activity_sel != "-- Select Existing Activity --" else "WORK")
+                
                 if p_task and final_p_name:
                     psheet = get_sheet("project_tasks")
-                    psheet.append_row([p_task.strip(), final_p_name, p_status, p_start.strftime('%Y-%m-%d'), p_end.strftime('%Y-%m-%d')])
+                    # UPDATED: We now push 6 items in the list, squeezing 'final_p_activity' right after Project Name
+                    psheet.append_row([p_task.strip(), final_p_name, final_p_activity, p_status, p_start.strftime('%Y-%m-%d'), p_end.strftime('%Y-%m-%d')])
                     get_project_tasks.clear() 
-                    st.success("Task added successfully!")
+                    st.success(f"Task added successfully under '{final_p_activity}' activity!")
                     time.sleep(1)
                     st.rerun()
                 else: 

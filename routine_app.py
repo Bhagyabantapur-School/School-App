@@ -266,14 +266,10 @@ try:
     active_count = len(running_tasks)
     
     if active_count > 0:
-        st.markdown(f"""
-            <div style='position: fixed; bottom: 30px; left: 20px; background-color: #ff4b4b; color: white; padding: 8px 16px; border-radius: 20px; box-shadow: 0px 4px 12px rgba(0,0,0,0.3); font-weight: bold; font-size: 16px; z-index: 9999; pointer-events: none; display: flex; align-items: center; justify-content: center;'>
-                <span style='font-size: 16px; margin-right: 6px; animation: pulse 1.5s infinite;'>⏱️</span> {active_count}
-            </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f'<div style="position: fixed; bottom: 30px; left: 20px; background-color: #ff4b4b; color: white; padding: 8px 16px; border-radius: 20px; box-shadow: 0px 4px 12px rgba(0,0,0,0.3); font-weight: bold; font-size: 16px; z-index: 9999; pointer-events: none; display: flex; align-items: center; justify-content: center;"><span style="font-size: 16px; margin-right: 6px; animation: pulse 1.5s infinite;">⏱️</span> {active_count}</div>', unsafe_allow_html=True)
 
     # --- TOP HEADER & TOGGLES (Always Visible) ---
-    st.markdown(f"<h3 style='text-align: center; color: #888; margin-top: 0px;'>{current_day} | {now.strftime('%I:%M %p')}</h3>", unsafe_allow_html=True)
+    st.markdown(f'<h3 style="text-align: center; color: #888; margin-top: 0px;">{current_day} | {now.strftime("%I:%M %p")}</h3>', unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns(3)
     with col1: flex_on = st.toggle("🔀 Flex", key="flex_toggle")
@@ -340,7 +336,7 @@ try:
 
     with t_app:
         if filtered_app_list:
-            st.markdown("<h4 style='text-align: center; color: #333;'>🚀 Scheduled Application Launchpad</h4>", unsafe_allow_html=True)
+            st.markdown('<h4 style="text-align: center; color: #333;">🚀 Scheduled Application Launchpad</h4>', unsafe_allow_html=True)
             for i in range(0, len(filtered_app_list), 3):
                 cols = st.columns(3)
                 for j in range(3):
@@ -348,7 +344,7 @@ try:
                         app_name, file_name, icon = filtered_app_list[i + j]
                         last_str = get_app_time_str(app_name, tracker_data, now)
                         with cols[j]:
-                            if st.button(f"{icon} {app_name}\\n(Last: {last_str})", key=f"app_{i+j}", use_container_width=True):
+                            if st.button(f"{icon} {app_name}\n(Last: {last_str})", key=f"app_{i+j}", use_container_width=True):
                                 log_and_open_app(app_name, file_name, tracker_data, now)
         else:
             st.info("No external apps are scheduled for the current time slot.")
@@ -439,15 +435,11 @@ try:
         else: color = "#333333" 
 
         # --- COMPACT & STYLISH CURRENT ACTIVITY BOX ---
-        st.markdown(f"""
-            <div style='text-align: center; background-color: #f8f9fa; border: 2px solid {color}; border-radius: 12px; padding: 12px; margin: 10px auto; max-width: 400px; box-shadow: 0px 4px 6px rgba(0,0,0,0.05);'>
-                <h2 style='margin: 0; font-size: 2.2rem; color: {color}; letter-spacing: 1px;'>{current_activity}</h2>
-            </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f'<div style="text-align: center; background-color: #f8f9fa; border: 2px solid {color}; border-radius: 12px; padding: 12px; margin: 10px auto; max-width: 400px; box-shadow: 0px 4px 6px rgba(0,0,0,0.05);"><h2 style="margin: 0; font-size: 2.2rem; color: {color}; letter-spacing: 1px;">{current_activity}</h2></div>', unsafe_allow_html=True)
 
         if is_auto_holiday or holiday_on:
-            if is_auto_holiday: st.markdown(f"<p style='text-align: center; color: #ff9f36; font-weight: bold; font-size: 1.1rem; margin-top: -5px;'>🎉 {auto_occasion} (Holiday Schedule)</p>", unsafe_allow_html=True)
-            else: st.markdown("<p style='text-align: center; color: #ff9f36; font-weight: bold; margin-top: -5px;'>🎉 Running Custom Holiday Schedule</p>", unsafe_allow_html=True)
+            if is_auto_holiday: st.markdown(f'<p style="text-align: center; color: #ff9f36; font-weight: bold; font-size: 1.1rem; margin-top: -5px;">🎉 {auto_occasion} (Holiday Schedule)</p>', unsafe_allow_html=True)
+            else: st.markdown('<p style="text-align: center; color: #ff9f36; font-weight: bold; margin-top: -5px;">🎉 Running Custom Holiday Schedule</p>', unsafe_allow_html=True)
 
         if current_activity_start and not flex_on:
             dt_start = datetime.combine(now.date(), current_activity_start)
@@ -457,13 +449,13 @@ try:
             eh, erem = divmod(int(elapsed.total_seconds()), 3600)
             em = erem // 60
             elapsed_text = f"{eh}h {em}m" if eh > 0 else f"{em}m"
-            st.markdown(f"<h3 style='text-align: center; color: #555; margin-top: 0px; margin-bottom: 10px; font-weight: 400;'>⏱️ Elapsed: {elapsed_text}</h3>", unsafe_allow_html=True)
+            st.markdown(f'<h3 style="text-align: center; color: #555; margin-top: 0px; margin-bottom: 10px; font-weight: 400;">⏱️ Elapsed: {elapsed_text}</h3>', unsafe_allow_html=True)
         else:
-            st.markdown("<div style='margin-bottom: 15px;'></div>", unsafe_allow_html=True)
+            st.markdown('<div style="margin-bottom: 15px;"></div>', unsafe_allow_html=True)
             
-        if next_activity == "FLEX MODE ACTIVE": st.markdown(f"<h4 style='text-align: center; color: #e65100; margin-bottom: 20px; font-weight: 400;'>⚠️ Schedule Paused - Logging Custom Activity</h4>", unsafe_allow_html=True)
-        elif next_activity not in ["NONE", "END OF DAY"]: st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;'>Up Next: <b>{next_activity}</b> at {next_time_str}</h4>", unsafe_allow_html=True)
-        elif next_activity == "END OF DAY": st.markdown(f"<h4 style='text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;'>Up Next: Schedule Complete</h4>", unsafe_allow_html=True)
+        if next_activity == "FLEX MODE ACTIVE": st.markdown('<h4 style="text-align: center; color: #e65100; margin-bottom: 20px; font-weight: 400;">⚠️ Schedule Paused - Logging Custom Activity</h4>', unsafe_allow_html=True)
+        elif next_activity not in ["NONE", "END OF DAY"]: st.markdown(f'<h4 style="text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;">Up Next: <b>{next_activity}</b> at {next_time_str}</h4>', unsafe_allow_html=True)
+        elif next_activity == "END OF DAY": st.markdown('<h4 style="text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;">Up Next: Schedule Complete</h4>', unsafe_allow_html=True)
 
         # --- DYNAMICALLY COLORED PENDING PAYMENTS EXPANDER ---
         if all_alert_pays:
@@ -487,13 +479,7 @@ try:
                 header_icon = "🟡"
                 header_text = f"Payments Due in {min_days} Days"
             
-            box_html = f"""
-            <details style='background-color: {header_bg}; color: white; border-radius: 8px; padding: 12px; margin-bottom: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);'>
-                <summary style='font-size: 18px; font-weight: bold; cursor: pointer; outline: none;'>
-                    {header_icon} {header_text} ({len(all_alert_pays)}) <span style='float:right;'>▼</span>
-                </summary>
-                <div style='margin-top: 15px;'>
-            """
+            box_html = f'<details style="background-color: {header_bg}; color: white; border-radius: 8px; padding: 12px; margin-bottom: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);"><summary style="font-size: 18px; font-weight: bold; cursor: pointer; outline: none;">{header_icon} {header_text} ({len(all_alert_pays)}) <span style="float:right;">▼</span></summary><div style="margin-top: 15px;">'
             for i, (days_until, p_row) in enumerate(all_alert_pays):
                 if days_until < 0:
                     day_str = f"Overdue by {abs(days_until)} days!"
@@ -509,7 +495,7 @@ try:
                     item_bg = "rgba(255, 255, 255, 0.1)"
                 
                 pad_bot = "margin-bottom: 10px;" if i < len(all_alert_pays) - 1 else "margin-bottom: 0px;"
-                box_html += f"<div style='background-color: {item_bg}; color: white; padding: 12px; border-radius: 6px; {pad_bot} border: 1px solid rgba(255,255,255,0.3);'><strong style='font-size: 16px;'>{p_row['Bill_Name']} ({p_row['Type']}) - {day_str}</strong><br><span style='font-size: 14px; opacity: 0.95;'>Est: ₹{p_row['Est_Amount']} | Fund: {p_row['Fund']} | A/c: {p_row['Account']}</span></div>"
+                box_html += f'<div style="background-color: {item_bg}; color: white; padding: 12px; border-radius: 6px; {pad_bot} border: 1px solid rgba(255,255,255,0.3);"><strong style="font-size: 16px;">{p_row["Bill_Name"]} ({p_row["Type"]}) - {day_str}</strong><br><span style="font-size: 14px; opacity: 0.95;">Est: ₹{p_row["Est_Amount"]} | Fund: {p_row["Fund"]} | A/c: {p_row["Account"]}</span></div>'
             box_html += "</div></details>"
             st.markdown(box_html, unsafe_allow_html=True)
 
@@ -551,7 +537,7 @@ try:
             upcoming_ui_elements_raw.sort(key=lambda x: x[0])
             with st.expander(f"⏳ Upcoming Special Tasks ({len(upcoming_ui_elements_raw)})", expanded=False):
                 for dt, r, html_text in upcoming_ui_elements_raw:
-                    st.markdown(f"<p style='text-align: center; margin-bottom:5px; font-size:16px; color: #d84315;'>{html_text}</p>", unsafe_allow_html=True)
+                    st.markdown(f'<p style="text-align: center; margin-bottom:5px; font-size:16px; color: #d84315;">{html_text}</p>', unsafe_allow_html=True)
                     with st.expander(f"✏️ Manage Task", expanded=False):
                         tab_resched, tab_cancel = st.tabs(["📅 Reschedule", "❌ Cancel"])
                         with tab_resched:
@@ -586,7 +572,7 @@ try:
                                         get_future_tasks.clear() 
                                         get_activity_log.clear() 
                                         st.rerun()
-                    st.markdown("<hr style='margin-top:5px; margin-bottom:15px;'>", unsafe_allow_html=True)
+                    st.markdown('<hr style="margin-top:5px; margin-bottom:15px;">', unsafe_allow_html=True)
 
         future_holidays = holidays_df[holidays_df['Date_dt'].dt.date > now.date()].sort_values('Date_dt')
         if not future_holidays.empty:
@@ -601,7 +587,7 @@ try:
             valid_must_dos = must_do_df[must_do_df['Task Name'].str.strip() != '']
             if not valid_must_dos.empty:
                 with st.expander(f"⭐ Must Do Tasks ({len(valid_must_dos)})", expanded=False):
-                    st.markdown("<p style='text-align: center; color: #888; font-size: 13px; margin-top:-10px;'>Tap to start tracking</p>", unsafe_allow_html=True)
+                    st.markdown('<p style="text-align: center; color: #888; font-size: 13px; margin-top:-10px;">Tap to start tracking</p>', unsafe_allow_html=True)
                     md_cols = st.columns(2)
                     running_subs_upper = [str(x).strip().upper() for x in running_tasks['Sub_Activities'].tolist()]
                     for idx, row in valid_must_dos.iterrows():
@@ -617,7 +603,7 @@ try:
 
         if chk_list:
             st.markdown("---")
-            st.markdown("<h4 style='text-align: center; color: #333;'>✅ Tasks & Reminders</h4>", unsafe_allow_html=True)
+            st.markdown('<h4 style="text-align: center; color: #333;">✅ Tasks & Reminders</h4>', unsafe_allow_html=True)
             today_logs = log_df[log_df['Date'] == today_str]
             today_logged_tasks = today_logs[today_logs['Activity'] == current_activity]['check_list'].tolist()
             
@@ -644,7 +630,7 @@ try:
         # ==========================================
         if sub_list or active_count > 0:
             st.markdown("---")
-            st.markdown("<h4 style='text-align: center; color: #333;'>Tap to Track Activity</h4>", unsafe_allow_html=True)
+            st.markdown('<h4 style="text-align: center; color: #333;">Tap to Track Activity</h4>', unsafe_allow_html=True)
             
             if active_count > 0:
                 for idx, active_row in running_tasks.iterrows():
@@ -667,21 +653,7 @@ try:
 
                     p_color, p_state, p_left, p_prog = ("#d84315", "🍅 Focus Time", 25 - cycle_minute, cycle_minute / 25.0) if current_state == "Focus" else ("#2e7b32", "☕ Break Time", 30 - cycle_minute, (cycle_minute - 25) / 5.0)
                     
-                    st.markdown(f"""
-                    <div style='background-color: #f8f9fa; border-left: 5px solid {p_color}; padding: 12px; border-radius: 6px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);'>
-                        <div style='display: flex; justify-content: space-between; align-items: center;'>
-                            <strong style='font-size: 16px; color: #333;'>⏳ {display_name}</strong>
-                            <span style='color: #666; font-size: 14px;'>Total: {mins_elapsed}m</span>
-                        </div>
-                        <div style='margin-top: 8px; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;'>
-                            <span style='color: {p_color}; font-weight: bold; font-size: 14px;'>{p_state} (Cycle {pomodoro_count})</span>
-                            <span style='color: #555; font-size: 13px; font-weight: bold;'>{p_left}m left</span>
-                        </div>
-                        <div style='width: 100%; background-color: #e0e0e0; border-radius: 4px; height: 6px;'>
-                            <div style='width: {p_prog * 100}%; background-color: {p_color}; height: 6px; border-radius: 4px; transition: width 0.5s ease;'></div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.markdown(f'<div style="background-color: #f8f9fa; border-left: 5px solid {p_color}; padding: 12px; border-radius: 6px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);"><div style="display: flex; justify-content: space-between; align-items: center;"><strong style="font-size: 16px; color: #333;">⏳ {display_name}</strong><span style="color: #666; font-size: 14px;">Total: {mins_elapsed}m</span></div><div style="margin-top: 8px; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;"><span style="color: {p_color}; font-weight: bold; font-size: 14px;">{p_state} (Cycle {pomodoro_count})</span><span style="color: #555; font-size: 13px; font-weight: bold;">{p_left}m left</span></div><div style="width: 100%; background-color: #e0e0e0; border-radius: 4px; height: 6px;"><div style="width: {p_prog * 100}%; background-color: {p_color}; height: 6px; border-radius: 4px; transition: width 0.5s ease;"></div></div></div>', unsafe_allow_html=True)
 
                     col_stop, col_cancel = st.columns(2)
                     with col_stop:
@@ -707,7 +679,7 @@ try:
             
             avail_subs = [t for t in sub_list if t not in running_tasks['Sub_Activities'].tolist()]
             if avail_subs:
-                st.markdown("<div style='margin-top: 15px; margin-bottom: 5px; color: #333;'><b>▶️ Routine Tasks:</b></div>", unsafe_allow_html=True)
+                st.markdown('<div style="margin-top: 15px; margin-bottom: 5px; color: #333;"><b>▶️ Routine Tasks:</b></div>', unsafe_allow_html=True)
                 
                 for i in range(0, len(avail_subs), 3):
                     cols = st.columns(3)
@@ -715,12 +687,12 @@ try:
                         if i + j < len(avail_subs):
                             task = avail_subs[i+j]
                             with cols[j]:
-                                if st.button(f"▶️ {task}" + ("" if "[Due:" in task else f"\\n(Last: {get_last_done_str(task, log_df, now, col_name='Sub_Activities')})"), key=f"btn_{i+j}_{task}", use_container_width=True):
+                                if st.button(f"▶️ {task}" + ("" if "[Due:" in task else f"\n(Last: {get_last_done_str(task, log_df, now, col_name='Sub_Activities')})"), key=f"btn_{i+j}_{task}", use_container_width=True):
                                     smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, current_activity, task, "", "Auto-logged via Timer"])
                                     get_activity_log.clear() 
                                     st.rerun()
 
-            st.markdown("<div style='margin-top: 15px; margin-bottom: 5px; color: #ff4b4b;'><b>👥 Meeting / Visitor Tracker:</b></div>", unsafe_allow_html=True)
+            st.markdown('<div style="margin-top: 15px; margin-bottom: 5px; color: #ff4b4b;"><b>👥 Meeting / Visitor Tracker:</b></div>', unsafe_allow_html=True)
             if st.button("⚡ Quick Start (Update Details Later)", use_container_width=True):
                 smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, "PEOPLE", "MEETING / VISITOR", "", "Update details later"])
                 get_activity_log.clear() 
@@ -742,14 +714,14 @@ try:
 
         # --- BEAUTIFUL TODAY'S ACTUAL PRODUCTIVITY CARDS ---
         st.markdown("---")
-        st.markdown("<h4 style='text-align: center; color: #555; margin-bottom: 20px;'>📊 Today's Actual Productivity</h4>", unsafe_allow_html=True)
+        st.markdown('<h4 style="text-align: center; color: #555; margin-bottom: 20px;">📊 Today\'s Actual Productivity</h4>', unsafe_allow_html=True)
         today_logs = log_df[(log_df['Date'] == today_str) & (log_df['Duration'] != 'RUNNING')].copy()
         
         if not today_logs.empty:
             today_logs['Total_Minutes'] = today_logs['Duration'].apply(parse_duration_to_minutes)
             summary = today_logs.groupby('Activity')['Total_Minutes'].sum().sort_values(ascending=False)
             
-            html_cards = "<div style='display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;'>"
+            html_cards = '<div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;">'
             for act, total_mins in summary.items():
                 cat = str(act).upper()
                 if cat in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"]: card_color = "#ff4b4b"
@@ -762,16 +734,14 @@ try:
                 h, m = divmod(int(total_mins), 60)
                 time_str = f"{h}h {m:02d}m" if h > 0 else f"{m}m"
                 
-                html_cards += f"""
-                <div style='flex: 1 1 calc(33.333% - 10px); min-width: 100px; max-width: 150px; background-color: white; border-left: 5px solid {card_color}; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border-radius: 8px; padding: 12px; text-align: center;'>
-                    <div style='font-size: 12px; color: #666; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;' title='{act}'>{act}</div>
-                    <div style='font-size: 18px; color: {card_color}; font-weight: bold; margin-top: 5px;'>{time_str}</div>
-                </div>
-                """
-            html_cards += "</div>"
+                html_cards += f'<div style="flex: 1 1 calc(33.333% - 10px); min-width: 100px; max-width: 150px; background-color: white; border-left: 5px solid {card_color}; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border-radius: 8px; padding: 12px; text-align: center;">'
+                html_cards += f'<div style="font-size: 12px; color: #666; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="{act}">{act}</div>'
+                html_cards += f'<div style="font-size: 18px; color: {card_color}; font-weight: bold; margin-top: 5px;">{time_str}</div>'
+                html_cards += '</div>'
+            html_cards += '</div>'
             st.markdown(html_cards, unsafe_allow_html=True)
         else: 
-            st.markdown("<p style='text-align: center; color: #888;'>No completed activities logged yet.</p>", unsafe_allow_html=True)
+            st.markdown('<p style="text-align: center; color: #888;">No completed activities logged yet.</p>', unsafe_allow_html=True)
         
         with st.expander("🗓️ Schedule Future Task"):
             with st.form("schedule_future_form", clear_on_submit=True):
@@ -823,13 +793,13 @@ try:
             
             col1, col2 = st.columns(2)
             with col1: 
-                st.markdown("<div style='font-size: 14px; font-weight: bold; margin-bottom: 5px; color: #333;'>Started At (HH : MM)</div>", unsafe_allow_html=True)
+                st.markdown('<div style="font-size: 14px; font-weight: bold; margin-bottom: 5px; color: #333;">Started At (HH : MM)</div>', unsafe_allow_html=True)
                 c_sh, c_sm = st.columns(2)
                 s_hour = c_sh.selectbox("Start Hour", hours, index=curr_h, key="s_hour", label_visibility="collapsed")
                 s_min = c_sm.selectbox("Start Min", minutes, index=curr_m, key="s_min", label_visibility="collapsed")
                 
             with col2: 
-                st.markdown("<div style='font-size: 14px; font-weight: bold; margin-bottom: 5px; color: #333;'>Ended At (HH : MM)</div>", unsafe_allow_html=True)
+                st.markdown('<div style="font-size: 14px; font-weight: bold; margin-bottom: 5px; color: #333;">Ended At (HH : MM)</div>', unsafe_allow_html=True)
                 c_eh, c_em = st.columns(2)
                 e_hour = c_eh.selectbox("End Hour", hours, index=curr_h, key="e_hour", label_visibility="collapsed")
                 e_min = c_em.selectbox("End Min", minutes, index=curr_m, key="e_min", label_visibility="collapsed")

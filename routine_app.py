@@ -191,12 +191,13 @@ def get_must_do_tasks():
     df = df[df["Main Category"].astype(str).str.strip() != ""] 
     return df
 
+# --- NEW: GET DEW TASKS ---
 @st.cache_data(ttl=300)
-def get_pre_tasks():
+def get_dew_tasks():
     ss = get_main_spreadsheet()
-    try: sheet = ss.worksheet("PRE")
+    try: sheet = ss.worksheet("DEW")
     except gspread.exceptions.WorksheetNotFound:
-        sheet = ss.add_worksheet(title="PRE", rows="100", cols="2")
+        sheet = ss.add_worksheet(title="DEW", rows="100", cols="2")
         smart_append_row(sheet, ["Main Category", "Task Name"])
     data = sheet.get_all_values()
     if len(data) <= 1: return pd.DataFrame(columns=["Main Category", "Task Name"])
@@ -268,7 +269,7 @@ try:
     holidays_df = get_holidays()
     payment_df = get_payment_checklist()
     must_do_df = get_must_do_tasks()
-    pre_df = get_pre_tasks()
+    dew_df = get_dew_tasks()
     tracker_data = get_tracker_data()
     
     ist_timezone = pytz.timezone('Asia/Kolkata')
@@ -302,7 +303,7 @@ try:
             get_holidays.clear()
             get_payment_checklist.clear()
             get_must_do_tasks.clear()
-            get_pre_tasks.clear()
+            get_dew_tasks.clear()
             get_tracker_data.clear()
             st.toast("✅ Force Synced with Google Sheets!")
             time.sleep(1.0)
@@ -364,7 +365,7 @@ try:
                         app_name, file_name, icon = filtered_app_list[i + j]
                         last_str = get_app_time_str(app_name, tracker_data, now)
                         with cols[j]:
-                            if st.button(f"{icon} {app_name}\\n(Last: {last_str})", key=f"app_{i+j}", use_container_width=True):
+                            if st.button(f"{icon} {app_name}\n(Last: {last_str})", key=f"app_{i+j}", use_container_width=True):
                                 log_and_open_app(app_name, file_name, tracker_data, now)
         else:
             st.info("No external apps are scheduled for the current time slot.")
@@ -617,22 +618,22 @@ try:
                     day_str = "Tomorrow!" if days_until == 1 else f"in {days_until} days"
                     st.markdown(f"**{h_row['Date_dt'].strftime('%b %d, %Y')}** - {h_row['Occasion']} *( {day_str} )*")
 
-        # --- PRE TASKS FROM 'PRE' TAB ---
-        if not pre_df.empty:
-            valid_pres = pre_df[pre_df['Task Name'].str.strip() != '']
-            if not valid_pres.empty:
-                with st.expander(f"🌅 PRE ({len(valid_pres)})", expanded=False):
+        # --- PRE TASKS FROM 'DEW' TAB ---
+        if not dew_df.empty:
+            valid_dews = dew_df[dew_df['Task Name'].str.strip() != '']
+            if not valid_dews.empty:
+                with st.expander(f"🌅 PRE ({len(valid_dews)})", expanded=False):
                     st.markdown('<p style="text-align: center; color: #888; font-size: 13px; margin-top:-10px;">Tap to start tracking</p>', unsafe_allow_html=True)
-                    pre_cols = st.columns(2)
+                    dew_cols = st.columns(2)
                     running_subs_upper = [str(x).strip().upper() for x in running_tasks['Sub_Activities'].tolist()]
-                    for idx, row in valid_pres.iterrows():
-                        p_task = str(row['Task Name']).strip()
-                        p_cat = str(row['Main Category']).strip().upper() or "PRE"
-                        with pre_cols[idx % 2]:
-                            if p_task.upper() in running_subs_upper:
-                                st.button(f"⏳ {p_task}", key=f"pre_run_{idx}", disabled=True, use_container_width=True)
-                            elif st.button(f"▶️ {p_task}", key=f"pre_btn_{idx}", use_container_width=True):
-                                smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, p_cat, p_task, "", "PRE Task"])
+                    for idx, row in valid_dews.iterrows():
+                        d_task = str(row['Task Name']).strip()
+                        d_cat = str(row['Main Category']).strip().upper() or "PRE"
+                        with dew_cols[idx % 2]:
+                            if d_task.upper() in running_subs_upper:
+                                st.button(f"⏳ {d_task}", key=f"dew_run_{idx}", disabled=True, use_container_width=True)
+                            elif st.button(f"▶️ {d_task}", key=f"dew_btn_{idx}", use_container_width=True):
+                                smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, d_cat, d_task, "", "DEW Task"])
                                 get_activity_log.clear()
                                 st.rerun()
 

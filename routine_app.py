@@ -457,46 +457,33 @@ try:
         min_days = all_alert_pays[0][0]
         
         if min_days < 0:
-            header_bg = "#d32f2f" 
-            header_icon = "🔴"
-            header_text = "OVERDUE PAYMENTS!"
+            header_text = f"🔴 OVERDUE PAYMENTS! ({len(all_alert_pays)})"
         elif min_days == 0:
-            header_bg = "#ef5350" 
-            header_icon = "🚨"
-            header_text = "PAYMENTS DUE TODAY!"
+            header_text = f"🔴 PAYMENTS DUE TODAY! ({len(all_alert_pays)})"
         elif min_days == 1:
-            header_bg = "#f57c00" 
-            header_icon = "🟠"
-            header_text = "Payments Due Tomorrow"
+            header_text = f"🟠 Payments Due Tomorrow ({len(all_alert_pays)})"
         else:
-            header_bg = "#ffb300" 
-            header_icon = "🟡"
-            header_text = f"Payments Due in {min_days} Days"
+            header_text = f"🟡 Payments Due in {min_days} Days ({len(all_alert_pays)})"
         
-        box_html = f'<details style="background-color: #f8f9fa; border: 1px solid {header_bg}; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); overflow: hidden;">'
-        box_html += f'<summary style="background-color: {header_bg}; color: white; font-size: 16px; font-weight: bold; cursor: pointer; outline: none; padding: 10px; margin: 0;">{header_icon} {header_text} ({len(all_alert_pays)}) <span style="float:right;">▼</span></summary>'
-        box_html += '<div style="padding: 10px;">'
-        
-        for i, (days_until, p_row) in enumerate(all_alert_pays):
-            if days_until < 0:
-                day_str = f"Overdue by {abs(days_until)} days!"
-                item_bg = "#d32f2f" # Red
-            elif days_until == 0:
-                day_str = "Due Today!"
-                item_bg = "#ef5350" # Light Red
-            elif days_until == 1:
-                day_str = "Due Tomorrow!"
-                item_bg = "#f57c00" # Orange
-            else:
-                day_str = f"Due in {days_until} days"
-                item_bg = "#ffb300" # Amber
-            
-            pad_bot = "margin-bottom: 8px;" if i < len(all_alert_pays) - 1 else "margin-bottom: 0px;"
-            # Simplified Card: Only Bill Name and Due Date
-            box_html += f'<div style="background-color: {item_bg}; color: white; padding: 8px 12px; border-radius: 6px; {pad_bot} box-shadow: 0 1px 3px rgba(0,0,0,0.1);"><strong style="font-size: 15px;">{p_row["Bill_Name"]} - {day_str}</strong></div>'
-        
-        box_html += "</div></details>"
-        st.markdown(box_html, unsafe_allow_html=True)
+        with st.expander(header_text, expanded=False):
+            for i, (days_until, p_row) in enumerate(all_alert_pays):
+                if days_until < 0:
+                    day_str = f"Overdue by {abs(days_until)} days!"
+                    item_bg = "#d32f2f" # Red
+                elif days_until == 0:
+                    day_str = "Due Today!"
+                    item_bg = "#ef5350" # Light Red
+                elif days_until == 1:
+                    day_str = "Due Tomorrow!"
+                    item_bg = "#f57c00" # Orange
+                else:
+                    day_str = f"Due in {days_until} days"
+                    item_bg = "#ffb300" # Amber
+                
+                pad_bot = "margin-bottom: 8px;" if i < len(all_alert_pays) - 1 else "margin-bottom: 0px;"
+                # Simplified Card: Only Bill Name and Due Date
+                card_html = f'<div style="background-color: {item_bg}; color: white; padding: 8px 12px; border-radius: 6px; {pad_bot} box-shadow: 0 1px 3px rgba(0,0,0,0.1);"><strong style="font-size: 15px;">{p_row["Bill_Name"]} - {day_str}</strong></div>'
+                st.markdown(card_html, unsafe_allow_html=True)
 
     sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
     chk_list = [c.strip() for c in current_check_list.split(',') if c.strip()]
@@ -530,7 +517,7 @@ try:
                     time_parts.append(f"{int(m)}m")
                     time_str = " ".join(time_parts)
                     
-                    time_text = f"Overdue by {time_str}" if is_overdue else f"Due in {time_str}"
+                    time_text = f"overdue by {time_str}" if is_overdue else f"due in {time_str}"
                     upcoming_ui_elements_raw.append((due_dt, r, time_text, is_overdue))
                     
                 if hours_until_due <= 0 and str(r['Activity']).strip().upper() == current_activity:

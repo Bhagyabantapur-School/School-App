@@ -480,10 +480,14 @@ try:
                     day_str = f"Due in {days_until} days"
                     item_bg = "#ffb300" # Amber
                 
-                pad_bot = "margin-bottom: 8px;" if i < len(all_alert_pays) - 1 else "margin-bottom: 0px;"
-                # Simplified Card: Only Bill Name and Due Date
+                # Assign margin-bottom: 8px to every item so the last one also has space!
+                pad_bot = "margin-bottom: 8px;"
+                
                 card_html = f'<div style="background-color: {item_bg}; color: white; padding: 8px 12px; border-radius: 6px; {pad_bot} box-shadow: 0 1px 3px rgba(0,0,0,0.1);"><strong style="font-size: 15px;">{p_row["Bill_Name"]} - {day_str}</strong></div>'
                 st.markdown(card_html, unsafe_allow_html=True)
+            
+            # Extra buffer space below the last card
+            st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
 
     sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
     chk_list = [c.strip() for c in current_check_list.split(',') if c.strip()]
@@ -517,7 +521,7 @@ try:
                     time_parts.append(f"{int(m)}m")
                     time_str = " ".join(time_parts)
                     
-                    time_text = f"overdue by {time_str}" if is_overdue else f"due in {time_str}"
+                    time_text = f"Overdue by {time_str}" if is_overdue else f"Due in {time_str}"
                     upcoming_ui_elements_raw.append((due_dt, r, time_text, is_overdue))
                     
                 if hours_until_due <= 0 and str(r['Activity']).strip().upper() == current_activity:
@@ -537,7 +541,7 @@ try:
             header_text = f"🟠 Upcoming Special Tasks ({len(upcoming_ui_elements_raw)})"
         
         with st.expander(header_text, expanded=False):
-            for dt, r, time_text, is_overdue in upcoming_ui_elements_raw:
+            for idx_task, (dt, r, time_text, is_overdue) in enumerate(upcoming_ui_elements_raw):
                 item_bg = "#d32f2f" if is_overdue else "#0068c9" # Red if overdue, Blue if upcoming
                 
                 # Card perfectly matching the Payments Due styling
@@ -584,7 +588,13 @@ try:
                                         get_future_tasks.clear() 
                                         get_activity_log.clear() 
                                         st.rerun()
-                st.markdown('<hr style="margin-top:5px; margin-bottom:15px;">', unsafe_allow_html=True)
+                
+                # Add horizontal line ONLY if it's not the last item!
+                if idx_task < len(upcoming_ui_elements_raw) - 1:
+                    st.markdown('<hr style="margin-top:5px; margin-bottom:15px; border: 0; border-top: 1px solid #eee;">', unsafe_allow_html=True)
+            
+            # Extra buffer space at the bottom of the expander
+            st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
 
     future_holidays = holidays_df[holidays_df['Date_dt'].dt.date > now.date()].sort_values('Date_dt')
     if not future_holidays.empty:
@@ -727,11 +737,14 @@ try:
         # --- VISITOR TRACKER (Single Card) ---
         st.markdown('<div style="margin-top: 15px; margin-bottom: 5px; color: #ff4b4b;"><b>👥 Visitor Tracker</b></div>', unsafe_allow_html=True)
         with st.container():
+            st.markdown("<div style='background-color:#ffffff; padding:15px; border-radius:8px; border:1px solid #ddd; margin-bottom: 15px;'>", unsafe_allow_html=True)
             if st.button("⚡ Quick Start (Update Details Later)", use_container_width=True):
                 smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, "PEOPLE", "VISITOR", "", "Update details later"])
                 get_activity_log.clear() 
                 st.rerun()
 
+            st.markdown("<p style='text-align:center; font-size:12px; color:#888; margin: 12px 0;'>— OR ENTER DETAILS FIRST —</p>", unsafe_allow_html=True)
+            
             with st.expander("📝 Enter Details Before Starting", expanded=False):
                 col_mt1, col_mt2 = st.columns(2)
                 with col_mt1: interaction_type = st.selectbox("Type", ["Attend Visitor", "Meet People"], key="live_mtg_type")
@@ -745,6 +758,7 @@ try:
                     smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, "PEOPLE", f"{interaction_type} - {(person_name.strip() if person_name else 'Unknown')}".upper(), "", f"Topic: {topic_talk} | Purpose: {purpose_visit}"])
                     get_activity_log.clear() 
                     st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
 
     # --- SCHEDULE FUTURE TASK ---
     with st.expander("🗓️ Schedule Future Task"):

@@ -292,17 +292,19 @@ try:
     base_app_list = [
         ("Money & Location", "money_location.py", "📍"),
         ("Money Utilities", "money_utilities.py", "💳"),
-        ("Strong Tracker", "strong.py", "💪"),
-        ("Project App", "project_app.py", "🚀"),
-        ("Election Duty", "election_duty.py", "🗳️"),
-        ("Monthly Tracker", "monthly_app.py", "📆"),
         ("Money Tracker", "money_tracker.py", "💵"),
-        ("Sleep & Water", "sleep_water_app.py", "💧"),
-        ("Backup Tracker", "backup_tracker_app.py", "💾"),
         ("Routine Audit", "routine_audit.py", "🔍"),
         ("Routine Editor", "routine_editor.py", "✏️"),
+        ("Project App", "project_app.py", "🚀"),
+        ("Health Hub", "health_app.py", "❤️"),
+        ("Sleep & Water", "sleep_water_app.py", "💧"),
         ("MDM Returns", "mdm_return_log.py", "📦"),
         ("Video Manager", "bps_ytfb_videos.py", "🎬")
+        ("Trace Inventory", "trace.py", "🏷️")
+        ("Monthly Tracker", "monthly_app.py", "📆"),
+        ("Backup Tracker", "backup_tracker_app.py", "💾"),
+        ("Strong Tracker", "strong.py", "💪"),
+        ("Election Duty", "election_duty.py", "🗳️"),
     ]
     
     active_apps_filter = []

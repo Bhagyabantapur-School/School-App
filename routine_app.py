@@ -457,7 +457,7 @@ try:
         elif next_activity not in ["NONE", "END OF DAY"]: st.markdown(f'<h4 style="text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;">Up Next: <b>{next_activity}</b> at {next_time_str}</h4>', unsafe_allow_html=True)
         elif next_activity == "END OF DAY": st.markdown('<h4 style="text-align: center; color: #666; margin-bottom: 20px; font-weight: 400;">Up Next: Schedule Complete</h4>', unsafe_allow_html=True)
 
-        # --- DYNAMICALLY COLORED PENDING PAYMENTS EXPANDER ---
+        # --- UPDATED DYNAMIC PENDING PAYMENTS EXPANDER ---
         if all_alert_pays:
             all_alert_pays.sort(key=lambda x: x[0])
             min_days = all_alert_pays[0][0]
@@ -479,23 +479,29 @@ try:
                 header_icon = "🟡"
                 header_text = f"Payments Due in {min_days} Days"
             
-            box_html = f'<details style="background-color: {header_bg}; color: white; border-radius: 8px; padding: 12px; margin-bottom: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);"><summary style="font-size: 18px; font-weight: bold; cursor: pointer; outline: none;">{header_icon} {header_text} ({len(all_alert_pays)}) <span style="float:right;">▼</span></summary><div style="margin-top: 15px;">'
+            # The details box has a neutral background inside, but a colored summary header
+            box_html = f'<details style="background-color: #f8f9fa; border: 1px solid {header_bg}; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); overflow: hidden;">'
+            box_html += f'<summary style="background-color: {header_bg}; color: white; font-size: 18px; font-weight: bold; cursor: pointer; outline: none; padding: 12px; margin: 0;">{header_icon} {header_text} ({len(all_alert_pays)}) <span style="float:right;">▼</span></summary>'
+            box_html += '<div style="padding: 15px;">'
+            
             for i, (days_until, p_row) in enumerate(all_alert_pays):
                 if days_until < 0:
                     day_str = f"Overdue by {abs(days_until)} days!"
-                    item_bg = "rgba(255, 255, 255, 0.25)"
+                    item_bg = "#d32f2f" # Red
                 elif days_until == 0:
                     day_str = "Due Today!"
-                    item_bg = "rgba(255, 255, 255, 0.2)"
+                    item_bg = "#ef5350" # Light Red
                 elif days_until == 1:
                     day_str = "Due Tomorrow!"
-                    item_bg = "rgba(255, 255, 255, 0.15)"
+                    item_bg = "#f57c00" # Orange
                 else:
                     day_str = f"Due in {days_until} days"
-                    item_bg = "rgba(255, 255, 255, 0.1)"
+                    item_bg = "#ffb300" # Amber
                 
                 pad_bot = "margin-bottom: 10px;" if i < len(all_alert_pays) - 1 else "margin-bottom: 0px;"
-                box_html += f'<div style="background-color: {item_bg}; color: white; padding: 12px; border-radius: 6px; {pad_bot} border: 1px solid rgba(255,255,255,0.3);"><strong style="font-size: 16px;">{p_row["Bill_Name"]} ({p_row["Type"]}) - {day_str}</strong><br><span style="font-size: 14px; opacity: 0.95;">Est: ₹{p_row["Est_Amount"]} | Fund: {p_row["Fund"]} | A/c: {p_row["Account"]}</span></div>'
+                # Individual cards use solid opaque colors matching their individual due date
+                box_html += f'<div style="background-color: {item_bg}; color: white; padding: 12px; border-radius: 6px; {pad_bot} box-shadow: 0 1px 3px rgba(0,0,0,0.1);"><strong style="font-size: 16px;">{p_row["Bill_Name"]} ({p_row["Type"]}) - {day_str}</strong><br><span style="font-size: 14px; opacity: 0.95;">Est: ₹{p_row["Est_Amount"]} | Fund: {p_row["Fund"]} | A/c: {p_row["Account"]}</span></div>'
+            
             box_html += "</div></details>"
             st.markdown(box_html, unsafe_allow_html=True)
 

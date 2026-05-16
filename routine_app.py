@@ -380,7 +380,7 @@ try:
     today_holiday_match = holidays_df[holidays_df['Date_dt'].dt.date == now.date()]
     is_auto_holiday = not today_holiday_match.empty
     auto_occasion = today_holiday_match.iloc[0]['Occasion'] if is_auto_holiday else ""
-    effective_day = "Holiday" if (holiday_on or is_auto_holiday) else current_day
+    effective_day = "Holiday" if is_auto_holiday else current_day
 
     scheduled_activity = "FREE TIME"
     scheduled_activity_start = None
@@ -432,9 +432,7 @@ try:
     # --- COMPACT CURRENT ACTIVITY BOX ---
     st.markdown(f'<div style="text-align: center; background-color: #f8f9fa; border: 2px solid {color}; border-radius: 8px; padding: 8px; margin: 5px auto; max-width: 300px; box-shadow: 0px 2px 4px rgba(0,0,0,0.05);"><h3 style="margin: 0; font-size: 1.6rem; color: {color}; letter-spacing: 0.5px;">{current_activity}</h3></div>', unsafe_allow_html=True)
 
-    if is_auto_holiday or holiday_on:
-        if is_auto_holiday: st.markdown(f'<p style="text-align: center; color: #ff9f36; font-weight: bold; font-size: 1.1rem; margin-top: -5px;">🎉 {auto_occasion} (Holiday Schedule)</p>', unsafe_allow_html=True)
-        else: st.markdown('<p style="text-align: center; color: #ff9f36; font-weight: bold; margin-top: -5px;">🎉 Running Custom Holiday Schedule</p>', unsafe_allow_html=True)
+    if is_auto_holiday: st.markdown(f'<p style="text-align: center; color: #ff9f36; font-weight: bold; font-size: 1.1rem; margin-top: -5px;">🎉 {auto_occasion} (Holiday Schedule)</p>', unsafe_allow_html=True)
 
     if current_activity_start:
         dt_start = datetime.combine(now.date(), current_activity_start)
@@ -480,13 +478,10 @@ try:
                     day_str = f"Due in {days_until} days"
                     item_bg = "#ffb300" # Amber
                 
-                # Assign margin-bottom: 8px to every item so the last one also has space!
                 pad_bot = "margin-bottom: 8px;"
-                
                 card_html = f'<div style="background-color: {item_bg}; color: white; padding: 8px 12px; border-radius: 6px; {pad_bot} box-shadow: 0 1px 3px rgba(0,0,0,0.1);"><strong style="font-size: 15px;">{p_row["Bill_Name"]} - {day_str}</strong></div>'
                 st.markdown(card_html, unsafe_allow_html=True)
             
-            # Extra buffer space below the last card
             st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
 
     sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
@@ -589,11 +584,10 @@ try:
                                         get_activity_log.clear() 
                                         st.rerun()
                 
-                # Add horizontal line ONLY if it's not the last item!
+                # Add horizontal line ONLY if it's not the last item
                 if idx_task < len(upcoming_ui_elements_raw) - 1:
                     st.markdown('<hr style="margin-top:5px; margin-bottom:15px; border: 0; border-top: 1px solid #eee;">', unsafe_allow_html=True)
             
-            # Extra buffer space at the bottom of the expander
             st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
 
     future_holidays = holidays_df[holidays_df['Date_dt'].dt.date > now.date()].sort_values('Date_dt')
@@ -734,11 +728,25 @@ try:
                                 get_activity_log.clear() 
                                 st.rerun()
 
-        # --- VISITOR TRACKER (Single Card) ---
+        # --- VISITOR TRACKER (Single Light Card using st.form) ---
         st.markdown('<div style="margin-top: 15px; margin-bottom: 5px; color: #ff4b4b;"><b>👥 Visitor Tracker</b></div>', unsafe_allow_html=True)
-        with st.container():
-            st.markdown("<div style='background-color:#ffffff; padding:15px; border-radius:8px; border:1px solid #ddd; margin-bottom: 15px;'>", unsafe_allow_html=True)
-            if st.button("⚡ Quick Start (Update Details Later)", use_container_width=True):
+        
+        # Inject CSS to style this specific form
+        st.markdown("""
+            <style>
+            div[data-testid="stForm"]:has(.visitor-anchor) {
+                background-color: #fff4f4 !important;
+                border: 1px solid #ffcdd2 !important;
+                border-radius: 10px !important;
+                padding: 15px !important;
+            }
+            </style>
+        """, unsafe_allow_html=True)
+
+        with st.form("visitor_tracker_form"):
+            st.markdown('<span class="visitor-anchor"></span>', unsafe_allow_html=True)
+            
+            if st.form_submit_button("⚡ Quick Start (Update Details Later)", use_container_width=True):
                 smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, "PEOPLE", "VISITOR", "", "Update details later"])
                 get_activity_log.clear() 
                 st.rerun()
@@ -754,11 +762,10 @@ try:
                 topic_talk = st.text_input("Topic", key="live_mtg_topic")
                 purpose_visit = st.text_input("Purpose", key="live_mtg_purpose")
                 
-                if st.button("▶️ Start with Details", type="primary", use_container_width=True):
+                if st.form_submit_button("▶️ Start with Details", type="primary", use_container_width=True):
                     smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, "PEOPLE", f"{interaction_type} - {(person_name.strip() if person_name else 'Unknown')}".upper(), "", f"Topic: {topic_talk} | Purpose: {purpose_visit}"])
                     get_activity_log.clear() 
                     st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
 
     # --- SCHEDULE FUTURE TASK ---
     with st.expander("🗓️ Schedule Future Task"):

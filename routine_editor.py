@@ -136,8 +136,21 @@ try:
     all_acts = sorted(list(set(df['Activity'].dropna().str.upper())))
     all_subs = sorted(list(set([x.strip() for items in df['Sub_Activities'].dropna() for x in str(items).split(',') if x.strip()])))
     all_chks = sorted(list(set([x.strip() for items in df['check_list'].dropna() for x in str(items).split(',') if x.strip()])))
-    all_apps = sorted(list(set([x.strip() for items in df['App'].dropna() for x in str(items).split(',') if x.strip()])))
+    all_apps_db = sorted(list(set([x.strip() for items in df['App'].dropna() for x in str(items).split(',') if x.strip()])))
 
+    # APP GROUPING LOGIC
+    app_groups = {
+        "MONEY": ["Money & Location", "Money Utilities", "Money Tracker"],
+        "ROUTINE": ["Live Routine Hub", "Routine Audit", "Routine Editor", "Project App"],
+        "HEALTH": ["Health Hub", "Sleep & Water"],
+        "SCH WORK": ["MDM Returns", "Video Manager"],
+        "HOME": ["Trace Inventory", "Monthly Tracker"],
+        "HARDWARE": ["Backup Tracker"],
+        "BALANCE": ["Strong Tracker"],
+        "ONES": ["Election Duty"]
+    }
+    app_to_group = {app: grp for grp, apps in app_groups.items() for app in apps}
+    
     # Current cell values
     curr_act = str(sel_row['Activity']).strip()
     curr_sub_list = [x.strip() for x in str(sel_row['Sub_Activities']).split(',') if x.strip()]
@@ -147,7 +160,17 @@ try:
     # Ensure current items exist in the dropdown options
     opts_sub = sorted(list(set(all_subs + curr_sub_list)))
     opts_chk = sorted(list(set(all_chks + curr_chk_list)))
-    opts_app = sorted(list(set(all_apps + curr_app_list)))
+    
+    # Merge grouped apps with historical apps
+    standard_apps = [app for grp in app_groups.values() for app in grp]
+    opts_app = standard_apps.copy()
+    for a in all_apps_db + curr_app_list:
+        if a not in opts_app and a.strip():
+            opts_app.append(a)
+
+    def format_app_display(app_name):
+        grp = app_to_group.get(app_name, "CUSTOM")
+        return f"[{grp}]  {app_name}"
 
     st.markdown(f"#### ✏️ 3. Update `{sel_row['Start_Time']}` Slot Details")
     
@@ -176,10 +199,10 @@ try:
 
         st.markdown("<hr style='margin: 10px 0px;'>", unsafe_allow_html=True)
 
-        # APPS
+        # APPS (With Visual Grouping)
         st.markdown("**4️⃣ Applications Launchpad**")
-        new_apps_sel = st.multiselect("Select Existing", opts_app, default=curr_app_list)
-        new_apps_txt = st.text_input("Add New (Comma separated)", placeholder="e.g., Routine Editor, Sleep & Water", key="new_app")
+        new_apps_sel = st.multiselect("Select Apps (Grouped by category)", opts_app, default=curr_app_list, format_func=format_app_display)
+        new_apps_txt = st.text_input("Add Custom App (Comma separated)", placeholder="e.g., Extra Tool 1", key="new_app")
 
         st.markdown("</div><br>", unsafe_allow_html=True)
 

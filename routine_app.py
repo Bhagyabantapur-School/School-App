@@ -95,26 +95,12 @@ def get_tracker_data():
 def get_routine_data():
     data = get_sheet("routine_master").get_all_values()
     df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 7: df[df.shape[1]] = ""
-    df = df.iloc[:, :7]
-    df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list"]
+    while df.shape[1] < 8: df[df.shape[1]] = ""
+    df = df.iloc[:, :8]
+    df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App"]
     df = df[df["Day"].astype(str).str.strip() != ""]
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
     return df
-
-@st.cache_data(ttl=300)
-def get_app_control_data():
-    try:
-        sheet = get_sheet("app_control")
-        data = sheet.get_all_values()
-        if len(data) <= 1: return pd.DataFrame(columns=["Time_Slot_Start", "Time_Slot_End", "Duration", "App"])
-        df = pd.DataFrame(data[1:], columns=data[0])
-        while df.shape[1] < 4: df[df.shape[1]] = ""
-        df = df.iloc[:, :4]
-        df.columns = ["Time_Slot_Start", "Time_Slot_End", "Duration", "App"]
-        return df
-    except Exception:
-        return pd.DataFrame(columns=["Time_Slot_Start", "Time_Slot_End", "Duration", "App"])
 
 @st.cache_data(ttl=300)
 def get_activity_log():
@@ -262,7 +248,6 @@ def log_and_open_app(app_name, target_file, cached_data, now_dt):
 # ==========================================
 try:
     df = get_routine_data()
-    app_control_df = get_app_control_data()
     log_df = get_activity_log() 
     future_df = get_future_tasks()
     holidays_df = get_holidays()
@@ -296,7 +281,6 @@ try:
     with col2:
         if st.button("🔄 Sync", use_container_width=True):
             get_routine_data.clear()
-            get_app_control_data.clear()
             get_activity_log.clear()
             get_future_tasks.clear()
             get_holidays.clear()
@@ -308,74 +292,7 @@ try:
             time.sleep(1.0)
             st.rerun()
 
-    # --- DYNAMIC APP LAUNCHPAD LOGIC ---
-    base_app_list = [
-        ("Money & Location", "money_location.py", "📍"),
-        ("Money Utilities", "money_utilities.py", "💳"),
-        ("Strong Tracker", "strong.py", "💪"),
-        ("Project App", "project_app.py", "🚀"),
-        ("Election Duty", "election_duty.py", "🗳️"),
-        ("Monthly Tracker", "monthly_app.py", "📆"),
-        ("Money Tracker", "money_tracker.py", "💵"),
-        ("Sleep & Water", "sleep_water_app.py", "💧"),
-        ("Backup Tracker", "backup_tracker_app.py", "💾"),
-        ("Routine Audit", "routine_audit.py", "🔍"),
-        ("Routine Editor", "routine_editor.py", "✏️"),
-        ("MDM Returns", "mdm_return_log.py", "📦"),
-        ("Video Manager", "bps_ytfb_videos.py", "🎬"),
-        ("Health Hub", "health_app.py", "❤️"),
-        ("Trace Inventory", "trace.py", "🏷️")
-    ]
-    
-    active_apps_filter = []
-    if not app_control_df.empty:
-        for _, row in app_control_df.iterrows():
-            try:
-                start_str = str(row['Time_Slot_Start']).strip()
-                end_str = str(row['Time_Slot_End']).strip()
-                if not start_str or not end_str: continue
-
-                start_t = datetime.strptime(start_str, '%H:%M').time()
-                end_t = datetime.strptime('23:59:59', '%H:%M:%S').time() if end_str in ['0:00', '00:00', '24:00'] else datetime.strptime(end_str, '%H:%M').time()
-
-                is_current = (start_t <= current_time <= end_t) if start_t <= end_t else (current_time >= start_t or current_time <= end_t)
-
-                if is_current:
-                    apps_raw = str(row['App']).split(',')
-                    active_apps_filter.extend([a.strip() for a in apps_raw if a.strip()])
-            except ValueError:
-                continue
-
-    filtered_app_list = [app for app in base_app_list if app[0] in active_apps_filter] if active_apps_filter else []
-
-    # Show Scheduled Apps seamlessly at the top (No Tabs)
-    if filtered_app_list:
-        st.markdown('<h4 style="text-align: center; color: #d84315; margin-top: 10px;">🚀 Scheduled Apps</h4>', unsafe_allow_html=True)
-        for i in range(0, len(filtered_app_list), 3):
-            cols = st.columns(3)
-            for j in range(3):
-                if i + j < len(filtered_app_list):
-                    app_name, file_name, icon = filtered_app_list[i + j]
-                    last_str = get_app_time_str(app_name, tracker_data, now)
-                    with cols[j]:
-                        if st.button(f"{icon} {app_name}\n(Last: {last_str})", key=f"sch_app_{i+j}", use_container_width=True):
-                            log_and_open_app(app_name, file_name, tracker_data, now)
-        st.markdown("---")
-
-    # PRE-PROCESS ALL PAYMENTS 
-    all_alert_pays = []
-    if not payment_df.empty:
-        def parse_pay_date(d_str):
-            try: return pd.to_datetime(str(d_str).strip(), dayfirst=True).date()
-            except: return pd.NaT
-        
-        payment_df['Due_Date_dt'] = payment_df['Due_Date'].apply(parse_pay_date)
-        pending_payments = payment_df[~payment_df['Status'].str.strip().str.upper().isin(['PAID', 'DONE'])]
-        for _, p_row in pending_payments.iterrows():
-            if pd.notna(p_row['Due_Date_dt']):
-                days_until = (p_row['Due_Date_dt'] - now.date()).days
-                if days_until <= 3: all_alert_pays.append((days_until, p_row))
-
+    # --- PRE-PROCESS SCHEDULE & SCHEDULED APPS ---
     holidays_df['Date_dt'] = pd.to_datetime(holidays_df['Date'], dayfirst=True, errors='coerce')
     today_holiday_match = holidays_df[holidays_df['Date_dt'].dt.date == now.date()]
     is_auto_holiday = not today_holiday_match.empty
@@ -388,6 +305,7 @@ try:
     next_time_str = ""
     scheduled_sub_activities = ""
     scheduled_check_list = ""
+    active_apps_filter = []
 
     today_schedule = df[df['Day'].str.strip().str.title() == effective_day.title()].to_dict('records')
 
@@ -405,6 +323,10 @@ try:
                 scheduled_activity_start = start_t
                 scheduled_sub_activities = str(row.get('Sub_Activities', '')).strip()
                 scheduled_check_list = str(row.get('check_list', '')).strip()
+                
+                # Extract apps dynamically assigned to this specific time slot
+                apps_raw = str(row.get('App', '')).split(',')
+                active_apps_filter.extend([a.strip() for a in apps_raw if a.strip()])
                 
                 if i + 1 < len(today_schedule):
                     next_row = today_schedule[i+1]
@@ -429,6 +351,41 @@ try:
     elif current_activity in ["SLEEP", "PRE", "TEA", "OUT"]: color = "#ff9f36" 
     else: color = "#333333" 
 
+    # --- DYNAMIC APP LAUNCHPAD LOGIC ---
+    base_app_list = [
+        ("Money & Location", "money_location.py", "📍"),
+        ("Money Utilities", "money_utilities.py", "💳"),
+        ("Strong Tracker", "strong.py", "💪"),
+        ("Project App", "project_app.py", "🚀"),
+        ("Election Duty", "election_duty.py", "🗳️"),
+        ("Monthly Tracker", "monthly_app.py", "📆"),
+        ("Money Tracker", "money_tracker.py", "💵"),
+        ("Sleep & Water", "sleep_water_app.py", "💧"),
+        ("Backup Tracker", "backup_tracker_app.py", "💾"),
+        ("Routine Audit", "routine_audit.py", "🔍"),
+        ("Routine Editor", "routine_editor.py", "✏️"),
+        ("MDM Returns", "mdm_return_log.py", "📦"),
+        ("Video Manager", "bps_ytfb_videos.py", "🎬"),
+        ("Health Hub", "health_app.py", "❤️"),
+        ("Trace Inventory", "trace.py", "🏷️")
+    ]
+
+    filtered_app_list = [app for app in base_app_list if app[0] in active_apps_filter] if active_apps_filter else []
+
+    # Show Scheduled Apps seamlessly at the top (No Tabs)
+    if filtered_app_list:
+        st.markdown('<h4 style="text-align: center; color: #d84315; margin-top: 10px;">🚀 Scheduled Apps</h4>', unsafe_allow_html=True)
+        for i in range(0, len(filtered_app_list), 3):
+            cols = st.columns(3)
+            for j in range(3):
+                if i + j < len(filtered_app_list):
+                    app_name, file_name, icon = filtered_app_list[i + j]
+                    last_str = get_app_time_str(app_name, tracker_data, now)
+                    with cols[j]:
+                        if st.button(f"{icon} {app_name}\n(Last: {last_str})", key=f"sch_app_{i+j}", use_container_width=True):
+                            log_and_open_app(app_name, file_name, tracker_data, now)
+        st.markdown("---")
+
     # --- COMPACT CURRENT ACTIVITY BOX ---
     st.markdown(f'<div style="text-align: center; background-color: #f8f9fa; border: 2px solid {color}; border-radius: 8px; padding: 8px; margin: 5px auto; max-width: 300px; box-shadow: 0px 2px 4px rgba(0,0,0,0.05);"><h3 style="margin: 0; font-size: 1.6rem; color: {color}; letter-spacing: 0.5px;">{current_activity}</h3></div>', unsafe_allow_html=True)
 
@@ -450,6 +407,19 @@ try:
     elif next_activity == "END OF DAY": st.markdown('<h4 style="text-align: center; color: #666; margin-bottom: 20px; font-weight: 400; font-size: 1.1rem;">Up Next: Schedule Complete</h4>', unsafe_allow_html=True)
 
     # --- SIMPLIFIED DYNAMIC PENDING PAYMENTS EXPANDER ---
+    all_alert_pays = []
+    if not payment_df.empty:
+        def parse_pay_date(d_str):
+            try: return pd.to_datetime(str(d_str).strip(), dayfirst=True).date()
+            except: return pd.NaT
+        
+        payment_df['Due_Date_dt'] = payment_df['Due_Date'].apply(parse_pay_date)
+        pending_payments = payment_df[~payment_df['Status'].str.strip().str.upper().isin(['PAID', 'DONE'])]
+        for _, p_row in pending_payments.iterrows():
+            if pd.notna(p_row['Due_Date_dt']):
+                days_until = (p_row['Due_Date_dt'] - now.date()).days
+                if days_until <= 3: all_alert_pays.append((days_until, p_row))
+
     if all_alert_pays:
         all_alert_pays.sort(key=lambda x: x[0])
         min_days = all_alert_pays[0][0]
@@ -728,10 +698,7 @@ try:
                                 get_activity_log.clear() 
                                 st.rerun()
 
-        # --- VISITOR TRACKER (Single Light Card using st.form) ---
-        st.markdown('<div style="margin-top: 15px; margin-bottom: 5px; color: #ff4b4b;"><b>👥 Visitor Tracker</b></div>', unsafe_allow_html=True)
-        
-        # Inject CSS to style this specific form
+        # --- VISITOR TRACKER (Single Light Card) ---
         st.markdown("""
             <style>
             div[data-testid="stForm"]:has(.visitor-anchor) {
@@ -745,7 +712,8 @@ try:
 
         with st.form("visitor_tracker_form"):
             st.markdown('<span class="visitor-anchor"></span>', unsafe_allow_html=True)
-            
+            st.markdown('<div style="color: #ff4b4b; font-size: 18px; margin-bottom: 10px;"><b>👥 Visitor Tracker</b></div>', unsafe_allow_html=True)
+
             if st.form_submit_button("⚡ Quick Start (Update Details Later)", use_container_width=True):
                 smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, "PEOPLE", "VISITOR", "", "Update details later"])
                 get_activity_log.clear() 

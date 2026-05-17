@@ -460,8 +460,8 @@ try:
         grouped = active_df.groupby('Project Name')
         
         for project, group in grouped:
-            # Expendable Group Header
-            with st.expander(f"📂 {project}", expanded=True):
+            # Expendable Group Header - Defaults to collapsed (expanded=False)
+            with st.expander(f"📂 {project}", expanded=False):
                 for _, row in group.iterrows():
                     c_date = str(row.get('Creation Date', '')).strip()
                     c_str = f" | 🕒 Created: {c_date}" if c_date else ""

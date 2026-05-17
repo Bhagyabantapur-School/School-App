@@ -18,7 +18,7 @@ st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    .block-container {padding-top: 4rem; padding-bottom: 2rem;}
+    .block-container {padding-top: 2rem; padding-bottom: 2rem;}
     div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {
         border-radius: 8px !important;
         border: 1px solid #cccccc !important;
@@ -47,6 +47,68 @@ def init_connection():
 def get_main_spreadsheet(): return init_connection().open("MY ROUTINE 2026")
 def get_sheet(tab_name): return get_main_spreadsheet().worksheet(tab_name)
 
+def auto_adjust_schedule(df):
+    """
+    AI Auto-Fixer: Scans every day for time overlaps.
+    If multiple tasks start at the same time, the shorter one wins and shifts the longer one forward.
+    If a task overlaps into the next, it perfectly shrinks the first task.
+    """
+    def time_to_mins(t_str):
+        try:
+            t = datetime.strptime(str(t_str).strip(), '%H:%M')
+            return t.hour * 60 + t.minute
+        except: return 0
+
+    def mins_to_time(mins):
+        h = (int(mins) // 60) % 24
+        m = int(mins) % 60
+        return f"{h}:{m:02d}"
+
+    final_rows = []
+    for day in df['Day'].unique():
+        day_df = df[df['Day'] == day].copy()
+        day_df['Start_Mins'] = day_df['Start_Time'].apply(time_to_mins)
+        day_df['End_Mins'] = day_df['End_Time'].apply(time_to_mins)
+        # Handle midnight rollover
+        day_df['End_Mins'] = day_df.apply(lambda r: r['End_Mins'] + 1440 if r['End_Mins'] <= r['Start_Mins'] and r['End_Mins'] < 120 else r['End_Mins'], axis=1)
+        day_df['Dur_Mins'] = day_df['End_Mins'] - day_df['Start_Mins']
+        
+        # Sort so overlaps are naturally arranged (Earliest Start -> Shortest Duration)
+        day_df = day_df.sort_values(['Start_Mins', 'Dur_Mins']).reset_index(drop=True)
+        
+        for i in range(len(day_df) - 1):
+            for j in range(i+1, len(day_df)):
+                start_A = day_df.loc[i, 'Start_Mins']
+                end_A = day_df.loc[i, 'End_Mins']
+                start_B = day_df.loc[j, 'Start_Mins']
+                
+                if start_B < end_A: # Overlap Detected!
+                    if start_A == start_B:
+                        # Same start time: Task B (longer) gets pushed forward
+                        day_df.loc[j, 'Start_Mins'] = end_A
+                        if day_df.loc[j, 'Start_Mins'] > day_df.loc[j, 'End_Mins']:
+                            day_df.loc[j, 'End_Mins'] = day_df.loc[j, 'Start_Mins']
+                    else:
+                        # Task A bleeds into Task B: Task A gets shrunk backwards
+                        day_df.loc[i, 'End_Mins'] = start_B
+                        end_A = start_B
+                        
+        # Final Format and Recalculation
+        day_df['Start_Time'] = day_df['Start_Mins'].apply(mins_to_time)
+        day_df['End_Time'] = day_df['End_Mins'].apply(mins_to_time)
+        day_df['Dur_Mins'] = day_df['End_Mins'] - day_df['Start_Mins']
+        
+        # Keep only tasks with a valid duration (removes swallowed tasks)
+        day_df = day_df[day_df['Dur_Mins'] > 0].copy()
+        day_df['Duration'] = day_df['Dur_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")
+        
+        final_rows.append(day_df)
+        
+    if final_rows:
+        fixed_df = pd.concat(final_rows, ignore_index=True)
+        return fixed_df[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App"]]
+    return df
+
 @st.cache_data(ttl=300) 
 def get_routine_data():
     data = get_sheet("routine_master").get_all_values()
@@ -59,6 +121,9 @@ def get_routine_data():
     
     df = df[df["Day"].astype(str).str.strip() != ""]
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
+    
+    # Automatically heal any overlaps upon loading
+    df = auto_adjust_schedule(df)
     return df
 
 # ==========================================
@@ -80,7 +145,6 @@ try:
             if len(mon_df) != len(d_df):
                 is_identical = False
                 break
-            # Check if activities and start times match perfectly
             if not mon_df['Activity'].equals(d_df['Activity']) or not mon_df['Start_Time'].equals(d_df['Start_Time']):
                 is_identical = False
                 break
@@ -177,6 +241,14 @@ try:
     with st.form("smart_edit_form"):
         st.markdown("<div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px;'>", unsafe_allow_html=True)
         
+        # TIME SLOT EDITING (Triggers Auto-Fix Overlaps)
+        st.markdown("**⏰ Edit Time Slot (Overlaps will Auto-Fix upon saving!)**")
+        col_t1, col_t2 = st.columns(2)
+        with col_t1: new_start_txt = st.text_input("Start Time (H:MM)", value=sel_row['Start_Time'])
+        with col_t2: new_end_txt = st.text_input("End Time (H:MM)", value=sel_row['End_Time'])
+        
+        st.markdown("<hr style='margin: 10px 0px;'>", unsafe_allow_html=True)
+
         # ACTIVITY
         st.markdown("**1️⃣ Activity Category**")
         col_a1, col_a2 = st.columns(2)
@@ -216,16 +288,20 @@ try:
             final_apps = ",".join(filter(None, [x for x in new_apps_sel] + [x.strip() for x in new_apps_txt.split(',')]))
 
             # Apply changes to the main dataframe
-            # This logic targets ALL days in the grouping (e.g., Mon-Fri) at the exact Start_Time
             target_mask = (df['Day'].str.title().isin(target_days)) & (df['Start_Time'] == sel_start)
             
+            df.loc[target_mask, 'Start_Time'] = new_start_txt.strip()
+            df.loc[target_mask, 'End_Time'] = new_end_txt.strip()
             df.loc[target_mask, 'Activity'] = final_act
             df.loc[target_mask, 'Sub_Activities'] = final_subs
             df.loc[target_mask, 'check_list'] = final_chks
             df.loc[target_mask, 'App'] = final_apps
 
+            # ✨ MAGIC OVERLAP FIXER ✨
+            df = auto_adjust_schedule(df)
+
             # Push to Google Sheets
-            with st.spinner("Saving changes to Google Sheets..."):
+            with st.spinner("Healing Overlaps and Saving to Google Sheets..."):
                 routine_sheet = get_sheet("routine_master")
                 routine_sheet.clear()
                 routine_sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name="A1")
@@ -233,7 +309,7 @@ try:
                 # Clear Cache to show new data immediately
                 get_routine_data.clear()
                 
-            st.success(f"✅ Successfully updated schedule for {sel_day_opt} at {sel_start}!")
+            st.success(f"✅ Successfully updated and healed schedule for {sel_day_opt}!")
             time.sleep(1.5)
             st.rerun()
 

@@ -72,7 +72,6 @@ def get_project_tasks():
     try:
         sheet = ss.worksheet("project_tasks")
     except gspread.exceptions.WorksheetNotFound:
-        # UPDATED: Now creates 8 columns
         sheet = ss.add_worksheet(title="project_tasks", rows="200", cols="8")
         sheet.append_row(["Task Name", "Project Name", "Activity", "Status", "Start Date", "End Date", "Completed Date", "Creation Date"])
     data = sheet.get_all_values()
@@ -80,7 +79,7 @@ def get_project_tasks():
         return pd.DataFrame(columns=["Task Name", "Project Name", "Activity", "Status", "Start Date", "End Date", "Completed Date", "Creation Date", "row_index"])
     
     df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 8: df[df.shape[1]] = "" # UPDATED to 8 columns
+    while df.shape[1] < 8: df[df.shape[1]] = "" 
     df = df.iloc[:, :8]
     df.columns = ["Task Name", "Project Name", "Activity", "Status", "Start Date", "End Date", "Completed Date", "Creation Date"]
     df['row_index'] = df.index + 2 
@@ -357,7 +356,7 @@ try:
                                 psheet = get_sheet("project_tasks")
                                 # Status is Column 4 (D)
                                 psheet.update_cell(p_idx, 4, new_proj_status)
-                                # If marked as completed here, update Column 7 (G)
+                                # Update Column 7 (G) with Completed Date if marked completed
                                 if new_proj_status == "Completed":
                                     psheet.update_cell(p_idx, 7, today_str)
                                 get_project_tasks.clear() 
@@ -461,39 +460,21 @@ try:
         grouped = active_df.groupby('Project Name')
         
         for project, group in grouped:
-            st.markdown(f"<h3 style='color: #d84315; margin-top: 15px; border-bottom: 2px solid #f0f2f6; padding-bottom: 5px;'>📂 {project}</h3>", unsafe_allow_html=True)
-            
-            for _, row in group.iterrows():
-                sheet_row = int(row['row_index'])
-                
-                with st.container():
-                    col_chk, col_info = st.columns([0.05, 0.95])
+            # Expendable Group Header
+            with st.expander(f"📂 {project}", expanded=True):
+                for _, row in group.iterrows():
+                    c_date = str(row.get('Creation Date', '')).strip()
+                    c_str = f" | 🕒 Created: {c_date}" if c_date else ""
                     
-                    with col_chk:
-                        st.markdown("<div style='margin-top: 12px;'></div>", unsafe_allow_html=True)
-                        is_done = st.checkbox(" ", key=f"chk_{sheet_row}_{project}")
-                        
-                        if is_done:
-                            psheet = get_sheet("project_tasks")
-                            psheet.update_cell(sheet_row, 4, "Completed") # Update Status to Col D
-                            psheet.update_cell(sheet_row, 7, today_str)   # Update Completed Date to Col G
-                            get_project_tasks.clear()
-                            st.toast(f"✅ Marked '{row['Task Name']}' as Completed!")
-                            time.sleep(1)
-                            st.rerun()
-                            
-                    with col_info:
-                        c_date = str(row.get('Creation Date', '')).strip()
-                        c_str = f" | 🕒 Created: {c_date}" if c_date else ""
-                        
-                        st.markdown(f"""
-                        <div style="background-color: #f8f9fa; padding: 10px 15px; border-radius: 6px; border-left: 5px solid #0068c9; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
-                            <strong style='font-size: 16px; color: #333;'>{row['Task Name']}</strong><br>
-                            <span style='font-size: 13px; color: #666;'>
-                                🎯 <b>{row['Activity']}</b> | 🗓️ {row['Start Date']} to {row['End Date']}{c_str}
-                            </span>
-                        </div>
-                        """, unsafe_allow_html=True)
+                    # Clean visual block displaying task details
+                    st.markdown(f"""
+                    <div style="background-color: #f8f9fa; padding: 10px 15px; border-radius: 6px; border-left: 5px solid #0068c9; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                        <strong style='font-size: 16px; color: #333;'>{row['Task Name']}</strong><br>
+                        <span style='font-size: 13px; color: #666;'>
+                            🎯 <b>{row['Activity']}</b> | 🗓️ {row['Start Date']} to {row['End Date']}{c_str}
+                        </span>
+                    </div>
+                    """, unsafe_allow_html=True)
         
     st.markdown("---")    
     
@@ -519,7 +500,6 @@ try:
             with col_p1: p_name_sel = st.selectbox("Existing Project", existing_projects)
             with col_p2: p_name_new = st.text_input("OR New Project Name", placeholder="Type new name here")
             
-            # --- NEW: ACTIVITY SELECTORS ---
             col_a1, col_a2 = st.columns(2)
             with col_a1: p_activity_sel = st.selectbox("Existing Activity (From Log)", existing_activities)
             with col_a2: p_activity_new = st.text_input("OR New Activity Tag", placeholder="e.g., WORK, LEARN")
@@ -531,15 +511,12 @@ try:
             
             if st.form_submit_button("Add Task", type="primary", use_container_width=True):
                 final_p_name = p_name_new.strip() if p_name_new.strip() else (p_name_sel if p_name_sel != "-- Select Existing Project --" else "")
-                
                 final_p_activity = p_activity_new.strip().upper() if p_activity_new.strip() else (p_activity_sel if p_activity_sel != "-- Select Existing Activity --" else "WORK")
                 
                 if p_task and final_p_name:
                     psheet = get_sheet("project_tasks")
-                    
                     comp_date = today_str if p_status == "Completed" else ""
                     
-                    # Columns: 1=Task Name, 2=Project Name, 3=Activity, 4=Status, 5=Start Date, 6=End Date, 7=Completed Date, 8=Creation Date
                     psheet.append_row([
                         p_task.strip(), 
                         final_p_name, 

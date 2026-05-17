@@ -11,7 +11,6 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 import time
-import plotly.express as px
 import calendar 
 
 # --- Master Google Sheets Formula for Duration ---
@@ -73,17 +72,17 @@ def get_project_tasks():
     try:
         sheet = ss.worksheet("project_tasks")
     except gspread.exceptions.WorksheetNotFound:
-        # UPDATED: Now creates 6 columns
-        sheet = ss.add_worksheet(title="project_tasks", rows="200", cols="6")
-        sheet.append_row(["Task Name", "Project Name", "Activity", "Status", "Start Date", "End Date"])
+        # UPDATED: Now creates 8 columns
+        sheet = ss.add_worksheet(title="project_tasks", rows="200", cols="8")
+        sheet.append_row(["Task Name", "Project Name", "Activity", "Status", "Start Date", "End Date", "Completed Date", "Creation Date"])
     data = sheet.get_all_values()
     if len(data) <= 1:
-        return pd.DataFrame(columns=["Task Name", "Project Name", "Activity", "Status", "Start Date", "End Date", "row_index"])
+        return pd.DataFrame(columns=["Task Name", "Project Name", "Activity", "Status", "Start Date", "End Date", "Completed Date", "Creation Date", "row_index"])
     
     df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 6: df[df.shape[1]] = "" # UPDATED to 6 columns
-    df = df.iloc[:, :6]
-    df.columns = ["Task Name", "Project Name", "Activity", "Status", "Start Date", "End Date"]
+    while df.shape[1] < 8: df[df.shape[1]] = "" # UPDATED to 8 columns
+    df = df.iloc[:, :8]
+    df.columns = ["Task Name", "Project Name", "Activity", "Status", "Start Date", "End Date", "Completed Date", "Creation Date"]
     df['row_index'] = df.index + 2 
     return df
 
@@ -356,8 +355,11 @@ try:
                             if not p_matches.empty:
                                 p_idx = int(p_matches.iloc[0]['row_index'])
                                 psheet = get_sheet("project_tasks")
-                                # UPDATED: Status moved to Column 4 (D) because Activity is Column 3 (C)
+                                # Status is Column 4 (D)
                                 psheet.update_cell(p_idx, 4, new_proj_status)
+                                # If marked as completed here, update Column 7 (G)
+                                if new_proj_status == "Completed":
+                                    psheet.update_cell(p_idx, 7, today_str)
                                 get_project_tasks.clear() 
                                 
                         get_activity_log.clear() 
@@ -416,20 +418,17 @@ try:
                         r_idx = int(task_row['row_index'])
                         curr_stat = task_row['Status'].strip().title()
                         
-                        # UPDATED: Fetch the Activity mapped to this project task
                         task_activity = str(task_row['Activity']).strip().upper()
                         if not task_activity: 
-                            task_activity = "WORK" # Fallback if empty
+                            task_activity = "WORK"
                         
                         psheet = get_sheet("project_tasks")
                         
                         if curr_stat == "Not Started":
-                            # UPDATED: Status moved to Column 4 (D)
                             psheet.update_cell(r_idx, 4, "In Progress")
                             get_project_tasks.clear() 
                             
                         log_sheet = get_sheet("activity_log")
-                        # UPDATED: Logs dynamically into column E ("Activity") instead of hardcoded "WORK"
                         log_sheet.append_row([
                             today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA,    
                             task_activity, selected_p_task_full, "", "Project Tracking"
@@ -448,64 +447,53 @@ try:
     st.markdown("<br><hr><br>", unsafe_allow_html=True)
 
     # ==========================================
-    # SECTION C: DASHBOARD CHARTS & DATA
+    # SECTION C: ACTIVE PROJECT TASKS (GROUPED)
     # ==========================================
-    status_colors = {"Completed": "#2e7b32", "In Progress": "#0068c9", "Not Started": "#ff9f36"}
+    st.markdown("### 📋 Active Project Tasks")
+    st.markdown("---")
     
-    if not proj_df.empty:
-        plot_df = proj_df.copy()
-        plot_df['Start Date'] = pd.to_datetime(plot_df['Start Date'], errors='coerce')
-        plot_df['End Date'] = pd.to_datetime(plot_df['End Date'], errors='coerce')
-        plot_df = plot_df.dropna(subset=['Start Date', 'End Date'])
-        
-        if not plot_df.empty:
-            st.markdown("### 📈 Overall Progress")
-            project_stats = plot_df.groupby('Project Name').apply(
-                lambda x: (x['Status'].str.strip().str.title() == 'Completed').sum() / len(x)
-            ).reset_index(name='Progress')
-            
-            cols = st.columns(4) 
-            for i, row in project_stats.iterrows():
-                with cols[i % 4]:
-                    percent_complete = int(row['Progress'] * 100)
-                    st.markdown(f"""
-                    <div style='background-color: #f0f2f6; padding: 15px; border-radius: 10px; margin-bottom: 5px; height: 110px;'>
-                        <p style='margin: 0; font-size: 16px; font-weight: 600; color: #333; line-height: 1.2; word-wrap: break-word;'>{row['Project Name']}</p>
-                        <h2 style='margin: 0; color: #0068c9; padding-top: 5px;'>{percent_complete}%</h2>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    st.progress(row['Progress'])
-                    st.markdown("<br>", unsafe_allow_html=True)
-            
-            st.markdown("---")
-            
-            col_gantt, col_pie = st.columns([2, 1])
-            
-            with col_gantt:
-                st.markdown("#### 🗓️ Task Timeline")
-                plot_df['Status'] = plot_df['Status'].str.strip().str.title()
-                plot_df = plot_df.sort_values('Start Date')
-                
-                fig_gantt = px.timeline(plot_df, x_start="Start Date", x_end="End Date", y="Task Name", 
-                                        color="Status", color_discrete_map=status_colors, hover_data=["Project Name"])
-                fig_gantt.update_yaxes(autorange="reversed", tickmode='linear')
-                fig_gantt.update_layout(margin=dict(l=0, r=0, t=30, b=0), xaxis_title="", yaxis_title="", showlegend=False)
-                st.plotly_chart(fig_gantt, use_container_width=True)
-                
-            with col_pie:
-                st.markdown("#### 📌 Task Status Breakdown")
-                status_counts = plot_df['Status'].value_counts().reset_index()
-                status_counts.columns = ['Status', 'Count']
-                
-                fig_pie = px.pie(status_counts, names='Status', values='Count', 
-                                 color='Status', color_discrete_map=status_colors, hole=0.45)
-                fig_pie.update_layout(margin=dict(l=0, r=0, t=30, b=0), legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
-                fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-                st.plotly_chart(fig_pie, use_container_width=True)
-        else:
-            st.info("Project dates are missing or invalid. Please update them in the Google Sheet.")
+    active_df = proj_df[proj_df['Status'].str.strip().str.title() != 'Completed'].copy()
+
+    if active_df.empty:
+        st.info("🎉 All caught up! No active tasks pending.")
     else:
-        st.info("No project tasks found. Add your first task below!")
+        active_df['Project Name'] = active_df['Project Name'].replace("", "Uncategorized Tasks")
+        grouped = active_df.groupby('Project Name')
+        
+        for project, group in grouped:
+            st.markdown(f"<h3 style='color: #d84315; margin-top: 15px; border-bottom: 2px solid #f0f2f6; padding-bottom: 5px;'>📂 {project}</h3>", unsafe_allow_html=True)
+            
+            for _, row in group.iterrows():
+                sheet_row = int(row['row_index'])
+                
+                with st.container():
+                    col_chk, col_info = st.columns([0.05, 0.95])
+                    
+                    with col_chk:
+                        st.markdown("<div style='margin-top: 12px;'></div>", unsafe_allow_html=True)
+                        is_done = st.checkbox(" ", key=f"chk_{sheet_row}_{project}")
+                        
+                        if is_done:
+                            psheet = get_sheet("project_tasks")
+                            psheet.update_cell(sheet_row, 4, "Completed") # Update Status to Col D
+                            psheet.update_cell(sheet_row, 7, today_str)   # Update Completed Date to Col G
+                            get_project_tasks.clear()
+                            st.toast(f"✅ Marked '{row['Task Name']}' as Completed!")
+                            time.sleep(1)
+                            st.rerun()
+                            
+                    with col_info:
+                        c_date = str(row.get('Creation Date', '')).strip()
+                        c_str = f" | 🕒 Created: {c_date}" if c_date else ""
+                        
+                        st.markdown(f"""
+                        <div style="background-color: #f8f9fa; padding: 10px 15px; border-radius: 6px; border-left: 5px solid #0068c9; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                            <strong style='font-size: 16px; color: #333;'>{row['Task Name']}</strong><br>
+                            <span style='font-size: 13px; color: #666;'>
+                                🎯 <b>{row['Activity']}</b> | 🗓️ {row['Start Date']} to {row['End Date']}{c_str}
+                            </span>
+                        </div>
+                        """, unsafe_allow_html=True)
         
     st.markdown("---")    
     
@@ -544,13 +532,24 @@ try:
             if st.form_submit_button("Add Task", type="primary", use_container_width=True):
                 final_p_name = p_name_new.strip() if p_name_new.strip() else (p_name_sel if p_name_sel != "-- Select Existing Project --" else "")
                 
-                # Resolving which Activity the user provided
                 final_p_activity = p_activity_new.strip().upper() if p_activity_new.strip() else (p_activity_sel if p_activity_sel != "-- Select Existing Activity --" else "WORK")
                 
                 if p_task and final_p_name:
                     psheet = get_sheet("project_tasks")
-                    # UPDATED: We now push 6 items in the list, squeezing 'final_p_activity' right after Project Name
-                    psheet.append_row([p_task.strip(), final_p_name, final_p_activity, p_status, p_start.strftime('%Y-%m-%d'), p_end.strftime('%Y-%m-%d')])
+                    
+                    comp_date = today_str if p_status == "Completed" else ""
+                    
+                    # Columns: 1=Task Name, 2=Project Name, 3=Activity, 4=Status, 5=Start Date, 6=End Date, 7=Completed Date, 8=Creation Date
+                    psheet.append_row([
+                        p_task.strip(), 
+                        final_p_name, 
+                        final_p_activity, 
+                        p_status, 
+                        p_start.strftime('%Y-%m-%d'), 
+                        p_end.strftime('%Y-%m-%d'),
+                        comp_date,
+                        today_str
+                    ])
                     get_project_tasks.clear() 
                     st.success(f"Task added successfully under '{final_p_activity}' activity!")
                     time.sleep(1)

@@ -241,7 +241,8 @@ def log_and_open_app(app_name, target_file, cached_data, now_dt):
     except Exception as e: print(f"Silent log failure: {e}")
         
     cached_data[app_name] = now_str 
-    st.switch_page(target_file)
+    if app_name != "Live Routine Hub":
+        st.switch_page(target_file)
 
 # ==========================================
 # Main Logic
@@ -292,6 +293,44 @@ try:
             time.sleep(1.0)
             st.rerun()
 
+    # --- DYNAMIC APP LAUNCHPAD LOGIC ---
+    app_groups = {
+        "MONEY": [
+            ("Money & Location", "money_location.py", "📍"),
+            ("Money Utilities", "money_utilities.py", "💳"),
+            ("Money Tracker", "money_tracker.py", "💵")
+        ],
+        "ROUTINE": [
+            ("Live Routine Hub", "routine_app.py", "⏱️"),
+            ("Routine Audit", "routine_audit.py", "🔍"),
+            ("Routine Editor", "routine_editor.py", "✏️"),
+            ("Project App", "project_app.py", "🚀")
+        ],
+        "HEALTH": [
+            ("Health Hub", "health_app.py", "❤️"),
+            ("Sleep & Water", "sleep_water_app.py", "💧")
+        ],
+        "SCH WORK": [
+            ("MDM Returns", "mdm_return_log.py", "📦"),
+            ("Video Manager", "bps_ytfb_videos.py", "🎬")
+        ],
+        "HOME": [
+            ("Trace Inventory", "trace.py", "🏷️"),
+            ("Monthly Tracker", "monthly_app.py", "📆")
+        ],
+        "HARDWARE": [
+            ("Backup Tracker", "backup_tracker_app.py", "💾")
+        ],
+        "BALANCE": [
+            ("Strong Tracker", "strong.py", "💪")
+        ],
+        "ONES": [
+            ("Election Duty", "election_duty.py", "🗳️")
+        ]
+    }
+    
+    base_app_list = [app for group in app_groups.values() for app in group]
+    
     # --- PRE-PROCESS SCHEDULE & SCHEDULED APPS ---
     holidays_df['Date_dt'] = pd.to_datetime(holidays_df['Date'], dayfirst=True, errors='coerce')
     today_holiday_match = holidays_df[holidays_df['Date_dt'].dt.date == now.date()]
@@ -324,7 +363,6 @@ try:
                 scheduled_sub_activities = str(row.get('Sub_Activities', '')).strip()
                 scheduled_check_list = str(row.get('check_list', '')).strip()
                 
-                # Extract apps dynamically assigned to this specific time slot
                 apps_raw = str(row.get('App', '')).split(',')
                 active_apps_filter.extend([a.strip() for a in apps_raw if a.strip()])
                 
@@ -351,28 +389,9 @@ try:
     elif current_activity in ["SLEEP", "PRE", "TEA", "OUT"]: color = "#ff9f36" 
     else: color = "#333333" 
 
-    # --- DYNAMIC APP LAUNCHPAD LOGIC ---
-    base_app_list = [
-        ("Money & Location", "money_location.py", "📍"),
-        ("Money Utilities", "money_utilities.py", "💳"),
-        ("Strong Tracker", "strong.py", "💪"),
-        ("Project App", "project_app.py", "🚀"),
-        ("Election Duty", "election_duty.py", "🗳️"),
-        ("Monthly Tracker", "monthly_app.py", "📆"),
-        ("Money Tracker", "money_tracker.py", "💵"),
-        ("Sleep & Water", "sleep_water_app.py", "💧"),
-        ("Backup Tracker", "backup_tracker_app.py", "💾"),
-        ("Routine Audit", "routine_audit.py", "🔍"),
-        ("Routine Editor", "routine_editor.py", "✏️"),
-        ("MDM Returns", "mdm_return_log.py", "📦"),
-        ("Video Manager", "bps_ytfb_videos.py", "🎬"),
-        ("Health Hub", "health_app.py", "❤️"),
-        ("Trace Inventory", "trace.py", "🏷️")
-    ]
-
     filtered_app_list = [app for app in base_app_list if app[0] in active_apps_filter] if active_apps_filter else []
 
-    # Show Scheduled Apps seamlessly at the top (No Tabs)
+    # Show Scheduled Apps seamlessly at the top
     if filtered_app_list:
         st.markdown('<h4 style="text-align: center; color: #d84315; margin-top: 10px;">🚀 Scheduled Apps</h4>', unsafe_allow_html=True)
         for i in range(0, len(filtered_app_list), 3):
@@ -407,19 +426,6 @@ try:
     elif next_activity == "END OF DAY": st.markdown('<h4 style="text-align: center; color: #666; margin-bottom: 20px; font-weight: 400; font-size: 1.1rem;">Up Next: Schedule Complete</h4>', unsafe_allow_html=True)
 
     # --- SIMPLIFIED DYNAMIC PENDING PAYMENTS EXPANDER ---
-    all_alert_pays = []
-    if not payment_df.empty:
-        def parse_pay_date(d_str):
-            try: return pd.to_datetime(str(d_str).strip(), dayfirst=True).date()
-            except: return pd.NaT
-        
-        payment_df['Due_Date_dt'] = payment_df['Due_Date'].apply(parse_pay_date)
-        pending_payments = payment_df[~payment_df['Status'].str.strip().str.upper().isin(['PAID', 'DONE'])]
-        for _, p_row in pending_payments.iterrows():
-            if pd.notna(p_row['Due_Date_dt']):
-                days_until = (p_row['Due_Date_dt'] - now.date()).days
-                if days_until <= 3: all_alert_pays.append((days_until, p_row))
-
     if all_alert_pays:
         all_alert_pays.sort(key=lambda x: x[0])
         min_days = all_alert_pays[0][0]
@@ -475,7 +481,6 @@ try:
                     is_overdue = sec_diff < 0
                     abs_sec = abs(int(sec_diff))
                     
-                    # Calculate Days, Hours, Minutes
                     d, h_rem = divmod(abs_sec, 86400)
                     h, m_rem = divmod(h_rem, 3600)
                     m = m_rem // 60
@@ -497,7 +502,6 @@ try:
     if upcoming_ui_elements_raw:
         upcoming_ui_elements_raw.sort(key=lambda x: x[0])
         
-        # Change header text based on urgency
         most_urgent_dt = upcoming_ui_elements_raw[0][0]
         is_urgent_overdue = (most_urgent_dt - now).total_seconds() < 0
         if is_urgent_overdue:
@@ -507,9 +511,8 @@ try:
         
         with st.expander(header_text, expanded=False):
             for idx_task, (dt, r, time_text, is_overdue) in enumerate(upcoming_ui_elements_raw):
-                item_bg = "#d32f2f" if is_overdue else "#0068c9" # Red if overdue, Blue if upcoming
+                item_bg = "#d32f2f" if is_overdue else "#0068c9" 
                 
-                # Card perfectly matching the Payments Due styling
                 st.markdown(f'<div style="background-color: {item_bg}; color: white; padding: 12px; border-radius: 6px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);"><strong style="font-size: 16px;">{r["Task_Name"]} ({r["Activity"]})</strong><br><span style="font-size: 14px; opacity: 0.95;">{time_text}</span></div>', unsafe_allow_html=True)
                 
                 col_run, col_manage = st.columns(2)
@@ -554,9 +557,8 @@ try:
                                         get_activity_log.clear() 
                                         st.rerun()
                 
-                # Add horizontal line ONLY if it's not the last item
                 if idx_task < len(upcoming_ui_elements_raw) - 1:
-                    st.markdown('<hr style="margin-top:5px; margin-bottom:15px; border: 0; border-top: 1px solid #eee;">', unsafe_allow_html=True)
+                    st.markdown('<hr style="margin: 5px 0px 15px 0px; border: 0; border-top: 1px solid #eee;">', unsafe_allow_html=True)
             
             st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
 
@@ -569,7 +571,7 @@ try:
                 day_str = "Tomorrow!" if days_until == 1 else f"in {days_until} days"
                 st.markdown(f"**{h_row['Date_dt'].strftime('%b %d, %Y')}** - {h_row['Occasion']} *( {day_str} )*")
 
-    # --- PRE TASKS FROM 'PRE' TAB ---
+    # --- PRE TASKS ---
     if not pre_df.empty:
         valid_pres = pre_df[pre_df['Task Name'].str.strip() != '']
         if not valid_pres.empty:
@@ -825,14 +827,18 @@ try:
     # --- PERMANENT ALL APPS LAUNCHPAD (At the Bottom) ---
     st.markdown("---")
     with st.expander("🧩 All Applications Launchpad", expanded=not bool(filtered_app_list)):
-        for i in range(0, len(base_app_list), 3):
-            cols = st.columns(3)
-            for j in range(3):
-                if i + j < len(base_app_list):
-                    app_name, file_name, icon = base_app_list[i + j]
-                    last_str = get_app_time_str(app_name, tracker_data, now)
-                    with cols[j]:
-                        if st.button(f"{icon} {app_name}\n(Last: {last_str})", key=f"all_app_{i+j}", use_container_width=True):
-                            log_and_open_app(app_name, file_name, tracker_data, now)
+        for group_name, apps in app_groups.items():
+            st.markdown(f"<div style='color: #0068c9; font-weight: bold; margin-top: 10px; margin-bottom: 5px; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;'>{group_name}</div>", unsafe_allow_html=True)
+            for i in range(0, len(apps), 3):
+                cols = st.columns(3)
+                for j in range(3):
+                    if i + j < len(apps):
+                        app_name, file_name, icon = apps[i + j]
+                        last_str = get_app_time_str(app_name, tracker_data, now)
+                        with cols[j]:
+                            # "Live Routine Hub" is the current app. It doesn't need to link to itself, but we can let it just rerun.
+                            if st.button(f"{icon} {app_name}\n(Last: {last_str})", key=f"all_{group_name}_{i+j}", use_container_width=True):
+                                log_and_open_app(app_name, file_name, tracker_data, now)
+            st.markdown("<hr style='margin: 5px 0px 10px 0px; border: 0; border-top: 1px solid #f0f2f6;'>", unsafe_allow_html=True)
 
 except Exception as e: st.error(f"System Error: {e}")

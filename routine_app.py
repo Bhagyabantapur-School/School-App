@@ -265,10 +265,6 @@ try:
     today_str = now.strftime('%Y-%m-%d')
     current_time = now.time()
 
-    # --- HARDCODED STATE TO BYPASS REMOVED BUTTONS ---
-    flex_on = False
-    holiday_on = False
-
     running_tasks = log_df[log_df['End_Time'] == 'RUNNING']
     active_count = len(running_tasks)
     
@@ -426,6 +422,19 @@ try:
     elif next_activity == "END OF DAY": st.markdown('<h4 style="text-align: center; color: #666; margin-bottom: 20px; font-weight: 400; font-size: 1.1rem;">Up Next: Schedule Complete</h4>', unsafe_allow_html=True)
 
     # --- SIMPLIFIED DYNAMIC PENDING PAYMENTS EXPANDER ---
+    all_alert_pays = []
+    if not payment_df.empty:
+        def parse_pay_date(d_str):
+            try: return pd.to_datetime(str(d_str).strip(), dayfirst=True).date()
+            except: return pd.NaT
+        
+        payment_df['Due_Date_dt'] = payment_df['Due_Date'].apply(parse_pay_date)
+        pending_payments = payment_df[~payment_df['Status'].str.strip().str.upper().isin(['PAID', 'DONE'])]
+        for _, p_row in pending_payments.iterrows():
+            if pd.notna(p_row['Due_Date_dt']):
+                days_until = (p_row['Due_Date_dt'] - now.date()).days
+                if days_until <= 3: all_alert_pays.append((days_until, p_row))
+
     if all_alert_pays:
         all_alert_pays.sort(key=lambda x: x[0])
         min_days = all_alert_pays[0][0]

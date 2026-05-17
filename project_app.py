@@ -118,6 +118,12 @@ def get_activity_log():
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
     return df
 
+def parse_duration_to_minutes(dur_str):
+    try:
+        h, m = map(int, str(dur_str).strip().split(':'))
+        return (h * 60) + m
+    except: return 0
+
 # ==========================================
 # 3. Dedicated SK-Sync Component
 # ==========================================
@@ -354,9 +360,7 @@ try:
                             if not p_matches.empty:
                                 p_idx = int(p_matches.iloc[0]['row_index'])
                                 psheet = get_sheet("project_tasks")
-                                # Status is Column 4 (D)
                                 psheet.update_cell(p_idx, 4, new_proj_status)
-                                # Update Column 7 (G) with Completed Date if marked completed
                                 if new_proj_status == "Completed":
                                     psheet.update_cell(p_idx, 7, today_str)
                                 get_project_tasks.clear() 
@@ -460,13 +464,11 @@ try:
         grouped = active_df.groupby('Project Name')
         
         for project, group in grouped:
-            # Expendable Group Header - Defaults to collapsed (expanded=False)
             with st.expander(f"📂 {project}", expanded=False):
                 for _, row in group.iterrows():
                     c_date = str(row.get('Creation Date', '')).strip()
                     c_str = f" | 🕒 Created: {c_date}" if c_date else ""
                     
-                    # Clean visual block displaying task details
                     st.markdown(f"""
                     <div style="background-color: #f8f9fa; padding: 10px 15px; border-radius: 6px; border-left: 5px solid #0068c9; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
                         <strong style='font-size: 16px; color: #333;'>{row['Task Name']}</strong><br>
@@ -476,10 +478,139 @@ try:
                     </div>
                     """, unsafe_allow_html=True)
         
-    st.markdown("---")    
+    st.markdown("<br>", unsafe_allow_html=True)
     
     # ==========================================
-    # SECTION D: ADD NEW TASK FORM
+    # SECTION D: PROJECT TIME ANALYTICS
+    # ==========================================
+    st.markdown("### ⏱️ Project Time Analytics")
+    st.markdown("---")
+    
+    proj_mapping = {}
+    for _, r in proj_df.iterrows():
+        t_name = str(r['Task Name']).strip()
+        p_name = str(r['Project Name']).strip()
+        if p_name == "": p_name = "Uncategorized Tasks"
+        if t_name:
+            proj_mapping[t_name] = p_name
+            
+    project_time = {p: 0 for p in set(proj_mapping.values())}
+    
+    for _, row in log_df.iterrows():
+        dur_str = str(row.get('Duration', ''))
+        if not dur_str or dur_str == 'RUNNING': continue
+        
+        mins = parse_duration_to_minutes(dur_str)
+        if mins <= 0: continue
+        
+        sub_act = str(row.get('Sub_Activities', '')).strip()
+        if not sub_act: continue
+            
+        raw_task = sub_act.split(" (")[0].strip()
+        
+        if raw_task in proj_mapping:
+            p_name = proj_mapping[raw_task]
+            project_time[p_name] += mins
+        elif " (" in sub_act and sub_act.endswith(")"):
+            possible_proj = sub_act.split(" (")[-1].replace(")", "").strip()
+            if possible_proj in project_time:
+                project_time[possible_proj] += mins
+                
+    active_projects = {k: v for k, v in project_time.items() if v > 0}
+    
+    if not active_projects:
+        st.info("No time logged for projects yet. Start a timer to see your stats here!")
+    else:
+        cols = st.columns(4)
+        idx = 0
+        for p_name, total_mins in sorted(active_projects.items(), key=lambda x: x[1], reverse=True):
+            h, m = divmod(total_mins, 60)
+            time_str = f"{h}h {m}m" if h > 0 else f"{m}m"
+            with cols[idx % 4]:
+                st.markdown(f"""
+                <div style="background-color: #ffffff; padding: 15px; border-radius: 8px; border-top: 4px solid #2e7b32; margin-bottom: 15px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-left: 1px solid #eee; border-right: 1px solid #eee; border-bottom: 1px solid #eee;">
+                    <div style="font-size: 13px; color: #888; font-weight: bold; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="{p_name}">{p_name}</div>
+                    <div style="font-size: 22px; color: #333; font-weight: bold; margin-top: 5px;">{time_str}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            idx += 1
+            
+    st.markdown("<br><hr><br>", unsafe_allow_html=True)
+
+    # ==========================================
+    # SECTION E: PROJECT LOG AUDIT
+    # ==========================================
+    st.markdown("### ⚠️ Project Log Audit")
+    st.markdown("---")
+    
+    with st.expander("🔍 Scan for Discrepancies", expanded=False):
+        proj_ref = {}
+        for _, r in proj_df.iterrows():
+            t_name = str(r.get('Task Name', '')).strip()
+            p_name = str(r.get('Project Name', '')).strip()
+            act = str(r.get('Activity', '')).strip().upper()
+            if t_name:
+                proj_ref[t_name] = {'Project Name': p_name, 'Activity': act}
+                
+        discrepancies = []
+        for idx, row in log_df.iterrows():
+            if str(row.get('Notes', '')).strip() != 'Project Tracking': 
+                continue
+                
+            sub_act = str(row.get('Sub_Activities', '')).strip()
+            if not sub_act: 
+                continue
+                
+            if " (" in sub_act and sub_act.endswith(")"):
+                parts = sub_act.rsplit(" (", 1)
+                raw_task = parts[0].strip()
+                raw_proj = parts[1].replace(")", "").strip()
+            else:
+                raw_task = sub_act
+                raw_proj = ""
+                
+            log_act = str(row.get('Activity', '')).strip().upper()
+            
+            if raw_task not in proj_ref:
+                discrepancies.append({
+                    'Log Date': row.get('Date', ''),
+                    'Log Task': raw_task,
+                    'Issue': f"Task '{raw_task}' is logged but missing from Project Master."
+                })
+            else:
+                ref = proj_ref[raw_task]
+                ref_proj = ref['Project Name']
+                ref_act = ref['Activity']
+                
+                issues = []
+                if raw_proj != ref_proj:
+                    issues.append(f"Project mismatch (Log: '{raw_proj}' vs Master: '{ref_proj}')")
+                if log_act != ref_act:
+                    issues.append(f"Activity mismatch (Log: '{log_act}' vs Master: '{ref_act}')")
+                    
+                if issues:
+                    discrepancies.append({
+                        'Log Date': row.get('Date', ''),
+                        'Log Task': raw_task,
+                        'Issue': " | ".join(issues)
+                    })
+                    
+        if not discrepancies:
+            st.success("🎉 Perfect sync! No discrepancies found between your activity log and project master list.")
+        else:
+            st.warning(f"Found {len(discrepancies)} discrepancy/discrepancies:")
+            for d in discrepancies:
+                st.markdown(f"""
+                <div style="background-color: #fff4f4; padding: 10px 15px; border-radius: 6px; border-left: 5px solid #d32f2f; margin-bottom: 8px;">
+                    <strong style='font-size: 15px; color: #d32f2f;'>📅 {d['Log Date']} - {d['Log Task']}</strong><br>
+                    <span style='font-size: 13px; color: #555;'>{d['Issue']}</span>
+                </div>
+                """, unsafe_allow_html=True)
+                
+    st.markdown("<br><hr><br>", unsafe_allow_html=True)
+
+    # ==========================================
+    # SECTION F: ADD NEW TASK FORM
     # ==========================================
     with st.expander("➕ Add New Project Task", expanded=proj_df.empty):
         with st.form("add_project_task", clear_on_submit=True):

@@ -264,7 +264,6 @@ def sync_journey_state():
         if not df_loc.empty:
             
             # --- NEW MEMORY ENGINE ---
-            # Looks backwards through history to find the last actual vehicle used
             last_move_val = "BIKE"
             for i in range(len(df_loc)-1, -1, -1):
                 m = str(df_loc.iloc[i].get('Move', '')).strip()
@@ -337,8 +336,8 @@ with tab_money:
             load_location_data.clear()
             st.rerun()
 
-    st.markdown("### ⚡ Busy Time Quick Entry")
-    with st.container(border=True):
+    # --- EXPANDABLE BUSY TIME QUICK ENTRY ---
+    with st.expander("⚡ Busy Time Quick Entry", expanded=True):
         bq_c1, bq_c2, bq_c3, bq_c4 = st.columns([1.5, 1.5, 1.2, 1.5])
         with bq_c1: b_type = st.radio("Flow Type", ["Expense (OUT)", "Income (IN)"], horizontal=True, label_visibility="collapsed")
         with bq_c2: b_amount = st.number_input("Amount (₹)", min_value=0.0, step=10.0, key="b_amt", label_visibility="collapsed")
@@ -368,6 +367,21 @@ with tab_money:
                     st.warning("Enter an amount!")
         
         st.caption(f"Logged under App Location: {current_loc or 'Unknown'}")
+        
+        # --- MINI PREVIEW OF LAST 5 INCOMPLETE ENTRIES ---
+        st.divider()
+        df_money_temp = load_money_data()
+        if not df_money_temp.empty and 'Remark' in df_money_temp.columns:
+            incomp_temp = df_money_temp[df_money_temp['Remark'] == '⚠️ INCOMPLETE']
+            if not incomp_temp.empty:
+                st.markdown("**📋 Last 5 Incomplete Entries:**")
+                last_5 = incomp_temp.tail(5)
+                for _, row in last_5.iterrows():
+                    is_out = float(row.get('Out', 0) or 0) > 0
+                    amt_display = f"₹{row['Out']} (OUT)" if is_out else f"₹{row['In']} (IN)"
+                    st.caption(f"🔸 **{row.get('Date', '')}** at {row.get('Time', '')} | **{amt_display}** | Loc: {row.get('Location', '')}")
+            else:
+                st.caption("✅ No incomplete quick entries waiting!")
 
     # --- BIKE REFUEL EXPANDER ---
     with st.expander("🏍️ Quick Log: Bike Refuel & Auto-Mileage"):
@@ -582,110 +596,110 @@ with tab_money:
                                 except Exception as e: st.error(f"Error processing item: {e}")
                 st.divider()
 
-    st.subheader("📝 Add Manual Financial Record")
-    
-    t_col1, t_col2 = st.columns(2)
-    with t_col1: entry_date = st.date_input("Date", value=st.session_state.locked_date)
-    with t_col2: entry_time_str = st.text_input("Time (HH:MM)", value=st.session_state.locked_time.strftime("%H:%M"))
-    
-    amt_col1, amt_col2 = st.columns(2)
-    with amt_col1: amount_in = st.number_input("IN (Income/Receive)", min_value=0.0, step=10.0)
-    with amt_col2: amount_out = st.number_input("OUT (Expense/Send)", min_value=0.0, step=10.0)
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        account = st.selectbox("Account (Physical)", get_clean_accounts())
-        fund = st.selectbox("Fund (Virtual Source)", get_list("Funds"))
+    # --- EXPANDABLE MANUAL FINANCIAL RECORD ---
+    with st.expander("📝 Add Manual Financial Record", expanded=False):
+        t_col1, t_col2 = st.columns(2)
+        with t_col1: entry_date = st.date_input("Date", value=st.session_state.locked_date)
+        with t_col2: entry_time_str = st.text_input("Time (HH:MM)", value=st.session_state.locked_time.strftime("%H:%M"))
         
-        mapped_entities = []
-        if 'Map_Entity' in config_df.columns:
-            mapped_entities = list(dict.fromkeys([str(e).strip() for e in config_df['Map_Entity'].dropna() if str(e).strip() != ""]))
-        ent_opts = mapped_entities if mapped_entities else get_list("Entities")
+        amt_col1, amt_col2 = st.columns(2)
+        with amt_col1: amount_in = st.number_input("IN (Income/Receive)", min_value=0.0, step=10.0)
+        with amt_col2: amount_out = st.number_input("OUT (Expense/Send)", min_value=0.0, step=10.0)
         
-        entity = st.selectbox("Entity", ent_opts)
-        
-        if 'Map_Entity' in config_df.columns:
-            ent_df = config_df[config_df['Map_Entity'].astype(str).str.strip() == entity]
-            cat_opts = list(dict.fromkeys([str(c).strip() for c in ent_df['Map_Category'].dropna() if str(c).strip() != ""]))
-            category = st.selectbox("Category", cat_opts + ["-- Type New --"])
-            if category == "-- Type New --":
-                category = st.text_input("Type New Category")
-                cat_df = pd.DataFrame() 
-            else:
-                cat_df = ent_df[ent_df['Map_Category'].astype(str).str.strip() == category]
-        else:
-            category = st.selectbox("Category", get_list("Categories") + ["-- Type New --"])
-            if category == "-- Type New --":
-                category = st.text_input("Type New Category")
-            cat_df = pd.DataFrame()
+        col1, col2 = st.columns(2)
+        with col1:
+            account = st.selectbox("Account (Physical)", get_clean_accounts())
+            fund = st.selectbox("Fund (Virtual Source)", get_list("Funds"))
             
-    with col2:
-        if not cat_df.empty and 'Map_SubCat' in cat_df.columns:
-            sub_opts = list(dict.fromkeys([str(s).strip() for s in cat_df['Map_SubCat'].dropna() if str(s).strip() != ""]))
-            sub_cat = st.selectbox("Sub Category", sub_opts + ["-- Type New --"])
-            if sub_cat == "-- Type New --":
-                sub_cat = st.text_input("Type New Sub Category")
-                sub_df = pd.DataFrame()
-            else:
-                sub_df = cat_df[cat_df['Map_SubCat'].astype(str).str.strip() == sub_cat]
-        else:
-            sub_cat = st.selectbox("Sub Category", get_list("Sub-Categories") + ["-- Type New --"])
-            if sub_cat == "-- Type New --":
-                sub_cat = st.text_input("Type New Sub Category")
-            sub_df = pd.DataFrame()
-        
-        if not sub_df.empty and 'Map_Particular' in sub_df.columns:
-            part_opts = list(dict.fromkeys([str(p).strip() for p in sub_df['Map_Particular'].dropna() if str(p).strip() != ""]))
-            particulars = st.selectbox("Particulars", part_opts + ["-- Type New --"])
-            if particulars == "-- Type New --":
-                particulars = st.text_input("Type New Particulars")
-                part_df = pd.DataFrame()
-            else:
-                part_df = sub_df[sub_df['Map_Particular'].astype(str).str.strip() == particulars]
-        else:
-            particulars = st.selectbox("Particulars", get_list("Particulars") + ["-- Type New --"])
-            if particulars == "-- Type New --":
-                particulars = st.text_input("Type New Particulars")
-            part_df = pd.DataFrame()
+            mapped_entities = []
+            if 'Map_Entity' in config_df.columns:
+                mapped_entities = list(dict.fromkeys([str(e).strip() for e in config_df['Map_Entity'].dropna() if str(e).strip() != ""]))
+            ent_opts = mapped_entities if mapped_entities else get_list("Entities")
             
-        mapped_tofrom = get_list("TO_FROM")
-        to_from_opts = ["-- Type New --", "- None -"] + mapped_tofrom
-        default_index = 1
-        
-        if should_inject_tofrom(current_loc):
-            if current_loc not in to_from_opts:
-                to_from_opts.insert(2, current_loc)
-                default_index = 2
+            entity = st.selectbox("Entity", ent_opts)
+            
+            if 'Map_Entity' in config_df.columns:
+                ent_df = config_df[config_df['Map_Entity'].astype(str).str.strip() == entity]
+                cat_opts = list(dict.fromkeys([str(c).strip() for c in ent_df['Map_Category'].dropna() if str(c).strip() != ""]))
+                category = st.selectbox("Category", cat_opts + ["-- Type New --"])
+                if category == "-- Type New --":
+                    category = st.text_input("Type New Category")
+                    cat_df = pd.DataFrame() 
+                else:
+                    cat_df = ent_df[ent_df['Map_Category'].astype(str).str.strip() == category]
             else:
-                default_index = to_from_opts.index(current_loc)
-        
-        to_from = st.selectbox("TO / FROM (Person/Entity)", to_from_opts, index=default_index)
-        if to_from == "-- Type New --": to_from = st.text_input("Type New TO / FROM")
-        elif to_from == "- None -": to_from = ""
-
-    rem_opts = get_list("Remarks")
-    remark_box = st.selectbox("Remark", ["- None -"] + rem_opts + ["-- Type New --"])
-    if remark_box == "-- Type New --": remark = st.text_input("Type New Remark")
-    elif remark_box == "- None -": remark = ""
-    else: remark = remark_box
-    
-    if st.button("💾 Save Manual Money Entry", use_container_width=True):
-        try:
-            try:
-                parsed_time = datetime.strptime(entry_time_str.strip(), "%H:%M")
-                formatted_time = parsed_time.strftime("%H:%M")
-            except ValueError:
-                st.error("⚠️ Invalid time! Use HH:MM format.")
-                st.stop()
+                category = st.selectbox("Category", get_list("Categories") + ["-- Type New --"])
+                if category == "-- Type New --":
+                    category = st.text_input("Type New Category")
+                cat_df = pd.DataFrame()
                 
-            formatted_date = entry_date.strftime("%d-%m-%Y")
-            row_data = [formatted_date, formatted_time, amount_in if amount_in > 0 else "", amount_out if amount_out > 0 else "", account, fund, entity, category, sub_cat, particulars, to_from, current_loc or "", remark]
-            sh.worksheet("MONEY_DATA").append_row(row_data)
-            load_money_data.clear() 
-            st.success(f"Saved: ₹{amount_in if amount_in > 0 else amount_out} logged!")
-            st.session_state.locked_date = get_ist_now().date() 
-        except Exception as e:
-            st.error(f"Failed to save: {e}")
+        with col2:
+            if not cat_df.empty and 'Map_SubCat' in cat_df.columns:
+                sub_opts = list(dict.fromkeys([str(s).strip() for s in cat_df['Map_SubCat'].dropna() if str(s).strip() != ""]))
+                sub_cat = st.selectbox("Sub Category", sub_opts + ["-- Type New --"])
+                if sub_cat == "-- Type New --":
+                    sub_cat = st.text_input("Type New Sub Category")
+                    sub_df = pd.DataFrame()
+                else:
+                    sub_df = cat_df[cat_df['Map_SubCat'].astype(str).str.strip() == sub_cat]
+            else:
+                sub_cat = st.selectbox("Sub Category", get_list("Sub-Categories") + ["-- Type New --"])
+                if sub_cat == "-- Type New --":
+                    sub_cat = st.text_input("Type New Sub Category")
+                sub_df = pd.DataFrame()
+            
+            if not sub_df.empty and 'Map_Particular' in sub_df.columns:
+                part_opts = list(dict.fromkeys([str(p).strip() for p in sub_df['Map_Particular'].dropna() if str(p).strip() != ""]))
+                particulars = st.selectbox("Particulars", part_opts + ["-- Type New --"])
+                if particulars == "-- Type New --":
+                    particulars = st.text_input("Type New Particulars")
+                    part_df = pd.DataFrame()
+                else:
+                    part_df = sub_df[sub_df['Map_Particular'].astype(str).str.strip() == particulars]
+            else:
+                particulars = st.selectbox("Particulars", get_list("Particulars") + ["-- Type New --"])
+                if particulars == "-- Type New --":
+                    particulars = st.text_input("Type New Particulars")
+                part_df = pd.DataFrame()
+                
+            mapped_tofrom = get_list("TO_FROM")
+            to_from_opts = ["-- Type New --", "- None -"] + mapped_tofrom
+            default_index = 1
+            
+            if should_inject_tofrom(current_loc):
+                if current_loc not in to_from_opts:
+                    to_from_opts.insert(2, current_loc)
+                    default_index = 2
+                else:
+                    default_index = to_from_opts.index(current_loc)
+            
+            to_from = st.selectbox("TO / FROM (Person/Entity)", to_from_opts, index=default_index)
+            if to_from == "-- Type New --": to_from = st.text_input("Type New TO / FROM")
+            elif to_from == "- None -": to_from = ""
+
+        rem_opts = get_list("Remarks")
+        remark_box = st.selectbox("Remark", ["- None -"] + rem_opts + ["-- Type New --"])
+        if remark_box == "-- Type New --": remark = st.text_input("Type New Remark")
+        elif remark_box == "- None -": remark = ""
+        else: remark = remark_box
+        
+        if st.button("💾 Save Manual Money Entry", use_container_width=True):
+            try:
+                try:
+                    parsed_time = datetime.strptime(entry_time_str.strip(), "%H:%M")
+                    formatted_time = parsed_time.strftime("%H:%M")
+                except ValueError:
+                    st.error("⚠️ Invalid time! Use HH:MM format.")
+                    st.stop()
+                    
+                formatted_date = entry_date.strftime("%d-%m-%Y")
+                row_data = [formatted_date, formatted_time, amount_in if amount_in > 0 else "", amount_out if amount_out > 0 else "", account, fund, entity, category, sub_cat, particulars, to_from, current_loc or "", remark]
+                sh.worksheet("MONEY_DATA").append_row(row_data)
+                load_money_data.clear() 
+                st.success(f"Saved: ₹{amount_in if amount_in > 0 else amount_out} logged!")
+                st.session_state.locked_date = get_ist_now().date() 
+            except Exception as e:
+                st.error(f"Failed to save: {e}")
 
 # ==========================================
 # TAB 2: LOCATION ENTRY FORM
@@ -696,9 +710,8 @@ with tab_location:
         st.session_state.target_destination = ""
 
     if not st.session_state.route_active or st.session_state.get('route_type') == "Dynamic":
-        st.markdown("### 🗺️ Dynamic Area Route")
-        dynamic_container = st.container(border=True)
-        with dynamic_container:
+        # --- EXPANDABLE DYNAMIC ROUTE ---
+        with st.expander("🗺️ Dynamic Area Route", expanded=(not st.session_state.route_active)):
             location_logic = get_location_logic()
             route_opts = list(location_logic.keys())
             
@@ -747,18 +760,13 @@ with tab_location:
                     else:
                         dyn_next_stop = st.selectbox("Next Stop", available_places, key="dyn_next_stop")
                     
-                    # FETCH SMART TRANSIT RULES
                     transit_rules = get_transit_rules()
                     current_pair = frozenset([str(current_loc).strip(), str(dyn_next_stop).strip()]) if current_loc else None
                     
-                    # If it's a complex (doesn't end with "route"), default to WALK
-                    # Default to the last used travel mode
-                    # Always default to the last used vehicle found in memory
                     pre_mode = st.session_state.get('current_move', 'BIKE')
                     base_fare = 0.0
                     
                     if current_pair in transit_rules:
-                        # Only override your personal vehicle if the Config sheet explicitly requires a specific paid transit (like BUS or AUTO)
                         if transit_rules[current_pair]['mode'] and transit_rules[current_pair]['mode'] not in ['WALK', 'BIKE', 'BIKE + WALK']:
                             pre_mode = transit_rules[current_pair]['mode']
                         base_fare = transit_rules[current_pair]['fare']
@@ -769,7 +777,6 @@ with tab_location:
                     
                     dyn_move = st.selectbox("Travel Mode", move_options, index=default_mode_idx, key="dyn_move")
                     
-                    # ZERO FARE MAGIC
                     if dyn_move in ["WALK", "BIKE", "BIKE + WALK"]:
                         base_fare = 0.0
                     
@@ -778,11 +785,9 @@ with tab_location:
                     if not people_opts: people_opts = ["I"]
                     if "I" not in people_opts: people_opts.insert(0, "I")
                     
-                    # REMEMBER COMPANIONS
                     default_people_idx = people_opts.index(st.session_state.current_people) if st.session_state.current_people in people_opts else 0
                     dyn_people = st.selectbox("Companions", people_opts, index=default_people_idx, key="dyn_people")
                     
-                    # AUTO COMPANION TICKETS CALCULATION
                     total_people = len([p for p in dyn_people.replace('I Baso', 'I, Baso').split(',') if p.strip()]) if dyn_people != "I" else 1
                     
                     child_tix = st.number_input("Child/Half Fares (Included in Companions)", min_value=0, max_value=total_people, value=0, step=1, key="dyn_child")
@@ -813,7 +818,6 @@ with tab_location:
                                 money_date_str = time_now.strftime("%d-%m-%Y")
                                 time_str = time_now.strftime("%H:%M")
                                 
-                                # Road Transit -> Place is empty
                                 sh.worksheet("LOCATION_DATA").append_row([
                                     loc_date_str, time_str, 
                                     dyn_move, "", dyn_people, f"Started Route: {selected_route} towards {dyn_next_stop}"
@@ -855,7 +859,6 @@ with tab_location:
                                 money_date_str = time_now.strftime("%d-%m-%Y")
                                 time_str = time_now.strftime("%H:%M")
                                 
-                                # Internal Move -> Place stays as the current complex (selected_route)
                                 sh.worksheet("LOCATION_DATA").append_row([
                                     loc_date_str, time_str, 
                                     dyn_move, selected_route, dyn_people, f"Started Route: {selected_route} towards {dyn_next_stop}"
@@ -917,7 +920,6 @@ with tab_location:
                             arr_remark = "Logged Arrival"
                             final_arr_people = active_p
                             
-                            # SMART OVERRIDES
                             if dyn_place == "Girishmore Bus Stop" and "Suborno" in active_p:
                                 arr_remark = "Waiting for School Bus"
                             elif dyn_place == "HOME":
@@ -935,9 +937,8 @@ with tab_location:
                         except Exception as e: st.error(f"Error: {e}")
 
     if not st.session_state.route_active or st.session_state.get('route_type') == "Express":
-        st.markdown("### 🏫 Express School Route")
-        express_container = st.container(border=True)
-        with express_container:
+        # --- EXPANDABLE EXPRESS ROUTE ---
+        with st.expander("🏫 Express School Route", expanded=(not st.session_state.route_active)):
             if not st.session_state.route_active:
                 col1, col2 = st.columns(2)
                 with col1: express_move = st.selectbox("Travel Mode", ["BIKE", "WALK", "BIKE + WALK", "TOTO"], key="exp_move")
@@ -946,7 +947,6 @@ with tab_location:
                     if not people_opts: people_opts = ["I", "I, BKP, TKM", "I, TKM"]
                     if "I" not in people_opts: people_opts.insert(0, "I")
                     
-                    # REMEMBER COMPANIONS
                     default_people_idx = people_opts.index(st.session_state.current_people) if st.session_state.current_people in people_opts else 0
                     express_people = st.selectbox("Companions", people_opts, index=default_people_idx, key="exp_people")
                     
@@ -998,7 +998,6 @@ with tab_location:
                                 arrival_people = "I"
                                 sh.worksheet("LOCATION_DATA").append_row([today_str, m_time_b, travel_mode, "", arrival_people, "Retroactive transit"])
                         
-                        # --- SMART ARRIVAL OVERRIDES ---
                         arr_remark_exp = ""
                         final_arr_people = arrival_people
                         
@@ -1027,7 +1026,7 @@ with tab_location:
     """, unsafe_allow_html=True)
 
     # ==========================================
-    # QUICK ACTION CALLBACKS (Runs BEFORE screen redraws)
+    # QUICK ACTION CALLBACKS
     # ==========================================
     def cb_board_bus():
         try:
@@ -1037,7 +1036,6 @@ with tab_location:
             sh.worksheet("LOCATION_DATA").append_row([
                 today_str, time_str, "- Stationary -", "Girishmore Bus Stop", "I", "Suborno boarded bus to school"
             ])
-            # Safely update the background state and the UI dropdowns
             st.session_state.current_people = "I"
             st.session_state.dyn_people = "I"
             st.session_state.exp_people = "I"
@@ -1057,33 +1055,13 @@ with tab_location:
             sh.worksheet("LOCATION_DATA").append_row([
                 today_str, time_str, "- Stationary -", "Girishmore Bus Stop", new_people, "Received Suborno from school bus"
             ])
-            # Safely update the background state and the UI dropdowns
             st.session_state.current_people = new_people
             st.session_state.dyn_people = new_people
             st.session_state.exp_people = new_people
             load_location_data.clear()
         except Exception as e:
             st.session_state.quick_err = str(e)
-            
-    def cb_home():
-        try:
-            time_now = get_ist_now()
-            today_str = time_now.strftime("%d.%m.%y")
-            time_str = time_now.strftime("%H:%M")
-            final_arr_people = get_home_occupants(st.session_state.current_people)
-            sh.worksheet("LOCATION_DATA").append_row([
-                today_str, time_str, "- Stationary -", "HOME", final_arr_people, "Quick Home Log"
-            ])
-            st.session_state.route_active = False
-            st.session_state.route_type = None
-            st.session_state.current_people = "I"
-            st.session_state.dyn_people = "I"  # Resets dropdown for next trip
-            st.session_state.exp_people = "I"  # Resets dropdown for next trip
-            load_location_data.clear()
-        except Exception as e:
-            st.session_state.quick_err = str(e)
 
-    # Check for background errors
     if "quick_err" in st.session_state:
         st.error(f"Google Sheets Error: {st.session_state.quick_err}")
         del st.session_state.quick_err
@@ -1093,61 +1071,56 @@ with tab_location:
     # ==========================================
     time_now_for_btn = get_ist_now()
     
-    # --- CONTEXT AWARE BUTTON: SUBORNO BOARDED BUS (MORNING 8:00 - 8:59) ---
     if current_loc == "Girishmore Bus Stop" and "Suborno" in st.session_state.current_people and not st.session_state.route_active and (time_now_for_btn.hour == 8):
         if st.button("🚌 Suborno Boarded Bus", use_container_width=True, type="primary", on_click=cb_board_bus):
             st.success("Logged Suborno boarding bus. You are now traveling alone.")
 
-    # --- CONTEXT AWARE BUTTON: RECEIVED SUBORNO FROM BUS (AFTERNOON 13:00 - 14:59) ---
     if current_loc == "Girishmore Bus Stop" and "Suborno" not in st.session_state.current_people and not st.session_state.route_active and (13 <= time_now_for_btn.hour <= 16):
         if st.button("👦 Received Suborno from Bus", use_container_width=True, type="primary", on_click=cb_receive_suborno):
             st.success("Logged Suborno arriving! Companions updated.")
-    
-    # --- UNIVERSAL HOME BUTTON ---
-    if st.button("🏠 Arrived HOME Now", use_container_width=True, on_click=cb_home):
-        st.success("Welcome Home!")
+            
+    # --- EXPANDABLE MANUAL LOCATION LOG ---
+    with st.expander("📝 Manual Location Log", expanded=False):
+        location_logic = get_location_logic()
+        loc_date = st.date_input("Log Date", value=st.session_state.locked_date)
+        loc_time_str = st.text_input("Start Time (Type in 24hr format)", value=st.session_state.locked_time.strftime("%H:%M"))
         
-    st.markdown("### 📝 Manual Location Log")
-    location_logic = get_location_logic()
-    loc_date = st.date_input("Log Date", value=st.session_state.locked_date)
-    loc_time_str = st.text_input("Start Time (Type in 24hr format)", value=st.session_state.locked_time.strftime("%H:%M"))
-    
-    col1, col2 = st.columns(2)
-    with col1: move = st.selectbox("Move Type", ["- Stationary -"] + get_list("Moves"))
-    with col2:
-        area_options = ["- Select Area -", "- On the way -"] + list(location_logic.keys())
-        area = st.selectbox("Select Route / Area", area_options)
-    
-    if area == "- On the way -":
-        specific_place = ""
-        st.info("🚲 Transit log.")
-    elif area == "- Select Area -": specific_place = ""
-    else:
-        specific_place_options = location_logic.get(area, []) + ["-- Type New --"]
-        specific_place = st.selectbox("Specific Place", specific_place_options)
-        if specific_place == "-- Type New --": specific_place = st.text_input("Type New Place Name")
+        col1, col2 = st.columns(2)
+        with col1: move = st.selectbox("Move Type", ["- Stationary -"] + get_list("Moves"))
+        with col2:
+            area_options = ["- Select Area -", "- On the way -"] + list(location_logic.keys())
+            area = st.selectbox("Select Route / Area", area_options)
+        
+        if area == "- On the way -":
+            specific_place = ""
+            st.info("🚲 Transit log.")
+        elif area == "- Select Area -": specific_place = ""
+        else:
+            specific_place_options = location_logic.get(area, []) + ["-- Type New --"]
+            specific_place = st.selectbox("Specific Place", specific_place_options)
+            if specific_place == "-- Type New --": specific_place = st.text_input("Type New Place Name")
 
-    manual_people_opts = get_list("People")
-    if not manual_people_opts: manual_people_opts = ["I"]
-    if "I" not in manual_people_opts: manual_people_opts.insert(0, "I")
-    
-    default_manual_people = manual_people_opts.index(st.session_state.current_people) if st.session_state.current_people in manual_people_opts else 0
-    people = st.selectbox("People", manual_people_opts, index=default_manual_people)
-    loc_remark = st.text_input("Location Remark (Optional)")
-    
-    if st.button("💾 Save Manual Entry", use_container_width=True):
-        try:
+        manual_people_opts = get_list("People")
+        if not manual_people_opts: manual_people_opts = ["I"]
+        if "I" not in manual_people_opts: manual_people_opts.insert(0, "I")
+        
+        default_manual_people = manual_people_opts.index(st.session_state.current_people) if st.session_state.current_people in manual_people_opts else 0
+        people = st.selectbox("People", manual_people_opts, index=default_manual_people)
+        loc_remark = st.text_input("Location Remark (Optional)")
+        
+        if st.button("💾 Save Manual Entry", use_container_width=True):
             try:
-                parsed_time = datetime.strptime(loc_time_str.strip(), "%H:%M")
-                formatted_time = parsed_time.strftime("%H:%M")
-            except ValueError:
-                st.error("⚠️ Invalid time! Use HH:MM format.")
-                st.stop()
-            formatted_date = loc_date.strftime("%d.%m.%y")
-            final_move = "" if move == "- Stationary -" else move
-            sh.worksheet("LOCATION_DATA").append_row([formatted_date, formatted_time, final_move, specific_place, people, loc_remark])
-            load_location_data.clear()
-            st.success("Logged successfully!")
-            st.session_state.locked_date = get_ist_now().date()
-            st.session_state.locked_time = get_ist_now().time()
-        except Exception as e: st.error(f"Error saving to Google Sheets: {e}")
+                try:
+                    parsed_time = datetime.strptime(loc_time_str.strip(), "%H:%M")
+                    formatted_time = parsed_time.strftime("%H:%M")
+                except ValueError:
+                    st.error("⚠️ Invalid time! Use HH:MM format.")
+                    st.stop()
+                formatted_date = loc_date.strftime("%d.%m.%y")
+                final_move = "" if move == "- Stationary -" else move
+                sh.worksheet("LOCATION_DATA").append_row([formatted_date, formatted_time, final_move, specific_place, people, loc_remark])
+                load_location_data.clear()
+                st.success("Logged successfully!")
+                st.session_state.locked_date = get_ist_now().date()
+                st.session_state.locked_time = get_ist_now().time()
+            except Exception as e: st.error(f"Error saving to Google Sheets: {e}")

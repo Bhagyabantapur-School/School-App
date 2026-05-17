@@ -1,40 +1,42 @@
 import streamlit as st
+
 # --- BACK BUTTON ---
 if st.button("⬅️ Back to Hub", type="secondary"):
     st.switch_page("routine_app.py") 
 st.write("---") 
 # -------------------
+
 import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
 from datetime import datetime
 import time
 
-st.set_page_config(page_title="Routine Editor", page_icon="⚙️", layout="wide")
+st.set_page_config(page_title="Smart Routine Editor", page_icon="⚙️", layout="wide")
 
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    .block-container {padding-top: 4rem; padding-bottom: 2rem;}
+    .block-container {padding-top: 2rem; padding-bottom: 2rem;}
     div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {
-        border-radius: 0px !important;
+        border-radius: 8px !important;
         border: 1px solid #cccccc !important;
         background-color: #ffffff !important;
-        box-shadow: none !important;
     }
-    div[data-testid="metric-container"] {
-        text-align: center; 
-        background-color: #f0f2f6; 
-        padding: 10px; 
-        border-radius: 10px; 
-        margin-bottom: 15px;
+    .edit-header {
+        color: #0068c9;
+        font-size: 24px;
+        font-weight: bold;
+        margin-bottom: 10px;
     }
     </style>
 """, unsafe_allow_html=True)
 
+st.markdown("<div class='edit-header'>⚙️ Smart Schedule Manager</div>", unsafe_allow_html=True)
+
 # ==========================================
-# Database Connection
+# Database Connection & Caching
 # ==========================================
 @st.cache_resource
 def init_connection():
@@ -42,229 +44,175 @@ def init_connection():
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
     return gspread.authorize(creds)
 
-def get_sheet(tab_name):
-    return init_connection().open("MY ROUTINE 2026").worksheet(tab_name)
+def get_main_spreadsheet(): return init_connection().open("MY ROUTINE 2026")
+def get_sheet(tab_name): return get_main_spreadsheet().worksheet(tab_name)
 
 @st.cache_data(ttl=300) 
 def get_routine_data():
     data = get_sheet("routine_master").get_all_values()
     df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 7: df[df.shape[1]] = ""
-    df = df.iloc[:, :7]
-    df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list"]
+    
+    # Ensure exactly 8 columns (Day, Start, End, Dur, Act, Sub, Chk, App)
+    while df.shape[1] < 8: df[df.shape[1]] = ""
+    df = df.iloc[:, :8]
+    df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App"]
+    
     df = df[df["Day"].astype(str).str.strip() != ""]
+    df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
     return df
 
-def parse_duration_to_minutes(dur_str):
-    try:
-        h, m = map(int, str(dur_str).strip().split(':'))
-        return (h * 60) + m
-    except: return 0
-
 # ==========================================
-# Main App UI
+# Main Logic
 # ==========================================
 try:
     df = get_routine_data()
-    now = datetime.now()
-    current_day = now.strftime('%A')
-    days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Holiday"]
 
-    col_title, col_sync = st.columns([8, 2])
-    with col_title: st.markdown("<h3 style='color: #555; margin-top: 0px;'>📅 Smart Schedule Manager</h3>", unsafe_allow_html=True)
-    with col_sync:
-        if st.button("🔄 Sync Editor", use_container_width=True):
-            get_routine_data.clear()
-            st.toast("Synced!")
-            time.sleep(1.0)
-            st.rerun()
+    # --- 1. SMART DAY GROUPING LOGIC ---
+    weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+    has_all_weekdays = all(d in df['Day'].str.title().unique() for d in weekdays)
 
-    with st.expander("🛠️ Advanced Tools: Batch Add, Replace & Free Time", expanded=False):
-        tool_mode = st.radio("Select Tool:", ["🔍 Find Free Time", "➕ Batch Add Task", "🔄 Find & Replace"], horizontal=True)
-        
-        if tool_mode == "🔍 Find Free Time":
-            st.markdown("#### Find Gaps in Your Routine")
-            free_day = st.selectbox("Select Day to Analyze", days_of_week, key="free_day")
-            day_df_free = df[df['Day'].str.strip().str.title() == free_day.title()].copy()
-            
-            if not day_df_free.empty:
-                time_blocks = []
-                for _, r in day_df_free.iterrows():
-                    try:
-                        st_m = int(r['Start_Time'].split(':')[0])*60 + int(r['Start_Time'].split(':')[1])
-                        et_m = 24 * 60 if r['End_Time'].strip() in ['0:00', '00:00'] else int(r['End_Time'].split(':')[0])*60 + int(r['End_Time'].split(':')[1])
-                        time_blocks.append((st_m, et_m, r['Activity']))
-                    except: pass
-                
-                time_blocks.sort(key=lambda x: x[0])
-                free_slots = []
-                current_min = 0
-                for block in time_blocks:
-                    if block[0] > current_min: free_slots.append((current_min, block[0]))
-                    current_min = max(current_min, block[1])
-                if current_min < 24 * 60: free_slots.append((current_min, 24 * 60))
-                    
-                if free_slots:
-                    st.success(f"Found {len(free_slots)} free time slots on {free_day}:")
-                    for start, end in free_slots:
-                        s_str = datetime.strptime(f"{start//60:02d}:{start%60:02d}", '%H:%M').strftime('%I:%M %p')
-                        e_str = "12:00 AM" if end == 24*60 else datetime.strptime(f"{end//60:02d}:{end%60:02d}", '%H:%M').strftime('%I:%M %p')
-                        st.markdown(f"- **{s_str} to {e_str}** ({end - start} mins available)")
-                else: st.info("This day is completely fully scheduled!")
-            else: st.info("No routine set for this day. The whole day is free!")
+    mon_fri_grouped = False
+    if has_all_weekdays:
+        mon_df = df[df['Day'].str.title() == "Monday"].reset_index(drop=True)
+        is_identical = True
+        for d in weekdays[1:]:
+            d_df = df[df['Day'].str.title() == d].reset_index(drop=True)
+            if len(mon_df) != len(d_df):
+                is_identical = False
+                break
+            # Check if activities and start times match perfectly
+            if not mon_df['Activity'].equals(d_df['Activity']) or not mon_df['Start_Time'].equals(d_df['Start_Time']):
+                is_identical = False
+                break
+        mon_fri_grouped = is_identical
 
-        elif tool_mode == "➕ Batch Add Task":
-            st.markdown("#### Add Task to Multiple Days")
-            b_days = st.multiselect("Select Days", days_of_week, default=[current_day], key="b_days")
-            col1, col2 = st.columns(2)
-            with col1: b_start = st.time_input("Start Time", value=datetime.strptime('09:00', '%H:%M').time(), key="b_start")
-            with col2: b_end = st.time_input("End Time", value=datetime.strptime('10:00', '%H:%M').time(), key="b_end")
-            b_act = st.text_input("Activity Name (e.g. PYTHON CODING)").upper()
-            b_sub = st.text_input("Sub-Activities (comma separated)")
-            b_chk = st.text_input("Checklist (comma separated)")
-            b_overwrite = st.checkbox("⚠️ Overwrite existing tasks in this time slot?", value=False)
-            
-            if st.button("Apply to Selected Days", type="primary"):
-                if not b_days or not b_act: st.error("Please provide both Days and an Activity Name.")
-                else:
-                    ns_min, ne_min = b_start.hour * 60 + b_start.minute, b_end.hour * 60 + b_end.minute
-                    if ne_min == 0: ne_min = 24 * 60
-                    
-                    if ne_min <= ns_min: st.error("End time must be after start time.")
-                    else:
-                        full_df = df.copy()
-                        rows_to_keep = []
-                        for _, r in full_df.iterrows():
-                            if str(r['Day']).strip().title() in [d.title() for d in b_days] and b_overwrite:
-                                try:
-                                    rs_min = int(r['Start_Time'].split(':')[0])*60 + int(r['Start_Time'].split(':')[1])
-                                    re_min = 24*60 if r['End_Time'].strip() in ['0:00', '00:00'] else int(r['End_Time'].split(':')[0])*60 + int(r['End_Time'].split(':')[1])
-                                    if max(ns_min, rs_min) < min(ne_min, re_min): continue 
-                                except: pass
-                            rows_to_keep.append(r)
-                        
-                        filtered_df = pd.DataFrame(rows_to_keep, columns=full_df.columns)
-                        new_rows = [{"Day": d, "Start_Time": b_start.strftime('%H:%M'), "End_Time": b_end.strftime('%H:%M'), "Duration": f"{(ne_min - ns_min)//60}:{(ne_min - ns_min)%60:02d}", "Activity": b_act, "Sub_Activities": b_sub, "check_list": b_chk} for d in b_days]
-                        final_df = pd.concat([filtered_df, pd.DataFrame(new_rows)], ignore_index=True)
-                        
-                        day_map = {d: i for i, d in enumerate(days_of_week)}
-                        final_df['Day_Idx'] = final_df['Day'].str.title().map(day_map)
-                        final_df['ST_Min'] = final_df['Start_Time'].apply(lambda x: int(x.split(':')[0])*60 + int(x.split(':')[1]) if ':' in x else 0)
-                        final_df = final_df.sort_values(['Day_Idx', 'ST_Min']).drop(columns=['Day_Idx', 'ST_Min'])
-                        
-                        routine_sheet = get_sheet("routine_master")
-                        routine_sheet.clear()
-                        routine_sheet.update(values=[final_df.columns.values.tolist()] + final_df.values.tolist(), range_name="A1")
-                        
-                        get_routine_data.clear()
-                        st.success(f"Added '{b_act}' to {len(b_days)} days!")
-                        time.sleep(1.5)
-                        st.rerun()
+    # Generate Dropdown Options
+    day_options = []
+    if mon_fri_grouped:
+        day_options.append("Monday to Friday")
+        for d in df['Day'].str.title().unique():
+            if d not in weekdays:
+                day_options.append(d)
+    else:
+        day_options = list(df['Day'].str.title().unique())
 
-        elif tool_mode == "🔄 Find & Replace":
-            st.markdown("#### Replace Items Across Schedule")
-            r_days = st.multiselect("Select Days to Search", days_of_week, default=days_of_week, key="r_days")
-            target_col = st.radio("What do you want to replace?", ["Activity", "Sub-Activity", "Checklist"], horizontal=True)
-            
-            if target_col == "Activity": unique_vals = sorted(list(set([a.strip().upper() for a in df['Activity'] if a.strip()])))
-            elif target_col == "Sub-Activity":
-                all_items = []
-                for val in df['Sub_Activities']: all_items.extend([s.strip() for s in str(val).split(',') if s.strip()])
-                unique_vals = sorted(list(set(all_items)))
-            else: 
-                all_items = []
-                for val in df['check_list']: all_items.extend([c.strip() for c in str(val).split(',') if c.strip()])
-                unique_vals = sorted(list(set(all_items)))
-            
-            old_val = st.selectbox("Target Item to Replace", unique_vals) if unique_vals else None
-            new_val = st.text_input("New Item Name")
-            
-            if st.button("Replace Item", type="primary"):
-                if not r_days or not new_val or not old_val: st.error("Please fill all fields.")
-                else:
-                    full_df = df.copy()
-                    count = 0
-                    for idx, r in full_df.iterrows():
-                        if str(r['Day']).strip().title() in [d.title() for d in r_days]:
-                            if target_col == "Activity" and str(r['Activity']).strip().upper() == old_val.upper():
-                                full_df.at[idx, 'Activity'] = new_val.upper()
-                                count += 1
-                            elif target_col in ["Sub-Activity", "Checklist"]:
-                                col_name = "Sub_Activities" if target_col == "Sub-Activity" else "check_list"
-                                items = [s.strip() for s in str(r[col_name]).split(',') if s.strip()]
-                                if old_val in items:
-                                    full_df.at[idx, col_name] = ", ".join([new_val if x == old_val else x for x in items])
-                                    count += 1
-                    
-                    if count > 0:
-                        routine_sheet = get_sheet("routine_master")
-                        routine_sheet.clear()
-                        routine_sheet.update(values=[full_df.columns.values.tolist()] + full_df.values.tolist(), range_name="A1")
-                        get_routine_data.clear()
-                        st.success(f"Replaced {count} instances of '{old_val}'!")
-                        time.sleep(1.5)
-                        st.rerun()
-                    else: st.info(f"No instances found.")
+    # --- 2. DAY SELECTION ---
+    st.markdown("#### 📅 1. Select Day to Manage")
+    sel_day_opt = st.selectbox("Select Schedule Day", day_options, label_visibility="collapsed")
+    
+    if sel_day_opt == "Monday to Friday":
+        target_days = weekdays
+        display_day = "Monday" # We show Monday's schedule as the template
+        st.info("💡 **Batch Mode Active:** Changes made here will instantly apply to Monday, Tuesday, Wednesday, Thursday, and Friday.")
+    else:
+        target_days = [sel_day_opt]
+        display_day = sel_day_opt
+
+    target_df = df[df['Day'].str.title() == display_day].copy()
+
+    # --- 3. TIME SLOT SELECTION ---
+    st.markdown("#### ⏱️ 2. Select Time Slot")
+    slot_opts = [f"{row['Start_Time']} to {row['End_Time']}  |  {row['Activity']}" for _, row in target_df.iterrows()]
+    selected_slot = st.selectbox("Choose the specific slot you want to update:", slot_opts)
+    
+    sel_start = selected_slot.split(" to ")[0].strip()
+
+    # --- 4. HIGHLIGHTED SCHEDULE DISPLAY ---
+    st.markdown(f"**Full Schedule for {display_day}** *(Editing row highlighted in yellow)*")
+    
+    def highlight_target_row(s):
+        # Applies a bright yellow background to the selected row for easy viewing
+        is_target = s['Start_Time'] == sel_start
+        return ['background-color: #fff59d; color: black; font-weight: bold;' if is_target else '' for _ in s]
+
+    st.dataframe(target_df.style.apply(highlight_target_row, axis=1), use_container_width=True, hide_index=True)
 
     st.markdown("---")
-    target_day = st.selectbox("Select Day to Edit Manually", days_of_week, index=days_of_week.index(current_day if current_day in days_of_week else "Monday"))
-    
-    target_full_df = df[df['Day'].str.strip().str.title() == target_day.title()].copy()
-    
-    if not target_full_df.empty:
-        edit_df = target_full_df[['Start_Time', 'End_Time', 'Activity', 'Sub_Activities', 'check_list']].copy()
-        def convert_to_time(t_str):
-            try: return datetime.strptime('00:00', '%H:%M').time() if t_str.strip() == '0:00' else datetime.strptime(t_str.strip(), '%H:%M').time()
-            except: return datetime.strptime('00:00', '%H:%M').time()
-        edit_df['Start_Time'] = edit_df['Start_Time'].apply(convert_to_time)
-        edit_df['End_Time'] = edit_df['End_Time'].apply(convert_to_time)
-        
-        edited_schedule = st.data_editor(
-            edit_df,
-            column_config={
-                "Start_Time": st.column_config.TimeColumn("Start", format="HH:mm", step=60, required=True),
-                "End_Time": st.column_config.TimeColumn("End", format="HH:mm", step=60, required=True),
-                "Activity": st.column_config.TextColumn("Activity", required=True),
-                "Sub_Activities": st.column_config.TextColumn("Sub List"),
-                "check_list": st.column_config.TextColumn("Checklist")
-            },
-            hide_index=True, use_container_width=True, num_rows="dynamic", key="schedule_editor"
-        )
-        
-        if st.button(f"💾 Save Changes for {target_day}", use_container_width=True):
-            with st.spinner("Syncing to Google Sheets..."):
-                new_rows = []
-                for _, row in edited_schedule.iterrows():
-                    if pd.isna(row['Activity']) or str(row['Activity']).strip() == "": continue
-                    if pd.isna(row['Start_Time']) or pd.isna(row['End_Time']): continue
-                    
-                    s_dt = datetime.combine(now.date(), row['Start_Time'])
-                    e_dt = datetime.combine(now.date(), row['End_Time'])
-                    if row['End_Time'].strftime('%H:%M') in ['00:00', '0:00'] or e_dt < s_dt: e_dt = e_dt.replace(day=e_dt.day + 1)
-                    h, m = divmod((e_dt - s_dt).seconds, 3600)
-                    
-                    sub_act = "" if str(row.get('Sub_Activities', '')).strip() == 'nan' else str(row.get('Sub_Activities', '')).strip()
-                    chk_act = "" if str(row.get('check_list', '')).strip() == 'nan' else str(row.get('check_list', '')).strip()
-                    new_rows.append([target_day, row['Start_Time'].strftime('%H:%M'), row['End_Time'].strftime('%H:%M'), f"{h}:{m//60:02d}", str(row['Activity']).strip().upper(), sub_act, chk_act])
 
-                full_df = df.copy()
-                other_days_df = full_df[full_df['Day'].str.strip().str.title() != target_day.title()]
-                final_df = pd.concat([other_days_df, pd.DataFrame(new_rows, columns=["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list"])], ignore_index=True)
-                
+    # --- 5. SMART EDITOR FORM ---
+    sel_row = target_df[target_df['Start_Time'] == sel_start].iloc[0]
+
+    # Harvest all historical data for dropdowns
+    all_acts = sorted(list(set(df['Activity'].dropna().str.upper())))
+    all_subs = sorted(list(set([x.strip() for items in df['Sub_Activities'].dropna() for x in str(items).split(',') if x.strip()])))
+    all_chks = sorted(list(set([x.strip() for items in df['check_list'].dropna() for x in str(items).split(',') if x.strip()])))
+    all_apps = sorted(list(set([x.strip() for items in df['App'].dropna() for x in str(items).split(',') if x.strip()])))
+
+    # Current cell values
+    curr_act = str(sel_row['Activity']).strip()
+    curr_sub_list = [x.strip() for x in str(sel_row['Sub_Activities']).split(',') if x.strip()]
+    curr_chk_list = [x.strip() for x in str(sel_row['check_list']).split(',') if x.strip()]
+    curr_app_list = [x.strip() for x in str(sel_row['App']).split(',') if x.strip()]
+
+    # Ensure current items exist in the dropdown options
+    opts_sub = sorted(list(set(all_subs + curr_sub_list)))
+    opts_chk = sorted(list(set(all_chks + curr_chk_list)))
+    opts_app = sorted(list(set(all_apps + curr_app_list)))
+
+    st.markdown(f"#### ✏️ 3. Update `{sel_row['Start_Time']}` Slot Details")
+    
+    with st.form("smart_edit_form"):
+        st.markdown("<div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px;'>", unsafe_allow_html=True)
+        
+        # ACTIVITY
+        st.markdown("**1️⃣ Activity Category**")
+        col_a1, col_a2 = st.columns(2)
+        with col_a1: new_act_sel = st.selectbox("Select Existing", all_acts, index=all_acts.index(curr_act) if curr_act in all_acts else 0)
+        with col_a2: new_act_txt = st.text_input("Or Create New Activity (Overrides selection)", placeholder="Type new activity...")
+
+        st.markdown("<hr style='margin: 10px 0px;'>", unsafe_allow_html=True)
+
+        # SUB-ACTIVITIES
+        st.markdown("**2️⃣ Sub-Activities**")
+        new_subs_sel = st.multiselect("Select Existing (Multiple allowed)", opts_sub, default=curr_sub_list)
+        new_subs_txt = st.text_input("Add New (Comma separated)", placeholder="e.g., Check emails, Plan week", key="new_sub")
+
+        st.markdown("<hr style='margin: 10px 0px;'>", unsafe_allow_html=True)
+
+        # CHECKLIST
+        st.markdown("**3️⃣ Tasks & Reminders (Checklist)**")
+        new_chks_sel = st.multiselect("Select Existing", opts_chk, default=curr_chk_list)
+        new_chks_txt = st.text_input("Add New (Comma separated)", placeholder="e.g., Pay bills, Buy milk", key="new_chk")
+
+        st.markdown("<hr style='margin: 10px 0px;'>", unsafe_allow_html=True)
+
+        # APPS
+        st.markdown("**4️⃣ Applications Launchpad**")
+        new_apps_sel = st.multiselect("Select Existing", opts_app, default=curr_app_list)
+        new_apps_txt = st.text_input("Add New (Comma separated)", placeholder="e.g., Routine Editor, Sleep & Water", key="new_app")
+
+        st.markdown("</div><br>", unsafe_allow_html=True)
+
+        if st.form_submit_button("💾 Save Changes to Routine", type="primary", use_container_width=True):
+            # Resolve final strings
+            final_act = new_act_txt.strip().upper() if new_act_txt.strip() else new_act_sel
+            
+            # Combine multiselect and new typed text, then format perfectly
+            final_subs = ",".join(filter(None, [x for x in new_subs_sel] + [x.strip() for x in new_subs_txt.split(',')]))
+            final_chks = ",".join(filter(None, [x for x in new_chks_sel] + [x.strip() for x in new_chks_txt.split(',')]))
+            final_apps = ",".join(filter(None, [x for x in new_apps_sel] + [x.strip() for x in new_apps_txt.split(',')]))
+
+            # Apply changes to the main dataframe
+            # This logic targets ALL days in the grouping (e.g., Mon-Fri) at the exact Start_Time
+            target_mask = (df['Day'].str.title().isin(target_days)) & (df['Start_Time'] == sel_start)
+            
+            df.loc[target_mask, 'Activity'] = final_act
+            df.loc[target_mask, 'Sub_Activities'] = final_subs
+            df.loc[target_mask, 'check_list'] = final_chks
+            df.loc[target_mask, 'App'] = final_apps
+
+            # Push to Google Sheets
+            with st.spinner("Saving changes to Google Sheets..."):
                 routine_sheet = get_sheet("routine_master")
-                routine_sheet.clear() 
-                routine_sheet.update(values=[final_df.columns.values.tolist()] + final_df.values.tolist(), range_name="A1")
-                get_routine_data.clear() 
-                st.success("Schedule successfully updated!")
-                time.sleep(1.5)
-                st.rerun()
+                routine_sheet.clear()
+                routine_sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name="A1")
+                
+                # Clear Cache to show new data immediately
+                get_routine_data.clear()
+                
+            st.success(f"✅ Successfully updated schedule for {sel_day_opt} at {sel_start}!")
+            time.sleep(1.5)
+            st.rerun()
 
-        target_full_df['Total_Minutes'] = target_full_df['Duration'].apply(parse_duration_to_minutes)
-        schedule_summary = target_full_df.groupby('Activity')['Total_Minutes'].sum().sort_values(ascending=False)
-        st.markdown("<br><h5>📈 Scheduled Summary</h5>", unsafe_allow_html=True)
-        cols_sched = st.columns(min(len(schedule_summary), 4))
-        for idx, (act, total_mins) in enumerate(schedule_summary.items()):
-            with cols_sched[idx % 4]: st.metric(label=act, value=f"{int(total_mins // 60)}:{int(total_mins % 60):02d}")
-    else: st.info(f"No routine scheduled for {target_day}. Add one using the tools above.")
-
-except Exception as e: st.error(f"System Error: {e}")
+except Exception as e:
+    st.error(f"System Error: {e}")

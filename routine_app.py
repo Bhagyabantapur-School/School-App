@@ -232,10 +232,8 @@ try:
     # ==========================================
     try:
         if not loc_df.empty and 'Place' in loc_df.columns:
-            # Look at the last 50 entries to catch overnight/multi-day trips perfectly
             recent_locs = loc_df.tail(50).copy()
             
-            # Smart Date Parsing to handle DD/MM/YYYY vs YYYY-MM-DD gracefully
             if 'Date' in recent_locs.columns:
                 recent_locs['Parsed_Date'] = pd.to_datetime(recent_locs['Date'], dayfirst=True, errors='coerce').dt.date
             else:
@@ -249,36 +247,44 @@ try:
                 row_date = r.get('Parsed_Date', pd.NaT)
                 
                 if curr_place:
-                    # Detect transition to HOME from ANY other place (prev_place not None/Home/Empty)
                     if curr_place == 'HOME' and prev_place not in ['HOME', None, '']:
-                        # Ensure this return actually happened TODAY
                         if row_date == now.date() or pd.isna(row_date):
                             arr_time = str(r.get('Time', r.get('Start_Time', ''))).strip()
                             if not arr_time: arr_time = now.strftime('%H:%M')
+                            # Standardize time format
+                            try: arr_time = datetime.strptime(arr_time, '%H:%M:%S').strftime('%H:%M')
+                            except: pass
+                            try: arr_time = datetime.strptime(arr_time, '%H:%M').strftime('%H:%M')
+                            except: pass
+                            
                             arrivals_to_log.append(arr_time)
                     
                     prev_place = curr_place
             
-            today_logs = log_df[log_df['Date'] == today_str]
-            preps_logged = len(today_logs[today_logs['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME'])
-            
-            if len(arrivals_to_log) > preps_logged:
-                for i in range(preps_logged, len(arrivals_to_log)):
-                    arr_time_str = arrivals_to_log[i]
-                    try:
-                        s_dt = datetime.strptime(arr_time_str, '%H:%M')
-                        start_val = s_dt.strftime('%H:%M')
-                    except:
-                        start_val = now.strftime('%H:%M')
-                    
-                    smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [
-                        today_str, start_val, "RUNNING", GS_FORMULA, "PRE", "Prepare after return back home", "", "Auto-started from Location Data"
-                    ])
+            if arrivals_to_log:
+                latest_arrival = arrivals_to_log[-1] # Grabs only the absolute newest arrival
                 
-                get_all_ecosystem_data.clear()
-                st.toast("🏠 Welcome Home! Started your prep timer.")
-                time.sleep(1.0)
-                st.rerun()
+                today_logs = log_df[log_df['Date'] == today_str]
+                today_preps = today_logs[today_logs['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME']
+                
+                already_logged = False
+                for _, p_row in today_preps.iterrows():
+                    p_start = str(p_row['Start_Time']).strip()
+                    try: p_start = datetime.strptime(p_start, '%H:%M').strftime('%H:%M')
+                    except: pass
+                    
+                    if p_start == latest_arrival:
+                        already_logged = True
+                        break
+                
+                if not already_logged:
+                    smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [
+                        today_str, latest_arrival, "RUNNING", GS_FORMULA, "PRE", "Prepare after return back home", "", "Auto-started from Location Data"
+                    ])
+                    get_all_ecosystem_data.clear()
+                    st.toast("🏠 Welcome Home! Started your prep timer.")
+                    time.sleep(1.0)
+                    st.rerun()
     except Exception as e:
         print(f"Location Sync Error: {e}")
 

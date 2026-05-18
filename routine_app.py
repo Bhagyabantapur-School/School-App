@@ -12,6 +12,11 @@ GS_FORMULA = '=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(IND
 
 st.set_page_config(page_title="Live Routine Hub", page_icon="⏱️", layout="centered")
 
+# Initialize session state for the Embedded App Viewer
+if 'opened_app_file' not in st.session_state:
+    st.session_state.opened_app_file = None
+    st.session_state.opened_app_name = None
+
 if 'active_main_task' not in st.session_state:
     st.session_state.active_main_task = None
     st.session_state.active_sub_task = None
@@ -91,23 +96,19 @@ def fetch_df_from_sheet(sheet, expected_cols, column_names):
 
 @st.cache_data(ttl=300, show_spinner="⚡ Booting up ecosystem...") 
 def get_all_ecosystem_data():
-    """Fetches ALL tabs in a single cached sequence to drastically reduce load times."""
     client = init_connection()
     main_ss = client.open("MY ROUTINE 2026")
     money_ss = client.open("sk_money_location")
     dash_ss = client.open("Personal_Dashboard_Data")
     
-    # 1. Routine Data
     df = fetch_df_from_sheet(main_ss.worksheet("routine_master"), 8, ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App"])
     df = df[df["Day"].astype(str).str.strip() != ""]
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
     
-    # 2. Activity Log
     log_df = fetch_df_from_sheet(main_ss.worksheet("activity_log"), 8, ["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"])
     log_df = log_df[log_df["Date"].astype(str).str.strip() != ""] 
     log_df["Activity"] = log_df["Activity"].astype(str).str.strip().str.upper()
     
-    # 3. Future Tasks
     try: f_sheet = main_ss.worksheet("future_tasks")
     except: 
         f_sheet = main_ss.add_worksheet(title="future_tasks", rows="100", cols="8")
@@ -116,7 +117,6 @@ def get_all_ecosystem_data():
     future_df = future_df[future_df["Due_Date"].astype(str).str.strip() != ""] 
     future_df['row_index'] = future_df.index + 2 
 
-    # 4. Holidays
     try: h_sheet = main_ss.worksheet("holidays")
     except: 
         h_sheet = main_ss.add_worksheet(title="holidays", rows="50", cols="2")
@@ -124,14 +124,12 @@ def get_all_ecosystem_data():
     holidays_df = fetch_df_from_sheet(h_sheet, 2, ["Date", "Occasion"])
     holidays_df = holidays_df[holidays_df["Date"].astype(str).str.strip() != ""] 
 
-    # 5. Payments
     try: 
         payment_df = fetch_df_from_sheet(money_ss.worksheet("PAYMENT_CHECKLIST"), 9, ["Month", "Bill_Name", "Type", "Est_Amount", "Due_Date", "Status", "Fund", "Account", "Actual_Paid"])
         payment_df = payment_df[payment_df["Month"].astype(str).str.strip() != ""] 
         payment_df['row_index'] = payment_df.index + 2
     except: payment_df = pd.DataFrame(columns=["Month", "Bill_Name", "Type", "Est_Amount", "Due_Date", "Status", "Fund", "Account", "Actual_Paid", "row_index"])
 
-    # 6. Must Do
     try: md_sheet = main_ss.worksheet("must_do")
     except:
         md_sheet = main_ss.add_worksheet(title="must_do", rows="100", cols="2")
@@ -139,7 +137,6 @@ def get_all_ecosystem_data():
     must_do_df = fetch_df_from_sheet(md_sheet, 2, ["Main Category", "Task Name"])
     must_do_df = must_do_df[must_do_df["Main Category"].astype(str).str.strip() != ""] 
 
-    # 7. PRE
     try: pre_sheet = main_ss.worksheet("PRE")
     except:
         pre_sheet = main_ss.add_worksheet(title="PRE", rows="100", cols="2")
@@ -147,7 +144,6 @@ def get_all_ecosystem_data():
     pre_df = fetch_df_from_sheet(pre_sheet, 2, ["Main Category", "Task Name"])
     pre_df = pre_df[pre_df["Main Category"].astype(str).str.strip() != ""] 
 
-    # 8. Tracker
     try:
         t_records = dash_ss.worksheet("Tracker").get_all_records()
         tracker_data = {row['App Name']: str(row['Last Opened']) for row in t_records}
@@ -199,7 +195,10 @@ def log_and_open_app(app_name, target_file, cached_data, now_dt):
         
     cached_data[app_name] = now_str 
     if app_name != "Live Routine Hub":
-        st.switch_page(target_file)
+        # Save the selected app into session state so it can be rendered as an IFrame inside the hub
+        st.session_state.opened_app_file = target_file
+        st.session_state.opened_app_name = app_name
+        st.rerun()
 
 # ==========================================
 # Main Logic
@@ -221,7 +220,6 @@ try:
     if active_count > 0:
         st.markdown(f'<div style="position: fixed; bottom: 30px; left: 20px; background-color: #ff4b4b; color: white; padding: 8px 16px; border-radius: 20px; box-shadow: 0px 4px 12px rgba(0,0,0,0.3); font-weight: bold; font-size: 16px; z-index: 9999; pointer-events: none; display: flex; align-items: center; justify-content: center;"><span style="font-size: 16px; margin-right: 6px; animation: pulse 1.5s infinite;">⏱️</span> {active_count}</div>', unsafe_allow_html=True)
 
-    # --- TOP HEADER & SYNC (Always Visible) ---
     st.markdown(f'<h3 style="text-align: center; color: #888; margin-top: 0px;">{current_day} | {now.strftime("%I:%M %p")}</h3>', unsafe_allow_html=True)
 
     col1, col2 = st.columns([8, 2])
@@ -232,7 +230,6 @@ try:
             time.sleep(1.0)
             st.rerun()
 
-    # --- DYNAMIC APP LAUNCHPAD LOGIC ---
     app_groups = {
         "MONEY": [
             ("Money & Location", "money_location.py", "📍"),
@@ -270,7 +267,6 @@ try:
     
     base_app_list = [app for group in app_groups.values() for app in group]
     
-    # --- PRE-PROCESS SCHEDULE & SCHEDULED APPS ---
     holidays_df['Date_dt'] = pd.to_datetime(holidays_df['Date'], dayfirst=True, errors='coerce')
     today_holiday_match = holidays_df[holidays_df['Date_dt'].dt.date == now.date()]
     is_auto_holiday = not today_holiday_match.empty
@@ -330,7 +326,6 @@ try:
 
     filtered_app_list = [app for app in base_app_list if app[0] in active_apps_filter] if active_apps_filter else []
 
-    # Show Scheduled Apps seamlessly at the top
     if filtered_app_list:
         st.markdown('<h4 style="text-align: center; color: #d84315; margin-top: 10px;">🚀 Scheduled Apps</h4>', unsafe_allow_html=True)
         for i in range(0, len(filtered_app_list), 3):
@@ -344,7 +339,6 @@ try:
                             log_and_open_app(app_name, file_name, tracker_data, now)
         st.markdown("---")
 
-    # --- COMPACT CURRENT ACTIVITY BOX ---
     st.markdown(f'<div style="text-align: center; background-color: #f8f9fa; border: 2px solid {color}; border-radius: 8px; padding: 8px; margin: 5px auto; max-width: 300px; box-shadow: 0px 2px 4px rgba(0,0,0,0.05);"><h3 style="margin: 0; font-size: 1.6rem; color: {color}; letter-spacing: 0.5px;">{current_activity}</h3></div>', unsafe_allow_html=True)
 
     if is_auto_holiday: st.markdown(f'<p style="text-align: center; color: #ff9f36; font-weight: bold; font-size: 1.1rem; margin-top: -5px;">🎉 {auto_occasion} (Holiday Schedule)</p>', unsafe_allow_html=True)
@@ -364,19 +358,27 @@ try:
     if next_activity not in ["NONE", "END OF DAY"]: st.markdown(f'<h4 style="text-align: center; color: #666; margin-bottom: 20px; font-weight: 400; font-size: 1.1rem;">Up Next: <b>{next_activity}</b> at {next_time_str}</h4>', unsafe_allow_html=True)
     elif next_activity == "END OF DAY": st.markdown('<h4 style="text-align: center; color: #666; margin-bottom: 20px; font-weight: 400; font-size: 1.1rem;">Up Next: Schedule Complete</h4>', unsafe_allow_html=True)
 
-    # --- SIMPLIFIED DYNAMIC PENDING PAYMENTS EXPANDER ---
-    all_alert_pays = []
-    if not payment_df.empty:
-        def parse_pay_date(d_str):
-            try: return pd.to_datetime(str(d_str).strip(), dayfirst=True).date()
-            except: return pd.NaT
+    # ==========================================
+    # --- EMBEDDED SUB-APP VIEWER ---
+    # ==========================================
+    if st.session_state.get('opened_app_file'):
+        st.markdown("---")
+        app_title = st.session_state.get('opened_app_name', 'Sub-App')
         
-        payment_df['Due_Date_dt'] = payment_df['Due_Date'].apply(parse_pay_date)
-        pending_payments = payment_df[~payment_df['Status'].str.strip().str.upper().isin(['PAID', 'DONE'])]
-        for _, p_row in pending_payments.iterrows():
-            if pd.notna(p_row['Due_Date_dt']):
-                days_until = (p_row['Due_Date_dt'] - now.date()).days
-                if days_until <= 3: all_alert_pays.append((days_until, p_row))
+        col_v1, col_v2 = st.columns([8, 2])
+        with col_v1:
+            st.markdown(f"<h3 style='color: #0068c9; margin-top: 0px;'>🖥️ Running: {app_title}</h3>", unsafe_allow_html=True)
+        with col_v2:
+            if st.button("❌ Close App", key="close_embed", use_container_width=True, type="primary"):
+                st.session_state.opened_app_file = None
+                st.session_state.opened_app_name = None
+                st.rerun()
+                
+        # Renders the exact streamlit app page directly below your Hub status
+        page_url = st.session_state.opened_app_file.replace('.py', '')
+        components.iframe(f"/{page_url}?embed=true", height=850, scrolling=True)
+        st.markdown("---")
+    # ==========================================
 
     if all_alert_pays:
         all_alert_pays.sort(key=lambda x: x[0])
@@ -465,13 +467,13 @@ try:
             for idx_task, (dt, r, time_text, is_overdue) in enumerate(upcoming_ui_elements_raw):
                 item_bg = "#d32f2f" if is_overdue else "#0068c9" 
                 
-                st.markdown(f'<div style="background-color: {item_bg}; color: white; padding: 12px; border-radius: 6px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);"><strong style="font-size: 16px;">{r["Task_Name"]} ({r["Activity"]})</strong><br><span style="font-size: 14px; opacity: 0.95;">{time_text}</span></div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="background-color: {item_bg}; color: white; padding: 12px; border-radius: 6px; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);"><strong style="font-size: 16px;">{r["Task_Name"]} ({r["Activity"]})</strong><br><span style="font-size: 14px; opacity: 0.95;">{time_text}</span></div>', unsafe_allow_html=True)
                 
                 col_run, col_manage = st.columns(2)
                 with col_run:
                     if st.button("▶️ Run Task", key=f"run_sp_{r['row_index']}", use_container_width=True):
                         smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, str(r['Activity']).upper(), str(r['Task_Name']).strip(), "", "Started from Special Tasks"])
-                        get_activity_log.clear() 
+                        get_all_ecosystem_data.clear() 
                         st.rerun()
                 with col_manage:
                     with st.expander(f"✏️ Manage Task", expanded=False):
@@ -521,7 +523,6 @@ try:
                 day_str = "Tomorrow!" if days_until == 1 else f"in {days_until} days"
                 st.markdown(f"**{h_row['Date_dt'].strftime('%b %d, %Y')}** - {h_row['Occasion']} *( {day_str} )*")
 
-    # --- PRE TASKS ---
     if not pre_df.empty:
         valid_pres = pre_df[pre_df['Task Name'].str.strip() != '']
         if not valid_pres.empty:
@@ -540,7 +541,6 @@ try:
                             get_all_ecosystem_data.clear()
                             st.rerun()
 
-    # --- MUST DO TASKS ---
     if not must_do_df.empty:
         valid_must_dos = must_do_df[must_do_df['Task Name'].str.strip() != '']
         if not valid_must_dos.empty:
@@ -559,7 +559,6 @@ try:
                             get_all_ecosystem_data.clear()
                             st.rerun()
 
-    # --- EXPANDABLE TASKS & REMINDERS ---
     if chk_list:
         with st.expander(f"✅ Tasks & Reminders ({len(chk_list)})", expanded=True):
             today_logs = log_df[log_df['Date'] == today_str]
@@ -583,9 +582,6 @@ try:
                     get_all_ecosystem_data.clear() 
                     st.rerun()
 
-    # ==========================================
-    # MULTI-TASKING LOGIC (LIVE TIMERS)
-    # ==========================================
     if sub_list or active_count > 0:
         st.markdown("---")
         st.markdown('<h4 style="text-align: center; color: #333;">Tap to Track Activity</h4>', unsafe_allow_html=True)
@@ -650,7 +646,6 @@ try:
                                 get_all_ecosystem_data.clear() 
                                 st.rerun()
 
-        # --- VISITOR TRACKER (Single Light Card) ---
         st.markdown("""
             <style>
             div[data-testid="stForm"]:has(.visitor-anchor) {
@@ -687,7 +682,6 @@ try:
                     get_all_ecosystem_data.clear() 
                     st.rerun()
 
-    # --- SCHEDULE FUTURE TASK ---
     with st.expander("🗓️ Schedule Future Task"):
         with st.form("schedule_future_form", clear_on_submit=True):
             f_act_list = [act for act in df['Activity'].unique() if act.strip()]
@@ -709,7 +703,6 @@ try:
                     st.rerun()
                 else: st.error("Please enter task details.")
 
-    # --- UPDATED MANUAL LOG SECTION WITH 1-MINUTE DROPDOWNS ---
     with st.expander("📝 Manual Log Activity"):
         unique_acts = sorted(list(set([a.strip().upper() for a in df['Activity'] if a.strip()])))
         log_date = st.date_input("Date", value=now.date(), key="log_date")

@@ -38,7 +38,6 @@ def init_connection():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
     client = gspread.authorize(creds)
-    # Open both the main tracking sheet and the new PEOPLE sheet
     return client.open("sk_money_location"), client.open("PEOPLE")
 
 try:
@@ -73,7 +72,11 @@ def load_bike_data():
     try: return pd.DataFrame(sh.worksheet("BIKE_LOG").get_all_records())
     except: return pd.DataFrame()
 
-# --- NEW CACHES FOR PEOPLE SHEET ---
+@st.cache_data(ttl=60)
+def load_working_hours():
+    try: return pd.DataFrame(sh.worksheet("WORKING_HOURS").get_all_records())
+    except: return pd.DataFrame()
+
 @st.cache_data(ttl=60)
 def load_people_names():
     try: return pd.DataFrame(sh_people.worksheet("People").get_all_records())
@@ -687,10 +690,60 @@ with tab_money:
 with tab_location:
     if 'target_destination' not in st.session_state: st.session_state.target_destination = ""
 
+    all_places_list = get_list("Places")
+
+    # ==========================================
+    # LOCATION DATA ENTRY (CLOSED DAYS)
+    # ==========================================
+    with st.expander("📝 Location Data Entry (Closed Days)", expanded=False):
+        ld_place = st.selectbox("Select Place", all_places_list + ["-- Type New --"], key="ld_place")
+        if ld_place == "-- Type New --": ld_place = st.text_input("Type New Place Name", key="ld_new_place")
+        
+        day_opts = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "-- Type New --"]
+        ld_closed = st.selectbox("Closed On", day_opts, key="ld_closed")
+        if ld_closed == "-- Type New --": ld_closed = st.text_input("Type New Day/Reason", key="ld_new_closed")
+        
+        if st.button("💾 Save Closed Day", type="primary", use_container_width=True):
+            if ld_place and ld_closed:
+                try:
+                    time_now = get_ist_now()
+                    sh.worksheet("LOCATION_DATA").append_row([
+                        time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), 
+                        "- Stationary -", ld_place, "I", f"Closed: {ld_closed}"
+                    ])
+                    load_location_data.clear()
+                    st.success(f"Saved: {ld_place} is closed on {ld_closed}")
+                except Exception as e: st.error(f"Error: {e}")
+
+    # ==========================================
+    # WORKING HOURS ENTRY
+    # ==========================================
+    with st.expander("🕒 Working Hours Entry", expanded=False):
+        wh_place = st.selectbox("Select Place", all_places_list + ["-- Type New --"], key="wh_place")
+        if wh_place == "-- Type New --": wh_place = st.text_input("Type New Place Name", key="wh_new_place")
+        
+        wh_c1, wh_c2 = st.columns(2)
+        with wh_c1: wh_open = st.time_input("Open Time", value=datetime.strptime("09:00", "%H:%M").time())
+        with wh_c2: wh_close = st.time_input("Close Time", value=datetime.strptime("17:00", "%H:%M").time())
+        
+        if st.button("💾 Save Working Hours", type="primary", use_container_width=True):
+            if wh_place:
+                try:
+                    try:
+                        wh_sheet = sh.worksheet("WORKING_HOURS")
+                    except gspread.exceptions.WorksheetNotFound:
+                        wh_sheet = sh.add_worksheet(title="WORKING_HOURS", rows="100", cols="3")
+                        wh_sheet.append_row(["Place", "Open", "Close"])
+                    
+                    wh_sheet.append_row([wh_place, wh_open.strftime("%H:%M"), wh_close.strftime("%H:%M")])
+                    load_working_hours.clear()
+                    st.success(f"Saved Working Hours for {wh_place}")
+                except Exception as e: st.error(f"Error: {e}")
+
     # ==========================================
     # DYNAMIC AREA ROUTE EXPANDER
     # ==========================================
-    with st.expander("🗺️ Dynamic Area Route", expanded=(not st.session_state.route_active)):
+    with st.expander("🗺️ Dynamic Area Route", expanded=False):
         location_logic = get_location_logic()
         route_opts = list(location_logic.keys())
         
@@ -720,12 +773,38 @@ with tab_location:
 
                 out_of_route = st.checkbox("📍 Visit place outside this route")
                 if out_of_route:
-                    all_places = get_list("Places")
-                    dyn_next_stop_sel = st.selectbox("Next Stop (Other Place)", all_places + ["-- Type New --"], key="dyn_other_place")
+                    dyn_next_stop_sel = st.selectbox("Next Stop (Other Place)", all_places_list + ["-- Type New --"], key="dyn_other_place")
                     if dyn_next_stop_sel == "-- Type New --": dyn_next_stop = st.text_input("Type New Place Name", key="dyn_new_place")
                     else: dyn_next_stop = dyn_next_stop_sel
                 else: dyn_next_stop = st.selectbox("Next Stop", available_places, key="dyn_next_stop")
                 
+                # --- SMART WARNINGS ---
+                if dyn_next_stop and dyn_next_stop != "-- No places mapped --":
+                    # 1. Closed Days Check
+                    df_loc_warn = load_location_data()
+                    if not df_loc_warn.empty and 'Place' in df_loc_warn.columns and 'Remark' in df_loc_warn.columns:
+                        place_history = df_loc_warn[df_loc_warn['Place'].astype(str).str.strip() == dyn_next_stop]
+                        closed_remarks = place_history[place_history['Remark'].astype(str).str.contains("Closed:", na=False)]
+                        if not closed_remarks.empty:
+                            last_closed = closed_remarks.iloc[-1]['Remark'].split("Closed:")[-1].strip()
+                            current_day_name = get_ist_now().strftime('%A')
+                            if current_day_name.lower() in last_closed.lower() or last_closed.lower() in current_day_name.lower():
+                                st.warning(f"⚠️ **Note:** {dyn_next_stop} is usually marked as CLOSED on {last_closed}s!")
+                    
+                    # 2. Working Hours Check
+                    df_wh_warn = load_working_hours()
+                    if not df_wh_warn.empty and 'Place' in df_wh_warn.columns:
+                        wh_match = df_wh_warn[df_wh_warn['Place'].astype(str).str.strip() == dyn_next_stop]
+                        if not wh_match.empty:
+                            last_wh = wh_match.iloc[-1]
+                            try:
+                                open_t = datetime.strptime(str(last_wh.get('Open', '00:00')), "%H:%M").time()
+                                close_t = datetime.strptime(str(last_wh.get('Close', '23:59')), "%H:%M").time()
+                                curr_t = get_ist_now().time()
+                                if not (open_t <= curr_t <= close_t):
+                                    st.warning(f"⚠️ **Note:** {dyn_next_stop} might be closed right now! Hours: {last_wh.get('Open')} - {last_wh.get('Close')}.")
+                            except: pass
+
                 transit_rules = get_transit_rules()
                 current_pair = frozenset([str(current_loc).strip(), str(dyn_next_stop).strip()]) if current_loc else None
                 pre_mode = st.session_state.get('current_move', 'BIKE')
@@ -845,8 +924,7 @@ with tab_location:
 
             out_of_route_arr = st.checkbox("📍 Diverted to a different place?")
             if out_of_route_arr:
-                all_places = get_list("Places")
-                dyn_place_sel = st.selectbox("Actual Arrival Place", all_places + ["-- Type New --"])
+                dyn_place_sel = st.selectbox("Actual Arrival Place", all_places_list + ["-- Type New --"])
                 if dyn_place_sel == "-- Type New --": dyn_place = st.text_input("Type New Place Name")
                 else: dyn_place = dyn_place_sel
             else:
@@ -913,7 +991,6 @@ with tab_location:
                         today_str = time_now_stop.strftime("%d.%m.%y")
                         today_people_str = time_now_stop.strftime("%d-%m-%Y")
                         
-                        # --- STRICT 00:00:00 DURATION CALCULATION ---
                         duration_secs = int((time_now_stop - start_t).total_seconds())
                         hours, remainder = divmod(duration_secs, 3600)
                         minutes, seconds = divmod(remainder, 60)
@@ -940,7 +1017,7 @@ with tab_location:
                                 today_str, time_now_stop.strftime("%H:%M"), active_m, "", active_p, f"Resumed Route: {active_r} towards {target_dest}"
                             ])
                             
-                        # Log to PEOPLE Sheet if applicable (now including Interaction column!)
+                        # Log to PEOPLE Sheet if applicable
                         if contact_name and stop_task in ["Call receive", "Call", "Meet"]:
                             sh_people.worksheet("People Interaction").append_row([
                                 contact_name, stop_task, today_people_str, start_t.strftime("%H:%M"), duration_str_hhmmss, "⚠️ INCOMPLETE"
@@ -966,8 +1043,6 @@ with tab_location:
                 
                 for idx, row in inc_interactions.iterrows():
                     sheet_row = idx + 2
-                    
-                    # Formatted exactly as: Call receive: Suborno | Date: 18-05-2026 | Time: 17:00 | Dur: 00:00:33
                     interaction_type = row.get('Interaction', 'Interaction')
                     person_name = row.get('People', 'Unknown')
                     date_val = row.get('Date', '')
@@ -994,7 +1069,7 @@ with tab_location:
 
     if not st.session_state.route_active or st.session_state.get('route_type') == "Express":
         # --- EXPANDABLE EXPRESS ROUTE ---
-        with st.expander("🏫 Express School Route", expanded=(not st.session_state.route_active)):
+        with st.expander("🏫 Express School Route", expanded=False):
             if not st.session_state.route_active:
                 col1, col2 = st.columns(2)
                 with col1: express_move = st.selectbox("Travel Mode", ["BIKE", "WALK", "BIKE + WALK", "TOTO"], key="exp_move")

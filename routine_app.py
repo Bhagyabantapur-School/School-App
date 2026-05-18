@@ -380,6 +380,20 @@ try:
         st.markdown("---")
     # ==========================================
 
+    # --- SIMPLIFIED DYNAMIC PENDING PAYMENTS EXPANDER ---
+    all_alert_pays = []
+    if not payment_df.empty:
+        def parse_pay_date(d_str):
+            try: return pd.to_datetime(str(d_str).strip(), dayfirst=True).date()
+            except: return pd.NaT
+        
+        payment_df['Due_Date_dt'] = payment_df['Due_Date'].apply(parse_pay_date)
+        pending_payments = payment_df[~payment_df['Status'].str.strip().str.upper().isin(['PAID', 'DONE'])]
+        for _, p_row in pending_payments.iterrows():
+            if pd.notna(p_row['Due_Date_dt']):
+                days_until = (p_row['Due_Date_dt'] - now.date()).days
+                if days_until <= 3: all_alert_pays.append((days_until, p_row))
+
     if all_alert_pays:
         all_alert_pays.sort(key=lambda x: x[0])
         min_days = all_alert_pays[0][0]
@@ -472,7 +486,7 @@ try:
                 col_run, col_manage = st.columns(2)
                 with col_run:
                     if st.button("▶️ Run Task", key=f"run_sp_{r['row_index']}", use_container_width=True):
-                        smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, str(r['Activity']).upper(), str(r['Task_Name']).strip(), "", "Started from Special Tasks"])
+                        smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, str(r['Activity']).upper(), str(r['Task_Name']).strip(), "", "Started from Special Tasks"])
                         get_all_ecosystem_data.clear() 
                         st.rerun()
                 with col_manage:

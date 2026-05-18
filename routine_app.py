@@ -251,7 +251,6 @@ try:
                         if row_date == now.date() or pd.isna(row_date):
                             arr_time = str(r.get('Time', r.get('Start_Time', ''))).strip()
                             if not arr_time: arr_time = now.strftime('%H:%M')
-                            # Standardize time format
                             try: arr_time = datetime.strptime(arr_time, '%H:%M:%S').strftime('%H:%M')
                             except: pass
                             try: arr_time = datetime.strptime(arr_time, '%H:%M').strftime('%H:%M')
@@ -262,7 +261,7 @@ try:
                     prev_place = curr_place
             
             if arrivals_to_log:
-                latest_arrival = arrivals_to_log[-1] # Grabs only the absolute newest arrival
+                latest_arrival = arrivals_to_log[-1] 
                 
                 today_logs = log_df[log_df['Date'] == today_str]
                 today_preps = today_logs[today_logs['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME']
@@ -278,23 +277,58 @@ try:
                         break
                 
                 if not already_logged:
-                    smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [
-                        today_str, latest_arrival, "RUNNING", GS_FORMULA, "PRE", "Prepare after return back home", "", "Auto-started from Location Data"
-                    ])
-                    get_all_ecosystem_data.clear()
-                    st.toast("🏠 Welcome Home! Started your prep timer.")
-                    time.sleep(1.0)
-                    st.rerun()
+                    arr_dt = datetime.strptime(f"{today_str} {latest_arrival}", "%Y-%m-%d %H:%M")
+                    arr_dt = ist_timezone.localize(arr_dt)
+                    mins_since = (now - arr_dt).total_seconds() / 60.0
+                    
+                    if mins_since >= 10:
+                        # GHOST MODE: Over 10 mins passed, log it invisibly in the background
+                        end_dt = arr_dt + timedelta(minutes=10)
+                        smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [
+                            today_str, latest_arrival, end_dt.strftime('%H:%M'), "0:10", "PRE", "Prepare after return back home", "", "Auto-completed from Location Data"
+                        ])
+                        get_all_ecosystem_data.clear()
+                        st.rerun()
+                    else:
+                        # NORMAL MODE: Just arrived, start the live timer
+                        smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [
+                            today_str, latest_arrival, "RUNNING", GS_FORMULA, "PRE", "Prepare after return back home", "", "Auto-started from Location Data"
+                        ])
+                        get_all_ecosystem_data.clear()
+                        st.toast("🏠 Welcome Home! Started your 10m prep timer.")
+                        time.sleep(1.0)
+                        st.rerun()
+
+        # --- AUTO-STOP RUNNING TIMERS ---
+        running_preps = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME')]
+        for idx, p_row in running_preps.iterrows():
+            p_start = str(p_row['Start_Time']).strip()
+            arr_dt = datetime.strptime(f"{today_str} {p_start}", "%Y-%m-%d %H:%M")
+            arr_dt = ist_timezone.localize(arr_dt)
+            mins_since = (now - arr_dt).total_seconds() / 60.0
+            
+            if mins_since >= 10:
+                sheet_row = idx + 2
+                end_dt = arr_dt + timedelta(minutes=10)
+                log_sheet = get_main_spreadsheet().worksheet("activity_log")
+                log_sheet.update_cell(sheet_row, 3, end_dt.strftime('%H:%M'))
+                log_sheet.update_cell(sheet_row, 4, GS_FORMULA)
+                get_all_ecosystem_data.clear()
+                st.toast("✅ Auto-saved 10m Home Prep block.")
+                time.sleep(1.0)
+                st.rerun()
+
     except Exception as e:
         print(f"Location Sync Error: {e}")
+
+    # Ensure log_df and running tasks are up to date after potential auto-stops
+    running_tasks = log_df[log_df['End_Time'] == 'RUNNING']
+    active_count = len(running_tasks)
 
     # ==========================================
     # --- ROUTINE HUB UI ---
     # ==========================================
 
-    running_tasks = log_df[log_df['End_Time'] == 'RUNNING']
-    active_count = len(running_tasks)
-    
     if active_count > 0:
         st.markdown(f'<div style="position: fixed; bottom: 30px; left: 20px; background-color: #ff4b4b; color: white; padding: 8px 16px; border-radius: 20px; box-shadow: 0px 4px 12px rgba(0,0,0,0.3); font-weight: bold; font-size: 16px; z-index: 9999; pointer-events: none; display: flex; align-items: center; justify-content: center;"><span style="font-size: 16px; margin-right: 6px; animation: pulse 1.5s infinite;">⏱️</span> {active_count}</div>', unsafe_allow_html=True)
 
@@ -396,10 +430,18 @@ try:
     current_sub_activities = scheduled_sub_activities
     current_check_list = scheduled_check_list
 
+    # Override for Home Prep mode
+    is_prep_running = any(running_tasks['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME')
+    if is_prep_running:
+        current_activity = "PREPARE AFTER RETURN BACK HOME"
+        prep_row = running_tasks[running_tasks['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME'].iloc[0]
+        try: current_activity_start = datetime.strptime(str(prep_row['Start_Time']).strip(), '%H:%M').time()
+        except: pass
+
     if current_activity in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"]: color = "#ff4b4b" 
     elif current_activity in ["WORK", "REPORT", "TASK", "HOME TASK", "HOME UTILITIES"]: color = "#0068c9" 
     elif current_activity == "HEALTH": color = "#2e7b32" 
-    elif current_activity in ["SLEEP", "PRE", "TEA", "OUT"]: color = "#ff9f36" 
+    elif current_activity in ["SLEEP", "PRE", "TEA", "OUT", "PREPARE AFTER RETURN BACK HOME"]: color = "#ff9f36" 
     else: color = "#333333" 
 
     filtered_app_list = [app for app in base_app_list if app[0] in active_apps_filter] if active_apps_filter else []
@@ -691,6 +733,7 @@ try:
             for idx, active_row in running_tasks.iterrows():
                 sheet_row = idx + 2 
                 display_name = str(active_row['Sub_Activities']) or str(active_row['Activity'])
+                is_home_prep = (str(active_row['Sub_Activities']).strip().upper() == 'PREPARE AFTER RETURN BACK HOME')
                 
                 try:
                     dt_naive = datetime.strptime(f"{active_row['Date']} {active_row['Start_Time']}", "%Y-%m-%d %H:%M")
@@ -710,27 +753,30 @@ try:
                 
                 st.markdown(f'<div style="background-color: #f8f9fa; border-left: 5px solid {p_color}; padding: 12px; border-radius: 6px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);"><div style="display: flex; justify-content: space-between; align-items: center;"><strong style="font-size: 16px; color: #333;">⏳ {display_name}</strong><span style="color: #666; font-size: 14px;">Total: {mins_elapsed}m</span></div><div style="margin-top: 8px; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;"><span style="color: {p_color}; font-weight: bold; font-size: 14px;">{p_state} (Cycle {pomodoro_count})</span><span style="color: #555; font-size: 13px; font-weight: bold;">{p_left}m left</span></div><div style="width: 100%; background-color: #e0e0e0; border-radius: 4px; height: 6px;"><div style="width: {p_prog * 100}%; background-color: {p_color}; height: 6px; border-radius: 4px; transition: width 0.5s ease;"></div></div></div>', unsafe_allow_html=True)
 
-                col_stop, col_cancel = st.columns(2)
-                with col_stop:
-                    if st.button("🛑 SAVE", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
-                        log_sheet = get_main_spreadsheet().worksheet("activity_log")
-                        log_sheet.update_cell(sheet_row, 3, now.strftime('%H:%M')) 
-                        log_sheet.update_cell(sheet_row, 4, GS_FORMULA)                   
-                        if str(active_row['Notes']).strip() == "": log_sheet.update_cell(sheet_row, 8, "Auto-logged via Timer") 
-                            
-                        if "[Due:" in str(active_row['Sub_Activities']):
-                            matches = future_df[(future_df['Task_Name'].str.strip() == str(active_row['Sub_Activities']).split(" [Due:")[0].strip()) & (future_df['Type'] == 'Sub-Activity')]
-                            if not matches.empty:
-                                get_main_spreadsheet().worksheet("future_tasks").update_cell(int(matches.iloc[0]['row_index']), 7, "Completed") 
-                                get_all_ecosystem_data.clear()
-                        get_all_ecosystem_data.clear() 
-                        st.rerun()
+                if is_home_prep:
+                    st.markdown(f"<div style='text-align:center; color:#888; font-size:13px; margin-bottom:15px; font-weight:bold;'><i>⏳ This timer will automatically close in {10 - mins_elapsed} minutes.</i></div>", unsafe_allow_html=True)
+                else:
+                    col_stop, col_cancel = st.columns(2)
+                    with col_stop:
+                        if st.button("🛑 SAVE", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
+                            log_sheet = get_main_spreadsheet().worksheet("activity_log")
+                            log_sheet.update_cell(sheet_row, 3, now.strftime('%H:%M')) 
+                            log_sheet.update_cell(sheet_row, 4, GS_FORMULA)                   
+                            if str(active_row['Notes']).strip() == "": log_sheet.update_cell(sheet_row, 8, "Auto-logged via Timer") 
+                                
+                            if "[Due:" in str(active_row['Sub_Activities']):
+                                matches = future_df[(future_df['Task_Name'].str.strip() == str(active_row['Sub_Activities']).split(" [Due:")[0].strip()) & (future_df['Type'] == 'Sub-Activity')]
+                                if not matches.empty:
+                                    get_main_spreadsheet().worksheet("future_tasks").update_cell(int(matches.iloc[0]['row_index']), 7, "Completed") 
+                                    get_all_ecosystem_data.clear()
+                            get_all_ecosystem_data.clear() 
+                            st.rerun()
 
-                with col_cancel:
-                    if st.button("❌ CANCEL", key=f"cancel_{sheet_row}", use_container_width=True):
-                        get_main_spreadsheet().worksheet("activity_log").delete_rows(sheet_row)
-                        get_all_ecosystem_data.clear() 
-                        st.rerun()
+                    with col_cancel:
+                        if st.button("❌ CANCEL", key=f"cancel_{sheet_row}", use_container_width=True):
+                            get_main_spreadsheet().worksheet("activity_log").delete_rows(sheet_row)
+                            get_all_ecosystem_data.clear() 
+                            st.rerun()
         
         avail_subs = [t for t in sub_list if t not in running_tasks['Sub_Activities'].tolist()]
         if avail_subs:

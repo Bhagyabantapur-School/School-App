@@ -78,7 +78,6 @@ def init_connection():
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
     return gspread.authorize(creds)
 
-# Restored Helper Functions for Saving Data
 def get_main_spreadsheet():
     return init_connection().open("MY ROUTINE 2026")
 
@@ -156,7 +155,17 @@ def get_all_ecosystem_data():
         tracker_data = {row['App Name']: str(row['Last Opened']) for row in t_records}
     except: tracker_data = {}
 
-    return df, log_df, future_df, holidays_df, payment_df, must_do_df, pre_df, tracker_data
+    # 9. Location Data
+    try:
+        loc_sheet = money_ss.worksheet("LOCATION_DATA")
+        loc_data = loc_sheet.get_all_values()
+        if len(loc_data) > 1:
+            loc_df = pd.DataFrame(loc_data[1:], columns=loc_data[0])
+        else:
+            loc_df = pd.DataFrame()
+    except: loc_df = pd.DataFrame()
+
+    return df, log_df, future_df, holidays_df, payment_df, must_do_df, pre_df, tracker_data, loc_df
 
 
 def get_last_done_str(item_name, log_df, now, col_name='Sub_Activities'):
@@ -202,7 +211,6 @@ def log_and_open_app(app_name, target_file, cached_data, now_dt):
         
     cached_data[app_name] = now_str 
     if app_name != "Live Routine Hub":
-        # Save the selected app into session state so it can be rendered as an IFrame inside the hub
         st.session_state.opened_app_file = target_file
         st.session_state.opened_app_name = app_name
         st.rerun()
@@ -211,7 +219,7 @@ def log_and_open_app(app_name, target_file, cached_data, now_dt):
 # Main Logic
 # ==========================================
 try:
-    df, log_df, future_df, holidays_df, payment_df, must_do_df, pre_df, tracker_data = get_all_ecosystem_data()
+    df, log_df, future_df, holidays_df, payment_df, must_do_df, pre_df, tracker_data, loc_df = get_all_ecosystem_data()
     
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist_timezone)
@@ -220,6 +228,64 @@ try:
     current_day = now.strftime('%A')
     today_str = now.strftime('%Y-%m-%d')
     current_time = now.time()
+
+    # ==========================================
+    # --- AUTO-LOGGER FOR HOME RETURN ---
+    # ==========================================
+    try:
+        if not loc_df.empty and 'Place' in loc_df.columns:
+            if 'Date' in loc_df.columns:
+                today_loc = loc_df[loc_df['Date'] == today_str]
+            else:
+                today_loc = loc_df.tail(50) # Fallback if Date is missing
+
+            prev_place = ""
+            arrivals_to_log = []
+            
+            # Identify arrivals to Home after being somewhere else
+            for _, r in today_loc.iterrows():
+                curr_place = str(r.get('Place', '')).strip().upper()
+                
+                if curr_place == 'HOME' and prev_place not in ['HOME', '']:
+                    arr_time = str(r.get('Time', r.get('Start_Time', now.strftime('%H:%M')))).strip()
+                    if not arr_time: arr_time = now.strftime('%H:%M')
+                    arrivals_to_log.append(arr_time)
+                
+                if curr_place != '':
+                    prev_place = curr_place
+            
+            # Check how many 'Prepare after return' logs already exist today
+            today_logs = log_df[log_df['Date'] == today_str]
+            preps_logged = len(today_logs[today_logs['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME'])
+            
+            # Auto-log if we have more unlogged arrivals than logged preps
+            if len(arrivals_to_log) > preps_logged:
+                for i in range(preps_logged, len(arrivals_to_log)):
+                    arr_time_str = arrivals_to_log[i]
+                    try:
+                        s_dt = datetime.strptime(arr_time_str, '%H:%M')
+                        e_dt = s_dt + timedelta(minutes=10)
+                        start_val = s_dt.strftime('%H:%M')
+                        end_val = e_dt.strftime('%H:%M')
+                    except:
+                        start_val = now.strftime('%H:%M')
+                        e_dt = now + timedelta(minutes=10)
+                        end_val = e_dt.strftime('%H:%M')
+                    
+                    smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [
+                        today_str, start_val, end_val, "0:10", "PRE", "Prepare after return back home", "", "Auto-logged from Location Data"
+                    ])
+                
+                get_all_ecosystem_data.clear()
+                st.toast("🏠 Welcome Home! Auto-logged 10 mins PRE.")
+                time.sleep(1.0)
+                st.rerun()
+    except Exception as e:
+        print(f"Location Sync Error: {e}")
+
+    # ==========================================
+    # --- ROUTINE HUB UI ---
+    # ==========================================
 
     running_tasks = log_df[log_df['End_Time'] == 'RUNNING']
     active_count = len(running_tasks)

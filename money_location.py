@@ -743,17 +743,30 @@ with tab_location:
         with wh_c1: wh_open = st.time_input("Open Time", value=datetime.strptime("09:00", "%H:%M").time())
         with wh_c2: wh_close = st.time_input("Close Time", value=datetime.strptime("17:00", "%H:%M").time())
         
+        # --- NEW: BREAK / LUNCH TIME OPTION ---
+        add_break = st.checkbox("➕ Add Break / Lunch Time")
+        if add_break:
+            b_c1, b_c2 = st.columns(2)
+            with b_c1: wh_b_start = st.time_input("Break Start", value=datetime.strptime("14:00", "%H:%M").time())
+            with b_c2: wh_b_end = st.time_input("Break End", value=datetime.strptime("14:30", "%H:%M").time())
+        
         if st.button("💾 Save Working Hours", type="primary", use_container_width=True):
             if wh_place:
                 try:
                     try:
                         wh_sheet = sh.worksheet("WORKING_HOURS")
+                        headers = wh_sheet.row_values(1)
+                        if "Break_Start" not in headers:
+                            wh_sheet.update_cell(1, 5, "Break_Start")
+                            wh_sheet.update_cell(1, 6, "Break_End")
                     except gspread.exceptions.WorksheetNotFound:
-                        # Create with Day column if it doesn't exist
-                        wh_sheet = sh.add_worksheet(title="WORKING_HOURS", rows="100", cols="4")
-                        wh_sheet.append_row(["Place", "Day", "Open", "Close"])
+                        wh_sheet = sh.add_worksheet(title="WORKING_HOURS", rows="100", cols="6")
+                        wh_sheet.append_row(["Place", "Day", "Open", "Close", "Break_Start", "Break_End"])
                     
-                    wh_sheet.append_row([wh_place, wh_day, wh_open.strftime("%H:%M"), wh_close.strftime("%H:%M")])
+                    b_start_str = wh_b_start.strftime("%H:%M") if add_break else ""
+                    b_end_str = wh_b_end.strftime("%H:%M") if add_break else ""
+                    
+                    wh_sheet.append_row([wh_place, wh_day, wh_open.strftime("%H:%M"), wh_close.strftime("%H:%M"), b_start_str, b_end_str])
                     load_working_hours.clear()
                     st.success(f"Saved Working Hours for {wh_place} on {wh_day}")
                 except Exception as e: st.error(f"Error: {e}")
@@ -809,7 +822,7 @@ with tab_location:
                             if current_day_name.lower() in last_closed.lower() or last_closed.lower() in current_day_name.lower():
                                 st.warning(f"⚠️ **Note:** {dyn_next_stop} is usually marked as CLOSED on {last_closed}s!")
                     
-                    # 2. Working Hours Check
+                    # 2. Working Hours & Break Check
                     df_wh_warn = load_working_hours()
                     if not df_wh_warn.empty and 'Place' in df_wh_warn.columns:
                         wh_match = df_wh_warn[df_wh_warn['Place'].astype(str).str.strip() == dyn_next_stop]
@@ -834,7 +847,19 @@ with tab_location:
                                 open_t = datetime.strptime(str(last_wh.get('Open', '00:00')), "%H:%M").time()
                                 close_t = datetime.strptime(str(last_wh.get('Close', '23:59')), "%H:%M").time()
                                 curr_t = get_ist_now().time()
-                                if not (open_t <= curr_t <= close_t):
+                                
+                                on_break = False
+                                if 'Break_Start' in last_wh and 'Break_End' in last_wh:
+                                    b_start_str = str(last_wh.get('Break_Start', ''))
+                                    b_end_str = str(last_wh.get('Break_End', ''))
+                                    if b_start_str and b_end_str and b_start_str != 'nan' and b_end_str != 'nan':
+                                        b_open = datetime.strptime(b_start_str, "%H:%M").time()
+                                        b_close = datetime.strptime(b_end_str, "%H:%M").time()
+                                        if b_open <= curr_t <= b_close:
+                                            on_break = True
+                                            st.warning(f"⚠️ **Note:** {dyn_next_stop} is currently on BREAK/LUNCH! ({b_start_str} - {b_end_str}).")
+                                
+                                if not on_break and not (open_t <= curr_t <= close_t):
                                     st.warning(f"⚠️ **Note:** {dyn_next_stop} might be closed right now! Hours: {last_wh.get('Open')} - {last_wh.get('Close')}.")
                             except: pass
 

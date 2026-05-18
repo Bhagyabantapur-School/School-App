@@ -38,10 +38,11 @@ def init_connection():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
     client = gspread.authorize(creds)
-    return client.open("sk_money_location")
+    # Open both the main tracking sheet and the new PEOPLE sheet
+    return client.open("sk_money_location"), client.open("PEOPLE")
 
 try:
-    sh = init_connection()
+    sh, sh_people = init_connection()
 except Exception as e:
     st.error(f"Could not connect to Google Sheets. Error: {e}")
     st.stop()
@@ -70,6 +71,17 @@ def load_shopping_data():
 @st.cache_data(ttl=60)
 def load_bike_data():
     try: return pd.DataFrame(sh.worksheet("BIKE_LOG").get_all_records())
+    except: return pd.DataFrame()
+
+# --- NEW CACHES FOR PEOPLE SHEET ---
+@st.cache_data(ttl=60)
+def load_people_names():
+    try: return pd.DataFrame(sh_people.worksheet("People").get_all_records())
+    except: return pd.DataFrame()
+
+@st.cache_data(ttl=60)
+def load_interactions():
+    try: return pd.DataFrame(sh_people.worksheet("People Interaction").get_all_records())
     except: return pd.DataFrame()
 
 config_df = load_config()
@@ -219,15 +231,12 @@ if check_midnight_rollover():
 # ==========================================
 def get_home_occupants(arriving_people_str):
     time_now = get_ist_now()
-    
     if time_now.hour >= 14:
         return "I Baso, Suborno, Mother"
         
     df_loc = load_location_data()
-    
     safe_arriving_str = arriving_people_str.replace('I Baso', 'I, Baso')
     arriving_people = set([p.strip() for p in safe_arriving_str.split(',') if p.strip()])
-    
     order = ["I", "Baso", "Suborno", "Mother"]
     
     if df_loc.empty:
@@ -259,15 +268,12 @@ def get_home_occupants(arriving_people_str):
         now_home = arriving_people.union({"Baso", "Suborno", "Mother"})
         
     ordered_home = [p for p in order if p in now_home] + [p for p in now_home if p not in order]
-    
     return ", ".join(ordered_home).replace("I, Baso", "I Baso")
 
 def sync_journey_state():
     if 'state_synced' not in st.session_state:
         df_loc = load_location_data()
         if not df_loc.empty:
-            
-            # --- NEW MEMORY ENGINE ---
             last_move_val = "BIKE"
             for i in range(len(df_loc)-1, -1, -1):
                 m = str(df_loc.iloc[i].get('Move', '')).strip()
@@ -275,7 +281,6 @@ def sync_journey_state():
                     last_move_val = m
                     break
             st.session_state.current_move = last_move_val
-            # --------------------------
 
             recent_route = None
             if 'Remark' in df_loc.columns:
@@ -289,12 +294,10 @@ def sync_journey_state():
 
             last_record = df_loc.iloc[-1].to_dict()
             move_val = str(last_record.get('Move', '')).strip()
-            
             st.session_state.current_people = str(last_record.get('People', 'I'))
             
             if move_val not in ["", "- Stationary -", "nan"]:
                 st.session_state.route_active = True
-                
                 rem = str(last_record.get('Remark', ''))
                 if "Started Route:" in rem:
                     st.session_state.active_route = rem.split("Started Route:")[-1].split("towards")[0].strip()
@@ -316,7 +319,6 @@ sync_journey_state()
 # ==========================================
 st.title("📱 SK Ecosystem - Core")
 
-# --- ONLY MONEY AND LOCATION TABS REMAIN ---
 tab_money, tab_location = st.tabs(["💰 Money", "📍 Location"])
 
 current_loc, loc_duration = get_current_location_details()
@@ -329,12 +331,9 @@ with tab_money:
     c_loc1, c_loc2 = st.columns([3, 1])
     with c_loc1:
         loc_display = f"📍 Location: **{current_loc}** ({loc_duration})" if loc_duration else f"📍 Location: **{current_loc}**"
-        if current_loc and current_shop_type:
-            st.success(f"{loc_display} | 🛒 **{current_shop_type}**")
-        elif current_loc:
-            st.success(loc_display)
-        else:
-            st.info("📍 Location: Unknown")
+        if current_loc and current_shop_type: st.success(f"{loc_display} | 🛒 **{current_shop_type}**")
+        elif current_loc: st.success(loc_display)
+        else: st.info("📍 Location: Unknown")
     with c_loc2:
         if st.button("🔄 Sync Loc", use_container_width=True):
             load_location_data.clear()
@@ -359,7 +358,6 @@ with tab_money:
                     
                     final_entity = "PERS" if chk_pers else ""
                     final_acc = "MB" if chk_mb else ""
-                    
                     final_tf = current_loc if should_inject_tofrom(current_loc) else ""
                     
                     row_data = [today_str, time_str, in_val, out_val, final_acc, "", final_entity, "", "", "", final_tf, current_loc or "", "⚠️ INCOMPLETE"]
@@ -367,8 +365,7 @@ with tab_money:
                     load_money_data.clear()
                     st.success("Fast saved! Complete it later.")
                     st.rerun()
-                else:
-                    st.warning("Enter an amount!")
+                else: st.warning("Enter an amount!")
         
         st.caption(f"Logged under App Location: {current_loc or 'Unknown'}")
         
@@ -384,8 +381,7 @@ with tab_money:
                     is_out = float(row.get('Out', 0) or 0) > 0
                     amt_display = f"₹{row['Out']} (OUT)" if is_out else f"₹{row['In']} (IN)"
                     st.caption(f"🔸 **{row.get('Date', '')}** at {row.get('Time', '')} | **{amt_display}** | Loc: {row.get('Location', '')}")
-            else:
-                st.caption("✅ No incomplete quick entries waiting!")
+            else: st.caption("✅ No incomplete quick entries waiting!")
 
     # --- BIKE REFUEL EXPANDER ---
     with st.expander("🏍️ Quick Log: Bike Refuel & Auto-Mileage"):
@@ -410,27 +406,18 @@ with tab_money:
                         date_str = time_now.strftime("%d-%m-%Y")
                         time_str = time_now.strftime("%H:%M")
                         
-                        # 1. Log to BIKE_LOG
                         sh.worksheet("BIKE_LOG").append_row([date_str, time_str, b_odo, b_litres, b_cost])
-                        
-                        # 2. Automatically log to MONEY_DATA
                         tf_val = current_loc if should_inject_tofrom(current_loc) else "Petrol Pump"
                         sh.worksheet("MONEY_DATA").append_row([
                             date_str, time_str, "", b_cost, b_acc, "Salary", "PERS", "NEEDS", 
                             "Transport", "Petrol", tf_val, current_loc or "", f"Odo: {b_odo}"
                         ])
-                        
                         load_bike_data.clear()
                         load_money_data.clear()
                         st.success("⛽ Refuel Logged! Mileage updated in Dashboard.")
                         st.rerun()
-                    except Exception as e:
-                        if "WorksheetNotFound" in str(e):
-                            st.error("⚠️ Error: Please create a sheet tab named 'BIKE_LOG' first!")
-                        else:
-                            st.error(f"Error: {e}")
-                else:
-                    st.warning("⚠️ Ensure Odometer is higher than last time, and Litres/Cost are greater than 0.")
+                    except Exception as e: st.error(f"Error: {e}")
+                else: st.warning("⚠️ Ensure Odometer is higher than last time, and Litres/Cost are greater than 0.")
 
     st.divider()
 
@@ -549,6 +536,7 @@ with tab_money:
                                 st.error(f"Error: {e}")
                     st.divider()
 
+    # --- EXPRESS CHECKOUT FOR PENDING SHOPPING ---
     if current_loc and current_shop_type:
         df_shop = load_shopping_data()
         if not df_shop.empty and 'Status' in df_shop.columns:
@@ -567,7 +555,6 @@ with tab_money:
                             raw_cost = row.get('Est_Cost', 0)
                             try: safe_cost = float(raw_cost) if str(raw_cost).strip() != "" else 0.0
                             except (ValueError, TypeError): safe_cost = 0.0
-                            
                             final_cost = st.number_input("Cost", value=safe_cost, key=f"cost_{idx}", label_visibility="collapsed")
                         with colC:
                             if st.button("💸 Pay & Clear", key=f"pay_{idx}", use_container_width=True, type="primary"):
@@ -582,7 +569,6 @@ with tab_money:
                                     time_now = get_ist_now()
                                     today_str = time_now.strftime("%d-%m-%Y")
                                     time_str = time_now.strftime("%H:%M")
-                                    
                                     final_tf = current_loc if should_inject_tofrom(current_loc) else ""
                                     
                                     money_row = [today_str, time_str, "", final_cost, str(row.get('Account', '')), str(row.get('Fund', '')), ent, cat, subcat, part_name, final_tf, current_loc, rem]
@@ -619,7 +605,6 @@ with tab_money:
             if 'Map_Entity' in config_df.columns:
                 mapped_entities = list(dict.fromkeys([str(e).strip() for e in config_df['Map_Entity'].dropna() if str(e).strip() != ""]))
             ent_opts = mapped_entities if mapped_entities else get_list("Entities")
-            
             entity = st.selectbox("Entity", ent_opts)
             
             if 'Map_Entity' in config_df.columns:
@@ -629,12 +614,10 @@ with tab_money:
                 if category == "-- Type New --":
                     category = st.text_input("Type New Category")
                     cat_df = pd.DataFrame() 
-                else:
-                    cat_df = ent_df[ent_df['Map_Category'].astype(str).str.strip() == category]
+                else: cat_df = ent_df[ent_df['Map_Category'].astype(str).str.strip() == category]
             else:
                 category = st.selectbox("Category", get_list("Categories") + ["-- Type New --"])
-                if category == "-- Type New --":
-                    category = st.text_input("Type New Category")
+                if category == "-- Type New --": category = st.text_input("Type New Category")
                 cat_df = pd.DataFrame()
                 
         with col2:
@@ -644,12 +627,10 @@ with tab_money:
                 if sub_cat == "-- Type New --":
                     sub_cat = st.text_input("Type New Sub Category")
                     sub_df = pd.DataFrame()
-                else:
-                    sub_df = cat_df[cat_df['Map_SubCat'].astype(str).str.strip() == sub_cat]
+                else: sub_df = cat_df[cat_df['Map_SubCat'].astype(str).str.strip() == sub_cat]
             else:
                 sub_cat = st.selectbox("Sub Category", get_list("Sub-Categories") + ["-- Type New --"])
-                if sub_cat == "-- Type New --":
-                    sub_cat = st.text_input("Type New Sub Category")
+                if sub_cat == "-- Type New --": sub_cat = st.text_input("Type New Sub Category")
                 sub_df = pd.DataFrame()
             
             if not sub_df.empty and 'Map_Particular' in sub_df.columns:
@@ -658,24 +639,20 @@ with tab_money:
                 if particulars == "-- Type New --":
                     particulars = st.text_input("Type New Particulars")
                     part_df = pd.DataFrame()
-                else:
-                    part_df = sub_df[sub_df['Map_Particular'].astype(str).str.strip() == particulars]
+                else: part_df = sub_df[sub_df['Map_Particular'].astype(str).str.strip() == particulars]
             else:
                 particulars = st.selectbox("Particulars", get_list("Particulars") + ["-- Type New --"])
-                if particulars == "-- Type New --":
-                    particulars = st.text_input("Type New Particulars")
+                if particulars == "-- Type New --": particulars = st.text_input("Type New Particulars")
                 part_df = pd.DataFrame()
                 
             mapped_tofrom = get_list("TO_FROM")
             to_from_opts = ["-- Type New --", "- None -"] + mapped_tofrom
             default_index = 1
-            
             if should_inject_tofrom(current_loc):
                 if current_loc not in to_from_opts:
                     to_from_opts.insert(2, current_loc)
                     default_index = 2
-                else:
-                    default_index = to_from_opts.index(current_loc)
+                else: default_index = to_from_opts.index(current_loc)
             
             to_from = st.selectbox("TO / FROM (Person/Entity)", to_from_opts, index=default_index)
             if to_from == "-- Type New --": to_from = st.text_input("Type New TO / FROM")
@@ -702,288 +679,308 @@ with tab_money:
                 load_money_data.clear() 
                 st.success(f"Saved: ₹{amount_in if amount_in > 0 else amount_out} logged!")
                 st.session_state.locked_date = get_ist_now().date() 
-            except Exception as e:
-                st.error(f"Failed to save: {e}")
+            except Exception as e: st.error(f"Failed to save: {e}")
 
 # ==========================================
 # TAB 2: LOCATION ENTRY FORM
 # ==========================================
 with tab_location:
-    
-    if 'target_destination' not in st.session_state: 
-        st.session_state.target_destination = ""
+    if 'target_destination' not in st.session_state: st.session_state.target_destination = ""
 
-    if not st.session_state.route_active or st.session_state.get('route_type') == "Dynamic":
-        # --- EXPANDABLE DYNAMIC ROUTE ---
-        with st.expander("🗺️ Dynamic Area Route", expanded=(not st.session_state.route_active)):
-            location_logic = get_location_logic()
-            route_opts = list(location_logic.keys())
-            
-            if not st.session_state.route_active:
-                d_col1, d_col2 = st.columns(2)
-                with d_col1:
-                    default_idx = 0
-                    if st.session_state.get('last_used_route') in route_opts:
-                        default_idx = route_opts.index(st.session_state.last_used_route)
-                        
-                    selected_route = st.selectbox("Select Route (Area)", route_opts, index=default_idx, key="dyn_route")
+    # ==========================================
+    # DYNAMIC AREA ROUTE EXPANDER
+    # ==========================================
+    with st.expander("🗺️ Dynamic Area Route", expanded=(not st.session_state.route_active)):
+        location_logic = get_location_logic()
+        route_opts = list(location_logic.keys())
+        
+        if not st.session_state.route_active:
+            d_col1, d_col2 = st.columns(2)
+            with d_col1:
+                default_idx = 0
+                if st.session_state.get('last_used_route') in route_opts:
+                    default_idx = route_opts.index(st.session_state.last_used_route)
                     
-                    places_for_route = location_logic.get(selected_route, [])
-                    if not places_for_route: places_for_route = ["-- No places mapped --"]
-                    
-                    is_sequential = selected_route.strip().lower().endswith('route')
-                    
-                    if is_sequential:
-                        dir_col1, dir_col2 = st.columns([1, 1])
-                        with dir_col1:
-                            route_direction = st.radio("Direction", ["Forward", "Return"], horizontal=True, key="dyn_dir")
-                            
-                        if current_loc in places_for_route:
-                            current_idx = places_for_route.index(current_loc)
-                            if route_direction == "Forward":
-                                available_places = places_for_route[current_idx + 1:]
-                            else:
-                                available_places = places_for_route[:current_idx][::-1]
-                            
-                            if not available_places:
-                                available_places = places_for_route 
-                        else:
-                            available_places = places_for_route if route_direction == "Forward" else places_for_route[::-1]
+                selected_route = st.selectbox("Select Route (Area)", route_opts, index=default_idx, key="dyn_route")
+                places_for_route = location_logic.get(selected_route, [])
+                if not places_for_route: places_for_route = ["-- No places mapped --"]
+                
+                is_sequential = selected_route.strip().lower().endswith('route')
+                if is_sequential:
+                    dir_col1, dir_col2 = st.columns([1, 1])
+                    with dir_col1: route_direction = st.radio("Direction", ["Forward", "Return"], horizontal=True, key="dyn_dir")
+                    if current_loc in places_for_route:
+                        current_idx = places_for_route.index(current_loc)
+                        if route_direction == "Forward": available_places = places_for_route[current_idx + 1:]
+                        else: available_places = places_for_route[:current_idx][::-1]
+                        if not available_places: available_places = places_for_route 
                     else:
-                        available_places = places_for_route
+                        available_places = places_for_route if route_direction == "Forward" else places_for_route[::-1]
+                else: available_places = places_for_route
 
-                    out_of_route = st.checkbox("📍 Visit place outside this route")
-                    
-                    if out_of_route:
-                        all_places = get_list("Places")
-                        dyn_next_stop_sel = st.selectbox("Next Stop (Other Place)", all_places + ["-- Type New --"], key="dyn_other_place")
-                        if dyn_next_stop_sel == "-- Type New --":
-                            dyn_next_stop = st.text_input("Type New Place Name", key="dyn_new_place")
-                        else:
-                            dyn_next_stop = dyn_next_stop_sel
-                    else:
-                        dyn_next_stop = st.selectbox("Next Stop", available_places, key="dyn_next_stop")
-                    
-                    transit_rules = get_transit_rules()
-                    current_pair = frozenset([str(current_loc).strip(), str(dyn_next_stop).strip()]) if current_loc else None
-                    
-                    pre_mode = st.session_state.get('current_move', 'BIKE')
-                    base_fare = 0.0
-                    
-                    if current_pair in transit_rules:
-                        if transit_rules[current_pair]['mode'] and transit_rules[current_pair]['mode'] not in ['WALK', 'BIKE', 'BIKE + WALK']:
-                            pre_mode = transit_rules[current_pair]['mode']
-                        base_fare = transit_rules[current_pair]['fare']
-
-                    move_options = ["BIKE", "WALK", "BIKE + WALK", "TOTO", "AUTO", "BUS"]
-                    if pre_mode and pre_mode not in move_options: move_options.append(pre_mode)
-                    default_mode_idx = move_options.index(pre_mode) if pre_mode in move_options else 0
-                    
-                    dyn_move = st.selectbox("Travel Mode", move_options, index=default_mode_idx, key="dyn_move")
-                    
-                    if dyn_move in ["WALK", "BIKE", "BIKE + WALK"]:
-                        base_fare = 0.0
-                    
-                with d_col2:
-                    people_opts = get_list("People")
-                    if not people_opts: people_opts = ["I"]
-                    if "I" not in people_opts: people_opts.insert(0, "I")
-                    
-                    default_people_idx = people_opts.index(st.session_state.current_people) if st.session_state.current_people in people_opts else 0
-                    dyn_people = st.selectbox("Companions", people_opts, index=default_people_idx, key="dyn_people")
-                    
-                    total_people = len([p for p in dyn_people.replace('I Baso', 'I, Baso').split(',') if p.strip()]) if dyn_people != "I" else 1
-                    
-                    child_tix = st.number_input("Child/Half Fares (Included in Companions)", min_value=0, max_value=total_people, value=0, step=1, key="dyn_child")
-                    
-                    actual_adults = total_people - child_tix
-                    calc_fare = (actual_adults * base_fare) + (child_tix * (base_fare / 2))
-                    
-                    if base_fare > 0:
-                        st.info(f"🧮 **Auto-Fare:** {actual_adults} Adult + {child_tix} Child/Half = **₹{calc_fare}**")
-                        
-                    fare_amt = st.number_input("Total Fare Amount (₹)", min_value=0.0, step=5.0, value=float(calc_fare))
-                    
-                    acc_opts = get_clean_accounts()
-                    default_acc_idx = acc_opts.index("MB") if "MB" in acc_opts else 0
-                    fare_acc = st.selectbox("Pay From", acc_opts, index=default_acc_idx, key="dyn_fare_acc")
-                
-                st.markdown("<br>", unsafe_allow_html=True)
-                c_btn1, c_btn2 = st.columns(2)
-                
-                with c_btn1:
-                    if st.button("🟢 Start Journey (New Area/Road)", key="start_dyn", use_container_width=True, type="primary"):
-                        if not dyn_next_stop or str(dyn_next_stop).strip() == "":
-                            st.error("⚠️ Please specify the next stop!")
-                        else:
-                            try:
-                                time_now = get_ist_now()
-                                loc_date_str = time_now.strftime("%d.%m.%y")
-                                money_date_str = time_now.strftime("%d-%m-%Y")
-                                time_str = time_now.strftime("%H:%M")
-                                
-                                sh.worksheet("LOCATION_DATA").append_row([
-                                    loc_date_str, time_str, 
-                                    dyn_move, "", dyn_people, f"Started Route: {selected_route} towards {dyn_next_stop}"
-                                ])
-                                
-                                if fare_amt > 0:
-                                    start_point = current_loc if current_loc else "Unknown"
-                                    part_str = f"{dyn_move} ({start_point} - {dyn_next_stop})"
-                                    remark_str = f"with {dyn_people}" if dyn_people != "I" else ""
-                                    
-                                    money_row = [
-                                        money_date_str, time_str, "", fare_amt, 
-                                        fare_acc, "Salary", "PERS", "VISIT", selected_route, 
-                                        part_str, start_point, start_point, remark_str
-                                    ]
-                                    sh.worksheet("MONEY_DATA").append_row(money_row)
-                                    load_money_data.clear()
-                                
-                                load_location_data.clear()
-                                st.session_state.route_active = True
-                                st.session_state.route_type = "Dynamic"
-                                st.session_state.active_route = selected_route
-                                st.session_state.last_used_route = selected_route
-                                st.session_state.current_move = dyn_move
-                                st.session_state.current_people = dyn_people
-                                st.session_state.target_destination = dyn_next_stop
-                                st.success(f"Started journey to {dyn_next_stop}!" + (f" Paid ₹{fare_amt} fare." if fare_amt > 0 else ""))
-                                st.rerun()
-                            except Exception as e: st.error(f"Error: {e}")
-
-                with c_btn2:
-                    if st.button("🚶‍♂️ Move Inside Same Complex", key="internal_dyn", use_container_width=True):
-                        if not dyn_next_stop or str(dyn_next_stop).strip() == "":
-                            st.error("⚠️ Please specify the next stop!")
-                        else:
-                            try:
-                                time_now = get_ist_now()
-                                loc_date_str = time_now.strftime("%d.%m.%y")
-                                money_date_str = time_now.strftime("%d-%m-%Y")
-                                time_str = time_now.strftime("%H:%M")
-                                
-                                sh.worksheet("LOCATION_DATA").append_row([
-                                    loc_date_str, time_str, 
-                                    dyn_move, selected_route, dyn_people, f"Started Route: {selected_route} towards {dyn_next_stop}"
-                                ])
-                                
-                                if fare_amt > 0:
-                                    start_point = current_loc if current_loc else "Unknown"
-                                    part_str = f"{dyn_move} ({start_point} - {dyn_next_stop})"
-                                    remark_str = f"with {dyn_people}" if dyn_people != "I" else ""
-                                    
-                                    money_row = [
-                                        money_date_str, time_str, "", fare_amt, 
-                                        fare_acc, "Salary", "PERS", "VISIT", selected_route, 
-                                        part_str, start_point, start_point, remark_str
-                                    ]
-                                    sh.worksheet("MONEY_DATA").append_row(money_row)
-                                    load_money_data.clear()
-                                
-                                load_location_data.clear()
-                                st.session_state.route_active = True
-                                st.session_state.route_type = "Dynamic"
-                                st.session_state.active_route = selected_route
-                                st.session_state.last_used_route = selected_route
-                                st.session_state.current_move = dyn_move
-                                st.session_state.current_people = dyn_people
-                                st.session_state.target_destination = dyn_next_stop
-                                st.success(f"Moving inside {selected_route} towards {dyn_next_stop}!" + (f" Paid ₹{fare_amt}." if fare_amt > 0 else ""))
-                                st.rerun()
-                            except Exception as e: st.error(f"Error: {e}")
-                    
-            else:
-                active_r = st.session_state.get('active_route', route_opts[0] if route_opts else "")
-                active_m = st.session_state.get('current_move', 'Transit')
-                active_p = st.session_state.get('current_people', 'I')
-                target_dest = st.session_state.get('target_destination', 'Destination')
-                
-                st.success(f"🚲 Journey in progress... ({active_m} with {active_p} towards {target_dest})")
-                
-                # --- NEW QUICK STOP FEATURE ---
-                st.markdown("---")
-                if not st.session_state.get('stop_active', False):
-                    if st.button("⏸️ Quick Stop (Urine/Call/Meet)", use_container_width=True):
-                        st.session_state.stop_active = True
-                        st.session_state.stop_start_time = get_ist_now()
-                        st.rerun()
-                else:
-                    st.warning(f"⏱️ Stop in progress since {st.session_state.stop_start_time.strftime('%H:%M')}...")
-                    stop_task = st.selectbox("Select Reason", ["Urine", "Call receive", "Call", "Meet", "-- Type New --"])
-                    if stop_task == "-- Type New --":
-                        stop_task = st.text_input("Type specific reason")
-                        
-                    if st.button("▶️ Save & Resume Journey", type="primary", use_container_width=True):
-                        if stop_task:
-                            try:
-                                time_now = get_ist_now()
-                                today_str = time_now.strftime("%d.%m.%y")
-                                start_t = st.session_state.stop_start_time
-                                duration_mins = int((time_now - start_t).total_seconds() / 60)
-                                
-                                # Log 1: The stop (Stationary)
-                                sh.worksheet("LOCATION_DATA").append_row([
-                                    today_str, start_t.strftime("%H:%M"), 
-                                    "- Stationary -", f"On the way ({active_r})", active_p, f"Quick Stop: {stop_task} ({duration_mins} min)"
-                                ])
-                                
-                                # Log 2: Resuming the journey
-                                sh.worksheet("LOCATION_DATA").append_row([
-                                    today_str, time_now.strftime("%H:%M"), 
-                                    active_m, "", active_p, f"Resumed Route: {active_r} towards {target_dest}"
-                                ])
-                                
-                                load_location_data.clear()
-                                st.session_state.stop_active = False
-                                st.session_state.stop_start_time = None
-                                st.success("Stop logged and journey resumed!")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Error: {e}")
-                        else:
-                            st.error("Please provide a reason.")
-                st.markdown("---")
-                # --- END QUICK STOP FEATURE ---
-
-                out_of_route_arr = st.checkbox("📍 Diverted to a different place?")
-                if out_of_route_arr:
+                out_of_route = st.checkbox("📍 Visit place outside this route")
+                if out_of_route:
                     all_places = get_list("Places")
-                    dyn_place_sel = st.selectbox("Actual Arrival Place", all_places + ["-- Type New --"])
-                    if dyn_place_sel == "-- Type New --":
-                        dyn_place = st.text_input("Type New Place Name")
-                    else:
-                        dyn_place = dyn_place_sel
-                else:
-                    places_for_route = location_logic.get(active_r, [])
-                    if target_dest not in places_for_route: places_for_route.insert(0, target_dest)
-                    dyn_place = st.selectbox("Confirm Arrival Place", places_for_route, index=places_for_route.index(target_dest), key="dyn_arrive")
+                    dyn_next_stop_sel = st.selectbox("Next Stop (Other Place)", all_places + ["-- Type New --"], key="dyn_other_place")
+                    if dyn_next_stop_sel == "-- Type New --": dyn_next_stop = st.text_input("Type New Place Name", key="dyn_new_place")
+                    else: dyn_next_stop = dyn_next_stop_sel
+                else: dyn_next_stop = st.selectbox("Next Stop", available_places, key="dyn_next_stop")
                 
-                if st.button(f"🛑 Log Arrival at chosen place", key="log_dyn", use_container_width=True, type="primary"):
-                    if not dyn_place or str(dyn_place).strip() == "":
-                        st.error("⚠️ Please specify your arrival place!")
+                transit_rules = get_transit_rules()
+                current_pair = frozenset([str(current_loc).strip(), str(dyn_next_stop).strip()]) if current_loc else None
+                pre_mode = st.session_state.get('current_move', 'BIKE')
+                base_fare = 0.0
+                
+                if current_pair in transit_rules:
+                    if transit_rules[current_pair]['mode'] and transit_rules[current_pair]['mode'] not in ['WALK', 'BIKE', 'BIKE + WALK']:
+                        pre_mode = transit_rules[current_pair]['mode']
+                    base_fare = transit_rules[current_pair]['fare']
+
+                move_options = ["BIKE", "WALK", "BIKE + WALK", "TOTO", "AUTO", "BUS"]
+                if pre_mode and pre_mode not in move_options: move_options.append(pre_mode)
+                default_mode_idx = move_options.index(pre_mode) if pre_mode in move_options else 0
+                
+                dyn_move = st.selectbox("Travel Mode", move_options, index=default_mode_idx, key="dyn_move")
+                if dyn_move in ["WALK", "BIKE", "BIKE + WALK"]: base_fare = 0.0
+                
+            with d_col2:
+                people_opts = get_list("People")
+                if not people_opts: people_opts = ["I"]
+                if "I" not in people_opts: people_opts.insert(0, "I")
+                
+                default_people_idx = people_opts.index(st.session_state.current_people) if st.session_state.current_people in people_opts else 0
+                dyn_people = st.selectbox("Companions", people_opts, index=default_people_idx, key="dyn_people")
+                
+                total_people = len([p for p in dyn_people.replace('I Baso', 'I, Baso').split(',') if p.strip()]) if dyn_people != "I" else 1
+                child_tix = st.number_input("Child/Half Fares (Included in Companions)", min_value=0, max_value=total_people, value=0, step=1, key="dyn_child")
+                
+                actual_adults = total_people - child_tix
+                calc_fare = (actual_adults * base_fare) + (child_tix * (base_fare / 2))
+                
+                if base_fare > 0: st.info(f"🧮 **Auto-Fare:** {actual_adults} Adult + {child_tix} Child/Half = **₹{calc_fare}**")
+                fare_amt = st.number_input("Total Fare Amount (₹)", min_value=0.0, step=5.0, value=float(calc_fare))
+                
+                acc_opts = get_clean_accounts()
+                default_acc_idx = acc_opts.index("MB") if "MB" in acc_opts else 0
+                fare_acc = st.selectbox("Pay From", acc_opts, index=default_acc_idx, key="dyn_fare_acc")
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            c_btn1, c_btn2 = st.columns(2)
+            
+            with c_btn1:
+                if st.button("🟢 Start Journey (New Area/Road)", key="start_dyn", use_container_width=True, type="primary"):
+                    if not dyn_next_stop or str(dyn_next_stop).strip() == "": st.error("⚠️ Please specify the next stop!")
                     else:
                         try:
                             time_now = get_ist_now()
+                            loc_date_str = time_now.strftime("%d.%m.%y")
+                            money_date_str = time_now.strftime("%d-%m-%Y")
+                            time_str = time_now.strftime("%H:%M")
                             
-                            arr_remark = "Logged Arrival"
-                            final_arr_people = active_p
-                            
-                            if dyn_place == "Girishmore Bus Stop" and "Suborno" in active_p:
-                                arr_remark = "Waiting for School Bus"
-                            elif dyn_place == "HOME":
-                                final_arr_people = get_home_occupants(active_p)
-                                
                             sh.worksheet("LOCATION_DATA").append_row([
-                                time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), 
-                                "- Stationary -", dyn_place, final_arr_people, arr_remark
+                                loc_date_str, time_str, dyn_move, "", dyn_people, f"Started Route: {selected_route} towards {dyn_next_stop}"
                             ])
+                            
+                            if fare_amt > 0:
+                                start_point = current_loc if current_loc else "Unknown"
+                                part_str = f"{dyn_move} ({start_point} - {dyn_next_stop})"
+                                remark_str = f"with {dyn_people}" if dyn_people != "I" else ""
+                                money_row = [money_date_str, time_str, "", fare_amt, fare_acc, "Salary", "PERS", "VISIT", selected_route, part_str, start_point, start_point, remark_str]
+                                sh.worksheet("MONEY_DATA").append_row(money_row)
+                                load_money_data.clear()
+                            
                             load_location_data.clear()
-                            st.session_state.route_active = False 
-                            st.session_state.route_type = None
-                            st.session_state.target_destination = ""
+                            st.session_state.route_active = True
+                            st.session_state.route_type = "Dynamic"
+                            st.session_state.active_route = selected_route
+                            st.session_state.last_used_route = selected_route
+                            st.session_state.current_move = dyn_move
+                            st.session_state.current_people = dyn_people
+                            st.session_state.target_destination = dyn_next_stop
+                            st.success(f"Started journey to {dyn_next_stop}!" + (f" Paid ₹{fare_amt} fare." if fare_amt > 0 else ""))
                             st.rerun()
                         except Exception as e: st.error(f"Error: {e}")
+
+            with c_btn2:
+                if st.button("🚶‍♂️ Move Inside Same Complex", key="internal_dyn", use_container_width=True):
+                    if not dyn_next_stop or str(dyn_next_stop).strip() == "": st.error("⚠️ Please specify the next stop!")
+                    else:
+                        try:
+                            time_now = get_ist_now()
+                            loc_date_str = time_now.strftime("%d.%m.%y")
+                            money_date_str = time_now.strftime("%d-%m-%Y")
+                            time_str = time_now.strftime("%H:%M")
+                            
+                            sh.worksheet("LOCATION_DATA").append_row([
+                                loc_date_str, time_str, dyn_move, selected_route, dyn_people, f"Started Route: {selected_route} towards {dyn_next_stop}"
+                            ])
+                            
+                            if fare_amt > 0:
+                                start_point = current_loc if current_loc else "Unknown"
+                                part_str = f"{dyn_move} ({start_point} - {dyn_next_stop})"
+                                remark_str = f"with {dyn_people}" if dyn_people != "I" else ""
+                                money_row = [money_date_str, time_str, "", fare_amt, fare_acc, "Salary", "PERS", "VISIT", selected_route, part_str, start_point, start_point, remark_str]
+                                sh.worksheet("MONEY_DATA").append_row(money_row)
+                                load_money_data.clear()
+                            
+                            load_location_data.clear()
+                            st.session_state.route_active = True
+                            st.session_state.route_type = "Dynamic"
+                            st.session_state.active_route = selected_route
+                            st.session_state.last_used_route = selected_route
+                            st.session_state.current_move = dyn_move
+                            st.session_state.current_people = dyn_people
+                            st.session_state.target_destination = dyn_next_stop
+                            st.success(f"Moving inside {selected_route} towards {dyn_next_stop}!" + (f" Paid ₹{fare_amt}." if fare_amt > 0 else ""))
+                            st.rerun()
+                        except Exception as e: st.error(f"Error: {e}")
+                
+        else:
+            active_r = st.session_state.get('active_route', route_opts[0] if route_opts else "")
+            active_m = st.session_state.get('current_move', 'Transit')
+            active_p = st.session_state.get('current_people', 'I')
+            target_dest = st.session_state.get('target_destination', 'Destination')
+            
+            st.success(f"🚲 Journey in progress... ({active_m} with {active_p} towards {target_dest})")
+
+            out_of_route_arr = st.checkbox("📍 Diverted to a different place?")
+            if out_of_route_arr:
+                all_places = get_list("Places")
+                dyn_place_sel = st.selectbox("Actual Arrival Place", all_places + ["-- Type New --"])
+                if dyn_place_sel == "-- Type New --": dyn_place = st.text_input("Type New Place Name")
+                else: dyn_place = dyn_place_sel
+            else:
+                places_for_route = location_logic.get(active_r, [])
+                if target_dest not in places_for_route: places_for_route.insert(0, target_dest)
+                dyn_place = st.selectbox("Confirm Arrival Place", places_for_route, index=places_for_route.index(target_dest), key="dyn_arrive")
+            
+            if st.button(f"🛑 Log Arrival at chosen place", key="log_dyn", use_container_width=True, type="primary"):
+                if not dyn_place or str(dyn_place).strip() == "": st.error("⚠️ Please specify your arrival place!")
+                else:
+                    try:
+                        time_now = get_ist_now()
+                        arr_remark = "Logged Arrival"
+                        final_arr_people = active_p
+                        
+                        if dyn_place == "Girishmore Bus Stop" and "Suborno" in active_p: arr_remark = "Waiting for School Bus"
+                        elif dyn_place == "HOME": final_arr_people = get_home_occupants(active_p)
+                            
+                        sh.worksheet("LOCATION_DATA").append_row([
+                            time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), "- Stationary -", dyn_place, final_arr_people, arr_remark
+                        ])
+                        load_location_data.clear()
+                        st.session_state.route_active = False 
+                        st.session_state.route_type = None
+                        st.session_state.target_destination = ""
+                        st.rerun()
+                    except Exception as e: st.error(f"Error: {e}")
+
+    # ==========================================
+    # QUICK STOP EXPANDER (ALWAYS AVAILABLE)
+    # ==========================================
+    with st.expander("⏸️ Quick Stop (Log interactions)", expanded=st.session_state.get('stop_active', False)):
+        if not st.session_state.get('stop_active', False):
+            if st.button("⏸️ Start Quick Stop", use_container_width=True):
+                st.session_state.stop_active = True
+                st.session_state.stop_start_time = get_ist_now()
+                st.rerun()
+        else:
+            time_now = get_ist_now()
+            start_t = st.session_state.stop_start_time
+            total_seconds = int((time_now - start_t).total_seconds())
+            running_minutes = total_seconds // 60
+            
+            st.warning(f"⏱️ Stop in progress since {start_t.strftime('%H:%M')} ({running_minutes} min so far)...")
+            stop_task = st.selectbox("Select Reason", ["Urine", "Call receive", "Call", "Meet", "-- Type New --"])
+            if stop_task == "-- Type New --": stop_task = st.text_input("Type specific reason")
+            
+            contact_name = ""
+            if stop_task in ["Call receive", "Call", "Meet"]:
+                df_names = load_people_names()
+                people_list = ["-- Select Name --", "-- Type New --"]
+                if not df_names.empty and 'Name' in df_names.columns:
+                    people_list.extend([str(n).strip() for n in df_names['Name'].dropna() if str(n).strip() != ""])
+                
+                sel_name = st.selectbox("Contact Name", people_list)
+                if sel_name == "-- Type New --": contact_name = st.text_input("Type New Name")
+                elif sel_name != "-- Select Name --": contact_name = sel_name
+
+            btn_label = "▶️ Save & Resume Journey" if st.session_state.route_active else "💾 Save Quick Stop"
+            if st.button(btn_label, type="primary", use_container_width=True):
+                if stop_task:
+                    try:
+                        time_now_stop = get_ist_now()
+                        today_str = time_now_stop.strftime("%d.%m.%y")
+                        today_people_str = time_now_stop.strftime("%d-%m-%Y")
+                        
+                        # --- STRICT 00:00:00 DURATION CALCULATION ---
+                        duration_secs = int((time_now_stop - start_t).total_seconds())
+                        hours, remainder = divmod(duration_secs, 3600)
+                        minutes, seconds = divmod(remainder, 60)
+                        duration_str_hhmmss = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                        
+                        stop_desc = f"Quick Stop: {stop_task}" + (f" ({contact_name})" if contact_name else "")
+                        
+                        loc = current_loc or "On the way"
+                        if st.session_state.route_active:
+                            active_r = st.session_state.get('active_route', '')
+                            active_m = st.session_state.get('current_move', 'Transit')
+                            active_p = st.session_state.get('current_people', 'I')
+                            target_dest = st.session_state.get('target_destination', '')
+                            loc = f"On the way ({active_r})"
+                            
+                        # Log to Location App
+                        sh.worksheet("LOCATION_DATA").append_row([
+                            today_str, start_t.strftime("%H:%M"), "- Stationary -", loc, st.session_state.current_people, stop_desc
+                        ])
+                        
+                        # Resume journey if active
+                        if st.session_state.route_active:
+                            sh.worksheet("LOCATION_DATA").append_row([
+                                today_str, time_now_stop.strftime("%H:%M"), active_m, "", active_p, f"Resumed Route: {active_r} towards {target_dest}"
+                            ])
+                            
+                        # Log to PEOPLE Sheet if applicable
+                        if contact_name and stop_task in ["Call receive", "Call", "Meet"]:
+                            sh_people.worksheet("People Interaction").append_row([
+                                contact_name, today_people_str, start_t.strftime("%H:%M:%S"), duration_str_hhmmss, "⚠️ INCOMPLETE"
+                            ])
+                            load_interactions.clear()
+
+                        load_location_data.clear()
+                        st.session_state.stop_active = False
+                        st.session_state.stop_start_time = None
+                        st.success("Stop saved!")
+                        st.rerun()
+                    except Exception as e: st.error(f"Error: {e}")
+                else: st.error("Please provide a reason.")
+        
+        # --- UNFINISHED INTERACTIONS ---
+        df_int = load_interactions()
+        if not df_int.empty and 'Purpose / Topic' in df_int.columns:
+            inc_interactions = df_int[df_int['Purpose / Topic'] == '⚠️ INCOMPLETE']
+            if not inc_interactions.empty:
+                st.divider()
+                st.error(f"⚠️ You have {len(inc_interactions)} incomplete People Interactions!")
+                int_ws = sh_people.worksheet("People Interaction")
+                for idx, row in inc_interactions.iterrows():
+                    sheet_row = idx + 2
+                    st.markdown(f"**{row.get('People', 'Unknown')}** | Date: {row.get('Date', '')} | Dur: {row.get('Duration', '')}")
+                    c_int1, c_int2 = st.columns([3, 1])
+                    with c_int1:
+                        new_topic = st.text_input("Purpose / Topic", key=f"topic_{idx}", label_visibility="collapsed")
+                    with c_int2:
+                        if st.button("Save", key=f"save_topic_{idx}", type="primary"):
+                            if new_topic.strip():
+                                try:
+                                    headers = int_ws.row_values(1)
+                                    col_idx = headers.index('Purpose / Topic') + 1
+                                    int_ws.update_cell(sheet_row, col_idx, new_topic)
+                                    load_interactions.clear()
+                                    st.success("Updated!")
+                                    st.rerun()
+                                except Exception as e: st.error(f"Error: {e}")
+                            else: st.warning("Enter Topic")
 
     if not st.session_state.route_active or st.session_state.get('route_type') == "Express":
         # --- EXPANDABLE EXPRESS ROUTE ---
@@ -1074,9 +1071,6 @@ with tab_location:
         </style>
     """, unsafe_allow_html=True)
 
-    # ==========================================
-    # QUICK ACTION CALLBACKS
-    # ==========================================
     def cb_board_bus():
         try:
             time_now = get_ist_now()
@@ -1089,8 +1083,7 @@ with tab_location:
             st.session_state.dyn_people = "I"
             st.session_state.exp_people = "I"
             load_location_data.clear()
-        except Exception as e:
-            st.session_state.quick_err = str(e)
+        except Exception as e: st.session_state.quick_err = str(e)
 
     def cb_receive_suborno():
         try:
@@ -1108,18 +1101,13 @@ with tab_location:
             st.session_state.dyn_people = new_people
             st.session_state.exp_people = new_people
             load_location_data.clear()
-        except Exception as e:
-            st.session_state.quick_err = str(e)
+        except Exception as e: st.session_state.quick_err = str(e)
 
     if "quick_err" in st.session_state:
         st.error(f"Google Sheets Error: {st.session_state.quick_err}")
         del st.session_state.quick_err
 
-    # ==========================================
-    # QUICK ACTION BUTTONS
-    # ==========================================
     time_now_for_btn = get_ist_now()
-    
     if current_loc == "Girishmore Bus Stop" and "Suborno" in st.session_state.current_people and not st.session_state.route_active and (time_now_for_btn.hour == 8):
         if st.button("🚌 Suborno Boarded Bus", use_container_width=True, type="primary", on_click=cb_board_bus):
             st.success("Logged Suborno boarding bus. You are now traveling alone.")

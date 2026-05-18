@@ -29,6 +29,10 @@ if 'locked_time' not in st.session_state: st.session_state.locked_time = get_ist
 if 'last_used_route' not in st.session_state: st.session_state.last_used_route = None
 if 'target_destination' not in st.session_state: st.session_state.target_destination = ""
 
+# Quick Stop Session States
+if 'stop_active' not in st.session_state: st.session_state.stop_active = False
+if 'stop_start_time' not in st.session_state: st.session_state.stop_start_time = None
+
 @st.cache_resource
 def init_connection():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -897,6 +901,51 @@ with tab_location:
                 
                 st.success(f"🚲 Journey in progress... ({active_m} with {active_p} towards {target_dest})")
                 
+                # --- NEW QUICK STOP FEATURE ---
+                st.markdown("---")
+                if not st.session_state.get('stop_active', False):
+                    if st.button("⏸️ Quick Stop (Urine/Call/Meet)", use_container_width=True):
+                        st.session_state.stop_active = True
+                        st.session_state.stop_start_time = get_ist_now()
+                        st.rerun()
+                else:
+                    st.warning(f"⏱️ Stop in progress since {st.session_state.stop_start_time.strftime('%H:%M')}...")
+                    stop_task = st.selectbox("Select Reason", ["Urine", "Call receive", "Call", "Meet", "-- Type New --"])
+                    if stop_task == "-- Type New --":
+                        stop_task = st.text_input("Type specific reason")
+                        
+                    if st.button("▶️ Save & Resume Journey", type="primary", use_container_width=True):
+                        if stop_task:
+                            try:
+                                time_now = get_ist_now()
+                                today_str = time_now.strftime("%d.%m.%y")
+                                start_t = st.session_state.stop_start_time
+                                duration_mins = int((time_now - start_t).total_seconds() / 60)
+                                
+                                # Log 1: The stop (Stationary)
+                                sh.worksheet("LOCATION_DATA").append_row([
+                                    today_str, start_t.strftime("%H:%M"), 
+                                    "- Stationary -", f"On the way ({active_r})", active_p, f"Quick Stop: {stop_task} ({duration_mins} min)"
+                                ])
+                                
+                                # Log 2: Resuming the journey
+                                sh.worksheet("LOCATION_DATA").append_row([
+                                    today_str, time_now.strftime("%H:%M"), 
+                                    active_m, "", active_p, f"Resumed Route: {active_r} towards {target_dest}"
+                                ])
+                                
+                                load_location_data.clear()
+                                st.session_state.stop_active = False
+                                st.session_state.stop_start_time = None
+                                st.success("Stop logged and journey resumed!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error: {e}")
+                        else:
+                            st.error("Please provide a reason.")
+                st.markdown("---")
+                # --- END QUICK STOP FEATURE ---
+
                 out_of_route_arr = st.checkbox("📍 Diverted to a different place?")
                 if out_of_route_arr:
                     all_places = get_list("Places")

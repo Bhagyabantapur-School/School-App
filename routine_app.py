@@ -78,6 +78,13 @@ def init_connection():
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
     return gspread.authorize(creds)
 
+# Restored Helper Functions for Saving Data
+def get_main_spreadsheet():
+    return init_connection().open("MY ROUTINE 2026")
+
+def get_sheet(tab_name):
+    return get_main_spreadsheet().worksheet(tab_name)
+
 def smart_append_row(sheet, row_data):
     col_a = sheet.col_values(1)
     next_row = len(col_a) + 1

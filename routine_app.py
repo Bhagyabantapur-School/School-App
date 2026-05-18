@@ -155,7 +155,6 @@ def get_all_ecosystem_data():
         tracker_data = {row['App Name']: str(row['Last Opened']) for row in t_records}
     except: tracker_data = {}
 
-    # 9. Location Data
     try:
         loc_sheet = money_ss.worksheet("LOCATION_DATA")
         loc_data = loc_sheet.get_all_values()
@@ -166,7 +165,6 @@ def get_all_ecosystem_data():
     except: loc_df = pd.DataFrame()
 
     return df, log_df, future_df, holidays_df, payment_df, must_do_df, pre_df, tracker_data, loc_df
-
 
 def get_last_done_str(item_name, log_df, now, col_name='Sub_Activities'):
     completed_logs = log_df[log_df['End_Time'] != 'RUNNING']
@@ -237,12 +235,11 @@ try:
             if 'Date' in loc_df.columns:
                 today_loc = loc_df[loc_df['Date'] == today_str]
             else:
-                today_loc = loc_df.tail(50) # Fallback if Date is missing
+                today_loc = loc_df.tail(50) 
 
             prev_place = ""
             arrivals_to_log = []
             
-            # Identify arrivals to Home after being somewhere else
             for _, r in today_loc.iterrows():
                 curr_place = str(r.get('Place', '')).strip().upper()
                 
@@ -254,30 +251,25 @@ try:
                 if curr_place != '':
                     prev_place = curr_place
             
-            # Check how many 'Prepare after return' logs already exist today
             today_logs = log_df[log_df['Date'] == today_str]
             preps_logged = len(today_logs[today_logs['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME'])
             
-            # Auto-log if we have more unlogged arrivals than logged preps
+            # Starts as a RUNNING timer instead of a completed task
             if len(arrivals_to_log) > preps_logged:
                 for i in range(preps_logged, len(arrivals_to_log)):
                     arr_time_str = arrivals_to_log[i]
                     try:
                         s_dt = datetime.strptime(arr_time_str, '%H:%M')
-                        e_dt = s_dt + timedelta(minutes=10)
                         start_val = s_dt.strftime('%H:%M')
-                        end_val = e_dt.strftime('%H:%M')
                     except:
                         start_val = now.strftime('%H:%M')
-                        e_dt = now + timedelta(minutes=10)
-                        end_val = e_dt.strftime('%H:%M')
                     
                     smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [
-                        today_str, start_val, end_val, "0:10", "PRE", "Prepare after return back home", "", "Auto-logged from Location Data"
+                        today_str, start_val, "RUNNING", GS_FORMULA, "PRE", "Prepare after return back home", "", "Auto-started from Location Data"
                     ])
                 
                 get_all_ecosystem_data.clear()
-                st.toast("🏠 Welcome Home! Auto-logged 10 mins PRE.")
+                st.toast("🏠 Welcome Home! Started your prep timer.")
                 time.sleep(1.0)
                 st.rerun()
     except Exception as e:
@@ -447,13 +439,11 @@ try:
                 st.session_state.opened_app_name = None
                 st.rerun()
                 
-        # Renders the exact streamlit app page directly below your Hub status
         page_url = st.session_state.opened_app_file.replace('.py', '')
         components.iframe(f"/{page_url}?embed=true", height=850, scrolling=True)
         st.markdown("---")
     # ==========================================
 
-    # --- SIMPLIFIED DYNAMIC PENDING PAYMENTS EXPANDER ---
     all_alert_pays = []
     if not payment_df.empty:
         def parse_pay_date(d_str):
@@ -501,9 +491,18 @@ try:
             
             st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
 
+    # --- DYNAMIC HOME RETURN CHECKLIST INJECTION ---
     sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
     chk_list = [c.strip() for c in current_check_list.split(',') if c.strip()]
     all_logged_items = log_df['check_list'].tolist() + log_df['Sub_Activities'].tolist()
+    
+    running_subs_upper_for_chk = [str(x).strip().upper() for x in running_tasks['Sub_Activities'].tolist()]
+    home_predef = ["Unpack Bag", "Wash Hands / Freshen Up", "Drink Water", "Change Clothes"]
+    
+    if 'PREPARE AFTER RETURN BACK HOME' in running_subs_upper_for_chk:
+        for item in home_predef:
+            if item not in chk_list:
+                chk_list.append(item)
     
     upcoming_ui_elements_raw = []
     if not future_df.empty:
@@ -649,7 +648,7 @@ try:
     if chk_list:
         with st.expander(f"✅ Tasks & Reminders ({len(chk_list)})", expanded=True):
             today_logs = log_df[log_df['Date'] == today_str]
-            today_logged_tasks = today_logs[today_logs['Activity'] == current_activity]['check_list'].tolist()
+            today_logged_tasks = today_logs[today_logs['Activity'].isin([current_activity, 'PRE'])]['check_list'].tolist()
             
             for task in chk_list:
                 is_done = any(task.upper() == str(x).strip().upper() for x in (all_logged_items if "[Due:" in task else today_logged_tasks))
@@ -660,7 +659,9 @@ try:
                 
                 checked = st.checkbox(f"{task} (Last: {get_last_done_str(task, log_df, now, col_name='check_list')})", value=is_done, disabled=is_done, key=f"chk_{task}_{current_activity}")
                 if checked and not is_done:
-                    smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), GS_FORMULA, current_activity, "", task, "Checked off"])
+                    # Dynamically log home tasks under PRE
+                    log_act = "PRE" if task in home_predef else current_activity
+                    smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), GS_FORMULA, log_act, "", task, "Checked off"])
                     if "[Due:" in task:
                         matches = future_df[(future_df['Task_Name'].str.strip() == task.split(" [Due:")[0].strip()) & (future_df['Type'] == 'Checklist')]
                         if not matches.empty:

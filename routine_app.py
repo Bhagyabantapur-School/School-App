@@ -65,7 +65,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# Database Connection & Caching
+# Database Connection & Caching (OPTIMIZED)
 # ==========================================
 @st.cache_resource
 def init_connection():
@@ -73,131 +73,88 @@ def init_connection():
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
     return gspread.authorize(creds)
 
-def get_main_spreadsheet(): return init_connection().open("MY ROUTINE 2026")
-def get_money_spreadsheet(): return init_connection().open("sk_money_location")
-def get_sheet(tab_name): return get_main_spreadsheet().worksheet(tab_name)
-
 def smart_append_row(sheet, row_data):
     col_a = sheet.col_values(1)
     next_row = len(col_a) + 1
     try: sheet.update(range_name=f"A{next_row}", values=[row_data], value_input_option="USER_ENTERED")
     except TypeError: sheet.update(f"A{next_row}", [row_data], value_input_option="USER_ENTERED")
 
-@st.cache_data(ttl=600)
-def get_tracker_data():
-    try:
-        sheet = init_connection().open("Personal_Dashboard_Data").worksheet("Tracker")
-        records = sheet.get_all_records()
-        return {row['App Name']: str(row['Last Opened']) for row in records}
-    except Exception: return {}
-
-@st.cache_data(ttl=300) 
-def get_routine_data():
-    data = get_sheet("routine_master").get_all_values()
+def fetch_df_from_sheet(sheet, expected_cols, column_names):
+    data = sheet.get_all_values()
+    if len(data) <= 1: 
+        return pd.DataFrame(columns=column_names)
     df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 8: df[df.shape[1]] = ""
-    df = df.iloc[:, :8]
-    df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App"]
+    while df.shape[1] < expected_cols: df[df.shape[1]] = ""
+    df = df.iloc[:, :expected_cols]
+    df.columns = column_names
+    return df
+
+@st.cache_data(ttl=300, show_spinner="⚡ Booting up ecosystem...") 
+def get_all_ecosystem_data():
+    """Fetches ALL tabs in a single cached sequence to drastically reduce load times."""
+    client = init_connection()
+    main_ss = client.open("MY ROUTINE 2026")
+    money_ss = client.open("sk_money_location")
+    dash_ss = client.open("Personal_Dashboard_Data")
+    
+    # 1. Routine Data
+    df = fetch_df_from_sheet(main_ss.worksheet("routine_master"), 8, ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App"])
     df = df[df["Day"].astype(str).str.strip() != ""]
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
-    return df
+    
+    # 2. Activity Log
+    log_df = fetch_df_from_sheet(main_ss.worksheet("activity_log"), 8, ["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"])
+    log_df = log_df[log_df["Date"].astype(str).str.strip() != ""] 
+    log_df["Activity"] = log_df["Activity"].astype(str).str.strip().str.upper()
+    
+    # 3. Future Tasks
+    try: f_sheet = main_ss.worksheet("future_tasks")
+    except: 
+        f_sheet = main_ss.add_worksheet(title="future_tasks", rows="100", cols="8")
+        smart_append_row(f_sheet, ["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason"])
+    future_df = fetch_df_from_sheet(f_sheet, 8, ["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason"])
+    future_df = future_df[future_df["Due_Date"].astype(str).str.strip() != ""] 
+    future_df['row_index'] = future_df.index + 2 
 
-@st.cache_data(ttl=300)
-def get_activity_log():
-    data = get_sheet("activity_log").get_all_values()
-    if len(data) <= 1: return pd.DataFrame(columns=["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"])
-    df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 8: df[df.shape[1]] = ""
-    df = df.iloc[:, :8]
-    df.columns = ["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"]
-    df = df[df["Date"].astype(str).str.strip() != ""] 
-    df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
-    return df
+    # 4. Holidays
+    try: h_sheet = main_ss.worksheet("holidays")
+    except: 
+        h_sheet = main_ss.add_worksheet(title="holidays", rows="50", cols="2")
+        smart_append_row(h_sheet, ["Date", "Occasion"])
+    holidays_df = fetch_df_from_sheet(h_sheet, 2, ["Date", "Occasion"])
+    holidays_df = holidays_df[holidays_df["Date"].astype(str).str.strip() != ""] 
 
-@st.cache_data(ttl=300)
-def get_future_tasks():
-    ss = get_main_spreadsheet()
-    try: sheet = ss.worksheet("future_tasks")
-    except gspread.exceptions.WorksheetNotFound:
-        sheet = ss.add_worksheet(title="future_tasks", rows="100", cols="8")
-        smart_append_row(sheet, ["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason"])
-    data = sheet.get_all_values()
-    if len(data) <= 1: return pd.DataFrame(columns=["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason", "row_index"])
-    df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 8: df[df.shape[1]] = ""
-    df = df.iloc[:, :8]
-    df.columns = ["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason"]
-    df = df[df["Due_Date"].astype(str).str.strip() != ""] 
-    df['row_index'] = df.index + 2 
-    return df
+    # 5. Payments
+    try: 
+        payment_df = fetch_df_from_sheet(money_ss.worksheet("PAYMENT_CHECKLIST"), 9, ["Month", "Bill_Name", "Type", "Est_Amount", "Due_Date", "Status", "Fund", "Account", "Actual_Paid"])
+        payment_df = payment_df[payment_df["Month"].astype(str).str.strip() != ""] 
+        payment_df['row_index'] = payment_df.index + 2
+    except: payment_df = pd.DataFrame(columns=["Month", "Bill_Name", "Type", "Est_Amount", "Due_Date", "Status", "Fund", "Account", "Actual_Paid", "row_index"])
 
-@st.cache_data(ttl=300)
-def get_holidays():
-    ss = get_main_spreadsheet()
-    try: sheet = ss.worksheet("holidays")
-    except gspread.exceptions.WorksheetNotFound:
-        sheet = ss.add_worksheet(title="holidays", rows="50", cols="2")
-        smart_append_row(sheet, ["Date", "Occasion"])
-    data = sheet.get_all_values()
-    if len(data) <= 1: return pd.DataFrame(columns=["Date", "Occasion"])
-    df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 2: df[df.shape[1]] = ""
-    df = df.iloc[:, :2]
-    df.columns = ["Date", "Occasion"]
-    df = df[df["Date"].astype(str).str.strip() != ""] 
-    return df
+    # 6. Must Do
+    try: md_sheet = main_ss.worksheet("must_do")
+    except:
+        md_sheet = main_ss.add_worksheet(title="must_do", rows="100", cols="2")
+        smart_append_row(md_sheet, ["Main Category", "Task Name"])
+    must_do_df = fetch_df_from_sheet(md_sheet, 2, ["Main Category", "Task Name"])
+    must_do_df = must_do_df[must_do_df["Main Category"].astype(str).str.strip() != ""] 
 
-@st.cache_data(ttl=300)
-def get_payment_checklist():
-    try: sheet = get_money_spreadsheet().worksheet("PAYMENT_CHECKLIST")
-    except Exception: return pd.DataFrame(columns=["Month", "Bill_Name", "Type", "Est_Amount", "Due_Date", "Status", "Fund", "Account", "Actual_Paid", "row_index"])
-    data = sheet.get_all_values()
-    if len(data) <= 1: return pd.DataFrame(columns=["Month", "Bill_Name", "Type", "Est_Amount", "Due_Date", "Status", "Fund", "Account", "Actual_Paid", "row_index"])
-    df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 9: df[df.shape[1]] = ""
-    df = df.iloc[:, :9]
-    df.columns = ["Month", "Bill_Name", "Type", "Est_Amount", "Due_Date", "Status", "Fund", "Account", "Actual_Paid"]
-    df = df[df["Month"].astype(str).str.strip() != ""] 
-    df['row_index'] = df.index + 2
-    return df
+    # 7. PRE
+    try: pre_sheet = main_ss.worksheet("PRE")
+    except:
+        pre_sheet = main_ss.add_worksheet(title="PRE", rows="100", cols="2")
+        smart_append_row(pre_sheet, ["Main Category", "Task Name"])
+    pre_df = fetch_df_from_sheet(pre_sheet, 2, ["Main Category", "Task Name"])
+    pre_df = pre_df[pre_df["Main Category"].astype(str).str.strip() != ""] 
 
-@st.cache_data(ttl=300)
-def get_must_do_tasks():
-    ss = get_main_spreadsheet()
-    try: sheet = ss.worksheet("must_do")
-    except gspread.exceptions.WorksheetNotFound:
-        sheet = ss.add_worksheet(title="must_do", rows="100", cols="2")
-        smart_append_row(sheet, ["Main Category", "Task Name"])
-    data = sheet.get_all_values()
-    if len(data) <= 1: return pd.DataFrame(columns=["Main Category", "Task Name"])
-    df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 2: df[df.shape[1]] = ""
-    df = df.iloc[:, :2]
-    df.columns = ["Main Category", "Task Name"]
-    df = df[df["Main Category"].astype(str).str.strip() != ""] 
-    return df
-
-@st.cache_data(ttl=300)
-def get_pre_tasks():
-    ss = get_main_spreadsheet()
-    try: sheet = ss.worksheet("PRE")
-    except gspread.exceptions.WorksheetNotFound:
-        sheet = ss.add_worksheet(title="PRE", rows="100", cols="2")
-        smart_append_row(sheet, ["Main Category", "Task Name"])
-    data = sheet.get_all_values()
-    if len(data) <= 1: return pd.DataFrame(columns=["Main Category", "Task Name"])
-    df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 2: df[df.shape[1]] = ""
-    df = df.iloc[:, :2]
-    df.columns = ["Main Category", "Task Name"]
-    df = df[df["Main Category"].astype(str).str.strip() != ""] 
-    return df
-
-def parse_duration_to_minutes(dur_str):
+    # 8. Tracker
     try:
-        h, m = map(int, str(dur_str).strip().split(':'))
-        return (h * 60) + m
-    except: return 0
+        t_records = dash_ss.worksheet("Tracker").get_all_records()
+        tracker_data = {row['App Name']: str(row['Last Opened']) for row in t_records}
+    except: tracker_data = {}
+
+    return df, log_df, future_df, holidays_df, payment_df, must_do_df, pre_df, tracker_data
+
 
 def get_last_done_str(item_name, log_df, now, col_name='Sub_Activities'):
     completed_logs = log_df[log_df['End_Time'] != 'RUNNING']
@@ -248,14 +205,7 @@ def log_and_open_app(app_name, target_file, cached_data, now_dt):
 # Main Logic
 # ==========================================
 try:
-    df = get_routine_data()
-    log_df = get_activity_log() 
-    future_df = get_future_tasks()
-    holidays_df = get_holidays()
-    payment_df = get_payment_checklist()
-    must_do_df = get_must_do_tasks()
-    pre_df = get_pre_tasks()
-    tracker_data = get_tracker_data()
+    df, log_df, future_df, holidays_df, payment_df, must_do_df, pre_df, tracker_data = get_all_ecosystem_data()
     
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist_timezone)
@@ -277,14 +227,7 @@ try:
     col1, col2 = st.columns([8, 2])
     with col2:
         if st.button("🔄 Sync", use_container_width=True):
-            get_routine_data.clear()
-            get_activity_log.clear()
-            get_future_tasks.clear()
-            get_holidays.clear()
-            get_payment_checklist.clear()
-            get_must_do_tasks.clear()
-            get_pre_tasks.clear()
-            get_tracker_data.clear()
+            get_all_ecosystem_data.clear()
             st.toast("✅ Force Synced with Google Sheets!")
             time.sleep(1.0)
             st.rerun()
@@ -545,12 +488,11 @@ try:
                             with col_t: new_time = st.selectbox("New Time", options=time_opts, index=time_opts.index(curr_time_str), key=f"nt_{r['row_index']}")
                                 
                             if st.button("Save New Time", key=f"rs_btn_{r['row_index']}", type="primary", use_container_width=True):
-                                fsheet = get_sheet("future_tasks")
+                                fsheet = get_main_spreadsheet().worksheet("future_tasks")
                                 fsheet.update_cell(int(r['row_index']), 1, new_date.strftime('%Y-%m-%d'))
                                 fsheet.update_cell(int(r['row_index']), 2, new_time)
-                                smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), GS_FORMULA, str(r['Activity']).upper(), "", f"{r['Task_Name']} [RESCHEDULED]", f"Moved to {new_date.strftime('%Y-%m-%d')} {new_time}"])
-                                get_future_tasks.clear() 
-                                get_activity_log.clear() 
+                                smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), GS_FORMULA, str(r['Activity']).upper(), "", f"{r['Task_Name']} [RESCHEDULED]", f"Moved to {new_date.strftime('%Y-%m-%d')} {new_time}"])
+                                get_all_ecosystem_data.clear() 
                                 st.rerun()
                         with tab_cancel:
                             col_r, col_b = st.columns([3, 1])
@@ -558,12 +500,11 @@ try:
                             with col_b:
                                 if st.button("Confirm", key=f"cnf_{r['row_index']}", type="primary"):
                                     if cancel_reason.strip():
-                                        fsheet = get_sheet("future_tasks")
+                                        fsheet = get_main_spreadsheet().worksheet("future_tasks")
                                         fsheet.update_cell(int(r['row_index']), 7, "Canceled")
                                         fsheet.update_cell(int(r['row_index']), 8, cancel_reason)
-                                        smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), GS_FORMULA, str(r['Activity']).upper(), "", f"{r['Task_Name']} [CANCELED]", f"Cancel Reason: {cancel_reason}"])
-                                        get_future_tasks.clear() 
-                                        get_activity_log.clear() 
+                                        smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), GS_FORMULA, str(r['Activity']).upper(), "", f"{r['Task_Name']} [CANCELED]", f"Cancel Reason: {cancel_reason}"])
+                                        get_all_ecosystem_data.clear() 
                                         st.rerun()
                 
                 if idx_task < len(upcoming_ui_elements_raw) - 1:
@@ -595,8 +536,8 @@ try:
                         if p_task.upper() in running_subs_upper:
                             st.button(f"⏳ {p_task}", key=f"pre_run_{idx}", disabled=True, use_container_width=True)
                         elif st.button(f"▶️ {p_task}", key=f"pre_btn_{idx}", use_container_width=True):
-                            smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, p_cat, p_task, "", "PRE Task"])
-                            get_activity_log.clear()
+                            smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, p_cat, p_task, "", "PRE Task"])
+                            get_all_ecosystem_data.clear()
                             st.rerun()
 
     # --- MUST DO TASKS ---
@@ -614,8 +555,8 @@ try:
                         if md_task.upper() in running_subs_upper:
                             st.button(f"⏳ {md_task}", key=f"md_run_{idx}", disabled=True, use_container_width=True)
                         elif st.button(f"▶️ {md_task}", key=f"md_btn_{idx}", use_container_width=True):
-                            smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, md_cat, md_task, "", "Must Do Task"])
-                            get_activity_log.clear()
+                            smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, md_cat, md_task, "", "Must Do Task"])
+                            get_all_ecosystem_data.clear()
                             st.rerun()
 
     # --- EXPANDABLE TASKS & REMINDERS ---
@@ -633,13 +574,13 @@ try:
                 
                 checked = st.checkbox(f"{task} (Last: {get_last_done_str(task, log_df, now, col_name='check_list')})", value=is_done, disabled=is_done, key=f"chk_{task}_{current_activity}")
                 if checked and not is_done:
-                    smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), GS_FORMULA, current_activity, "", task, "Checked off"])
+                    smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), GS_FORMULA, current_activity, "", task, "Checked off"])
                     if "[Due:" in task:
                         matches = future_df[(future_df['Task_Name'].str.strip() == task.split(" [Due:")[0].strip()) & (future_df['Type'] == 'Checklist')]
                         if not matches.empty:
-                            get_sheet("future_tasks").update_cell(int(matches.iloc[0]['row_index']), 7, "Completed") 
-                            get_future_tasks.clear() 
-                    get_activity_log.clear() 
+                            get_main_spreadsheet().worksheet("future_tasks").update_cell(int(matches.iloc[0]['row_index']), 7, "Completed") 
+                            get_all_ecosystem_data.clear() 
+                    get_all_ecosystem_data.clear() 
                     st.rerun()
 
     # ==========================================
@@ -675,7 +616,7 @@ try:
                 col_stop, col_cancel = st.columns(2)
                 with col_stop:
                     if st.button("🛑 SAVE", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
-                        log_sheet = get_sheet("activity_log")
+                        log_sheet = get_main_spreadsheet().worksheet("activity_log")
                         log_sheet.update_cell(sheet_row, 3, now.strftime('%H:%M')) 
                         log_sheet.update_cell(sheet_row, 4, GS_FORMULA)                   
                         if str(active_row['Notes']).strip() == "": log_sheet.update_cell(sheet_row, 8, "Auto-logged via Timer") 
@@ -683,15 +624,15 @@ try:
                         if "[Due:" in str(active_row['Sub_Activities']):
                             matches = future_df[(future_df['Task_Name'].str.strip() == str(active_row['Sub_Activities']).split(" [Due:")[0].strip()) & (future_df['Type'] == 'Sub-Activity')]
                             if not matches.empty:
-                                get_sheet("future_tasks").update_cell(int(matches.iloc[0]['row_index']), 7, "Completed") 
-                                get_future_tasks.clear()
-                        get_activity_log.clear() 
+                                get_main_spreadsheet().worksheet("future_tasks").update_cell(int(matches.iloc[0]['row_index']), 7, "Completed") 
+                                get_all_ecosystem_data.clear()
+                        get_all_ecosystem_data.clear() 
                         st.rerun()
 
                 with col_cancel:
                     if st.button("❌ CANCEL", key=f"cancel_{sheet_row}", use_container_width=True):
-                        get_sheet("activity_log").delete_rows(sheet_row)
-                        get_activity_log.clear() 
+                        get_main_spreadsheet().worksheet("activity_log").delete_rows(sheet_row)
+                        get_all_ecosystem_data.clear() 
                         st.rerun()
         
         avail_subs = [t for t in sub_list if t not in running_tasks['Sub_Activities'].tolist()]
@@ -705,8 +646,8 @@ try:
                         task = avail_subs[i+j]
                         with cols[j]:
                             if st.button(f"▶️ {task}" + ("" if "[Due:" in task else f"\n(Last: {get_last_done_str(task, log_df, now, col_name='Sub_Activities')})"), key=f"btn_{i+j}_{task}", use_container_width=True):
-                                smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, current_activity, task, "", "Auto-logged via Timer"])
-                                get_activity_log.clear() 
+                                smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, current_activity, task, "", "Auto-logged via Timer"])
+                                get_all_ecosystem_data.clear() 
                                 st.rerun()
 
         # --- VISITOR TRACKER (Single Light Card) ---
@@ -726,8 +667,8 @@ try:
             st.markdown('<div style="color: #ff4b4b; font-size: 18px; margin-bottom: 10px;"><b>👥 Visitor Tracker</b></div>', unsafe_allow_html=True)
 
             if st.form_submit_button("⚡ Quick Start (Update Details Later)", use_container_width=True):
-                smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, "PEOPLE", "VISITOR", "", "Update details later"])
-                get_activity_log.clear() 
+                smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, "PEOPLE", "VISITOR", "", "Update details later"])
+                get_all_ecosystem_data.clear() 
                 st.rerun()
 
             st.markdown("<p style='text-align:center; font-size:12px; color:#888; margin: 12px 0;'>— OR ENTER DETAILS FIRST —</p>", unsafe_allow_html=True)
@@ -742,8 +683,8 @@ try:
                 purpose_visit = st.text_input("Purpose", key="live_mtg_purpose")
                 
                 if st.form_submit_button("▶️ Start with Details", type="primary", use_container_width=True):
-                    smart_append_row(get_sheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, "PEOPLE", f"{interaction_type} - {(person_name.strip() if person_name else 'Unknown')}".upper(), "", f"Topic: {topic_talk} | Purpose: {purpose_visit}"])
-                    get_activity_log.clear() 
+                    smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, "PEOPLE", f"{interaction_type} - {(person_name.strip() if person_name else 'Unknown')}".upper(), "", f"Topic: {topic_talk} | Purpose: {purpose_visit}"])
+                    get_all_ecosystem_data.clear() 
                     st.rerun()
 
     # --- SCHEDULE FUTURE TASK ---
@@ -763,8 +704,8 @@ try:
             if st.form_submit_button("Schedule Task", use_container_width=True):
                 final_act = f_act_custom.strip().upper() if f_act_custom.strip() else f_act.strip().upper()
                 if f_name:
-                    smart_append_row(get_sheet("future_tasks"), [f_date.strftime('%Y-%m-%d'), f_time.strftime('%H:%M'), final_act, f_type, f_name.strip(), "Personal", "Pending", ""])
-                    get_future_tasks.clear() 
+                    smart_append_row(get_main_spreadsheet().worksheet("future_tasks"), [f_date.strftime('%Y-%m-%d'), f_time.strftime('%H:%M'), final_act, f_type, f_name.strip(), "Personal", "Pending", ""])
+                    get_all_ecosystem_data.clear() 
                     st.rerun()
                 else: st.error("Please enter task details.")
 
@@ -816,7 +757,7 @@ try:
         
         if st.button("💾 Save to Activity Log", use_container_width=True, type="primary"):
             if log_activity:
-                smart_append_row(get_sheet("activity_log"), [
+                smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [
                     log_date.strftime('%Y-%m-%d'), 
                     f"{s_hour}:{s_min}", 
                     f"{e_hour}:{e_min}", 
@@ -826,7 +767,7 @@ try:
                     log_chk.strip(), 
                     log_notes
                 ])
-                get_activity_log.clear() 
+                get_all_ecosystem_data.clear() 
                 st.success("Activity Logged!")
                 time.sleep(1.0)
                 st.rerun()
@@ -845,7 +786,6 @@ try:
                         app_name, file_name, icon = apps[i + j]
                         last_str = get_app_time_str(app_name, tracker_data, now)
                         with cols[j]:
-                            # "Live Routine Hub" is the current app. It doesn't need to link to itself, but we can let it just rerun.
                             if st.button(f"{icon} {app_name}\n(Last: {last_str})", key=f"all_{group_name}_{i+j}", use_container_width=True):
                                 log_and_open_app(app_name, file_name, tracker_data, now)
             st.markdown("<hr style='margin: 5px 0px 10px 0px; border: 0; border-top: 1px solid #f0f2f6;'>", unsafe_allow_html=True)

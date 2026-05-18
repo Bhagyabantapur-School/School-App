@@ -693,35 +693,52 @@ with tab_location:
     all_places_list = get_list("Places")
 
     # ==========================================
-    # LOCATION DATA ENTRY (CLOSED DAYS)
+    # LOCATION DATA ENTRY
     # ==========================================
-    with st.expander("📝 Location Data Entry (Closed Days)", expanded=False):
-        ld_place = st.selectbox("Select Place", all_places_list + ["-- Type New --"], key="ld_place")
+    with st.expander("📝 Location Data Entry", expanded=False):
+        ld_place_opts = all_places_list + ["-- Type New --"]
+        default_ld_idx = ld_place_opts.index(current_loc) if current_loc in ld_place_opts else 0
+        ld_place = st.selectbox("Select Place", ld_place_opts, index=default_ld_idx, key="ld_place")
         if ld_place == "-- Type New --": ld_place = st.text_input("Type New Place Name", key="ld_new_place")
         
-        day_opts = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "-- Type New --"]
-        ld_closed = st.selectbox("Closed On", day_opts, key="ld_closed")
-        if ld_closed == "-- Type New --": ld_closed = st.text_input("Type New Day/Reason", key="ld_new_closed")
+        ld_type = st.selectbox("Entry Type", ["Closed", "-- Type New --"], key="ld_type")
         
-        if st.button("💾 Save Closed Day", type="primary", use_container_width=True):
-            if ld_place and ld_closed:
+        if ld_type == "Closed":
+            current_day = get_ist_now().strftime('%A')
+            current_time_str = get_ist_now().strftime('%H:%M')
+            ld_final_remark = f"Closed: {current_day}"
+            st.info(f"📍 Will log: **{ld_final_remark}** (Auto-detected weekday)")
+        else:
+            ld_final_remark = st.text_input("Type New Entry (e.g. Purpose of visit)", key="ld_custom_remark")
+        
+        if st.button("💾 Save Entry", type="primary", use_container_width=True, key="ld_save_btn"):
+            if ld_place and ld_final_remark:
                 try:
                     time_now = get_ist_now()
                     sh.worksheet("LOCATION_DATA").append_row([
                         time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), 
-                        "- Stationary -", ld_place, "I", f"Closed: {ld_closed}"
+                        "- Stationary -", ld_place, st.session_state.current_people, ld_final_remark
                     ])
                     load_location_data.clear()
-                    st.success(f"Saved: {ld_place} is closed on {ld_closed}")
+                    st.success(f"Saved: {ld_place} -> {ld_final_remark}")
                 except Exception as e: st.error(f"Error: {e}")
+            else:
+                st.warning("Please provide an entry to save.")
 
     # ==========================================
     # WORKING HOURS ENTRY
     # ==========================================
     with st.expander("🕒 Working Hours Entry", expanded=False):
-        wh_place = st.selectbox("Select Place", all_places_list + ["-- Type New --"], key="wh_place")
+        wh_place_opts = all_places_list + ["-- Type New --"]
+        default_wh_idx = wh_place_opts.index(current_loc) if current_loc in wh_place_opts else 0
+        wh_place = st.selectbox("Select Place", wh_place_opts, index=default_wh_idx, key="wh_place")
         if wh_place == "-- Type New --": wh_place = st.text_input("Type New Place Name", key="wh_new_place")
         
+        wh_day_opts = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "All Days", "Mon-Fri", "Sat-Sun"]
+        curr_day = get_ist_now().strftime('%A')
+        default_day_idx = wh_day_opts.index(curr_day) if curr_day in wh_day_opts else 0
+        wh_day = st.selectbox("Day(s)", wh_day_opts, index=default_day_idx, key="wh_day")
+
         wh_c1, wh_c2 = st.columns(2)
         with wh_c1: wh_open = st.time_input("Open Time", value=datetime.strptime("09:00", "%H:%M").time())
         with wh_c2: wh_close = st.time_input("Close Time", value=datetime.strptime("17:00", "%H:%M").time())
@@ -732,12 +749,13 @@ with tab_location:
                     try:
                         wh_sheet = sh.worksheet("WORKING_HOURS")
                     except gspread.exceptions.WorksheetNotFound:
-                        wh_sheet = sh.add_worksheet(title="WORKING_HOURS", rows="100", cols="3")
-                        wh_sheet.append_row(["Place", "Open", "Close"])
+                        # Create with Day column if it doesn't exist
+                        wh_sheet = sh.add_worksheet(title="WORKING_HOURS", rows="100", cols="4")
+                        wh_sheet.append_row(["Place", "Day", "Open", "Close"])
                     
-                    wh_sheet.append_row([wh_place, wh_open.strftime("%H:%M"), wh_close.strftime("%H:%M")])
+                    wh_sheet.append_row([wh_place, wh_day, wh_open.strftime("%H:%M"), wh_close.strftime("%H:%M")])
                     load_working_hours.clear()
-                    st.success(f"Saved Working Hours for {wh_place}")
+                    st.success(f"Saved Working Hours for {wh_place} on {wh_day}")
                 except Exception as e: st.error(f"Error: {e}")
 
     # ==========================================
@@ -796,7 +814,22 @@ with tab_location:
                     if not df_wh_warn.empty and 'Place' in df_wh_warn.columns:
                         wh_match = df_wh_warn[df_wh_warn['Place'].astype(str).str.strip() == dyn_next_stop]
                         if not wh_match.empty:
-                            last_wh = wh_match.iloc[-1]
+                            curr_day_name = get_ist_now().strftime('%A')
+                            
+                            if 'Day' in wh_match.columns:
+                                def is_day_match(d_str):
+                                    d = str(d_str).strip()
+                                    if d == "All Days": return True
+                                    if d == "Mon-Fri" and curr_day_name in ["Monday","Tuesday","Wednesday","Thursday","Friday"]: return True
+                                    if d == "Sat-Sun" and curr_day_name in ["Saturday","Sunday"]: return True
+                                    if curr_day_name.lower() in d.lower(): return True
+                                    return False
+                                    
+                                day_matches = wh_match[wh_match['Day'].apply(is_day_match)]
+                                if not day_matches.empty: last_wh = day_matches.iloc[-1]
+                                else: last_wh = wh_match.iloc[-1]
+                            else: last_wh = wh_match.iloc[-1]
+
                             try:
                                 open_t = datetime.strptime(str(last_wh.get('Open', '00:00')), "%H:%M").time()
                                 close_t = datetime.strptime(str(last_wh.get('Close', '23:59')), "%H:%M").time()
@@ -1017,7 +1050,7 @@ with tab_location:
                                 today_str, time_now_stop.strftime("%H:%M"), active_m, "", active_p, f"Resumed Route: {active_r} towards {target_dest}"
                             ])
                             
-                        # Log to PEOPLE Sheet if applicable
+                        # Log to PEOPLE Sheet if applicable (now including Interaction column!)
                         if contact_name and stop_task in ["Call receive", "Call", "Meet"]:
                             sh_people.worksheet("People Interaction").append_row([
                                 contact_name, stop_task, today_people_str, start_t.strftime("%H:%M"), duration_str_hhmmss, "⚠️ INCOMPLETE"

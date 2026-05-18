@@ -228,33 +228,40 @@ try:
     current_time = now.time()
 
     # ==========================================
-    # --- AUTO-LOGGER FOR HOME RETURN ---
+    # --- SMARTER AUTO-LOGGER FOR HOME RETURN ---
     # ==========================================
     try:
         if not loc_df.empty and 'Place' in loc_df.columns:
-            if 'Date' in loc_df.columns:
-                today_loc = loc_df[loc_df['Date'] == today_str]
-            else:
-                today_loc = loc_df.tail(50) 
-
-            prev_place = ""
-            arrivals_to_log = []
+            # Look at the last 50 entries to catch overnight/multi-day trips perfectly
+            recent_locs = loc_df.tail(50).copy()
             
-            for _, r in today_loc.iterrows():
+            # Smart Date Parsing to handle DD/MM/YYYY vs YYYY-MM-DD gracefully
+            if 'Date' in recent_locs.columns:
+                recent_locs['Parsed_Date'] = pd.to_datetime(recent_locs['Date'], dayfirst=True, errors='coerce').dt.date
+            else:
+                recent_locs['Parsed_Date'] = now.date()
+                
+            arrivals_to_log = []
+            prev_place = None
+            
+            for _, r in recent_locs.iterrows():
                 curr_place = str(r.get('Place', '')).strip().upper()
+                row_date = r.get('Parsed_Date', pd.NaT)
                 
-                if curr_place == 'HOME' and prev_place not in ['HOME', '']:
-                    arr_time = str(r.get('Time', r.get('Start_Time', now.strftime('%H:%M')))).strip()
-                    if not arr_time: arr_time = now.strftime('%H:%M')
-                    arrivals_to_log.append(arr_time)
-                
-                if curr_place != '':
+                if curr_place:
+                    # Detect transition to HOME from ANY other place (prev_place not None/Home/Empty)
+                    if curr_place == 'HOME' and prev_place not in ['HOME', None, '']:
+                        # Ensure this return actually happened TODAY
+                        if row_date == now.date() or pd.isna(row_date):
+                            arr_time = str(r.get('Time', r.get('Start_Time', ''))).strip()
+                            if not arr_time: arr_time = now.strftime('%H:%M')
+                            arrivals_to_log.append(arr_time)
+                    
                     prev_place = curr_place
             
             today_logs = log_df[log_df['Date'] == today_str]
             preps_logged = len(today_logs[today_logs['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME'])
             
-            # Starts as a RUNNING timer instead of a completed task
             if len(arrivals_to_log) > preps_logged:
                 for i in range(preps_logged, len(arrivals_to_log)):
                     arr_time_str = arrivals_to_log[i]

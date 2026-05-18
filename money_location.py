@@ -940,10 +940,10 @@ with tab_location:
                                 today_str, time_now_stop.strftime("%H:%M"), active_m, "", active_p, f"Resumed Route: {active_r} towards {target_dest}"
                             ])
                             
-                        # Log to PEOPLE Sheet if applicable
+                        # Log to PEOPLE Sheet if applicable (now including Interaction column!)
                         if contact_name and stop_task in ["Call receive", "Call", "Meet"]:
                             sh_people.worksheet("People Interaction").append_row([
-                                contact_name, today_people_str, start_t.strftime("%H:%M:%S"), duration_str_hhmmss, "⚠️ INCOMPLETE"
+                                contact_name, stop_task, today_people_str, start_t.strftime("%H:%M"), duration_str_hhmmss, "⚠️ INCOMPLETE"
                             ])
                             load_interactions.clear()
 
@@ -963,9 +963,19 @@ with tab_location:
                 st.divider()
                 st.error(f"⚠️ You have {len(inc_interactions)} incomplete People Interactions!")
                 int_ws = sh_people.worksheet("People Interaction")
+                
                 for idx, row in inc_interactions.iterrows():
                     sheet_row = idx + 2
-                    st.markdown(f"**{row.get('People', 'Unknown')}** | Date: {row.get('Date', '')} | Dur: {row.get('Duration', '')}")
+                    
+                    # Formatted exactly as: Call receive: Suborno | Date: 18-05-2026 | Time: 17:00 | Dur: 00:00:33
+                    interaction_type = row.get('Interaction', 'Interaction')
+                    person_name = row.get('People', 'Unknown')
+                    date_val = row.get('Date', '')
+                    time_val = row.get('Time', '')
+                    dur_val = row.get('Duration', '')
+                    
+                    st.markdown(f"**{interaction_type}: {person_name}** | Date: {date_val} | Time: {time_val} | Dur: {dur_val}")
+                    
                     c_int1, c_int2 = st.columns([3, 1])
                     with c_int1:
                         new_topic = st.text_input("Purpose / Topic", key=f"topic_{idx}", label_visibility="collapsed")

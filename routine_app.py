@@ -255,7 +255,6 @@ try:
             for _, r in recent_locs.iterrows():
                 place = str(r.get('Place', '')).strip().upper()
                 
-                # Check all possible columns for movement status
                 status = ""
                 for col in ['Type', 'Status', 'Movement', 'Activity']:
                     if col in recent_locs.columns:
@@ -283,13 +282,11 @@ try:
                 try: row_time = datetime.strptime(row_time, '%H:%M').strftime('%H:%M')
                 except: pass
                 
-                # State Transition: Left Home
                 if curr_state == 'OUT' and prev_state == 'HOME':
                     last_dep_time = row_time
                     last_dep_date = row_date
                     preps_before_out.append({'date': row_date, 'dep_time': row_time})
                 
-                # State Transition: Arrived Home
                 elif curr_state == 'HOME' and prev_state == 'OUT':
                     arr_time = row_time
                     preps_after_return.append({'date': row_date, 'arr_time': arr_time})
@@ -307,7 +304,6 @@ try:
 
             logs_to_append = []
 
-            # 1. Log "Prepare before out from Home" (Retroactive - 10 mins backward)
             for prep in preps_before_out:
                 p_date = prep['date']
                 p_dep = prep['dep_time']
@@ -332,7 +328,6 @@ try:
                         ])
                     except: pass
 
-            # 2. Log full "OUT" block (From dep_time to arr_time)
             for out in outings:
                 p_date = out['dep_date']
                 p_dep = out['dep_time']
@@ -360,7 +355,6 @@ try:
                             ])
                     except: pass
 
-            # 3. Handle "Prepare after return back home"
             for prep in preps_after_return:
                 p_date = prep['date']
                 p_arr = prep['arr_time']
@@ -398,7 +392,6 @@ try:
                             st.rerun()
                     except: pass
 
-            # Append completed background tasks
             if logs_to_append:
                 sheet = get_main_spreadsheet().worksheet("activity_log")
                 for r in logs_to_append:
@@ -406,7 +399,6 @@ try:
                 get_all_ecosystem_data.clear()
                 st.rerun()
 
-        # --- AUTO-STOP RUNNING TIMERS ---
         running_preps = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME')]
         for idx, p_row in running_preps.iterrows():
             p_start = str(p_row['Start_Time']).strip()
@@ -428,19 +420,18 @@ try:
     except Exception as e:
         print(f"Location Sync Error: {e}")
 
-    # Ensure log_df and running tasks are up to date
     running_tasks = log_df[log_df['End_Time'] == 'RUNNING']
     active_count = len(running_tasks)
 
     # ==========================================
-    # --- PENDING EDITS AUDIT SCANNER ---
+    # --- PENDING EDITS AUDIT SCANNER (WITH AUTO-FIX) ---
     # ==========================================
     pending_edits = []
     try:
-        prep_logs = log_df[log_df['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME']
+        prep_logs = log_df[log_df['Sub_Activities'].str.strip().str.upper().isin(['PREPARE AFTER RETURN BACK HOME', 'PREPARE BEFORE OUT FROM HOME'])]
         recent_preps = prep_logs.tail(20) 
         
-        for _, p_row in recent_preps.iterrows():
+        for idx, p_row in recent_preps.iterrows():
             p_date = str(p_row['Date']).strip()
             p_start_str = str(p_row['Start_Time']).strip()
             try:
@@ -450,11 +441,13 @@ try:
 
             conflict_found = False
             conflict_reasons = []
+            earliest_conflict_dt = p_end_dt
 
             # 1. Check activity_log for overlaps
             same_day_logs = log_df[log_df['Date'] == p_date]
-            for _, log_r in same_day_logs.iterrows():
-                if str(log_r['Sub_Activities']).strip().upper() == 'PREPARE AFTER RETURN BACK HOME':
+            for log_idx, log_r in same_day_logs.iterrows():
+                if log_idx == idx: continue
+                if str(log_r['Sub_Activities']).strip().upper() in ['PREPARE AFTER RETURN BACK HOME', 'PREPARE BEFORE OUT FROM HOME']:
                     continue
                 log_start_str = str(log_r['Start_Time']).strip()
                 try:
@@ -462,6 +455,8 @@ try:
                     if p_start_dt < log_start_dt < p_end_dt:
                         conflict_found = True
                         conflict_reasons.append(f"Started '{str(log_r['Activity']).strip()}' at {log_start_str}")
+                        if log_start_dt < earliest_conflict_dt:
+                            earliest_conflict_dt = log_start_dt
                 except: pass
 
             # 2. Check loc_df for overlaps
@@ -487,9 +482,10 @@ try:
                             if p_start_dt < loc_time_dt < p_end_dt:
                                 conflict_found = True
                                 conflict_reasons.append(f"Left for '{loc_r.get('Place', '')}' at {loc_time_str}")
+                                if loc_time_dt < earliest_conflict_dt:
+                                    earliest_conflict_dt = loc_time_dt
                         except: pass
 
-            # Flag it if a conflict happened, unless the user already fixed the sheet manually
             if conflict_found:
                 actual_end_str = str(p_row['End_Time']).strip()
                 needs_edit = False
@@ -498,15 +494,18 @@ try:
                 else:
                     try:
                         actual_end_dt = datetime.strptime(f"{p_date} {actual_end_str}", "%Y-%m-%d %H:%M")
-                        if (actual_end_dt - p_start_dt).total_seconds() >= 540: 
+                        # If the recorded end time is past the conflict time, we need to edit it down
+                        if actual_end_dt > earliest_conflict_dt: 
                             needs_edit = True
                     except: pass
 
                 if needs_edit:
                     pending_edits.append({
+                        'sheet_row': idx + 2, # Maps to the exact row in Google Sheets
                         'date': p_date,
                         'start': p_start_str,
-                        'reasons': ", ".join(conflict_reasons)
+                        'reasons': ", ".join(conflict_reasons),
+                        'suggested_end': earliest_conflict_dt.strftime('%H:%M')
                     })
     except Exception as e:
         pass
@@ -556,9 +555,18 @@ try:
     with hub_container:
         if pending_edits:
             with st.expander(f"⚠️ Action Required: Pending Sheet Edits ({len(pending_edits)})", expanded=True):
-                st.markdown("<p style='font-size:13px; color:#666; margin-top:-10px;'>You started a task or left home before your 10m prep finished. Please update the end times in your Google Sheet Activity Log to fix the overlap!</p>", unsafe_allow_html=True)
+                st.markdown("<p style='font-size:13px; color:#666; margin-top:-10px;'>You started a task or left home before your 10m prep finished. Click Auto-Fix to perfectly align the times!</p>", unsafe_allow_html=True)
                 for edit in pending_edits:
                     st.markdown(f"<div style='background-color:#fff4f4; border-left:4px solid #d32f2f; padding:8px; margin-bottom:5px; font-size:14px;'><b>{edit['date']} at {edit['start']}</b><br><span style='color:#555;'>Conflict: {edit['reasons']}</span></div>", unsafe_allow_html=True)
+                    if st.button(f"🔧 Auto-Fix to {edit['suggested_end']}", key=f"fix_{edit['sheet_row']}", use_container_width=True):
+                        log_sheet = get_main_spreadsheet().worksheet("activity_log")
+                        log_sheet.update_cell(int(edit['sheet_row']), 3, edit['suggested_end'])
+                        log_sheet.update_cell(int(edit['sheet_row']), 4, GS_FORMULA)
+                        get_all_ecosystem_data.clear()
+                        st.toast(f"✅ Fixed! End time perfectly adjusted to {edit['suggested_end']}.")
+                        time.sleep(1.0)
+                        st.rerun()
+                st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
 
         app_groups = {
             "MONEY": [
@@ -951,7 +959,7 @@ try:
                     if is_home_prep:
                         mins_remaining = max(0, 10 - mins_elapsed)
                         st.markdown(f"<div style='text-align:center; color:#888; font-size:13px; margin-bottom:5px; font-weight:bold;'><i>⏳ This timer will automatically close in {mins_remaining} minutes.</i></div>", unsafe_allow_html=True)
-                        st.markdown("<div style='text-align:center; color:#d84315; font-size:11px; margin-bottom:15px;'><i>📝 Note: You must manually edit the Google Sheet if you start a new activity or leave home before this 10m timer finishes.</i></div>", unsafe_allow_html=True)
+                        st.markdown("<div style='text-align:center; color:#d84315; font-size:11px; margin-bottom:15px;'><i>📝 Note: Auto-Fix your sheet above if you start a new activity before this finishes!</i></div>", unsafe_allow_html=True)
                     else:
                         col_stop, col_cancel = st.columns(2)
                         with col_stop:

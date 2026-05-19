@@ -633,7 +633,7 @@ try:
     filtered_app_list = [app for app in base_app_list if app[0] in active_apps_filter] if active_apps_filter else []
 
     if filtered_app_list:
-        st.markdown('<h4 style="text-align: center; color: #d84315; margin-top: 10px;">🚀 Scheduled Apps</h4>', unsafe_allow_html=True)
+        st.markdown('<h4 style="text-align: left; color: #d84315; margin-top: 10px;">🚀 Scheduled Apps</h4>', unsafe_allow_html=True)
         for i in range(0, len(filtered_app_list), 3):
             cols = st.columns(3)
             for j in range(3):
@@ -645,9 +645,10 @@ try:
                             log_and_open_app(app_name, file_name, tracker_data, now)
         st.markdown("---")
 
-    st.markdown(f'<div style="text-align: center; background-color: #f8f9fa; border: 2px solid {color}; border-radius: 8px; padding: 8px; margin: 5px auto; max-width: 300px; box-shadow: 0px 2px 4px rgba(0,0,0,0.05);"><h3 style="margin: 0; font-size: 1.6rem; color: {color}; letter-spacing: 0.5px;">{current_activity}</h3></div>', unsafe_allow_html=True)
+    # Replaced the card with simple left-aligned text for a cleaner look
+    st.markdown(f'<h3 style="margin: 5px 0px 10px 0px; font-size: 1.8rem; color: {color}; letter-spacing: 0.5px; text-align: left;">{current_activity}</h3>', unsafe_allow_html=True)
 
-    if is_auto_holiday: st.markdown(f'<p style="text-align: center; color: #ff9f36; font-weight: bold; font-size: 1.1rem; margin-top: -5px;">🎉 {auto_occasion} (Holiday Schedule)</p>', unsafe_allow_html=True)
+    if is_auto_holiday: st.markdown(f'<p style="text-align: left; color: #ff9f36; font-weight: bold; font-size: 1.1rem; margin-top: -5px;">🎉 {auto_occasion} (Holiday Schedule)</p>', unsafe_allow_html=True)
 
     if current_activity_start:
         dt_start = datetime.combine(now.date(), current_activity_start)
@@ -657,12 +658,13 @@ try:
         eh, erem = divmod(int(elapsed.total_seconds()), 3600)
         em = erem // 60
         elapsed_text = f"{eh}h {em}m" if eh > 0 else f"{em}m"
-        st.markdown(f'<h3 style="text-align: center; color: #555; margin-top: 0px; margin-bottom: 10px; font-weight: 400; font-size: 1.1rem;">⏱️ Elapsed: {elapsed_text}</h3>', unsafe_allow_html=True)
+        st.markdown(f'<h3 style="text-align: left; color: #555; margin-top: 0px; margin-bottom: 10px; font-weight: 400; font-size: 1.1rem;">⏱️ Elapsed: {elapsed_text}</h3>', unsafe_allow_html=True)
     else:
         st.markdown('<div style="margin-bottom: 15px;"></div>', unsafe_allow_html=True)
         
-    if next_activity not in ["NONE", "END OF DAY"]: st.markdown(f'<h4 style="text-align: center; color: #666; margin-bottom: 20px; font-weight: 400; font-size: 1.1rem;">Up Next: <b>{next_activity}</b> at {next_time_str}</h4>', unsafe_allow_html=True)
-    elif next_activity == "END OF DAY": st.markdown('<h4 style="text-align: center; color: #666; margin-bottom: 20px; font-weight: 400; font-size: 1.1rem;">Up Next: Schedule Complete</h4>', unsafe_allow_html=True)
+    if next_activity not in ["NONE", "END OF DAY"]: st.markdown(f'<h4 style="text-align: left; color: #666; margin-bottom: 20px; font-weight: 400; font-size: 1.1rem;">Up Next: <b>{next_activity}</b> at {next_time_str}</h4>', unsafe_allow_html=True)
+    elif next_activity == "END OF DAY": st.markdown('<h4 style="text-align: left; color: #666; margin-bottom: 20px; font-weight: 400; font-size: 1.1rem;">Up Next: Schedule Complete</h4>', unsafe_allow_html=True)
+
 
     all_alert_pays = []
     if not payment_df.empty:

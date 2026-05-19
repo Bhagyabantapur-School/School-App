@@ -233,76 +233,178 @@ try:
     current_time = now.time()
 
     # ==========================================
-    # --- SMARTER AUTO-LOGGER FOR HOME RETURN ---
+    # --- SMARTER AUTO-LOGGER FOR FULL JOURNEY ---
     # ==========================================
     try:
         if not loc_df.empty and 'Place' in loc_df.columns:
-            recent_locs = loc_df.tail(50).copy()
+            recent_locs = loc_df.tail(150).copy()
             
             if 'Date' in recent_locs.columns:
                 recent_locs['Parsed_Date'] = pd.to_datetime(recent_locs['Date'], dayfirst=True, errors='coerce').dt.date
             else:
                 recent_locs['Parsed_Date'] = now.date()
                 
-            arrivals_to_log = []
-            prev_place = None
+            outings = []
+            preps_before_out = []
+            preps_after_return = []
+            
+            prev_state = None
+            last_dep_time = None
+            last_dep_date = None
             
             for _, r in recent_locs.iterrows():
-                curr_place = str(r.get('Place', '')).strip().upper()
-                row_date = r.get('Parsed_Date', pd.NaT)
+                place = str(r.get('Place', '')).strip().upper()
                 
-                if curr_place:
-                    if curr_place == 'HOME' and prev_place not in ['HOME', None, '']:
-                        if row_date == now.date() or pd.isna(row_date):
-                            arr_time = str(r.get('Time', r.get('Start_Time', ''))).strip()
-                            if not arr_time: arr_time = now.strftime('%H:%M')
-                            try: arr_time = datetime.strptime(arr_time, '%H:%M:%S').strftime('%H:%M')
-                            except: pass
-                            try: arr_time = datetime.strptime(arr_time, '%H:%M').strftime('%H:%M')
-                            except: pass
+                # Check all possible columns for movement status
+                status = ""
+                for col in ['Type', 'Status', 'Movement', 'Activity']:
+                    if col in recent_locs.columns:
+                        val = str(r[col]).strip().upper()
+                        if val:
+                            status = val
+                            break
                             
-                            arrivals_to_log.append(arr_time)
+                is_moving = status in ['BIKE', 'WALK', 'TOTO', 'AUTO', 'BUS', 'TRAIN', 'CAR', 'IN_VEHICLE', 'ON_BICYCLE', 'ON_FOOT', 'RUNNING']
+                
+                if place == 'HOME' and not is_moving:
+                    curr_state = 'HOME'
+                elif place != 'HOME' or is_moving:
+                    curr_state = 'OUT'
+                else:
+                    curr_state = prev_state
                     
-                    prev_place = curr_place
-            
-            if arrivals_to_log:
-                latest_arrival = arrivals_to_log[-1] 
+                row_date_obj = r.get('Parsed_Date', pd.NaT)
+                row_date = row_date_obj.strftime('%Y-%m-%d') if pd.notna(row_date_obj) else today_str
                 
-                today_logs = log_df[log_df['Date'] == today_str]
-                today_preps = today_logs[today_logs['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME']
+                row_time = str(r.get('Time', r.get('Start_Time', ''))).strip()
+                if not row_time: continue
+                try: row_time = datetime.strptime(row_time, '%H:%M:%S').strftime('%H:%M')
+                except: pass
+                try: row_time = datetime.strptime(row_time, '%H:%M').strftime('%H:%M')
+                except: pass
                 
+                # State Transition: Left Home
+                if curr_state == 'OUT' and prev_state == 'HOME':
+                    last_dep_time = row_time
+                    last_dep_date = row_date
+                    preps_before_out.append({'date': row_date, 'dep_time': row_time})
+                
+                # State Transition: Arrived Home
+                elif curr_state == 'HOME' and prev_state == 'OUT':
+                    arr_time = row_time
+                    preps_after_return.append({'date': row_date, 'arr_time': arr_time})
+                    
+                    if last_dep_time:
+                        outings.append({
+                            'dep_date': last_dep_date,
+                            'dep_time': last_dep_time,
+                            'arr_date': row_date,
+                            'arr_time': arr_time
+                        })
+                        last_dep_time = None
+                        
+                prev_state = curr_state
+
+            logs_to_append = []
+
+            # 1. Log "Prepare before out from Home" (Retroactive - 10 mins backward)
+            for prep in preps_before_out:
+                p_date = prep['date']
+                p_dep = prep['dep_time']
+                
+                day_logs = log_df[log_df['Date'] == p_date]
                 already_logged = False
-                for _, p_row in today_preps.iterrows():
-                    p_start = str(p_row['Start_Time']).strip()
-                    try: p_start = datetime.strptime(p_start, '%H:%M').strftime('%H:%M')
-                    except: pass
-                    
-                    if p_start == latest_arrival:
-                        already_logged = True
-                        break
+                for _, log_r in day_logs.iterrows():
+                    if str(log_r['Sub_Activities']).strip().upper() == 'PREPARE BEFORE OUT FROM HOME':
+                        log_end = str(log_r['End_Time']).strip()
+                        try: log_end = datetime.strptime(log_end, '%H:%M').strftime('%H:%M')
+                        except: pass
+                        if log_end == p_dep:
+                            already_logged = True
+                            break
                 
                 if not already_logged:
-                    arr_dt = datetime.strptime(f"{today_str} {latest_arrival}", "%Y-%m-%d %H:%M")
-                    arr_dt = ist_timezone.localize(arr_dt)
-                    mins_since = (now - arr_dt).total_seconds() / 60.0
-                    
-                    if mins_since >= 10:
-                        # GHOST MODE
-                        end_dt = arr_dt + timedelta(minutes=10)
-                        smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [
-                            today_str, latest_arrival, end_dt.strftime('%H:%M'), "0:10", "PRE", "Prepare after return back home", "", "Auto-completed from Location Data"
+                    try:
+                        dep_dt = datetime.strptime(f"{p_date} {p_dep}", "%Y-%m-%d %H:%M")
+                        start_dt = dep_dt - timedelta(minutes=10)
+                        logs_to_append.append([
+                            p_date, start_dt.strftime('%H:%M'), p_dep, "0:10", "PRE", "Prepare before out from Home", "", "Auto-logged backwards from Location Data"
                         ])
-                        get_all_ecosystem_data.clear()
-                        st.rerun()
-                    else:
-                        # NORMAL MODE
-                        smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [
-                            today_str, latest_arrival, "RUNNING", GS_FORMULA, "PRE", "Prepare after return back home", "", "Auto-started from Location Data"
-                        ])
-                        get_all_ecosystem_data.clear()
-                        st.toast("🏠 Welcome Home! Started your 10m prep timer.")
-                        time.sleep(1.0)
-                        st.rerun()
+                    except: pass
+
+            # 2. Log full "OUT" block (From dep_time to arr_time)
+            for out in outings:
+                p_date = out['dep_date']
+                p_dep = out['dep_time']
+                
+                day_logs = log_df[log_df['Date'] == p_date]
+                already_logged = False
+                for _, log_r in day_logs.iterrows():
+                    if str(log_r['Activity']).strip().upper() == 'OUT':
+                        log_start = str(log_r['Start_Time']).strip()
+                        try: log_start = datetime.strptime(log_start, '%H:%M').strftime('%H:%M')
+                        except: pass
+                        if log_start == p_dep:
+                            already_logged = True
+                            break
+                            
+                if not already_logged:
+                    try:
+                        dep_dt = datetime.strptime(f"{out['dep_date']} {out['dep_time']}", "%Y-%m-%d %H:%M")
+                        arr_dt = datetime.strptime(f"{out['arr_date']} {out['arr_time']}", "%Y-%m-%d %H:%M")
+                        dur_mins = int((arr_dt - dep_dt).total_seconds() / 60)
+                        if dur_mins > 0:
+                            dur_str = f"{dur_mins // 60}:{dur_mins % 60:02d}"
+                            logs_to_append.append([
+                                out['dep_date'], out['dep_time'], out['arr_time'], dur_str, "OUT", "Outing", "", "Auto-logged from Location Data"
+                            ])
+                    except: pass
+
+            # 3. Handle "Prepare after return back home"
+            for prep in preps_after_return:
+                p_date = prep['date']
+                p_arr = prep['arr_time']
+                
+                day_logs = log_df[log_df['Date'] == p_date]
+                already_logged = False
+                for _, log_r in day_logs.iterrows():
+                    if str(log_r['Sub_Activities']).strip().upper() == 'PREPARE AFTER RETURN BACK HOME':
+                        log_start = str(log_r['Start_Time']).strip()
+                        try: log_start = datetime.strptime(log_start, '%H:%M').strftime('%H:%M')
+                        except: pass
+                        if log_start == p_arr:
+                            already_logged = True
+                            break
+                
+                if not already_logged:
+                    is_latest = (prep == preps_after_return[-1])
+                    try:
+                        arr_dt = datetime.strptime(f"{p_date} {p_arr}", "%Y-%m-%d %H:%M")
+                        arr_dt_aware = ist_timezone.localize(arr_dt)
+                        mins_since = (now - arr_dt_aware).total_seconds() / 60.0
+                        
+                        if mins_since >= 10 or not is_latest or p_date != today_str:
+                            end_dt = arr_dt + timedelta(minutes=10)
+                            logs_to_append.append([
+                                p_date, p_arr, end_dt.strftime('%H:%M'), "0:10", "PRE", "Prepare after return back home", "", "Auto-completed from Location Data"
+                            ])
+                        else:
+                            smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [
+                                p_date, p_arr, "RUNNING", GS_FORMULA, "PRE", "Prepare after return back home", "", "Auto-started from Location Data"
+                            ])
+                            get_all_ecosystem_data.clear()
+                            st.toast("🏠 Welcome Home! Started your 10m prep timer.")
+                            time.sleep(1.0)
+                            st.rerun()
+                    except: pass
+
+            # Append completed background tasks
+            if logs_to_append:
+                sheet = get_main_spreadsheet().worksheet("activity_log")
+                for r in logs_to_append:
+                    smart_append_row(sheet, r)
+                get_all_ecosystem_data.clear()
+                st.rerun()
 
         # --- AUTO-STOP RUNNING TIMERS ---
         running_preps = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME')]
@@ -432,7 +534,6 @@ try:
     if st.session_state.get('opened_app_file'):
         app_title = st.session_state.get('opened_app_name', 'Sub-App')
         
-        # This instantly creates Tab 1 for the Sub-App, and Tab 2 for the Routine Hub
         tab_app, tab_hub = st.tabs([f"🖥️ {app_title}", "⏱️ Routine Hub"])
         
         with tab_app:
@@ -450,7 +551,6 @@ try:
             
         hub_container = tab_hub
     else:
-        # If no app is open, the Hub takes up the full normal screen
         hub_container = st.container()
 
     with hub_container:
@@ -548,7 +648,6 @@ try:
         current_sub_activities = scheduled_sub_activities
         current_check_list = scheduled_check_list
 
-        # Override for Home Prep mode
         is_prep_running = any(running_tasks['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME')
         if is_prep_running:
             current_activity = "Welcome Home"

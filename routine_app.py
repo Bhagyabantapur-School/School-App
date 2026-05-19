@@ -12,10 +12,6 @@ GS_FORMULA = '=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(IND
 
 st.set_page_config(page_title="Live Routine Hub", page_icon="⏱️", layout="centered")
 
-# Initialize session state
-if 'redirect_url' not in st.session_state:
-    st.session_state.redirect_url = None
-
 if 'active_main_task' not in st.session_state:
     st.session_state.active_main_task = None
     st.session_state.active_sub_task = None
@@ -25,17 +21,6 @@ if 'pomodoro_state' not in st.session_state:
     st.session_state.pomodoro_state = {}
 
 st_autorefresh(interval=120000, key="routine_refresh")
-
-# --- JAVASCRIPT REDIRECT HANDLER (Opens in New Tab) ---
-if st.session_state.redirect_url:
-    url = st.session_state.redirect_url
-    page_name = url.replace(".py", "")
-    components.html(f"""
-        <script>
-            window.open("/{page_name}", "_blank");
-        </script>
-    """, height=0)
-    st.session_state.redirect_url = None
 
 st.markdown("""
     <style>
@@ -219,8 +204,7 @@ def log_and_open_app(app_name, target_file, cached_data, now_dt):
         
     cached_data[app_name] = now_str 
     if app_name != "Live Routine Hub":
-        st.session_state.redirect_url = target_file
-        st.rerun()
+        st.switch_page(target_file)
 
 # ==========================================
 # Main Logic

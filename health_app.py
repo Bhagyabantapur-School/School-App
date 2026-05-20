@@ -306,6 +306,9 @@ try:
                             clean_param = param.split("[Check]")[0].strip()
                             checked = st.checkbox(clean_param, key=f"live_param_{idx}_{param}")
                             param_values[param] = "Yes" if checked else "No"
+                        elif "[Num]" in param:
+                            clean_param = param.split("[Num]")[0].strip()
+                            param_values[param] = st.number_input(clean_param, value=0, step=1, key=f"live_param_{idx}_{param}")
                         else:
                             param_values[param] = st.text_input(param, key=f"live_param_{idx}_{param}")
 
@@ -331,7 +334,7 @@ try:
                                     elif h == "Start_Time": row_data.append(active_row['Start_Time'])
                                     elif h == "End_Time": row_data.append(end_time_log.strftime('%H:%M'))
                                     elif h == "Duration": row_data.append(GS_FORMULA)
-                                    else: row_data.append(param_values.get(h, ""))
+                                    else: row_data.append(str(param_values.get(h, "")))
                                     
                                 smart_append_row(target_sheet, row_data)
                                 
@@ -436,6 +439,9 @@ try:
                             clean_param = param.split("[Check]")[0].strip()
                             checked = st.checkbox(clean_param, key=f"man_param_{param}")
                             m_param_values[param] = "Yes" if checked else "No"
+                        elif "[Num]" in param:
+                            clean_param = param.split("[Num]")[0].strip()
+                            m_param_values[param] = st.number_input(clean_param, value=0, step=1, key=f"man_param_{param}")
                         else:
                             m_param_values[param] = st.text_input(param, key=f"man_param_{param}")
                                 
@@ -466,7 +472,7 @@ try:
                                 elif h == "Start_Time": row_data.append(start_str_m)
                                 elif h == "End_Time": row_data.append(end_str_m)
                                 elif h == "Duration": row_data.append(GS_FORMULA)
-                                else: row_data.append(m_param_values.get(h, ""))
+                                else: row_data.append(str(m_param_values.get(h, "")))
                                 
                             smart_append_row(target_sheet, row_data)
                             
@@ -540,9 +546,10 @@ try:
                             st.markdown("#### Custom Params")
                             for i in range(num_params):
                                 ph = ""
-                                if i == 0: ph = "e.g., Heart Rate"
+                                if i == 0: ph = "e.g., Glasses of Water [Num]"
                                 elif i == 1: ph = "e.g., Music [Drop: Yes, No]"
                                 elif i == 2: ph = "e.g., Felt Good [Check]"
+                                else: ph = "e.g., Heart Rate"
                                 param_inputs.append(st.text_input(f"Parameter {i+1}", placeholder=ph, key=f"param_input_{i}"))
                         
                         if st.form_submit_button("Create Category", use_container_width=True, type="primary"):
@@ -649,9 +656,10 @@ try:
                         st.markdown("#### Custom Params")
                         for i in range(num_params):
                             ph = ""
-                            if i == 0: ph = "e.g., Heart Rate"
+                            if i == 0: ph = "e.g., Glasses of Water [Num]"
                             elif i == 1: ph = "e.g., Music [Drop: Yes, No]"
                             elif i == 2: ph = "e.g., Felt Good [Check]"
+                            else: ph = "e.g., Heart Rate"
                             param_inputs.append(st.text_input(f"Parameter {i+1}", placeholder=ph, key=f"init_param_input_{i}"))
                     
                     if st.form_submit_button("Create Category", use_container_width=True, type="primary"):

@@ -12,6 +12,11 @@ GS_FORMULA = '=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(IND
 
 st.set_page_config(page_title="Live Routine Hub", page_icon="⏱️", layout="centered")
 
+# Initialize session state for the Embedded App Viewer
+if 'opened_app_file' not in st.session_state:
+    st.session_state.opened_app_file = None
+    st.session_state.opened_app_name = None
+
 if 'active_main_task' not in st.session_state:
     st.session_state.active_main_task = None
     st.session_state.active_sub_task = None
@@ -60,6 +65,11 @@ st.markdown("""
     }
     details > summary::-webkit-details-marker {
         display: none;
+    }
+    /* Tab Styling */
+    button[data-baseweb="tab"] {
+        font-size: 18px !important;
+        font-weight: bold;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -145,6 +155,25 @@ def get_all_ecosystem_data():
     pre_df = fetch_df_from_sheet(pre_sheet, 2, ["Main Category", "Task Name"])
     pre_df = pre_df[pre_df["Main Category"].astype(str).str.strip() != ""] 
 
+    # --- DYNAMIC PREP CHECKLISTS TAB ---
+    try: prep_chk_sheet = main_ss.worksheet("prep_checklists")
+    except:
+        prep_chk_sheet = main_ss.add_worksheet(title="prep_checklists", rows="100", cols="2")
+        default_chk_vals = [
+            ["Type", "Task Name"],
+            ["Prepare after return back home", "Unpack Bag"],
+            ["Prepare after return back home", "Wash Hands / Freshen Up"],
+            ["Prepare after return back home", "Drink Water"],
+            ["Prepare after return back home", "Change Clothes"],
+            ["Prepare before out from Home", "Take Keys"],
+            ["Prepare before out from Home", "Take Wallet"]
+        ]
+        try: prep_chk_sheet.update(range_name='A1:B7', values=default_chk_vals, value_input_option="USER_ENTERED")
+        except TypeError: prep_chk_sheet.update('A1:B7', default_chk_vals, value_input_option="USER_ENTERED")
+    
+    prep_chk_df = fetch_df_from_sheet(prep_chk_sheet, 2, ["Type", "Task Name"])
+    prep_chk_df = prep_chk_df[prep_chk_df["Type"].astype(str).str.strip() != ""]
+
     try:
         t_records = dash_ss.worksheet("Tracker").get_all_records()
         tracker_data = {row['App Name']: str(row['Last Opened']) for row in t_records}
@@ -159,7 +188,7 @@ def get_all_ecosystem_data():
             loc_df = pd.DataFrame()
     except: loc_df = pd.DataFrame()
 
-    return df, log_df, future_df, holidays_df, payment_df, must_do_df, pre_df, tracker_data, loc_df
+    return df, log_df, future_df, holidays_df, payment_df, must_do_df, pre_df, tracker_data, loc_df, prep_chk_df
 
 def get_last_done_str(item_name, log_df, now, col_name='Sub_Activities'):
     completed_logs = log_df[log_df['End_Time'] != 'RUNNING']
@@ -204,13 +233,15 @@ def log_and_open_app(app_name, target_file, cached_data, now_dt):
         
     cached_data[app_name] = now_str 
     if app_name != "Live Routine Hub":
-        st.switch_page(target_file)
+        st.session_state.opened_app_file = target_file
+        st.session_state.opened_app_name = app_name
+        st.rerun()
 
 # ==========================================
 # Main Logic
 # ==========================================
 try:
-    df, log_df, future_df, holidays_df, payment_df, must_do_df, pre_df, tracker_data, loc_df = get_all_ecosystem_data()
+    df, log_df, future_df, holidays_df, payment_df, must_do_df, pre_df, tracker_data, loc_df, prep_chk_df = get_all_ecosystem_data()
     
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist_timezone)
@@ -219,6 +250,13 @@ try:
     current_day = now.strftime('%A')
     today_str = now.strftime('%Y-%m-%d')
     current_time = now.time()
+
+    # Fetch Dynamic Checklists from Tab
+    return_predef = prep_chk_df[prep_chk_df['Type'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME']['Task Name'].tolist()
+    return_predef = [str(x).strip() for x in return_predef if str(x).strip()]
+    
+    out_predef = prep_chk_df[prep_chk_df['Type'].str.strip().str.upper() == 'PREPARE BEFORE OUT FROM HOME']['Task Name'].tolist()
+    out_predef = [str(x).strip() for x in out_predef if str(x).strip()]
 
     # ==========================================
     # --- SMARTER AUTO-LOGGER FOR FULL JOURNEY ---
@@ -437,7 +475,13 @@ try:
                 if log_idx == idx: continue
                 if str(log_r['Sub_Activities']).strip().upper() in ['PREPARE AFTER RETURN BACK HOME', 'PREPARE BEFORE OUT FROM HOME']:
                     continue
+                
                 log_start_str = str(log_r['Start_Time']).strip()
+                log_end_str = str(log_r['End_Time']).strip()
+                
+                # Zero-Duration Ignore Strategy: If Start == End, it's a checklist item, ignore it!
+                if log_start_str == log_end_str: continue
+
                 try:
                     log_start_dt = datetime.strptime(f"{p_date} {log_start_str}", "%Y-%m-%d %H:%M")
                     if p_start_dt < log_start_dt < p_end_dt:
@@ -514,457 +558,486 @@ try:
             time.sleep(1.0)
             st.rerun()
 
-    if pending_edits:
-        with st.expander(f"⚠️ Action Required: Pending Sheet Edits ({len(pending_edits)})", expanded=True):
-            st.markdown("<p style='font-size:13px; color:#666; margin-top:-10px;'>You started a task or left home before your 10m prep finished. Click Auto-Fix to perfectly align the times!</p>", unsafe_allow_html=True)
-            for edit in pending_edits:
-                st.markdown(f"<div style='background-color:#fff4f4; border-left:4px solid #d32f2f; padding:8px; margin-bottom:5px; font-size:14px;'><b>{edit['date']} at {edit['start']}</b><br><span style='color:#555;'>Conflict: {edit['reasons']}</span></div>", unsafe_allow_html=True)
-                if st.button(f"🔧 Auto-Fix to {edit['suggested_end']}", key=f"fix_{edit['sheet_row']}", use_container_width=True):
-                    log_sheet = get_main_spreadsheet().worksheet("activity_log")
-                    log_sheet.update_cell(int(edit['sheet_row']), 3, edit['suggested_end'])
-                    log_sheet.update_cell(int(edit['sheet_row']), 4, GS_FORMULA)
-                    get_all_ecosystem_data.clear()
-                    st.toast(f"✅ Fixed! End time perfectly adjusted to {edit['suggested_end']}.")
-                    time.sleep(1.0)
+    # ==========================================
+    # --- TABBED INTERFACE ENGINE ---
+    # ==========================================
+    if st.session_state.get('opened_app_file'):
+        app_title = st.session_state.get('opened_app_name', 'Sub-App')
+        
+        tab_app, tab_hub = st.tabs([f"🖥️ {app_title}", "⏱️ Routine Hub"])
+        
+        with tab_app:
+            col_v1, col_v2 = st.columns([8, 2])
+            with col_v1:
+                st.markdown(f"<h3 style='color: #0068c9; margin-top: 0px;'>Running: {app_title}</h3>", unsafe_allow_html=True)
+            with col_v2:
+                if st.button("❌ Close App", key="close_embed", use_container_width=True, type="primary"):
+                    st.session_state.opened_app_file = None
+                    st.session_state.opened_app_name = None
                     st.rerun()
-            st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
-
-    app_groups = {
-        "MONEY": [
-            ("Money & Location", "money_location.py", "📍"),
-            ("Money Utilities", "money_utilities.py", "💳"),
-            ("Money Tracker", "money_tracker.py", "💵")
-        ],
-        "ROUTINE": [
-            ("Live Routine Hub", "routine_app.py", "⏱️"),
-            ("Routine Audit", "routine_audit.py", "🔍"),
-            ("Routine Editor", "routine_editor.py", "✏️"),
-            ("Project App", "project_app.py", "🚀")
-        ],
-        "HEALTH": [
-            ("Health Hub", "health_app.py", "❤️"),
-            ("Sleep & Water", "sleep_water_app.py", "💧")
-        ],
-        "SCH WORK": [
-            ("MDM Returns", "mdm_return_log.py", "📦"),
-            ("Video Manager", "bps_ytfb_videos.py", "🎬")
-        ],
-        "HOME": [
-            ("Trace Inventory", "trace.py", "🏷️"),
-            ("Monthly Tracker", "monthly_app.py", "📆")
-        ],
-        "HARDWARE": [
-            ("Backup Tracker", "backup_tracker_app.py", "💾")
-        ],
-        "BALANCE": [
-            ("Strong Tracker", "strong.py", "💪")
-        ],
-        "ONES": [
-            ("Election Duty", "election_duty.py", "🗳️")
-        ]
-    }
-    
-    base_app_list = [app for group in app_groups.values() for app in group]
-    
-    holidays_df['Date_dt'] = pd.to_datetime(holidays_df['Date'], dayfirst=True, errors='coerce')
-    today_holiday_match = holidays_df[holidays_df['Date_dt'].dt.date == now.date()]
-    is_auto_holiday = not today_holiday_match.empty
-    auto_occasion = today_holiday_match.iloc[0]['Occasion'] if is_auto_holiday else ""
-    effective_day = "Holiday" if is_auto_holiday else current_day
-
-    scheduled_activity = "FREE TIME"
-    scheduled_activity_start = None
-    next_activity = "NONE"
-    next_time_str = ""
-    scheduled_sub_activities = ""
-    scheduled_check_list = ""
-    active_apps_filter = []
-
-    today_schedule = df[df['Day'].str.strip().str.title() == effective_day.title()].to_dict('records')
-
-    for i, row in enumerate(today_schedule):
-        try:
-            start_str = str(row['Start_Time']).strip()
-            end_str = str(row['End_Time']).strip()
-            start_t = datetime.strptime(start_str, '%H:%M').time()
-            end_t = datetime.strptime('23:59:59', '%H:%M:%S').time() if end_str in ['0:00', '00:00', '24:00'] else datetime.strptime(end_str, '%H:%M').time()
-
-            is_current = (start_t <= current_time <= end_t) if start_t <= end_t else (current_time >= start_t or current_time <= end_t)
-
-            if is_current:
-                scheduled_activity = str(row['Activity']).strip().upper()
-                scheduled_activity_start = start_t
-                scheduled_sub_activities = str(row.get('Sub_Activities', '')).strip()
-                scheduled_check_list = str(row.get('check_list', '')).strip()
-                
-                apps_raw = str(row.get('App', '')).split(',')
-                active_apps_filter.extend([a.strip() for a in apps_raw if a.strip()])
-                
-                if i + 1 < len(today_schedule):
-                    next_row = today_schedule[i+1]
-                    next_activity = str(next_row['Activity']).strip().upper()
-                    next_time_str = datetime.strptime(str(next_row['Start_Time']).strip(), '%H:%M').strftime('%I:%M %p')
-                else: next_activity = "END OF DAY"
-                break
-            elif current_time < start_t and scheduled_activity == "FREE TIME":
-                next_activity = str(row['Activity']).strip().upper()
-                next_time_str = datetime.strptime(start_str, '%H:%M').strftime('%I:%M %p')
-                break
-        except ValueError: continue
-
-    current_activity = scheduled_activity
-    current_activity_start = scheduled_activity_start
-    current_sub_activities = scheduled_sub_activities
-    current_check_list = scheduled_check_list
-
-    is_prep_running = any(running_tasks['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME')
-    if is_prep_running:
-        current_activity = "Welcome Home"
-        prep_row = running_tasks[running_tasks['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME'].iloc[0]
-        try: current_activity_start = datetime.strptime(str(prep_row['Start_Time']).strip(), '%H:%M').time()
-        except: pass
-
-    if current_activity in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"]: color = "#ff4b4b" 
-    elif current_activity in ["WORK", "REPORT", "TASK", "HOME TASK", "HOME UTILITIES"]: color = "#0068c9" 
-    elif current_activity == "HEALTH": color = "#2e7b32" 
-    elif current_activity in ["SLEEP", "PRE", "TEA", "OUT", "PREPARE AFTER RETURN BACK HOME", "Welcome Home"]: color = "#ff9f36" 
-    else: color = "#333333" 
-
-    hide_extras = (current_activity == "SLEEP")
-
-    filtered_app_list = [app for app in base_app_list if app[0] in active_apps_filter] if active_apps_filter else []
-
-    if filtered_app_list and not hide_extras:
-        st.markdown('<h4 style="text-align: left; color: #d84315; margin-top: 10px;">🚀 Scheduled Apps</h4>', unsafe_allow_html=True)
-        for i in range(0, len(filtered_app_list), 3):
-            cols = st.columns(3)
-            for j in range(3):
-                if i + j < len(filtered_app_list):
-                    app_name, file_name, icon = filtered_app_list[i + j]
-                    last_str = get_app_time_str(app_name, tracker_data, now)
-                    with cols[j]:
-                        if st.button(f"{icon} {app_name}\n(Last: {last_str})", key=f"sch_app_{i+j}", use_container_width=True):
-                            log_and_open_app(app_name, file_name, tracker_data, now)
-        st.markdown("---")
-
-    st.markdown(f'<h3 style="margin: 5px 0px 10px 0px; font-size: 1.8rem; color: {color}; letter-spacing: 0.5px; text-align: left;">{current_activity}</h3>', unsafe_allow_html=True)
-
-    if is_auto_holiday: st.markdown(f'<p style="text-align: left; color: #ff9f36; font-weight: bold; font-size: 1.1rem; margin-top: -5px;">🎉 {auto_occasion} (Holiday Schedule)</p>', unsafe_allow_html=True)
-
-    if current_activity_start:
-        dt_start = datetime.combine(now.date(), current_activity_start)
-        dt_start = ist_timezone.localize(dt_start)
-        if current_time < current_activity_start: dt_start -= timedelta(days=1)
-        elapsed = now - dt_start
-        eh, erem = divmod(int(elapsed.total_seconds()), 3600)
-        em = erem // 60
-        elapsed_text = f"{eh}h {em}m" if eh > 0 else f"{em}m"
-        st.markdown(f'<h3 style="text-align: left; color: #555; margin-top: 0px; margin-bottom: 10px; font-weight: 400; font-size: 1.1rem;">⏱️ Elapsed: {elapsed_text}</h3>', unsafe_allow_html=True)
+                    
+            page_url = st.session_state.opened_app_file.replace('.py', '')
+            components.iframe(f"/{page_url}?embed=true", height=850, scrolling=True)
+            
+        hub_container = tab_hub
     else:
-        st.markdown('<div style="margin-bottom: 15px;"></div>', unsafe_allow_html=True)
-        
-    if next_activity not in ["NONE", "END OF DAY"]: st.markdown(f'<h4 style="text-align: right; color: #666; margin-bottom: 20px; font-weight: 400; font-size: 1.1rem;">Up Next: <b>{next_activity}</b> at {next_time_str}</h4>', unsafe_allow_html=True)
-    elif next_activity == "END OF DAY": st.markdown('<h4 style="text-align: right; color: #666; margin-bottom: 20px; font-weight: 400; font-size: 1.1rem;">Up Next: Schedule Complete</h4>', unsafe_allow_html=True)
+        hub_container = st.container()
 
-
-    if not hide_extras:
-        all_alert_pays = []
-        if not payment_df.empty:
-            def parse_pay_date(d_str):
-                try: return pd.to_datetime(str(d_str).strip(), dayfirst=True).date()
-                except: return pd.NaT
-            
-            payment_df['Due_Date_dt'] = payment_df['Due_Date'].apply(parse_pay_date)
-            pending_payments = payment_df[~payment_df['Status'].str.strip().str.upper().isin(['PAID', 'DONE'])]
-            for _, p_row in pending_payments.iterrows():
-                if pd.notna(p_row['Due_Date_dt']):
-                    days_until = (p_row['Due_Date_dt'] - now.date()).days
-                    if days_until <= 3: all_alert_pays.append((days_until, p_row))
-
-        if all_alert_pays:
-            all_alert_pays.sort(key=lambda x: x[0])
-            min_days = all_alert_pays[0][0]
-            
-            if min_days < 0:
-                header_text = f"🔴 OVERDUE PAYMENTS! ({len(all_alert_pays)})"
-            elif min_days == 0:
-                header_text = f"🔴 PAYMENTS DUE TODAY! ({len(all_alert_pays)})"
-            elif min_days == 1:
-                header_text = f"🟠 Payments Due Tomorrow ({len(all_alert_pays)})"
-            else:
-                header_text = f"🟡 Payments Due in {min_days} Days ({len(all_alert_pays)})"
-            
-            with st.expander(header_text, expanded=False):
-                for i, (days_until, p_row) in enumerate(all_alert_pays):
-                    if days_until < 0:
-                        day_str = f"Overdue by {abs(days_until)} days!"
-                        item_bg = "#d32f2f" # Red
-                    elif days_until == 0:
-                        day_str = "Due Today!"
-                        item_bg = "#ef5350" # Light Red
-                    elif days_until == 1:
-                        day_str = "Due Tomorrow!"
-                        item_bg = "#f57c00" # Orange
-                    else:
-                        day_str = f"Due in {days_until} days"
-                        item_bg = "#ffb300" # Amber
-                    
-                    pad_bot = "margin-bottom: 8px;"
-                    card_html = f'<div style="background-color: {item_bg}; color: white; padding: 8px 12px; border-radius: 6px; {pad_bot} box-shadow: 0 1px 3px rgba(0,0,0,0.1);"><strong style="font-size: 15px;">{p_row["Bill_Name"]} - {day_str}</strong></div>'
-                    st.markdown(card_html, unsafe_allow_html=True)
-                
-                st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
-
-    # --- DYNAMIC HOME RETURN CHECKLIST INJECTION ---
-    sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
-    chk_list = [c.strip() for c in current_check_list.split(',') if c.strip()]
-    all_logged_items = log_df['check_list'].tolist() + log_df['Sub_Activities'].tolist()
-    
-    running_subs_upper_for_chk = [str(x).strip().upper() for x in running_tasks['Sub_Activities'].tolist()]
-    home_predef = ["Unpack Bag", "Wash Hands / Freshen Up", "Drink Water", "Change Clothes"]
-    
-    if 'PREPARE AFTER RETURN BACK HOME' in running_subs_upper_for_chk:
-        for item in home_predef:
-            if item not in chk_list:
-                chk_list.append(item)
-    
-    if not hide_extras:
-        upcoming_ui_elements_raw = []
-        if not future_df.empty:
-            for _, r in future_df.iterrows():
-                try:
-                    due_dt_str = f"{r['Due_Date']} {r['Due_Time']}"
-                    due_dt = ist_timezone.localize(datetime.strptime(due_dt_str, "%Y-%m-%d %H:%M"))
-                    time_diff = due_dt - now
-                    hours_until_due = time_diff.total_seconds() / 3600
-                    formatted_task = f"{r['Task_Name']} [Due: {r['Due_Date'][5:]} {r['Due_Time']}]"
-                    
-                    if str(r['Status']).strip().upper() in ['COMPLETED', 'CANCELED'] or any(formatted_task.upper() == str(x).strip().upper() for x in all_logged_items): continue
-                        
-                    if hours_until_due <= 24:
-                        sec_diff = time_diff.total_seconds()
-                        is_overdue = sec_diff < 0
-                        abs_sec = abs(int(sec_diff))
-                        
-                        d, h_rem = divmod(abs_sec, 86400)
-                        h, m_rem = divmod(h_rem, 3600)
-                        m = m_rem // 60
-                        
-                        time_parts = []
-                        if d > 0: time_parts.append(f"{int(d)}d")
-                        if h > 0 or d > 0: time_parts.append(f"{int(h)}h")
-                        time_parts.append(f"{int(m)}m")
-                        time_str = " ".join(time_parts)
-                        
-                        time_text = f"Overdue by {time_str}" if is_overdue else f"Due in {time_str}"
-                        upcoming_ui_elements_raw.append((due_dt, r, time_text, is_overdue))
-                        
-                    if hours_until_due <= 0 and str(r['Activity']).strip().upper() == current_activity:
-                        if r['Type'] == 'Sub-Activity': sub_list.append(formatted_task)
-                        elif r['Type'] == 'Checklist': chk_list.append(formatted_task)
-                except: continue
-
-        if upcoming_ui_elements_raw:
-            upcoming_ui_elements_raw.sort(key=lambda x: x[0])
-            
-            most_urgent_dt = upcoming_ui_elements_raw[0][0]
-            is_urgent_overdue = (most_urgent_dt - now).total_seconds() < 0
-            if is_urgent_overdue:
-                header_text = f"🔴 Upcoming Special Tasks - OVERDUE ({len(upcoming_ui_elements_raw)})"
-            else:
-                header_text = f"🟠 Upcoming Special Tasks ({len(upcoming_ui_elements_raw)})"
-            
-            with st.expander(header_text, expanded=False):
-                for idx_task, (dt, r, time_text, is_overdue) in enumerate(upcoming_ui_elements_raw):
-                    item_bg = "#d32f2f" if is_overdue else "#0068c9" 
-                    
-                    st.markdown(f'<div style="background-color: {item_bg}; color: white; padding: 12px; border-radius: 6px; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);"><strong style="font-size: 16px;">{r["Task_Name"]} ({r["Activity"]})</strong><br><span style="font-size: 14px; opacity: 0.95;">{time_text}</span></div>', unsafe_allow_html=True)
-                    
-                    col_run, col_manage = st.columns(2)
-                    with col_run:
-                        if st.button("▶️ Run Task", key=f"run_sp_{r['row_index']}", use_container_width=True):
-                            smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, str(r['Activity']).upper(), str(r['Task_Name']).strip(), "", "Started from Special Tasks"])
-                            get_all_ecosystem_data.clear() 
-                            st.rerun()
-                    with col_manage:
-                        with st.expander(f"✏️ Manage Task", expanded=False):
-                            tab_resched, tab_cancel = st.tabs(["📅 Reschedule", "❌ Cancel"])
-                            with tab_resched:
-                                col_d, col_t = st.columns(2)
-                                try: curr_date = datetime.strptime(str(r['Due_Date']).strip(), '%Y-%m-%d').date()
-                                except: curr_date = now.date()
-                                curr_time_str = str(r['Due_Time']).strip()
-                                time_opts = [f"{str(h).zfill(2)}:{str(m).zfill(2)}" for h in range(24) for m in range(60)]
-                                if curr_time_str not in time_opts: curr_time_str = "12:00"
-                                
-                                with col_d: new_date = st.date_input("New Date", value=curr_date, key=f"nd_{r['row_index']}")
-                                with col_t: new_time = st.selectbox("New Time", options=time_opts, index=time_opts.index(curr_time_str), key=f"nt_{r['row_index']}")
-                                    
-                                if st.button("Save New Time", key=f"rs_btn_{r['row_index']}", type="primary", use_container_width=True):
-                                    fsheet = get_main_spreadsheet().worksheet("future_tasks")
-                                    fsheet.update_cell(int(r['row_index']), 1, new_date.strftime('%Y-%m-%d'))
-                                    fsheet.update_cell(int(r['row_index']), 2, new_time)
-                                    smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), GS_FORMULA, str(r['Activity']).upper(), "", f"{r['Task_Name']} [RESCHEDULED]", f"Moved to {new_date.strftime('%Y-%m-%d')} {new_time}"])
-                                    get_all_ecosystem_data.clear() 
-                                    st.rerun()
-                            with tab_cancel:
-                                col_r, col_b = st.columns([3, 1])
-                                with col_r: cancel_reason = st.text_input("Reason", placeholder="Why are you cancelling?", key=f"rsn_{r['row_index']}", label_visibility="collapsed")
-                                with col_b:
-                                    if st.button("Confirm", key=f"cnf_{r['row_index']}", type="primary"):
-                                        if cancel_reason.strip():
-                                            fsheet = get_main_spreadsheet().worksheet("future_tasks")
-                                            fsheet.update_cell(int(r['row_index']), 7, "Canceled")
-                                            fsheet.update_cell(int(r['row_index']), 8, cancel_reason)
-                                            smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), GS_FORMULA, str(r['Activity']).upper(), "", f"{r['Task_Name']} [CANCELED]", f"Cancel Reason: {cancel_reason}"])
-                                            get_all_ecosystem_data.clear() 
-                                            st.rerun()
-                    
-                    if idx_task < len(upcoming_ui_elements_raw) - 1:
-                        st.markdown('<hr style="margin: 5px 0px 15px 0px; border: 0; border-top: 1px solid #eee;">', unsafe_allow_html=True)
-                
-                st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
-
-        future_holidays = holidays_df[holidays_df['Date_dt'].dt.date > now.date()].sort_values('Date_dt')
-        if not future_holidays.empty:
-            upcoming_hols = future_holidays.head(3)
-            with st.expander(f"🌴 Upcoming Holidays ({len(upcoming_hols)})", expanded=False):
-                for _, h_row in upcoming_hols.iterrows():
-                    days_until = (h_row['Date_dt'].date() - now.date()).days
-                    day_str = "Tomorrow!" if days_until == 1 else f"in {days_until} days"
-                    st.markdown(f"**{h_row['Date_dt'].strftime('%b %d, %Y')}** - {h_row['Occasion']} *( {day_str} )*")
-
-        if not pre_df.empty:
-            valid_pres = pre_df[pre_df['Task Name'].str.strip() != '']
-            if not valid_pres.empty:
-                with st.expander(f"🌅 PRE ({len(valid_pres)})", expanded=False):
-                    st.markdown('<p style="text-align: center; color: #888; font-size: 13px; margin-top:-10px;">Tap to start tracking</p>', unsafe_allow_html=True)
-                    pre_cols = st.columns(2)
-                    running_subs_upper = [str(x).strip().upper() for x in running_tasks['Sub_Activities'].tolist()]
-                    for idx, row in valid_pres.iterrows():
-                        p_task = str(row['Task Name']).strip()
-                        p_cat = str(row['Main Category']).strip().upper() or "PRE"
-                        with pre_cols[idx % 2]:
-                            if p_task.upper() in running_subs_upper:
-                                st.button(f"⏳ {p_task}", key=f"pre_run_{idx}", disabled=True, use_container_width=True)
-                            elif st.button(f"▶️ {p_task}", key=f"pre_btn_{idx}", use_container_width=True):
-                                smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, p_cat, p_task, "", "PRE Task"])
-                                get_all_ecosystem_data.clear()
-                                st.rerun()
-
-        if not must_do_df.empty:
-            valid_must_dos = must_do_df[must_do_df['Task Name'].str.strip() != '']
-            if not valid_must_dos.empty:
-                with st.expander(f"⭐ Must Do Tasks ({len(valid_must_dos)})", expanded=False):
-                    st.markdown('<p style="text-align: center; color: #888; font-size: 13px; margin-top:-10px;">Tap to start tracking</p>', unsafe_allow_html=True)
-                    md_cols = st.columns(2)
-                    running_subs_upper = [str(x).strip().upper() for x in running_tasks['Sub_Activities'].tolist()]
-                    for idx, row in valid_must_dos.iterrows():
-                        md_task = str(row['Task Name']).strip()
-                        md_cat = str(row['Main Category']).strip().upper() or "WORK"
-                        with md_cols[idx % 2]:
-                            if md_task.upper() in running_subs_upper:
-                                st.button(f"⏳ {md_task}", key=f"md_run_{idx}", disabled=True, use_container_width=True)
-                            elif st.button(f"▶️ {md_task}", key=f"md_btn_{idx}", use_container_width=True):
-                                smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, md_cat, md_task, "", "Must Do Task"])
-                                get_all_ecosystem_data.clear()
-                                st.rerun()
-
-        if chk_list:
-            with st.expander(f"✅ Tasks & Reminders ({len(chk_list)})", expanded=True):
-                today_logs = log_df[log_df['Date'] == today_str]
-                today_logged_tasks = today_logs[today_logs['Activity'].isin([current_activity, 'PRE'])]['check_list'].tolist()
-                
-                for task in chk_list:
-                    is_done = any(task.upper() == str(x).strip().upper() for x in (all_logged_items if "[Due:" in task else today_logged_tasks))
-                    if "[Due:" in task and not is_done:
-                        raw_task = task.split(" [Due:")[0].strip()
-                        matches = future_df[(future_df['Task_Name'].str.strip() == raw_task) & (future_df['Type'] == 'Checklist')]
-                        if not matches.empty and str(matches.iloc[0]['Status']).strip().upper() in ['COMPLETED', 'CANCELED']: is_done = True
-                    
-                    checked = st.checkbox(f"{task} (Last: {get_last_done_str(task, log_df, now, col_name='check_list')})", value=is_done, disabled=is_done, key=f"chk_{task}_{current_activity}")
-                    if checked and not is_done:
-                        log_act = "PRE" if task in home_predef else current_activity
-                        smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), GS_FORMULA, log_act, "", task, "Checked off"])
-                        if "[Due:" in task:
-                            matches = future_df[(future_df['Task_Name'].str.strip() == task.split(" [Due:")[0].strip()) & (future_df['Type'] == 'Checklist')]
-                            if not matches.empty:
-                                get_main_spreadsheet().worksheet("future_tasks").update_cell(int(matches.iloc[0]['row_index']), 7, "Completed") 
-                                get_all_ecosystem_data.clear() 
-                        get_all_ecosystem_data.clear() 
+    with hub_container:
+        if pending_edits:
+            with st.expander(f"⚠️ Action Required: Pending Sheet Edits ({len(pending_edits)})", expanded=True):
+                st.markdown("<p style='font-size:13px; color:#666; margin-top:-10px;'>You started a task or left home before your 10m prep finished. Click Auto-Fix to perfectly align the times!</p>", unsafe_allow_html=True)
+                for edit in pending_edits:
+                    st.markdown(f"<div style='background-color:#fff4f4; border-left:4px solid #d32f2f; padding:8px; margin-bottom:5px; font-size:14px;'><b>{edit['date']} at {edit['start']}</b><br><span style='color:#555;'>Conflict: {edit['reasons']}</span></div>", unsafe_allow_html=True)
+                    if st.button(f"🔧 Auto-Fix to {edit['suggested_end']}", key=f"fix_{edit['sheet_row']}", use_container_width=True):
+                        log_sheet = get_main_spreadsheet().worksheet("activity_log")
+                        log_sheet.update_cell(int(edit['sheet_row']), 3, edit['suggested_end'])
+                        log_sheet.update_cell(int(edit['sheet_row']), 4, GS_FORMULA)
+                        get_all_ecosystem_data.clear()
+                        st.toast(f"✅ Fixed! End time perfectly adjusted to {edit['suggested_end']}.")
+                        time.sleep(1.0)
                         st.rerun()
+                st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
 
-    if sub_list or active_count > 0:
-        st.markdown("---")
-        st.markdown('<h4 style="text-align: center; color: #333;">Tap to Track Activity</h4>', unsafe_allow_html=True)
+        app_groups = {
+            "MONEY": [
+                ("Money & Location", "money_location.py", "📍"),
+                ("Money Utilities", "money_utilities.py", "💳"),
+                ("Money Tracker", "money_tracker.py", "💵")
+            ],
+            "ROUTINE": [
+                ("Live Routine Hub", "routine_app.py", "⏱️"),
+                ("Routine Audit", "routine_audit.py", "🔍"),
+                ("Routine Editor", "routine_editor.py", "✏️"),
+                ("Project App", "project_app.py", "🚀")
+            ],
+            "HEALTH": [
+                ("Health Hub", "health_app.py", "❤️"),
+                ("Sleep & Water", "sleep_water_app.py", "💧")
+            ],
+            "SCH WORK": [
+                ("MDM Returns", "mdm_return_log.py", "📦"),
+                ("Video Manager", "bps_ytfb_videos.py", "🎬")
+            ],
+            "HOME": [
+                ("Trace Inventory", "trace.py", "🏷️"),
+                ("Monthly Tracker", "monthly_app.py", "📆")
+            ],
+            "HARDWARE": [
+                ("Backup Tracker", "backup_tracker_app.py", "💾")
+            ],
+            "BALANCE": [
+                ("Strong Tracker", "strong.py", "💪")
+            ],
+            "ONES": [
+                ("Election Duty", "election_duty.py", "🗳️")
+            ]
+        }
         
-        if active_count > 0:
-            for idx, active_row in running_tasks.iterrows():
-                sheet_row = idx + 2 
-                display_name = str(active_row['Sub_Activities']) or str(active_row['Activity'])
-                is_home_prep = (str(active_row['Sub_Activities']).strip().upper() == 'PREPARE AFTER RETURN BACK HOME')
-                
-                try:
-                    dt_naive = datetime.strptime(f"{active_row['Date']} {active_row['Start_Time']}", "%Y-%m-%d %H:%M")
-                    mins_elapsed = int((now - ist_timezone.localize(dt_naive)).total_seconds() // 60)
-                except: mins_elapsed = 0 
-                
-                cycle_minute = mins_elapsed % 30
-                pomodoro_count = (mins_elapsed // 30) + 1
-                current_state = "Focus" if cycle_minute < 25 else "Break"
-                task_id = f"task_{sheet_row}"
-                
-                if task_id in st.session_state.pomodoro_state and st.session_state.pomodoro_state[task_id] != current_state:
-                    components.html("""<script>try {var ctx = new (window.AudioContext || window.webkitAudioContext)();function playBeep(freq, time, dur) {var osc = ctx.createOscillator();var gain = ctx.createGain();osc.connect(gain);gain.connect(ctx.destination);osc.frequency.value = freq;osc.type = "square";gain.gain.setValueAtTime(0.1, time);gain.gain.exponentialRampToValueAtTime(0.001, time + dur);osc.start(time);osc.stop(time + dur);}playBeep(600, ctx.currentTime, 0.2);playBeep(800, ctx.currentTime + 0.2, 0.3);} catch(e) {}</script>""", height=0, width=0)
-                st.session_state.pomodoro_state[task_id] = current_state
-
-                p_color, p_state, p_left, p_prog = ("#d84315", "🍅 Focus Time", 25 - cycle_minute, cycle_minute / 25.0) if current_state == "Focus" else ("#2e7b32", "☕ Break Time", 30 - cycle_minute, (cycle_minute - 25) / 5.0)
-                
-                st.markdown(f'<div style="background-color: #f8f9fa; border-left: 5px solid {p_color}; padding: 12px; border-radius: 6px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);"><div style="display: flex; justify-content: space-between; align-items: center;"><strong style="font-size: 16px; color: #333;">⏳ {display_name}</strong><span style="color: #666; font-size: 14px;">Total: {mins_elapsed}m</span></div><div style="margin-top: 8px; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;"><span style="color: {p_color}; font-weight: bold; font-size: 14px;">{p_state} (Cycle {pomodoro_count})</span><span style="color: #555; font-size: 13px; font-weight: bold;">{p_left}m left</span></div><div style="width: 100%; background-color: #e0e0e0; border-radius: 4px; height: 6px;"><div style="width: {p_prog * 100}%; background-color: {p_color}; height: 6px; border-radius: 4px; transition: width 0.5s ease;"></div></div></div>', unsafe_allow_html=True)
-
-                if is_home_prep:
-                    mins_remaining = max(0, 10 - mins_elapsed)
-                    st.markdown(f"<div style='text-align:center; color:#888; font-size:13px; margin-bottom:5px; font-weight:bold;'><i>⏳ This timer will automatically close in {mins_remaining} minutes.</i></div>", unsafe_allow_html=True)
-                    st.markdown("<div style='text-align:center; color:#d84315; font-size:11px; margin-bottom:15px;'><i>📝 Note: Auto-Fix your sheet above if you start a new activity before this finishes!</i></div>", unsafe_allow_html=True)
-                else:
-                    col_stop, col_cancel = st.columns(2)
-                    with col_stop:
-                        if st.button("🛑 SAVE", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
-                            log_sheet = get_main_spreadsheet().worksheet("activity_log")
-                            log_sheet.update_cell(sheet_row, 3, now.strftime('%H:%M')) 
-                            log_sheet.update_cell(sheet_row, 4, GS_FORMULA)                   
-                            if str(active_row['Notes']).strip() == "": log_sheet.update_cell(sheet_row, 8, "Auto-logged via Timer") 
-                                
-                            if "[Due:" in str(active_row['Sub_Activities']):
-                                matches = future_df[(future_df['Task_Name'].str.strip() == str(active_row['Sub_Activities']).split(" [Due:")[0].strip()) & (future_df['Type'] == 'Sub-Activity')]
-                                if not matches.empty:
-                                    get_main_spreadsheet().worksheet("future_tasks").update_cell(int(matches.iloc[0]['row_index']), 7, "Completed") 
-                                    get_all_ecosystem_data.clear()
-                            get_all_ecosystem_data.clear() 
-                            st.rerun()
-
-                    with col_cancel:
-                        if st.button("❌ CANCEL", key=f"cancel_{sheet_row}", use_container_width=True):
-                            get_main_spreadsheet().worksheet("activity_log").delete_rows(sheet_row)
-                            get_all_ecosystem_data.clear() 
-                            st.rerun()
+        base_app_list = [app for group in app_groups.values() for app in group]
         
-        avail_subs = [t for t in sub_list if t not in running_tasks['Sub_Activities'].tolist()]
-        if avail_subs:
-            st.markdown('<div style="margin-top: 15px; margin-bottom: 5px; color: #333;"><b>▶️ Routine Tasks:</b></div>', unsafe_allow_html=True)
-            
-            for i in range(0, len(avail_subs), 3):
+        holidays_df['Date_dt'] = pd.to_datetime(holidays_df['Date'], dayfirst=True, errors='coerce')
+        today_holiday_match = holidays_df[holidays_df['Date_dt'].dt.date == now.date()]
+        is_auto_holiday = not today_holiday_match.empty
+        auto_occasion = today_holiday_match.iloc[0]['Occasion'] if is_auto_holiday else ""
+        effective_day = "Holiday" if is_auto_holiday else current_day
+
+        scheduled_activity = "FREE TIME"
+        scheduled_activity_start = None
+        next_activity = "NONE"
+        next_time_str = ""
+        scheduled_sub_activities = ""
+        scheduled_check_list = ""
+        active_apps_filter = []
+
+        today_schedule = df[df['Day'].str.strip().str.title() == effective_day.title()].to_dict('records')
+
+        for i, row in enumerate(today_schedule):
+            try:
+                start_str = str(row['Start_Time']).strip()
+                end_str = str(row['End_Time']).strip()
+                start_t = datetime.strptime(start_str, '%H:%M').time()
+                end_t = datetime.strptime('23:59:59', '%H:%M:%S').time() if end_str in ['0:00', '00:00', '24:00'] else datetime.strptime(end_str, '%H:%M').time()
+
+                is_current = (start_t <= current_time <= end_t) if start_t <= end_t else (current_time >= start_t or current_time <= end_t)
+
+                if is_current:
+                    scheduled_activity = str(row['Activity']).strip().upper()
+                    scheduled_activity_start = start_t
+                    scheduled_sub_activities = str(row.get('Sub_Activities', '')).strip()
+                    scheduled_check_list = str(row.get('check_list', '')).strip()
+                    
+                    apps_raw = str(row.get('App', '')).split(',')
+                    active_apps_filter.extend([a.strip() for a in apps_raw if a.strip()])
+                    
+                    if i + 1 < len(today_schedule):
+                        next_row = today_schedule[i+1]
+                        next_activity = str(next_row['Activity']).strip().upper()
+                        next_time_str = datetime.strptime(str(next_row['Start_Time']).strip(), '%H:%M').strftime('%I:%M %p')
+                    else: next_activity = "END OF DAY"
+                    break
+                elif current_time < start_t and scheduled_activity == "FREE TIME":
+                    next_activity = str(row['Activity']).strip().upper()
+                    next_time_str = datetime.strptime(start_str, '%H:%M').strftime('%I:%M %p')
+                    break
+            except ValueError: continue
+
+        current_activity = scheduled_activity
+        current_activity_start = scheduled_activity_start
+        current_sub_activities = scheduled_sub_activities
+        current_check_list = scheduled_check_list
+
+        is_prep_running = any(running_tasks['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME')
+        if is_prep_running:
+            current_activity = "Welcome Home"
+            prep_row = running_tasks[running_tasks['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME'].iloc[0]
+            try: current_activity_start = datetime.strptime(str(prep_row['Start_Time']).strip(), '%H:%M').time()
+            except: pass
+
+        if current_activity in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"]: color = "#ff4b4b" 
+        elif current_activity in ["WORK", "REPORT", "TASK", "HOME TASK", "HOME UTILITIES"]: color = "#0068c9" 
+        elif current_activity == "HEALTH": color = "#2e7b32" 
+        elif current_activity in ["SLEEP", "PRE", "TEA", "OUT", "PREPARE AFTER RETURN BACK HOME", "Welcome Home"]: color = "#ff9f36" 
+        else: color = "#333333" 
+
+        hide_extras = (current_activity == "SLEEP")
+
+        filtered_app_list = [app for app in base_app_list if app[0] in active_apps_filter] if active_apps_filter else []
+
+        if filtered_app_list and not hide_extras:
+            st.markdown('<h4 style="text-align: left; color: #d84315; margin-top: 10px;">🚀 Scheduled Apps</h4>', unsafe_allow_html=True)
+            for i in range(0, len(filtered_app_list), 3):
                 cols = st.columns(3)
                 for j in range(3):
-                    if i + j < len(avail_subs):
-                        task = avail_subs[i+j]
+                    if i + j < len(filtered_app_list):
+                        app_name, file_name, icon = filtered_app_list[i + j]
+                        last_str = get_app_time_str(app_name, tracker_data, now)
                         with cols[j]:
-                            if st.button(f"▶️ {task}" + ("" if "[Due:" in task else f"\n(Last: {get_last_done_str(task, log_df, now, col_name='Sub_Activities')})"), key=f"btn_{i+j}_{task}", use_container_width=True):
-                                smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, current_activity, task, "", "Auto-logged via Timer"])
+                            if st.button(f"{icon} {app_name}\n(Last: {last_str})", key=f"sch_app_{i+j}", use_container_width=True):
+                                log_and_open_app(app_name, file_name, tracker_data, now)
+            st.markdown("---")
+
+        st.markdown(f'<h3 style="margin: 5px 0px 10px 0px; font-size: 1.8rem; color: {color}; letter-spacing: 0.5px; text-align: left;">{current_activity}</h3>', unsafe_allow_html=True)
+
+        if is_auto_holiday: st.markdown(f'<p style="text-align: left; color: #ff9f36; font-weight: bold; font-size: 1.1rem; margin-top: -5px;">🎉 {auto_occasion} (Holiday Schedule)</p>', unsafe_allow_html=True)
+
+        if current_activity_start:
+            dt_start = datetime.combine(now.date(), current_activity_start)
+            dt_start = ist_timezone.localize(dt_start)
+            if current_time < current_activity_start: dt_start -= timedelta(days=1)
+            elapsed = now - dt_start
+            eh, erem = divmod(int(elapsed.total_seconds()), 3600)
+            em = erem // 60
+            elapsed_text = f"{eh}h {em}m" if eh > 0 else f"{em}m"
+            st.markdown(f'<h3 style="text-align: left; color: #555; margin-top: 0px; margin-bottom: 10px; font-weight: 400; font-size: 1.1rem;">⏱️ Elapsed: {elapsed_text}</h3>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div style="margin-bottom: 15px;"></div>', unsafe_allow_html=True)
+            
+        if next_activity not in ["NONE", "END OF DAY"]: st.markdown(f'<h4 style="text-align: right; color: #666; margin-bottom: 20px; font-weight: 400; font-size: 1.1rem;">Up Next: <b>{next_activity}</b> at {next_time_str}</h4>', unsafe_allow_html=True)
+        elif next_activity == "END OF DAY": st.markdown('<h4 style="text-align: right; color: #666; margin-bottom: 20px; font-weight: 400; font-size: 1.1rem;">Up Next: Schedule Complete</h4>', unsafe_allow_html=True)
+
+
+        if not hide_extras:
+            all_alert_pays = []
+            if not payment_df.empty:
+                def parse_pay_date(d_str):
+                    try: return pd.to_datetime(str(d_str).strip(), dayfirst=True).date()
+                    except: return pd.NaT
+                
+                payment_df['Due_Date_dt'] = payment_df['Due_Date'].apply(parse_pay_date)
+                pending_payments = payment_df[~payment_df['Status'].str.strip().str.upper().isin(['PAID', 'DONE'])]
+                for _, p_row in pending_payments.iterrows():
+                    if pd.notna(p_row['Due_Date_dt']):
+                        days_until = (p_row['Due_Date_dt'] - now.date()).days
+                        if days_until <= 3: all_alert_pays.append((days_until, p_row))
+
+            if all_alert_pays:
+                all_alert_pays.sort(key=lambda x: x[0])
+                min_days = all_alert_pays[0][0]
+                
+                if min_days < 0:
+                    header_text = f"🔴 OVERDUE PAYMENTS! ({len(all_alert_pays)})"
+                elif min_days == 0:
+                    header_text = f"🔴 PAYMENTS DUE TODAY! ({len(all_alert_pays)})"
+                elif min_days == 1:
+                    header_text = f"🟠 Payments Due Tomorrow ({len(all_alert_pays)})"
+                else:
+                    header_text = f"🟡 Payments Due in {min_days} Days ({len(all_alert_pays)})"
+                
+                with st.expander(header_text, expanded=False):
+                    for i, (days_until, p_row) in enumerate(all_alert_pays):
+                        if days_until < 0:
+                            day_str = f"Overdue by {abs(days_until)} days!"
+                            item_bg = "#d32f2f" # Red
+                        elif days_until == 0:
+                            day_str = "Due Today!"
+                            item_bg = "#ef5350" # Light Red
+                        elif days_until == 1:
+                            day_str = "Due Tomorrow!"
+                            item_bg = "#f57c00" # Orange
+                        else:
+                            day_str = f"Due in {days_until} days"
+                            item_bg = "#ffb300" # Amber
+                        
+                        pad_bot = "margin-bottom: 8px;"
+                        card_html = f'<div style="background-color: {item_bg}; color: white; padding: 8px 12px; border-radius: 6px; {pad_bot} box-shadow: 0 1px 3px rgba(0,0,0,0.1);"><strong style="font-size: 15px;">{p_row["Bill_Name"]} - {day_str}</strong></div>'
+                        st.markdown(card_html, unsafe_allow_html=True)
+                
+                st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
+
+        # --- DYNAMIC CHECKLIST INJECTION FROM SHEET ---
+        sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
+        chk_list = [c.strip() for c in current_check_list.split(',') if c.strip()]
+        all_logged_items = log_df['check_list'].tolist() + log_df['Sub_Activities'].tolist()
+        
+        running_subs_upper_for_chk = [str(x).strip().upper() for x in running_tasks['Sub_Activities'].tolist()]
+        
+        if 'PREPARE AFTER RETURN BACK HOME' in running_subs_upper_for_chk:
+            for item in return_predef:
+                if item not in chk_list:
+                    chk_list.append(item)
+                    
+        if 'PREPARE BEFORE OUT FROM HOME' in running_subs_upper_for_chk:
+            for item in out_predef:
+                if item not in chk_list:
+                    chk_list.append(item)
+        
+        if not hide_extras:
+            upcoming_ui_elements_raw = []
+            if not future_df.empty:
+                for _, r in future_df.iterrows():
+                    try:
+                        due_dt_str = f"{r['Due_Date']} {r['Due_Time']}"
+                        due_dt = ist_timezone.localize(datetime.strptime(due_dt_str, "%Y-%m-%d %H:%M"))
+                        time_diff = due_dt - now
+                        hours_until_due = time_diff.total_seconds() / 3600
+                        formatted_task = f"{r['Task_Name']} [Due: {r['Due_Date'][5:]} {r['Due_Time']}]"
+                        
+                        if str(r['Status']).strip().upper() in ['COMPLETED', 'CANCELED'] or any(formatted_task.upper() == str(x).strip().upper() for x in all_logged_items): continue
+                            
+                        if hours_until_due <= 24:
+                            sec_diff = time_diff.total_seconds()
+                            is_overdue = sec_diff < 0
+                            abs_sec = abs(int(sec_diff))
+                            
+                            d, h_rem = divmod(abs_sec, 86400)
+                            h, m_rem = divmod(h_rem, 3600)
+                            m = m_rem // 60
+                            
+                            time_parts = []
+                            if d > 0: time_parts.append(f"{int(d)}d")
+                            if h > 0 or d > 0: time_parts.append(f"{int(h)}h")
+                            time_parts.append(f"{int(m)}m")
+                            time_str = " ".join(time_parts)
+                            
+                            time_text = f"Overdue by {time_str}" if is_overdue else f"Due in {time_str}"
+                            upcoming_ui_elements_raw.append((due_dt, r, time_text, is_overdue))
+                            
+                        if hours_until_due <= 0 and str(r['Activity']).strip().upper() == current_activity:
+                            if r['Type'] == 'Sub-Activity': sub_list.append(formatted_task)
+                            elif r['Type'] == 'Checklist': chk_list.append(formatted_task)
+                    except: continue
+
+            if upcoming_ui_elements_raw:
+                upcoming_ui_elements_raw.sort(key=lambda x: x[0])
+                
+                most_urgent_dt = upcoming_ui_elements_raw[0][0]
+                is_urgent_overdue = (most_urgent_dt - now).total_seconds() < 0
+                if is_urgent_overdue:
+                    header_text = f"🔴 Upcoming Special Tasks - OVERDUE ({len(upcoming_ui_elements_raw)})"
+                else:
+                    header_text = f"🟠 Upcoming Special Tasks ({len(upcoming_ui_elements_raw)})"
+                
+                with st.expander(header_text, expanded=False):
+                    for idx_task, (dt, r, time_text, is_overdue) in enumerate(upcoming_ui_elements_raw):
+                        item_bg = "#d32f2f" if is_overdue else "#0068c9" 
+                        
+                        st.markdown(f'<div style="background-color: {item_bg}; color: white; padding: 12px; border-radius: 6px; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);"><strong style="font-size: 16px;">{r["Task_Name"]} ({r["Activity"]})</strong><br><span style="font-size: 14px; opacity: 0.95;">{time_text}</span></div>', unsafe_allow_html=True)
+                        
+                        col_run, col_manage = st.columns(2)
+                        with col_run:
+                            if st.button("▶️ Run Task", key=f"run_sp_{r['row_index']}", use_container_width=True):
+                                smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, str(r['Activity']).upper(), str(r['Task_Name']).strip(), "", "Started from Special Tasks"])
+                                get_all_ecosystem_data.clear() 
+                                st.rerun()
+                        with col_manage:
+                            with st.expander(f"✏️ Manage Task", expanded=False):
+                                tab_resched, tab_cancel = st.tabs(["📅 Reschedule", "❌ Cancel"])
+                                with tab_resched:
+                                    col_d, col_t = st.columns(2)
+                                    try: curr_date = datetime.strptime(str(r['Due_Date']).strip(), '%Y-%m-%d').date()
+                                    except: curr_date = now.date()
+                                    curr_time_str = str(r['Due_Time']).strip()
+                                    time_opts = [f"{str(h).zfill(2)}:{str(m).zfill(2)}" for h in range(24) for m in range(60)]
+                                    if curr_time_str not in time_opts: curr_time_str = "12:00"
+                                    
+                                    with col_d: new_date = st.date_input("New Date", value=curr_date, key=f"nd_{r['row_index']}")
+                                    with col_t: new_time = st.selectbox("New Time", options=time_opts, index=time_opts.index(curr_time_str), key=f"nt_{r['row_index']}")
+                                        
+                                    if st.button("Save New Time", key=f"rs_btn_{r['row_index']}", type="primary", use_container_width=True):
+                                        fsheet = get_main_spreadsheet().worksheet("future_tasks")
+                                        fsheet.update_cell(int(r['row_index']), 1, new_date.strftime('%Y-%m-%d'))
+                                        fsheet.update_cell(int(r['row_index']), 2, new_time)
+                                        smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), GS_FORMULA, str(r['Activity']).upper(), "", f"{r['Task_Name']} [RESCHEDULED]", f"Moved to {new_date.strftime('%Y-%m-%d')} {new_time}"])
+                                        get_all_ecosystem_data.clear() 
+                                        st.rerun()
+                                with tab_cancel:
+                                    col_r, col_b = st.columns([3, 1])
+                                    with col_r: cancel_reason = st.text_input("Reason", placeholder="Why are you cancelling?", key=f"rsn_{r['row_index']}", label_visibility="collapsed")
+                                    with col_b:
+                                        if st.button("Confirm", key=f"cnf_{r['row_index']}", type="primary"):
+                                            if cancel_reason.strip():
+                                                fsheet = get_main_spreadsheet().worksheet("future_tasks")
+                                                fsheet.update_cell(int(r['row_index']), 7, "Canceled")
+                                                fsheet.update_cell(int(r['row_index']), 8, cancel_reason)
+                                                smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), GS_FORMULA, str(r['Activity']).upper(), "", f"{r['Task_Name']} [CANCELED]", f"Cancel Reason: {cancel_reason}"])
+                                                get_all_ecosystem_data.clear() 
+                                                st.rerun()
+                        
+                        if idx_task < len(upcoming_ui_elements_raw) - 1:
+                            st.markdown('<hr style="margin: 5px 0px 15px 0px; border: 0; border-top: 1px solid #eee;">', unsafe_allow_html=True)
+                
+                st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
+
+            future_holidays = holidays_df[holidays_df['Date_dt'].dt.date > now.date()].sort_values('Date_dt')
+            if not future_holidays.empty:
+                upcoming_hols = future_holidays.head(3)
+                with st.expander(f"🌴 Upcoming Holidays ({len(upcoming_hols)})", expanded=False):
+                    for _, h_row in upcoming_hols.iterrows():
+                        days_until = (h_row['Date_dt'].date() - now.date()).days
+                        day_str = "Tomorrow!" if days_until == 1 else f"in {days_until} days"
+                        st.markdown(f"**{h_row['Date_dt'].strftime('%b %d, %Y')}** - {h_row['Occasion']} *( {day_str} )*")
+
+            if not pre_df.empty:
+                valid_pres = pre_df[pre_df['Task Name'].str.strip() != '']
+                if not valid_pres.empty:
+                    with st.expander(f"🌅 PRE ({len(valid_pres)})", expanded=False):
+                        st.markdown('<p style="text-align: center; color: #888; font-size: 13px; margin-top:-10px;">Tap to start tracking</p>', unsafe_allow_html=True)
+                        pre_cols = st.columns(2)
+                        running_subs_upper = [str(x).strip().upper() for x in running_tasks['Sub_Activities'].tolist()]
+                        for idx, row in valid_pres.iterrows():
+                            p_task = str(row['Task Name']).strip()
+                            p_cat = str(row['Main Category']).strip().upper() or "PRE"
+                            with pre_cols[idx % 2]:
+                                if p_task.upper() in running_subs_upper:
+                                    st.button(f"⏳ {p_task}", key=f"pre_run_{idx}", disabled=True, use_container_width=True)
+                                elif st.button(f"▶️ {p_task}", key=f"pre_btn_{idx}", use_container_width=True):
+                                    smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, p_cat, p_task, "", "PRE Task"])
+                                    get_all_ecosystem_data.clear()
+                                    st.rerun()
+
+            if not must_do_df.empty:
+                valid_must_dos = must_do_df[must_do_df['Task Name'].str.strip() != '']
+                if not valid_must_dos.empty:
+                    with st.expander(f"⭐ Must Do Tasks ({len(valid_must_dos)})", expanded=False):
+                        st.markdown('<p style="text-align: center; color: #888; font-size: 13px; margin-top:-10px;">Tap to start tracking</p>', unsafe_allow_html=True)
+                        md_cols = st.columns(2)
+                        running_subs_upper = [str(x).strip().upper() for x in running_tasks['Sub_Activities'].tolist()]
+                        for idx, row in valid_must_dos.iterrows():
+                            md_task = str(row['Task Name']).strip()
+                            md_cat = str(row['Main Category']).strip().upper() or "WORK"
+                            with md_cols[idx % 2]:
+                                if md_task.upper() in running_subs_upper:
+                                    st.button(f"⏳ {md_task}", key=f"md_run_{idx}", disabled=True, use_container_width=True)
+                                elif st.button(f"▶️ {md_task}", key=f"md_btn_{idx}", use_container_width=True):
+                                    smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, md_cat, md_task, "", "Must Do Task"])
+                                    get_all_ecosystem_data.clear()
+                                    st.rerun()
+
+            if chk_list:
+                with st.expander(f"✅ Tasks & Reminders ({len(chk_list)})", expanded=True):
+                    today_logs = log_df[log_df['Date'] == today_str]
+                    today_logged_tasks = today_logs[today_logs['Activity'].isin([current_activity, 'PRE'])]['check_list'].tolist()
+                    
+                    for task in chk_list:
+                        is_done = any(task.upper() == str(x).strip().upper() for x in (all_logged_items if "[Due:" in task else today_logged_tasks))
+                        if "[Due:" in task and not is_done:
+                            raw_task = task.split(" [Due:")[0].strip()
+                            matches = future_df[(future_df['Task_Name'].str.strip() == raw_task) & (future_df['Type'] == 'Checklist')]
+                            if not matches.empty and str(matches.iloc[0]['Status']).strip().upper() in ['COMPLETED', 'CANCELED']: is_done = True
+                        
+                        checked = st.checkbox(f"{task} (Last: {get_last_done_str(task, log_df, now, col_name='check_list')})", value=is_done, disabled=is_done, key=f"chk_{task}_{current_activity}")
+                        if checked and not is_done:
+                            log_act = "PRE" if task in (return_predef + out_predef) else current_activity
+                            smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), GS_FORMULA, log_act, "", task, "Checked off"])
+                            if "[Due:" in task:
+                                matches = future_df[(future_df['Task_Name'].str.strip() == task.split(" [Due:")[0].strip()) & (future_df['Type'] == 'Checklist')]
+                                if not matches.empty:
+                                    get_main_spreadsheet().worksheet("future_tasks").update_cell(int(matches.iloc[0]['row_index']), 7, "Completed") 
+                                    get_all_ecosystem_data.clear() 
+                            get_all_ecosystem_data.clear() 
+                            st.rerun()
+
+        if sub_list or active_count > 0:
+            st.markdown("---")
+            st.markdown('<h4 style="text-align: center; color: #333;">Tap to Track Activity</h4>', unsafe_allow_html=True)
+            
+            if active_count > 0:
+                for idx, active_row in running_tasks.iterrows():
+                    sheet_row = idx + 2 
+                    display_name = str(active_row['Sub_Activities']) or str(active_row['Activity'])
+                    is_home_prep = (str(active_row['Sub_Activities']).strip().upper() == 'PREPARE AFTER RETURN BACK HOME')
+                    
+                    try:
+                        dt_naive = datetime.strptime(f"{active_row['Date']} {active_row['Start_Time']}", "%Y-%m-%d %H:%M")
+                        mins_elapsed = int((now - ist_timezone.localize(dt_naive)).total_seconds() // 60)
+                    except: mins_elapsed = 0 
+                    
+                    cycle_minute = mins_elapsed % 30
+                    pomodoro_count = (mins_elapsed // 30) + 1
+                    current_state = "Focus" if cycle_minute < 25 else "Break"
+                    task_id = f"task_{sheet_row}"
+                    
+                    if task_id in st.session_state.pomodoro_state and st.session_state.pomodoro_state[task_id] != current_state:
+                        components.html("""<script>try {var ctx = new (window.AudioContext || window.webkitAudioContext)();function playBeep(freq, time, dur) {var osc = ctx.createOscillator();var gain = ctx.createGain();osc.connect(gain);gain.connect(ctx.destination);osc.frequency.value = freq;osc.type = "square";gain.gain.setValueAtTime(0.1, time);gain.gain.exponentialRampToValueAtTime(0.001, time + dur);osc.start(time);osc.stop(time + dur);}playBeep(600, ctx.currentTime, 0.2);playBeep(800, ctx.currentTime + 0.2, 0.3);} catch(e) {}</script>""", height=0, width=0)
+                    st.session_state.pomodoro_state[task_id] = current_state
+
+                    p_color, p_state, p_left, p_prog = ("#d84315", "🍅 Focus Time", 25 - cycle_minute, cycle_minute / 25.0) if current_state == "Focus" else ("#2e7b32", "☕ Break Time", 30 - cycle_minute, (cycle_minute - 25) / 5.0)
+                    
+                    st.markdown(f'<div style="background-color: #f8f9fa; border-left: 5px solid {p_color}; padding: 12px; border-radius: 6px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);"><div style="display: flex; justify-content: space-between; align-items: center;"><strong style="font-size: 16px; color: #333;">⏳ {display_name}</strong><span style="color: #666; font-size: 14px;">Total: {mins_elapsed}m</span></div><div style="margin-top: 8px; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;"><span style="color: {p_color}; font-weight: bold; font-size: 14px;">{p_state} (Cycle {pomodoro_count})</span><span style="color: #555; font-size: 13px; font-weight: bold;">{p_left}m left</span></div><div style="width: 100%; background-color: #e0e0e0; border-radius: 4px; height: 6px;"><div style="width: {p_prog * 100}%; background-color: {p_color}; height: 6px; border-radius: 4px; transition: width 0.5s ease;"></div></div></div>', unsafe_allow_html=True)
+
+                    if is_home_prep:
+                        mins_remaining = max(0, 10 - mins_elapsed)
+                        st.markdown(f"<div style='text-align:center; color:#888; font-size:13px; margin-bottom:5px; font-weight:bold;'><i>⏳ This timer will automatically close in {mins_remaining} minutes.</i></div>", unsafe_allow_html=True)
+                        st.markdown("<div style='text-align:center; color:#d84315; font-size:11px; margin-bottom:15px;'><i>📝 Note: Auto-Fix your sheet above if you start a new activity before this finishes!</i></div>", unsafe_allow_html=True)
+                    else:
+                        col_stop, col_cancel = st.columns(2)
+                        with col_stop:
+                            if st.button("🛑 SAVE", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
+                                log_sheet = get_main_spreadsheet().worksheet("activity_log")
+                                log_sheet.update_cell(sheet_row, 3, now.strftime('%H:%M')) 
+                                log_sheet.update_cell(sheet_row, 4, GS_FORMULA)                   
+                                if str(active_row['Notes']).strip() == "": log_sheet.update_cell(sheet_row, 8, "Auto-logged via Timer") 
+                                    
+                                if "[Due:" in str(active_row['Sub_Activities']):
+                                    matches = future_df[(future_df['Task_Name'].str.strip() == str(active_row['Sub_Activities']).split(" [Due:")[0].strip()) & (future_df['Type'] == 'Sub-Activity')]
+                                    if not matches.empty:
+                                        get_main_spreadsheet().worksheet("future_tasks").update_cell(int(matches.iloc[0]['row_index']), 7, "Completed") 
+                                        get_all_ecosystem_data.clear()
                                 get_all_ecosystem_data.clear() 
                                 st.rerun()
 
-    if not hide_extras:
+                        with col_cancel:
+                            if st.button("❌ CANCEL", key=f"cancel_{sheet_row}", use_container_width=True):
+                                get_main_spreadsheet().worksheet("activity_log").delete_rows(sheet_row)
+                                get_all_ecosystem_data.clear() 
+                                st.rerun()
+            
+            avail_subs = [t for t in sub_list if t not in running_tasks['Sub_Activities'].tolist()]
+            if avail_subs:
+                st.markdown('<div style="margin-top: 15px; margin-bottom: 5px; color: #333;"><b>▶️ Routine Tasks:</b></div>', unsafe_allow_html=True)
+                
+                for i in range(0, len(avail_subs), 3):
+                    cols = st.columns(3)
+                    for j in range(3):
+                        if i + j < len(avail_subs):
+                            task = avail_subs[i+j]
+                            with cols[j]:
+                                if st.button(f"▶️ {task}" + ("" if "[Due:" in task else f"\n(Last: {get_last_done_str(task, log_df, now, col_name='Sub_Activities')})"), key=f"btn_{i+j}_{task}", use_container_width=True):
+                                    smart_append_row(get_main_spreadsheet().worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, current_activity, task, "", "Auto-logged via Timer"])
+                                    get_all_ecosystem_data.clear() 
+                                    st.rerun()
+
         st.markdown("""
             <style>
             div[data-testid="stForm"]:has(.visitor-anchor) {

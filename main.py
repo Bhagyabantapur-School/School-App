@@ -41,7 +41,7 @@ mdm_return = st.Page("mdm_return_log.py", title="MDM Returns", icon="📦")
 ytfb_videos = st.Page("bps_ytfb_videos.py", title="Video Manager", icon="🎬")
 trace_app = st.Page("trace.py", title="Trace Inventory", icon="🏷️")
 sleep_water = st.Page("sleep_water_app.py", title="Sleep & Water", icon="💧")
-visual_dashboard = st.Page("dashboard.py", title="Visual Dashboard", icon="🚀") # <-- PLACED AT THE END
+visual_dashboard = st.Page("dashboard.py", title="Visual Dashboard", icon="🚀")
 
 # --- BPS Digital Pages ---
 bps_dashboard = st.Page("bps_dashboard.py", title="Main Dashboard", icon="🏫", default=(system_choice == 'BPS Digital System'))

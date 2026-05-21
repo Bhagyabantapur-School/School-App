@@ -479,7 +479,6 @@ try:
                 log_start_str = str(log_r['Start_Time']).strip()
                 log_end_str = str(log_r['End_Time']).strip()
                 
-                # Zero-Duration Ignore Strategy: If Start == End, it's a checklist item, ignore it!
                 if log_start_str == log_end_str: continue
 
                 try:
@@ -603,7 +602,8 @@ try:
             "MONEY": [
                 ("Money & Location", "money_location.py", "📍"),
                 ("Money Utilities", "money_utilities.py", "💳"),
-                ("Money Tracker", "money_tracker.py", "💵")
+                ("Money Tracker", "money_tracker.py", "💵"),
+                ("Product Inventory", "product_inventory.py", "📦")
             ],
             "ROUTINE": [
                 ("Live Routine Hub", "routine_app.py", "⏱️"),
@@ -631,6 +631,9 @@ try:
             ],
             "ONES": [
                 ("Election Duty", "election_duty.py", "🗳️")
+            ],
+            "DASHBOARD": [
+                ("Visual Dashboard", "dashboard.py", "🚀")
             ]
         }
         
@@ -768,16 +771,16 @@ try:
                     for i, (days_until, p_row) in enumerate(all_alert_pays):
                         if days_until < 0:
                             day_str = f"Overdue by {abs(days_until)} days!"
-                            item_bg = "#d32f2f" # Red
+                            item_bg = "#d32f2f" 
                         elif days_until == 0:
                             day_str = "Due Today!"
-                            item_bg = "#ef5350" # Light Red
+                            item_bg = "#ef5350" 
                         elif days_until == 1:
                             day_str = "Due Tomorrow!"
-                            item_bg = "#f57c00" # Orange
+                            item_bg = "#f57c00" 
                         else:
                             day_str = f"Due in {days_until} days"
-                            item_bg = "#ffb300" # Amber
+                            item_bg = "#ffb300" 
                         
                         pad_bot = "margin-bottom: 8px;"
                         card_html = f'<div style="background-color: {item_bg}; color: white; padding: 8px 12px; border-radius: 6px; {pad_bot} box-shadow: 0 1px 3px rgba(0,0,0,0.1);"><strong style="font-size: 15px;">{p_row["Bill_Name"]} - {day_str}</strong></div>'

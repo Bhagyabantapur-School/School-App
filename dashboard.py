@@ -109,7 +109,7 @@ with col_title:
     st.title("🚀 My Personal Dashboard")
     st.markdown("Welcome back! Here is a summary of your systems:")
 with col_count:
-    st.metric("Total Active Apps", "14") # <-- Updated metric to 14
+    st.metric("Total Active Apps", "17") # <-- Expanded to exactly 17
 st.write("---") 
 
 # ROW 1 (Finance & Core Focus)
@@ -152,7 +152,7 @@ with r3_col3:
 r4_col1, r4_col2, r4_col3 = st.columns(3)
 with r4_col1:
     st.markdown(create_card("⏱️", "Daily Routine", "Next Session", "Yoga", "#F5F5F5", "#9E9E9E", "#616161", tracker_data), unsafe_allow_html=True)
-    if st.button("Open App", key="btn10", use_container_width=True): log_and_open("Daily Routine", "routine_app.py")
+    if st.button("Open App", key="btn10", use_container_width=True): log_and_open("Live Routine Hub", "routine_app.py")
 with r4_col2:
     st.markdown(create_card("🔍", "Routine Audit", "Analysis", "Live", "#F3E5F5", "#8E24AA", "#6A1B9A", tracker_data), unsafe_allow_html=True)
     if st.button("Open App", key="btn11", use_container_width=True): log_and_open("Routine Audit", "routine_audit.py")
@@ -160,7 +160,7 @@ with r4_col3:
     st.markdown(create_card("✏️", "Routine Editor", "Manage", "Active", "#E8EAF6", "#3949AB", "#283593", tracker_data), unsafe_allow_html=True)
     if st.button("Open App", key="btn12", use_container_width=True): log_and_open("Routine Editor", "routine_editor.py")
 
-# ROW 5 (MDM & Video)
+# ROW 5 (MDM, Video, Trace)
 r5_col1, r5_col2, r5_col3 = st.columns(3)
 with r5_col1:
     st.markdown(create_card("📦", "MDM Returns", "Sync", "Ready", "#E8F5E9", "#43A047", "#2E7D32", tracker_data), unsafe_allow_html=True)
@@ -169,4 +169,16 @@ with r5_col2:
     st.markdown(create_card("🎬", "Video Manager", "Platform", "YT / FB", "#FFEBEE", "#E53935", "#C62828", tracker_data), unsafe_allow_html=True)
     if st.button("Open App", key="btn14", use_container_width=True): log_and_open("Video Manager", "bps_ytfb_videos.py")
 with r5_col3:
-    st.empty() # Placeholder for App #15!
+    st.markdown(create_card("🏷️", "Trace Inventory", "Items", "Tracked", "#F3E5F5", "#8E24AA", "#6A1B9A", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn15", use_container_width=True): log_and_open("Trace Inventory", "trace.py")
+
+# ROW 6 (Sleep, Product Inventory)
+r6_col1, r6_col2, r6_col3 = st.columns(3)
+with r6_col1:
+    st.markdown(create_card("💧", "Sleep & Water", "Health", "Logged", "#E3F2FD", "#1E88E5", "#1565C0", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn16", use_container_width=True): log_and_open("Sleep & Water", "sleep_water_app.py")
+with r6_col2:
+    st.markdown(create_card("📦", "Product Inventory", "Stock", "Active", "#E0F2F1", "#00897B", "#00695C", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn17", use_container_width=True): log_and_open("Product Inventory", "product_inventory.py")
+with r6_col3:
+    st.empty() # Placeholder for future App #18!

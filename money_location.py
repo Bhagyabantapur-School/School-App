@@ -14,6 +14,16 @@ from google.oauth2.service_account import Credentials
 # ==========================================
 st.set_page_config(page_title="SK Ecosystem - Core", page_icon="📱", layout="centered")
 
+# --- MOBILE KEYBOARD FIX ---
+st.markdown("""
+    <style>
+    /* Prevent mobile keyboard popup on selectboxes by disabling input focus */
+    div[data-baseweb="select"] input {
+        pointer-events: none !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 def get_ist_now():
     return datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
 
@@ -717,10 +727,10 @@ with tab_location:
                                 today_str, time_now_stop.strftime("%H:%M"), active_m, "", active_p, f"Resumed Route: {active_r} towards {target_dest}"
                             ])
                             
-                        # Log to PEOPLE Sheet if applicable
+                        # Log to PEOPLE Sheet if applicable (now sending both Start Time and End Time!)
                         if contact_name and stop_task in ["Call receive", "Call", "Meet"]:
                             sh_people.worksheet("People Interaction").append_row([
-                                contact_name, stop_task, today_people_str, start_t.strftime("%H:%M"), duration_str_hhmmss, "⚠️ INCOMPLETE"
+                                contact_name, stop_task, today_people_str, start_t.strftime("%H:%M"), time_now_stop.strftime("%H:%M"), duration_str_hhmmss, "⚠️ INCOMPLETE"
                             ])
                             load_interactions.clear()
 
@@ -746,10 +756,14 @@ with tab_location:
                     interaction_type = row.get('Interaction', 'Interaction')
                     person_name = row.get('People', 'Unknown')
                     date_val = row.get('Date', '')
-                    time_val = row.get('Time', '')
+                    
+                    start_time_val = row.get('Start Time', row.get('Time', ''))
+                    end_time_val = row.get('End Time', '')
+                    time_display = f"{start_time_val} to {end_time_val}" if end_time_val else start_time_val
+                    
                     dur_val = row.get('Duration', '')
                     
-                    st.markdown(f"**{interaction_type}: {person_name}** | Date: {date_val} | Time: {time_val} | Dur: {dur_val}")
+                    st.markdown(f"**{interaction_type}: {person_name}** | Date: {date_val} | Time: {time_display} | Dur: {dur_val}")
                     
                     c_int1, c_int2 = st.columns([3, 1])
                     with c_int1:
@@ -964,35 +978,51 @@ with tab_money:
 
     # --- EXPANDABLE BUSY TIME QUICK ENTRY ---
     with st.expander("⚡ Busy Time Quick Entry", expanded=True):
-        bq_c1, bq_c2, bq_c3, bq_c4 = st.columns([1.5, 1.5, 1.2, 1.5])
-        with bq_c1: b_type = st.radio("Flow Type", ["Expense (OUT)", "Income (IN)"], horizontal=True, label_visibility="collapsed")
-        with bq_c2: b_amount = st.number_input("Amount (₹)", min_value=0.0, step=10.0, key="b_amt", label_visibility="collapsed")
-        with bq_c3:
+        b_type = st.radio("Flow Type", ["Expense (OUT)", "Income (IN)"], horizontal=True)
+        
+        c_amt1, c_amt2, c_amt3 = st.columns([1, 1, 1])
+        with c_amt1:
+            b_amount = st.number_input("Total Amount (₹)", min_value=0.0, step=10.0, key="b_amt")
+        with c_amt2:
+            b_due = st.number_input("Due / Pay Later (₹)", min_value=0.0, max_value=float(b_amount), value=0.0, step=1.0, key="b_due")
+        with c_amt3:
+            st.markdown("<br>", unsafe_allow_html=True)
             chk_pers = st.checkbox("Entity: PERS", value=True)
-            chk_mb = st.checkbox("Acc: MB", value=False)
-        with bq_c4:
-            if st.button("🚀 Fast Save", use_container_width=True, type="primary"):
-                if b_amount > 0:
-                    time_now = get_ist_now()
-                    today_str = time_now.strftime("%d-%m-%Y")
-                    time_str = time_now.strftime("%H:%M")
-                    in_val = b_amount if "IN" in b_type else ""
-                    out_val = b_amount if "OUT" in b_type else ""
-                    
-                    final_entity = "PERS" if chk_pers else ""
+            chk_mb = st.checkbox("Paid Acc: MB", value=False)
+
+        if st.button("🚀 Fast Save", use_container_width=True, type="primary"):
+            if b_amount > 0:
+                time_now = get_ist_now()
+                today_str = time_now.strftime("%d-%m-%Y")
+                time_str = time_now.strftime("%H:%M")
+                
+                final_entity = "PERS" if chk_pers else ""
+                final_tf = current_loc if should_inject_tofrom(current_loc) else ""
+                
+                b_paid = b_amount - b_due
+                
+                # 1. Log the Paid amount (if any)
+                if b_paid > 0:
+                    in_val = b_paid if "IN" in b_type else ""
+                    out_val = b_paid if "OUT" in b_type else ""
                     final_acc = "MB" if chk_mb else ""
-                    final_tf = current_loc if should_inject_tofrom(current_loc) else ""
+                    sh.worksheet("MONEY_DATA").append_row([today_str, time_str, in_val, out_val, final_acc, "", final_entity, "", "", "", final_tf, current_loc or "", "⚠️ INCOMPLETE"])
+                
+                # 2. Log the Due amount (if any)
+                if b_due > 0:
+                    in_val_due = b_due if "IN" in b_type else ""
+                    out_val_due = b_due if "OUT" in b_type else ""
+                    sh.worksheet("MONEY_DATA").append_row([today_str, time_str, in_val_due, out_val_due, "UNPAID", "", final_entity, "", "", "", final_tf, current_loc or "", "⚠️ INCOMPLETE"])
                     
-                    row_data = [today_str, time_str, in_val, out_val, final_acc, "", final_entity, "", "", "", final_tf, current_loc or "", "⚠️ INCOMPLETE"]
-                    sh.worksheet("MONEY_DATA").append_row(row_data)
-                    load_money_data.clear()
-                    st.success("Fast saved! Complete it later.")
-                    st.rerun()
-                else: st.warning("Enter an amount!")
+                load_money_data.clear()
+                st.success(f"Fast saved! Paid: ₹{b_paid}, Due: ₹{b_due}.")
+                st.rerun()
+            else:
+                st.warning("Enter an amount!")
         
         st.caption(f"Logged under App Location: {current_loc or 'Unknown'}")
         
-        # --- MINI PREVIEW OF LAST 5 INCOMPLETE ENTRIES ---
+        # --- MINI PREVIEW OF LAST 5 INCOMPLETE ENTRIES & DUES ---
         st.divider()
         df_money_temp = load_money_data()
         if not df_money_temp.empty and 'Remark' in df_money_temp.columns:
@@ -1003,7 +1033,13 @@ with tab_money:
                 for _, row in last_5.iterrows():
                     is_out = float(row.get('Out', 0) or 0) > 0
                     amt_display = f"₹{row['Out']} (OUT)" if is_out else f"₹{row['In']} (IN)"
-                    st.caption(f"🔸 **{row.get('Date', '')}** at {row.get('Time', '')} | **{amt_display}** | Loc: {row.get('Location', '')}")
+                    
+                    # Highlight if it's an unpaid due
+                    acc_val = str(row.get('Account', '')).strip()
+                    if acc_val == 'UNPAID':
+                        st.caption(f"🔴 **{row.get('Date', '')}** at {row.get('Time', '')} | **{amt_display}** | Loc: {row.get('Location', '')} | **(DUE)**")
+                    else:
+                        st.caption(f"🔸 **{row.get('Date', '')}** at {row.get('Time', '')} | **{amt_display}** | Loc: {row.get('Location', '')}")
             else: st.caption("✅ No incomplete quick entries waiting!")
 
     # --- BIKE REFUEL EXPANDER ---
@@ -1063,7 +1099,10 @@ with tab_money:
                     c_r1_1, c_r1_2, c_r1_3 = st.columns(3)
                     with c_r1_1: 
                         acc_opts = get_clean_accounts()
-                        default_acc = acc_opts.index(row.get('Account', '')) if row.get('Account', '') in acc_opts else 0
+                        row_acc = str(row.get('Account', '')).strip()
+                        if row_acc and row_acc not in acc_opts:
+                            acc_opts.insert(0, row_acc)
+                        default_acc = acc_opts.index(row_acc) if row_acc in acc_opts else 0
                         i_acc = st.selectbox("Account", acc_opts, index=default_acc, key=f"ac_{idx}")
                     with c_r1_2: 
                         i_fund = st.selectbox("Fund", get_list("Funds"), key=f"fu_{idx}")
@@ -1221,7 +1260,9 @@ with tab_money:
         
         col1, col2 = st.columns(2)
         with col1:
-            account = st.selectbox("Account (Physical)", get_clean_accounts())
+            acc_opts = get_clean_accounts()
+            if 'UNPAID' not in acc_opts: acc_opts.insert(0, 'UNPAID')
+            account = st.selectbox("Account (Physical)", acc_opts)
             fund = st.selectbox("Fund (Virtual Source)", get_list("Funds"))
             
             mapped_entities = []

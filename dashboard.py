@@ -109,7 +109,7 @@ with col_title:
     st.title("🚀 My Personal Dashboard")
     st.markdown("Welcome back! Here is a summary of your systems:")
 with col_count:
-    st.metric("Total Active Apps", "17") # <-- Expanded to exactly 17
+    st.metric("Total Active Apps", "17")
 st.write("---") 
 
 # ROW 1 (Finance & Core Focus)
@@ -181,4 +181,4 @@ with r6_col2:
     st.markdown(create_card("📦", "Product Inventory", "Stock", "Active", "#E0F2F1", "#00897B", "#00695C", tracker_data), unsafe_allow_html=True)
     if st.button("Open App", key="btn17", use_container_width=True): log_and_open("Product Inventory", "product_inventory.py")
 with r6_col3:
-    st.empty() # Placeholder for future App #18!
+    st.empty() # Placeholder

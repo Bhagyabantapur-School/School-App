@@ -32,6 +32,7 @@ project = st.Page("project_app.py", title="Project Tracker", icon="🚀")
 election = st.Page("election_duty.py", title="Election Duty", icon="🗳️")
 monthly = st.Page("monthly_app.py", title="Monthly Tracker", icon="📆")
 money_tracker = st.Page("money_tracker.py", title="Money Tracker", icon="💵")
+product_inventory = st.Page("product_inventory.py", title="Product Inventory", icon="📦")
 health = st.Page("health_app.py", title="Health Tracker", icon="❤️")
 backup = st.Page("backup_tracker_app.py", title="Backup Tracker", icon="💾")
 routine_audit = st.Page("routine_audit.py", title="Routine Audit", icon="🔍")
@@ -39,7 +40,8 @@ routine_editor = st.Page("routine_editor.py", title="Routine Editor", icon="✏�
 mdm_return = st.Page("mdm_return_log.py", title="MDM Returns", icon="📦")
 ytfb_videos = st.Page("bps_ytfb_videos.py", title="Video Manager", icon="🎬")
 trace_app = st.Page("trace.py", title="Trace Inventory", icon="🏷️")
-sleep_water = st.Page("sleep_water_app.py", title="Sleep & Water", icon="💧") # <-- NEW APP
+sleep_water = st.Page("sleep_water_app.py", title="Sleep & Water", icon="💧")
+visual_dashboard = st.Page("dashboard.py", title="Visual Dashboard", icon="🚀") # <-- PLACED AT THE END
 
 # --- BPS Digital Pages ---
 bps_dashboard = st.Page("bps_dashboard.py", title="Main Dashboard", icon="🏫", default=(system_choice == 'BPS Digital System'))
@@ -59,9 +61,9 @@ if st.session_state.active_system == 'Personal Hub':
     pg = st.navigation({
         "My Personal Hub": [
             routine_hub, money_location, money_utilities, 
-            strong, project, election, monthly, money_tracker, 
+            strong, project, election, monthly, money_tracker, product_inventory,
             health, backup, routine_audit, routine_editor, 
-            mdm_return, ytfb_videos, trace_app, sleep_water # <-- ADDED HERE
+            mdm_return, ytfb_videos, trace_app, sleep_water, visual_dashboard
         ]
     })
     st.sidebar.caption("🔒 Personal Workspace Active")

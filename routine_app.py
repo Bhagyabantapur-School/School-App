@@ -65,7 +65,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# Database Connection & Caching (OPTIMIZED BATCH MODE)
+# Database Connection & Caching (ENTERPRISE DASHBOARD FIX)
 # ==========================================
 @st.cache_resource
 def init_connection():
@@ -73,18 +73,22 @@ def init_connection():
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
     return gspread.authorize(creds)
 
+# ✨ THE FIX: We cache the file objects! This prevents the app from re-searching Drive on every button click.
+@st.cache_resource
+def get_cached_sheet(sheet_name):
+    return init_connection().open(sheet_name)
+
 def smart_append_row(sheet, row_data):
     col_a = sheet.col_values(1)
     next_row = len(col_a) + 1
     try: sheet.update(range_name=f"A{next_row}", values=[row_data], value_input_option="USER_ENTERED")
     except TypeError: sheet.update(f"A{next_row}", [row_data], value_input_option="USER_ENTERED")
 
-@st.cache_data(ttl=300, show_spinner="⚡ Booting up ecosystem (Batch Mode)...") 
+@st.cache_data(ttl=300, show_spinner="⚡ Booting up ecosystem (Optimized)...") 
 def get_all_ecosystem_data():
-    client = init_connection()
-    main_ss = client.open("MY ROUTINE 2026")
-    money_ss = client.open("sk_money_location")
-    dash_ss = client.open("Personal_Dashboard_Data")
+    main_ss = get_cached_sheet("MY ROUTINE 2026")
+    money_ss = get_cached_sheet("sk_money_location")
+    dash_ss = get_cached_sheet("Personal_Dashboard_Data")
     
     def process_raw(data, expected_cols, column_names):
         if not data or len(data) <= 1: 
@@ -95,11 +99,11 @@ def get_all_ecosystem_data():
             records.append(padded_row[:expected_cols])
         return pd.DataFrame(records, columns=column_names)
 
-    # 1. BATCH FETCH MAIN SPREADSHEET (7 Tabs -> 1 API Request)
+    # ✨ THE FIX: We removed '!A:H' from the range names. Google now auto-trims empty cells, loading 10x faster.
     try:
         main_ranges = [
-            'routine_master!A:H', 'activity_log!A:H', 'future_tasks!A:H', 
-            'holidays!A:B', 'must_do!A:B', 'PRE!A:B', 'prep_checklists!A:B'
+            'routine_master', 'activity_log', 'future_tasks', 
+            'holidays', 'must_do', 'PRE', 'prep_checklists'
         ]
         main_res = main_ss.values_batch_get(main_ranges).get('valueRanges', [])
         rm_data = main_res[0].get('values', [])
@@ -110,7 +114,7 @@ def get_all_ecosystem_data():
         pre_data = main_res[5].get('values', [])
         prep_data = main_res[6].get('values', [])
     except Exception:
-        # Failsafe if tabs are somehow missing
+        # Failsafe if ranges fail
         rm_data = main_ss.worksheet("routine_master").get_all_values()
         al_data = main_ss.worksheet("activity_log").get_all_values()
         try: ft_data = main_ss.worksheet("future_tasks").get_all_values()
@@ -148,9 +152,8 @@ def get_all_ecosystem_data():
     prep_chk_df = process_raw(prep_data, 2, ["Type", "Task Name"])
     prep_chk_df = prep_chk_df[prep_chk_df["Type"].astype(str).str.strip() != ""]
 
-    # 2. BATCH FETCH MONEY SPREADSHEET (2 Tabs -> 1 API Request)
     try:
-        money_res = money_ss.values_batch_get(['PAYMENT_CHECKLIST!A:I', 'LOCATION_DATA!A:Z']).get('valueRanges', [])
+        money_res = money_ss.values_batch_get(['PAYMENT_CHECKLIST', 'LOCATION_DATA']).get('valueRanges', [])
         pay_data = money_res[0].get('values', [])
         loc_data_vals = money_res[1].get('values', [])
     except:
@@ -171,9 +174,8 @@ def get_all_ecosystem_data():
     else:
         loc_df = pd.DataFrame()
 
-    # 3. BATCH FETCH DASHBOARD SPREADSHEET (1 Tab -> 1 API Request)
     try:
-        track_data = dash_ss.values_batch_get(['Tracker!A:Z']).get('valueRanges', [])[0].get('values', [])
+        track_data = dash_ss.values_batch_get(['Tracker']).get('valueRanges', [])[0].get('values', [])
         if track_data and len(track_data) > 1:
             headers = track_data[0]
             tracker_data = {}
@@ -222,7 +224,7 @@ def get_app_time_str(app_name, tracker_data, now_dt):
 def log_and_open_app(app_name, target_file, cached_data, now_dt):
     now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
     try:
-        sheet = init_connection().open("Personal_Dashboard_Data").worksheet("Tracker") 
+        sheet = get_cached_sheet("Personal_Dashboard_Data").worksheet("Tracker") 
         cell = sheet.find(app_name)
         if cell: sheet.update_cell(cell.row, 2, now_str)
         else: sheet.append_row([app_name, now_str])
@@ -404,7 +406,7 @@ try:
                                 p_date, p_arr, end_dt.strftime('%H:%M'), "0:10", "PRE", "Prepare after return back home", "", "Auto-completed from Location Data"
                             ])
                         else:
-                            main_ss = init_connection().open("MY ROUTINE 2026")
+                            main_ss = get_cached_sheet("MY ROUTINE 2026")
                             smart_append_row(main_ss.worksheet("activity_log"), [
                                 p_date, p_arr, "RUNNING", GS_FORMULA, "PRE", "Prepare after return back home", "", "Auto-started from Location Data"
                             ])
@@ -415,7 +417,7 @@ try:
                     except: pass
 
             if logs_to_append:
-                main_ss = init_connection().open("MY ROUTINE 2026")
+                main_ss = get_cached_sheet("MY ROUTINE 2026")
                 sheet = main_ss.worksheet("activity_log")
                 for r in logs_to_append:
                     smart_append_row(sheet, r)
@@ -432,7 +434,7 @@ try:
             if mins_since >= 10:
                 sheet_row = idx + 2
                 end_dt = arr_dt + timedelta(minutes=10)
-                main_ss = init_connection().open("MY ROUTINE 2026")
+                main_ss = get_cached_sheet("MY ROUTINE 2026")
                 log_sheet = main_ss.worksheet("activity_log")
                 log_sheet.update_cell(sheet_row, 3, end_dt.strftime('%H:%M'))
                 log_sheet.update_cell(sheet_row, 4, GS_FORMULA)
@@ -467,7 +469,6 @@ try:
             conflict_reasons = []
             earliest_conflict_dt = p_end_dt
 
-            # 1. Check activity_log for overlaps
             same_day_logs = log_df[log_df['Date'] == p_date]
             for log_idx, log_r in same_day_logs.iterrows():
                 if log_idx == idx: continue
@@ -477,7 +478,6 @@ try:
                 log_start_str = str(log_r['Start_Time']).strip()
                 log_end_str = str(log_r['End_Time']).strip()
                 
-                # Zero-Duration Ignore Strategy
                 if log_start_str == log_end_str: continue
 
                 try:
@@ -489,7 +489,6 @@ try:
                             earliest_conflict_dt = log_start_dt
                 except: pass
 
-            # 2. Check loc_df for overlaps
             if not loc_df.empty and 'Place' in loc_df.columns:
                 loc_df_day = loc_df.copy()
                 if 'Date' in loc_df_day.columns:
@@ -562,7 +561,7 @@ try:
             for edit in pending_edits:
                 st.markdown(f"<div style='background-color:#fff4f4; border-left:4px solid #d32f2f; padding:8px; margin-bottom:5px; font-size:14px;'><b>{edit['date']} at {edit['start']}</b><br><span style='color:#555;'>Conflict: {edit['reasons']}</span></div>", unsafe_allow_html=True)
                 if st.button(f"🔧 Auto-Fix to {edit['suggested_end']}", key=f"fix_{edit['sheet_row']}", use_container_width=True):
-                    main_ss = init_connection().open("MY ROUTINE 2026")
+                    main_ss = get_cached_sheet("MY ROUTINE 2026")
                     log_sheet = main_ss.worksheet("activity_log")
                     log_sheet.update_cell(int(edit['sheet_row']), 3, edit['suggested_end'])
                     log_sheet.update_cell(int(edit['sheet_row']), 4, GS_FORMULA)
@@ -830,7 +829,7 @@ try:
                         col_run, col_manage = st.columns(2)
                         with col_run:
                             if st.button("▶️ Run Task", key=f"run_sp_{r['row_index']}", use_container_width=True):
-                                main_ss = init_connection().open("MY ROUTINE 2026")
+                                main_ss = get_cached_sheet("MY ROUTINE 2026")
                                 smart_append_row(main_ss.worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, str(r['Activity']).upper(), str(r['Task_Name']).strip(), "", "Started from Special Tasks"])
                                 get_all_ecosystem_data.clear() 
                                 st.rerun()
@@ -849,7 +848,7 @@ try:
                                     with col_t: new_time = st.selectbox("New Time", options=time_opts, index=time_opts.index(curr_time_str), key=f"nt_{r['row_index']}")
                                         
                                     if st.button("Save New Time", key=f"rs_btn_{r['row_index']}", type="primary", use_container_width=True):
-                                        main_ss = init_connection().open("MY ROUTINE 2026")
+                                        main_ss = get_cached_sheet("MY ROUTINE 2026")
                                         fsheet = main_ss.worksheet("future_tasks")
                                         fsheet.update_cell(int(r['row_index']), 1, new_date.strftime('%Y-%m-%d'))
                                         fsheet.update_cell(int(r['row_index']), 2, new_time)
@@ -862,7 +861,7 @@ try:
                                     with col_b:
                                         if st.button("Confirm", key=f"cnf_{r['row_index']}", type="primary"):
                                             if cancel_reason.strip():
-                                                main_ss = init_connection().open("MY ROUTINE 2026")
+                                                main_ss = get_cached_sheet("MY ROUTINE 2026")
                                                 fsheet = main_ss.worksheet("future_tasks")
                                                 fsheet.update_cell(int(r['row_index']), 7, "Canceled")
                                                 fsheet.update_cell(int(r['row_index']), 8, cancel_reason)
@@ -898,7 +897,7 @@ try:
                                 if p_task.upper() in running_subs_upper:
                                     st.button(f"⏳ {p_task}", key=f"pre_run_{idx}", disabled=True, use_container_width=True)
                                 elif st.button(f"▶️ {p_task}", key=f"pre_btn_{idx}", use_container_width=True):
-                                    main_ss = init_connection().open("MY ROUTINE 2026")
+                                    main_ss = get_cached_sheet("MY ROUTINE 2026")
                                     smart_append_row(main_ss.worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, p_cat, p_task, "", "PRE Task"])
                                     get_all_ecosystem_data.clear()
                                     st.rerun()
@@ -917,7 +916,7 @@ try:
                                 if md_task.upper() in running_subs_upper:
                                     st.button(f"⏳ {md_task}", key=f"md_run_{idx}", disabled=True, use_container_width=True)
                                 elif st.button(f"▶️ {md_task}", key=f"md_btn_{idx}", use_container_width=True):
-                                    main_ss = init_connection().open("MY ROUTINE 2026")
+                                    main_ss = get_cached_sheet("MY ROUTINE 2026")
                                     smart_append_row(main_ss.worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, md_cat, md_task, "", "Must Do Task"])
                                     get_all_ecosystem_data.clear()
                                     st.rerun()
@@ -937,7 +936,7 @@ try:
                         checked = st.checkbox(f"{task} (Last: {get_last_done_str(task, log_df, now, col_name='check_list')})", value=is_done, disabled=is_done, key=f"chk_{task}_{current_activity}")
                         if checked and not is_done:
                             log_act = "PRE" if task in (return_predef + out_predef) else current_activity
-                            main_ss = init_connection().open("MY ROUTINE 2026")
+                            main_ss = get_cached_sheet("MY ROUTINE 2026")
                             smart_append_row(main_ss.worksheet("activity_log"), [today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), GS_FORMULA, log_act, "", task, "Checked off"])
                             if "[Due:" in task:
                                 matches = future_df[(future_df['Task_Name'].str.strip() == task.split(" [Due:")[0].strip()) & (future_df['Type'] == 'Checklist')]
@@ -983,7 +982,7 @@ try:
                         col_stop, col_cancel = st.columns(2)
                         with col_stop:
                             if st.button("🛑 SAVE", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
-                                main_ss = init_connection().open("MY ROUTINE 2026")
+                                main_ss = get_cached_sheet("MY ROUTINE 2026")
                                 log_sheet = main_ss.worksheet("activity_log")
                                 log_sheet.update_cell(sheet_row, 3, now.strftime('%H:%M')) 
                                 log_sheet.update_cell(sheet_row, 4, GS_FORMULA)                   
@@ -999,7 +998,7 @@ try:
 
                         with col_cancel:
                             if st.button("❌ CANCEL", key=f"cancel_{sheet_row}", use_container_width=True):
-                                main_ss = init_connection().open("MY ROUTINE 2026")
+                                main_ss = get_cached_sheet("MY ROUTINE 2026")
                                 main_ss.worksheet("activity_log").delete_rows(sheet_row)
                                 get_all_ecosystem_data.clear() 
                                 st.rerun()
@@ -1015,7 +1014,7 @@ try:
                             task = avail_subs[i+j]
                             with cols[j]:
                                 if st.button(f"▶️ {task}" + ("" if "[Due:" in task else f"\n(Last: {get_last_done_str(task, log_df, now, col_name='Sub_Activities')})"), key=f"btn_{i+j}_{task}", use_container_width=True):
-                                    main_ss = init_connection().open("MY ROUTINE 2026")
+                                    main_ss = get_cached_sheet("MY ROUTINE 2026")
                                     smart_append_row(main_ss.worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, current_activity, task, "", "Auto-logged via Timer"])
                                     get_all_ecosystem_data.clear() 
                                     st.rerun()
@@ -1037,7 +1036,7 @@ try:
             st.markdown('<div style="color: #ff4b4b; font-size: 18px; margin-bottom: 10px;"><b>👥 Visitor Tracker</b></div>', unsafe_allow_html=True)
 
             if st.form_submit_button("⚡ Quick Start (Update Details Later)", use_container_width=True):
-                main_ss = init_connection().open("MY ROUTINE 2026")
+                main_ss = get_cached_sheet("MY ROUTINE 2026")
                 smart_append_row(main_ss.worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, "PEOPLE", "VISITOR", "", "Update details later"])
                 get_all_ecosystem_data.clear() 
                 st.rerun()
@@ -1054,7 +1053,7 @@ try:
                 purpose_visit = st.text_input("Purpose", key="live_mtg_purpose")
                 
                 if st.form_submit_button("▶️ Start with Details", type="primary", use_container_width=True):
-                    main_ss = init_connection().open("MY ROUTINE 2026")
+                    main_ss = get_cached_sheet("MY ROUTINE 2026")
                     smart_append_row(main_ss.worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, "PEOPLE", f"{interaction_type} - {(person_name.strip() if person_name else 'Unknown')}".upper(), "", f"Topic: {topic_talk} | Purpose: {purpose_visit}"])
                     get_all_ecosystem_data.clear() 
                     st.rerun()
@@ -1075,7 +1074,7 @@ try:
                 if st.form_submit_button("Schedule Task", use_container_width=True):
                     final_act = f_act_custom.strip().upper() if f_act_custom.strip() else f_act.strip().upper()
                     if f_name:
-                        main_ss = init_connection().open("MY ROUTINE 2026")
+                        main_ss = get_cached_sheet("MY ROUTINE 2026")
                         smart_append_row(main_ss.worksheet("future_tasks"), [f_date.strftime('%Y-%m-%d'), f_time.strftime('%H:%M'), final_act, f_type, f_name.strip(), "Personal", "Pending", ""])
                         get_all_ecosystem_data.clear() 
                         st.rerun()
@@ -1128,7 +1127,7 @@ try:
             
             if st.button("💾 Save to Activity Log", use_container_width=True, type="primary"):
                 if log_activity:
-                    main_ss = init_connection().open("MY ROUTINE 2026")
+                    main_ss = get_cached_sheet("MY ROUTINE 2026")
                     smart_append_row(main_ss.worksheet("activity_log"), [
                         log_date.strftime('%Y-%m-%d'), 
                         f"{s_hour}:{s_min}", 

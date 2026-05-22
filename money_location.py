@@ -173,7 +173,7 @@ def get_current_location_details():
                     hours, remainder = divmod(remainder, 3600)
                     minutes, _ = divmod(remainder, 60)
                     if days > 0:
-                        duration_str = f"{days}d {hours}h"
+                        duration_str = f"{days}d {hours}h {minutes}m"
                     elif hours > 0:
                         duration_str = f"{hours}h {minutes}m"
                     else:
@@ -199,45 +199,6 @@ def should_inject_tofrom(loc_name):
     if loc_lower == "home" or "house" in loc_lower:
         return False
     return True
-
-# ==========================================
-# AUTO MIDNIGHT ROLLOVER ENGINE
-# ==========================================
-def check_midnight_rollover():
-    df_loc = load_location_data()
-    if not df_loc.empty:
-        last_record = df_loc.iloc[-1].to_dict()
-        last_date_str = str(last_record.get('Date', ''))
-        try:
-            last_dt = datetime.strptime(last_date_str, "%d.%m.%y").date()
-            time_now = get_ist_now()
-            today_dt = time_now.date()
-            
-            if last_dt < today_dt:
-                last_move = str(last_record.get('Move', ''))
-                last_place = str(last_record.get('Place', ''))
-                last_people = str(last_record.get('People', 'I'))
-                
-                days_diff = (today_dt - last_dt).days
-                rows_to_add = []
-                
-                for i in range(1, days_diff + 1):
-                    missing_date = last_dt + timedelta(days=i)
-                    missing_date_str = missing_date.strftime("%d.%m.%y")
-                    rows_to_add.append([
-                        missing_date_str, "00:00", last_move, last_place, last_people, "Auto Midnight Rollover"
-                    ])
-                
-                if rows_to_add:
-                    sh.worksheet("LOCATION_DATA").append_rows(rows_to_add)
-                    load_location_data.clear()
-                    return True 
-        except Exception as e:
-            pass 
-    return False
-
-if check_midnight_rollover():
-    st.rerun()
 
 # ==========================================
 # DYNAMIC HOME ROSTER ENGINE

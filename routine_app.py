@@ -827,31 +827,10 @@ try:
                         for idx, row in valid_pres.iterrows():
                             p_task = str(row['Task Name']).strip()
                             p_cat = str(row['Main Category']).strip().upper() or "PRE"
-                            
-                            # ✨ THE FIX: Calculate total time spent today on this PRE task
-                            today_logs = log_df[(log_df['Date'] == today_str) & (log_df['Sub_Activities'].str.strip().str.upper() == p_task.upper())]
-                            total_mins = 0
-                            for _, r in today_logs.iterrows():
-                                if r['End_Time'] == 'RUNNING':
-                                    try:
-                                        r_start = datetime.strptime(f"{r['Date']} {r['Start_Time']}", "%Y-%m-%d %H:%M")
-                                        r_start_aware = ist_timezone.localize(r_start)
-                                        total_mins += int((now - r_start_aware).total_seconds() // 60)
-                                    except: pass
-                                else:
-                                    try:
-                                        dur_val = str(r['Duration']).strip()
-                                        if ':' in dur_val:
-                                            h, m = map(int, dur_val.split(':'))
-                                            total_mins += h * 60 + m
-                                    except: pass
-                                    
-                            dur_str = f" ({total_mins}m)" if total_mins > 0 else ""
-                            
                             with pre_cols[idx % 2]:
                                 if p_task.upper() in running_subs_upper:
-                                    st.button(f"⏳ {p_task}{dur_str}", key=f"pre_run_{idx}", disabled=True, use_container_width=True)
-                                elif st.button(f"▶️ {p_task}{dur_str}", key=f"pre_btn_{idx}", use_container_width=True):
+                                    st.button(f"⏳ {p_task}", key=f"pre_run_{idx}", disabled=True, use_container_width=True)
+                                elif st.button(f"▶️ {p_task}", key=f"pre_btn_{idx}", use_container_width=True):
                                     main_ss = get_cached_sheet("MY ROUTINE 2026")
                                     smart_append_row(main_ss.worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, p_cat, p_task, "", "PRE Task"], log_df_len)
                                     get_all_ecosystem_data.clear()
@@ -868,7 +847,6 @@ try:
                             md_task = str(row['Task Name']).strip()
                             md_cat = str(row['Main Category']).strip().upper() or "WORK"
                             
-                            # ✨ THE FIX: Calculate total time spent today on this Must Do task
                             today_logs = log_df[(log_df['Date'] == today_str) & (log_df['Sub_Activities'].str.strip().str.upper() == md_task.upper())]
                             total_mins = 0
                             for _, r in today_logs.iterrows():
@@ -889,6 +867,19 @@ try:
                             dur_str = f" ({total_mins}m)" if total_mins > 0 else ""
                             
                             with md_cols[idx % 2]:
+                                if total_mins > 0:
+                                    st.markdown(f'''
+                                        <div id="md_green_{idx}"></div>
+                                        <style>
+                                        div.element-container:has(#md_green_{idx}) + div.element-container button {{
+                                            background-color: #e8f5e9 !important;
+                                            border: 1px solid #81c784 !important;
+                                            color: #1b5e20 !important;
+                                            font-weight: 600 !important;
+                                        }}
+                                        </style>
+                                    ''', unsafe_allow_html=True)
+
                                 if md_task.upper() in running_subs_upper:
                                     st.button(f"⏳ {md_task}{dur_str}", key=f"md_run_{idx}", disabled=True, use_container_width=True)
                                 elif st.button(f"▶️ {md_task}{dur_str}", key=f"md_btn_{idx}", use_container_width=True):
@@ -1134,7 +1125,7 @@ try:
                             last_str = get_app_time_str(app_name, tracker_data, now)
                             with cols[j]:
                                 if st.button(f"{icon} {app_name}\n(Last: {last_str})", key=f"all_{group_name}_{i+j}", use_container_width=True):
-                                    log_and_open_app(app_name, file_name, tracker_data, tracker_rows, now)
+                                    log_and_open_app(app_name, file_name, tracker_data, tracker_rows, tracker_data_len, now)
                 st.markdown("<hr style='margin: 5px 0px 10px 0px; border: 0; border-top: 1px solid #f0f2f6;'>", unsafe_allow_html=True)
 
 except Exception as e: st.error(f"System Error: {e}")

@@ -173,7 +173,7 @@ def get_current_location_details():
                     hours, remainder = divmod(remainder, 3600)
                     minutes, _ = divmod(remainder, 60)
                     if days > 0:
-                        duration_str = f"{days}d {hours}h {minutes}m"
+                        duration_str = f"{days}d {hours}h"
                     elif hours > 0:
                         duration_str = f"{hours}h {minutes}m"
                     else:

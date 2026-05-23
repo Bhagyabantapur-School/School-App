@@ -649,7 +649,7 @@ try:
                     last_str = get_app_time_str(app_name, tracker_data, now)
                     with cols[j]:
                         if st.button(f"{icon} {app_name}\n(Last: {last_str})", key=f"sch_app_{i+j}", use_container_width=True):
-                            log_and_open_app(app_name, file_name, tracker_data, tracker_rows, tracker_data_len, now)
+                            log_and_open_app(app_name, file_name, tracker_data, tracker_rows, now)
         st.markdown("---")
 
     st.markdown(f'<h3 style="margin: 5px 0px 10px 0px; font-size: 1.8rem; color: {color}; letter-spacing: 0.5px; text-align: left;">{current_activity}</h3>', unsafe_allow_html=True)
@@ -827,10 +827,35 @@ try:
                         for idx, row in valid_pres.iterrows():
                             p_task = str(row['Task Name']).strip()
                             p_cat = str(row['Main Category']).strip().upper() or "PRE"
+                            
+                            today_logs = log_df[(log_df['Date'] == today_str) & (log_df['Sub_Activities'].str.strip().str.upper() == p_task.upper())]
+                            total_mins = 0
+                            for _, r in today_logs.iterrows():
+                                if r['End_Time'] == 'RUNNING':
+                                    try:
+                                        r_start = datetime.strptime(f"{r['Date']} {r['Start_Time']}", "%Y-%m-%d %H:%M")
+                                        r_start_aware = ist_timezone.localize(r_start)
+                                        total_mins += int((now - r_start_aware).total_seconds() // 60)
+                                    except: pass
+                                else:
+                                    try:
+                                        dur_val = str(r['Duration']).strip()
+                                        if ':' in dur_val:
+                                            h_val, m_val = map(int, dur_val.split(':'))
+                                            total_mins += h_val * 60 + m_val
+                                    except: pass
+                                    
+                            dur_str = ""
+                            if total_mins > 0:
+                                d_h, d_m = divmod(total_mins, 60)
+                                if d_h > 0 and d_m > 0: dur_str = f" ({d_h}h {d_m}m)"
+                                elif d_h > 0: dur_str = f" ({d_h}h)"
+                                else: dur_str = f" ({d_m}m)"
+                            
                             with pre_cols[idx % 2]:
                                 if p_task.upper() in running_subs_upper:
-                                    st.button(f"⏳ {p_task}", key=f"pre_run_{idx}", disabled=True, use_container_width=True)
-                                elif st.button(f"▶️ {p_task}", key=f"pre_btn_{idx}", use_container_width=True):
+                                    st.button(f"⏳ {p_task}{dur_str}", key=f"pre_run_{idx}", disabled=True, use_container_width=True)
+                                elif st.button(f"▶️ {p_task}{dur_str}", key=f"pre_btn_{idx}", use_container_width=True):
                                     main_ss = get_cached_sheet("MY ROUTINE 2026")
                                     smart_append_row(main_ss.worksheet("activity_log"), [today_str, now.strftime('%H:%M'), "RUNNING", GS_FORMULA, p_cat, p_task, "", "PRE Task"], log_df_len)
                                     get_all_ecosystem_data.clear()
@@ -860,11 +885,16 @@ try:
                                     try:
                                         dur_val = str(r['Duration']).strip()
                                         if ':' in dur_val:
-                                            h, m = map(int, dur_val.split(':'))
-                                            total_mins += h * 60 + m
+                                            h_val, m_val = map(int, dur_val.split(':'))
+                                            total_mins += h_val * 60 + m_val
                                     except: pass
                                     
-                            dur_str = f" ({total_mins}m)" if total_mins > 0 else ""
+                            dur_str = ""
+                            if total_mins > 0:
+                                d_h, d_m = divmod(total_mins, 60)
+                                if d_h > 0 and d_m > 0: dur_str = f" ({d_h}h {d_m}m)"
+                                elif d_h > 0: dur_str = f" ({d_h}h)"
+                                else: dur_str = f" ({d_m}m)"
                             
                             with md_cols[idx % 2]:
                                 if total_mins > 0:
@@ -938,7 +968,15 @@ try:
 
                     p_color, p_state, p_left, p_prog = ("#d84315", "🍅 Focus Time", 25 - cycle_minute, cycle_minute / 25.0) if current_state == "Focus" else ("#2e7b32", "☕ Break Time", 30 - cycle_minute, (cycle_minute - 25) / 5.0)
                     
-                    st.markdown(f'<div style="background-color: #f8f9fa; border-left: 5px solid {p_color}; padding: 12px; border-radius: 6px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);"><div style="display: flex; justify-content: space-between; align-items: center;"><strong style="font-size: 16px; color: #333;">⏳ {display_name}</strong><span style="color: #666; font-size: 14px;">Total: {mins_elapsed}m</span></div><div style="margin-top: 8px; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;"><span style="color: {p_color}; font-weight: bold; font-size: 14px;">{p_state} (Cycle {pomodoro_count})</span><span style="color: #555; font-size: 13px; font-weight: bold;">{p_left}m left</span></div><div style="width: 100%; background-color: #e0e0e0; border-radius: 4px; height: 6px;"><div style="width: {p_prog * 100}%; background-color: {p_color}; height: 6px; border-radius: 4px; transition: width 0.5s ease;"></div></div></div>', unsafe_allow_html=True)
+                    dur_str_running = ""
+                    if mins_elapsed > 0:
+                        d_h, d_m = divmod(mins_elapsed, 60)
+                        if d_h > 0 and d_m > 0: dur_str_running = f"{d_h}h {d_m}m"
+                        elif d_h > 0: dur_str_running = f"{d_h}h"
+                        else: dur_str_running = f"{d_m}m"
+                    else: dur_str_running = "0m"
+
+                    st.markdown(f'<div style="background-color: #f8f9fa; border-left: 5px solid {p_color}; padding: 12px; border-radius: 6px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);"><div style="display: flex; justify-content: space-between; align-items: center;"><strong style="font-size: 16px; color: #333;">⏳ {display_name}</strong><span style="color: #666; font-size: 14px;">Total: {dur_str_running}</span></div><div style="margin-top: 8px; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;"><span style="color: {p_color}; font-weight: bold; font-size: 14px;">{p_state} (Cycle {pomodoro_count})</span><span style="color: #555; font-size: 13px; font-weight: bold;">{p_left}m left</span></div><div style="width: 100%; background-color: #e0e0e0; border-radius: 4px; height: 6px;"><div style="width: {p_prog * 100}%; background-color: {p_color}; height: 6px; border-radius: 4px; transition: width 0.5s ease;"></div></div></div>', unsafe_allow_html=True)
 
                     if is_home_prep:
                         mins_remaining = max(0, 10 - mins_elapsed)
@@ -1125,7 +1163,7 @@ try:
                             last_str = get_app_time_str(app_name, tracker_data, now)
                             with cols[j]:
                                 if st.button(f"{icon} {app_name}\n(Last: {last_str})", key=f"all_{group_name}_{i+j}", use_container_width=True):
-                                    log_and_open_app(app_name, file_name, tracker_data, tracker_rows, tracker_data_len, now)
+                                    log_and_open_app(app_name, file_name, tracker_data, tracker_rows, now)
                 st.markdown("<hr style='margin: 5px 0px 10px 0px; border: 0; border-top: 1px solid #f0f2f6;'>", unsafe_allow_html=True)
 
 except Exception as e: st.error(f"System Error: {e}")

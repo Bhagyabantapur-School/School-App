@@ -431,10 +431,20 @@ with tab_shopping:
             if p_sub_cat == "-- Type New --": p_sub_cat = st.text_input("Type New Sub Category", key="plan_sub_new_fb")
             p_sub_df = pd.DataFrame()
             
+        # DYNAMIC ITEM AGGREGATION FROM HISTORY
         if not p_sub_df.empty and 'Map_Particular' in p_sub_df.columns:
-            p_part_opts = list(dict.fromkeys([str(p).strip() for p in p_sub_df['Map_Particular'].dropna() if str(p).strip() != ""]))
+            base_opts = list(dict.fromkeys([str(p).strip() for p in p_sub_df['Map_Particular'].dropna() if str(p).strip() != ""]))
         else:
-            p_part_opts = get_list("Particulars")
+            base_opts = get_list("Particulars")
+            
+        # Pull previously added items from SHOPPING_LIST to build the memory dropdown
+        df_shop_hist = load_shopping_data()
+        past_items = []
+        if not df_shop_hist.empty and 'Item' in df_shop_hist.columns:
+            past_items = [str(x).strip() for x in df_shop_hist['Item'].dropna().tolist() if str(x).strip() != ""]
+            
+        # Merge CONFIG options and historical items, removing duplicates
+        p_part_opts = list(dict.fromkeys(base_opts + past_items))
             
         selected_items = st.multiselect("Select Existing Items", p_part_opts, key="plan_item_multi")
         custom_items_str = st.text_input("Add New Items (Separate with commas, e.g. Apples, Milk)", key="plan_item_new_multi")
@@ -448,7 +458,6 @@ with tab_shopping:
         s_type = st.selectbox("Shop Category", shop_type_opts + ["-- Type New --"], key="plan_stype")
         if s_type == "-- Type New --": s_type = st.text_input("Type New Shop Category", key="plan_stype_new")
             
-        est_cost = st.number_input("Estimated Cost per item (₹)", min_value=0.0, step=10.0, key="plan_cost")
         fund = st.selectbox("Fund to use", get_list("Funds"), key="plan_fund")
         account = st.selectbox("Account to use", get_clean_accounts(), key="plan_acc")
         
@@ -457,7 +466,8 @@ with tab_shopping:
         if all_items:
             try:
                 today_str = get_ist_now().strftime("%d-%m-%Y")
-                rows_to_add = [[today_str, itm, s_type, est_cost, "", "Pending", "", fund, account] for itm in all_items]
+                # Removed Est_Cost logic and passing a blank string to the sheet
+                rows_to_add = [[today_str, itm, s_type, "", "", "Pending", "", fund, account] for itm in all_items]
                 sh.worksheet("SHOPPING_LIST").append_rows(rows_to_add)
                 load_shopping_data.clear() 
                 st.success(f"Added {len(all_items)} items to your {s_type} list!")
@@ -472,7 +482,8 @@ with tab_shopping:
     if not df_shop.empty and 'Status' in df_shop.columns:
         all_pending = df_shop[df_shop['Status'] == 'Pending']
         if not all_pending.empty:
-            st.dataframe(all_pending[['Item', 'Shop_Type', 'Est_Cost', 'Fund']], use_container_width=True, hide_index=True)
+            display_cols = [c for c in ['Item', 'Shop_Type', 'Fund', 'Account'] if c in all_pending.columns]
+            st.dataframe(all_pending[display_cols], use_container_width=True, hide_index=True)
         else: st.write("You have no pending items!")
 
 # ==========================================

@@ -183,21 +183,26 @@ def get_current_location_details():
             return loc, duration_str
     return None, None
 
+# --- BULLETPROOF SHOP TYPE MATCHER ---
 def get_shop_type(place_name):
-    if 'Specific_Place' in config_df.columns and 'Shop_Type' in config_df.columns:
-        match = config_df[config_df['Specific_Place'].astype(str).str.strip() == place_name]
+    if not place_name: return None
+    # Find column names flexibly ignoring spaces and case
+    place_col = next((c for c in config_df.columns if str(c).strip().replace('_', ' ').lower() in ['specific place', 'place']), None)
+    type_col = next((c for c in config_df.columns if str(c).strip().replace('_', ' ').lower() in ['shop type', 'shop category']), None)
+    
+    if place_col and type_col:
+        safe_place = str(place_name).strip().lower()
+        match = config_df[config_df[place_col].astype(str).str.strip().str.lower() == safe_place]
         if not match.empty:
-            s_type = match['Shop_Type'].dropna().values
+            s_type = match[type_col].dropna().values
             if len(s_type) > 0 and str(s_type[0]).strip() != "":
                 return str(s_type[0]).strip()
     return None
 
 def should_inject_tofrom(loc_name):
-    if not loc_name:
-        return False
+    if not loc_name: return False
     loc_lower = str(loc_name).strip().lower()
-    if loc_lower == "home" or "house" in loc_lower:
-        return False
+    if loc_lower == "home" or "house" in loc_lower: return False
     return True
 
 # ==========================================
@@ -929,12 +934,22 @@ with tab_money:
     c_loc1, c_loc2 = st.columns([3, 1])
     with c_loc1:
         loc_display = f"📍 Location: **{current_loc}** ({loc_duration})" if loc_duration else f"📍 Location: **{current_loc}**"
-        if current_loc and current_shop_type: st.success(f"{loc_display} | 🛒 **{current_shop_type}**")
-        elif current_loc: st.success(loc_display)
-        else: st.info("📍 Location: Unknown")
+        
+        # --- NEW DIAGNOSTIC UI ---
+        if current_loc and current_shop_type: 
+            st.success(f"{loc_display} | 🛒 **{current_shop_type}**")
+        elif current_loc: 
+            st.success(loc_display)
+            st.caption(f"*(No Shop Type mapped for '{current_loc}' in CONFIG)*")
+        else: 
+            st.info("📍 Location: Unknown")
+            
     with c_loc2:
         if st.button("🔄 Sync Loc", use_container_width=True):
+            # FULL SYSTEM CACHE WIPE
             load_location_data.clear()
+            load_config.clear()
+            load_shopping_data.clear()
             st.rerun()
 
     # --- EXPANDABLE BUSY TIME QUICK ENTRY ---
@@ -1159,48 +1174,78 @@ with tab_money:
                                 st.error(f"Error: {e}")
                     st.divider()
 
-    # --- EXPRESS CHECKOUT FOR PENDING SHOPPING ---
+    # --- BULLETPROOF EXPRESS CHECKOUT FOR PENDING SHOPPING ---
     if current_loc and current_shop_type:
         df_shop = load_shopping_data()
-        if not df_shop.empty and 'Status' in df_shop.columns:
-            pending_items = df_shop[(df_shop['Status'] == 'Pending') & (df_shop['Shop_Type'] == current_shop_type)]
+        
+        # Flexibly find column names in SHOPPING_LIST to ignore typos
+        status_col = next((c for c in df_shop.columns if str(c).strip().lower() == 'status'), None)
+        stype_col = next((c for c in df_shop.columns if str(c).strip().replace('_', ' ').lower() in ['shop type', 'shop_type', 'shop category']), None)
+        item_col = next((c for c in df_shop.columns if str(c).strip().lower() == 'item'), 'Item')
+        fund_col = next((c for c in df_shop.columns if str(c).strip().lower() == 'fund'), 'Fund')
+        acc_col = next((c for c in df_shop.columns if str(c).strip().lower() == 'account'), 'Account')
+        cost_col = next((c for c in df_shop.columns if str(c).strip().replace('_', ' ').lower() in ['est cost', 'estimated cost', 'est_cost']), 'Est_Cost')
+        
+        if status_col and stype_col:
+            safe_current_stype = str(current_shop_type).strip().lower()
+            
+            mask = (df_shop[status_col].astype(str).str.strip().str.lower() == 'pending') & \
+                   (df_shop[stype_col].astype(str).str.strip().str.lower() == safe_current_stype)
+                   
+            pending_items = df_shop[mask]
+            
             if not pending_items.empty:
-                st.markdown("### ⚡ Express 1-Click Checkout")
+                st.markdown(f"### ⚡ Express 1-Click Checkout ({current_shop_type})")
                 shop_ws = sh.worksheet("SHOPPING_LIST") 
+                
+                # Fetch headers safely to update correct columns
+                headers = shop_ws.row_values(1)
+                s_idx = next((i for i, h in enumerate(headers) if str(h).strip().lower() == 'status'), None)
+                c_idx = next((i for i, h in enumerate(headers) if str(h).strip().replace('_', ' ').lower() in ['actual cost', 'actual_cost']), None)
+                d_idx = next((i for i, h in enumerate(headers) if str(h).strip().replace('_', ' ').lower() in ['date bought', 'date_bought']), None)
+
                 for idx, row in pending_items.iterrows():
                     sheet_row = idx + 2 
                     with st.container(border=True):
                         colA, colB, colC = st.columns([2, 1, 1.5])
                         with colA:
-                            st.write(f"**{row.get('Item', 'Unknown')}**")
-                            st.caption(f"Fund: {row.get('Fund', '')} | Acc: {row.get('Account', '')}")
+                            st.write(f"**{row.get(item_col, 'Unknown')}**")
+                            st.caption(f"Fund: {row.get(fund_col, '')} | Acc: {row.get(acc_col, '')}")
                         with colB:
-                            raw_cost = row.get('Est_Cost', 0)
+                            raw_cost = row.get(cost_col, 0)
                             try: safe_cost = float(raw_cost) if str(raw_cost).strip() != "" else 0.0
                             except (ValueError, TypeError): safe_cost = 0.0
                             final_cost = st.number_input("Cost", value=safe_cost, key=f"cost_{idx}", label_visibility="collapsed")
                         with colC:
                             if st.button("💸 Pay & Clear", key=f"pay_{idx}", use_container_width=True, type="primary"):
                                 try:
-                                    part_name = str(row.get('Item', ''))
-                                    match_row = config_df[config_df['Map_Particular'].astype(str).str.strip() == part_name]
-                                    ent = str(match_row['Map_Entity'].values[0]) if not match_row.empty else "PERS"
-                                    cat = str(match_row['Map_Category'].values[0]) if not match_row.empty else ""
-                                    subcat = str(match_row['Map_SubCat'].values[0]) if not match_row.empty else ""
-                                    rem = "Auto-cleared from list"
+                                    part_name = str(row.get(item_col, ''))
+                                    ent = "PERS"
+                                    cat = ""
+                                    subcat = ""
                                     
+                                    # Flexibly map Categories
+                                    map_part_col = next((c for c in config_df.columns if str(c).strip().replace('_', ' ').lower() == 'map particular'), None)
+                                    if map_part_col:
+                                        match_row = config_df[config_df[map_part_col].astype(str).str.strip().str.lower() == part_name.strip().lower()]
+                                        if not match_row.empty:
+                                            if 'Map_Entity' in config_df.columns: ent = str(match_row['Map_Entity'].values[0])
+                                            if 'Map_Category' in config_df.columns: cat = str(match_row['Map_Category'].values[0])
+                                            if 'Map_SubCat' in config_df.columns: subcat = str(match_row['Map_SubCat'].values[0])
+                                            
+                                    rem = "Auto-cleared from list"
                                     time_now = get_ist_now()
                                     today_str = time_now.strftime("%d-%m-%Y")
                                     time_str = time_now.strftime("%H:%M")
                                     final_tf = current_loc if should_inject_tofrom(current_loc) else ""
                                     
-                                    money_row = [today_str, time_str, "", final_cost, str(row.get('Account', '')), str(row.get('Fund', '')), ent, cat, subcat, part_name, final_tf, current_loc, rem]
+                                    money_row = [today_str, time_str, "", final_cost, str(row.get(acc_col, '')), str(row.get(fund_col, '')), ent, cat, subcat, part_name, final_tf, current_loc, rem]
                                     sh.worksheet("MONEY_DATA").append_row(money_row)
                                     
-                                    headers = shop_ws.row_values(1)
-                                    shop_ws.update_cell(sheet_row, headers.index('Status') + 1, 'Bought')
-                                    shop_ws.update_cell(sheet_row, headers.index('Actual_Cost') + 1, final_cost)
-                                    shop_ws.update_cell(sheet_row, headers.index('Date_Bought') + 1, today_str)
+                                    # Safely write to Shopping list exactly where it needs to
+                                    if s_idx is not None: shop_ws.update_cell(sheet_row, s_idx + 1, 'Bought')
+                                    if c_idx is not None: shop_ws.update_cell(sheet_row, c_idx + 1, final_cost)
+                                    if d_idx is not None: shop_ws.update_cell(sheet_row, d_idx + 1, today_str)
                                     
                                     load_money_data.clear()
                                     load_shopping_data.clear()

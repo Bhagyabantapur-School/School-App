@@ -51,31 +51,22 @@ def get_dependent_options(df, target_col, filter_col=None, filter_val=None):
 # ==========================================
 st.title("🛒 Shopping List Manager")
 
-st.subheader("⚙️ Plan New Purchases")
+# 1. Shop Category
+shop_type_opts = list(dict.fromkeys([str(s).strip() for s in config_df['Shop_Type'].dropna() if str(s).strip() != ""])) if 'Shop_Type' in config_df.columns else ["Grocery", "Vegetables", "Stationary"]
+s_type = st.selectbox("1. Shop Category", shop_type_opts, index=0)
 
-# 1. Entity
-entities = get_dependent_options(config_df, 'Map_Entity')
-default_ent = "PERS" if "PERS" in entities else (entities[0] if entities else None)
-p_entity = st.selectbox("1. Entity", entities, index=entities.index(default_ent) if default_ent else 0)
+# 2. Sub Category (Dependent on CONFIG)
+subcat_opts = get_dependent_options(config_df, 'Map_SubCat')
+default_sub = "GROC" if "GROC" in subcat_opts else (subcat_opts[0] if subcat_opts else None)
+p_subcat = st.selectbox("2. Sub Category", subcat_opts, index=subcat_opts.index(default_sub) if default_sub else 0)
 
-# 2. Category
-categories = get_dependent_options(config_df, 'Map_Category', 'Map_Entity', p_entity)
-default_cat = "NEEDS" if "NEEDS" in categories else (categories[0] if categories else None)
-p_category = st.selectbox("2. Category", categories, index=categories.index(default_cat) if default_cat else 0)
-
-# 3. Sub Category
-subcats = get_dependent_options(config_df, 'Map_SubCat', 'Map_Category', p_category)
-default_sub = "GROC" if "GROC" in subcats else (subcats[0] if subcats else None)
-p_subcat = st.selectbox("3. Sub Category", subcats, index=subcats.index(default_sub) if default_sub else 0)
-
-# 4. Particulars (Existing Items Memory)
-base_opts = get_dependent_options(config_df, 'Map_Particular', 'Map_SubCat', p_subcat)
+# 3. Particulars (Dependent on Sub Category + History)
+config_items = get_dependent_options(config_df, 'Map_Particular', 'Map_SubCat', p_subcat)
 df_shop_hist = load_shopping_data()
 past_items = [str(x).strip() for x in df_shop_hist['Item'].dropna().tolist() if str(x).strip() != ""] if not df_shop_hist.empty else []
-# Merge config items and past history items
-p_part_opts = sorted(list(dict.fromkeys(base_opts + past_items)))
+p_part_opts = sorted(list(dict.fromkeys(config_items + past_items)))
 
-selected_items = st.multiselect("4. Select Existing Items", p_part_opts)
+selected_items = st.multiselect("3. Select Existing Items", p_part_opts)
 custom_items_str = st.text_input("Add New Items (Comma separated)")
 
 # --- SAVE LOGIC ---
@@ -84,9 +75,9 @@ if st.button("➕ Add All to Pending List", use_container_width=True, type="prim
     if all_items:
         try:
             today_str = get_ist_now().strftime("%d-%m-%Y")
-            # Defaults: Shop=Grocery, Fund=Salary, Account=AXIS Bank
-            # Headers: Date_Added, Item, Shop_Type, Est_Cost, Actual_Cost, Status, Date_Bought, Fund, Account
-            rows_to_add = [[today_str, itm, "Grocery", "", "", "Pending", p_subcat, "Salary", "AXIS Bank"] for itm in all_items]
+            # HARDCODED DEFAULTS: 
+            # Date_Added, Item, Shop_Type, Est_Cost, Actual_Cost, Status, Date_Bought (SubCat), Fund, Account
+            rows_to_add = [[today_str, itm, s_type, "", "", "Pending", p_subcat, "Salary", "AXIS Bank"] for itm in all_items]
             
             sh.worksheet("SHOPPING_LIST").append_rows(rows_to_add)
             load_shopping_data.clear() 
@@ -104,13 +95,11 @@ if not df_shop.empty:
     pending = df_shop[df_shop['Status'] == 'Pending']
     
     if not pending.empty:
-        # Dynamic header check to prevent crashes
+        # Check available columns and map Date_Bought to 'Sub Category'
         potential_cols = ['Item', 'Shop_Type', 'Date_Bought', 'Fund', 'Account']
         found_cols = [c for c in potential_cols if c in pending.columns]
         
         df_display = pending[found_cols].copy()
-        
-        # Rename 'Date_Bought' to 'Sub Category' for UI
         if 'Date_Bought' in df_display.columns:
             df_display.rename(columns={'Date_Bought': 'Sub Category'}, inplace=True)
             

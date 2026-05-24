@@ -48,11 +48,7 @@ st.title("🛒 Shopping List Manager")
 shop_type_opts = sorted(list(dict.fromkeys([str(s).strip() for s in config_df['Shop_Type'].dropna() if str(s).strip() != ""]))) if 'Shop_Type' in config_df.columns else ["Grocery", "Vegetables", "Stationary"]
 s_type = st.selectbox("1. Shop Category", shop_type_opts)
 
-# 2. Sub Category (Dropdown from CONFIG)
-subcat_opts = sorted(list(dict.fromkeys([str(s).strip() for s in config_df['Map_SubCat'].dropna() if str(s).strip() != ""])))
-p_subcat = st.selectbox("2. Sub Category", subcat_opts)
-
-# 3. Existing Items (Filtered by Selected Shop_Type)
+# 2. Existing Items (Filtered by Selected Shop_Type)
 # We look at SHOPPING_LIST tab, filter by Shop_Type, then pull unique Items
 if not df_shop.empty and 'Shop_Type' in df_shop.columns and 'Item' in df_shop.columns:
     items_in_shop = df_shop[df_shop['Shop_Type'].astype(str).str.strip() == s_type]
@@ -60,7 +56,7 @@ if not df_shop.empty and 'Shop_Type' in df_shop.columns and 'Item' in df_shop.co
 else:
     past_items = []
 
-selected_items = st.multiselect("3. Select Existing Items", past_items)
+selected_items = st.multiselect("2. Select Existing Items", past_items)
 custom_items_str = st.text_input("Add New Items (Comma separated)")
 
 # --- SAVE LOGIC ---
@@ -71,8 +67,9 @@ if st.button("➕ Add All to Pending List", use_container_width=True, type="prim
             today_str = get_ist_now().strftime("%d-%m-%Y")
             
             # HARDCODED DEFAULTS:
-            # Date_Added, Item, Shop_Type, Est_Cost, Actual_Cost, Status, Date_Bought (Mapped to SubCat), Fund, Account
-            rows_to_add = [[today_str, itm, s_type, "", "", "Pending", p_subcat, "Salary", "AXIS Bank"] for itm in all_items]
+            # Order: Date_Added, Item, Shop_Type, Est_Cost, Actual_Cost, Status, Date_Bought, Fund, Account
+            # Note: Sub Category input is removed, so Date_Bought column is passed as empty string
+            rows_to_add = [[today_str, itm, s_type, "", "", "Pending", "", "Salary", "AXIS Bank"] for itm in all_items]
             
             sh.worksheet("SHOPPING_LIST").append_rows(rows_to_add)
             load_shopping_data.clear() 
@@ -84,23 +81,17 @@ if st.button("➕ Add All to Pending List", use_container_width=True, type="prim
 # --- PENDING LIST ---
 st.divider()
 st.subheader("📋 Pending Items")
-
-# Reload data after potential save
 df_shop_new = load_shopping_data()
+
 if not df_shop_new.empty:
     pending = df_shop_new[df_shop_new['Status'] == 'Pending']
     
     if not pending.empty:
         # Dynamic header check to prevent crashes
-        potential_cols = ['Item', 'Shop_Type', 'Date_Bought', 'Fund', 'Account']
+        potential_cols = ['Item', 'Shop_Type', 'Fund', 'Account']
         found_cols = [c for c in potential_cols if c in pending.columns]
         
         df_display = pending[found_cols].copy()
-        
-        # Rename 'Date_Bought' to 'Sub Category' for UI
-        if 'Date_Bought' in df_display.columns:
-            df_display.rename(columns={'Date_Bought': 'Sub Category'}, inplace=True)
-            
         st.dataframe(df_display, use_container_width=True, hide_index=True)
     else:
         st.write("You have no pending items!")

@@ -715,39 +715,44 @@ with tab_location:
             if not inc_interactions.empty:
                 st.divider()
                 st.error(f"⚠️ You have {len(inc_interactions)} incomplete People Interactions!")
-                int_ws = sh_people.worksheet("People Interaction")
                 
-                for idx, row in inc_interactions.iterrows():
-                    sheet_row = idx + 2
-                    interaction_type = row.get('Interaction', 'Interaction')
-                    person_name = row.get('People', 'Unknown')
-                    date_val = row.get('Date', '')
+                try:
+                    int_ws = sh_people.worksheet("People Interaction")
                     
-                    start_time_val = row.get('Start Time', row.get('Time', ''))
-                    end_time_val = row.get('End Time', '')
-                    time_display = f"{start_time_val} to {end_time_val}" if end_time_val else start_time_val
-                    
-                    dur_val = row.get('Duration', '')
-                    
-                    st.markdown(f"**{interaction_type}: {person_name}** | Date: {date_val} | Time: {time_display} | Dur: {dur_val}")
-                    
-                    c_int1, c_int2 = st.columns([3, 1])
-                    with c_int1:
-                        new_topic = st.text_input("Purpose / Topic", key=f"topic_{idx}", label_visibility="collapsed")
-                    with c_int2:
-                        if st.button("Save", key=f"save_topic_{idx}", type="primary"):
-                            if new_topic.strip():
-                                try:
-                                    headers = int_ws.row_values(1)
-                                    col_idx = headers.index('Purpose / Topic') + 1
-                                    int_ws.update_cell(sheet_row, col_idx, new_topic)
-                                    load_interactions.clear()
-                                    st.success("Updated!")
-                                    st.rerun()
-                                except Exception as e: st.error(f"Error: {e}")
-                            else: st.warning("Enter Topic")
-
-    if not st.session_state.route_active or st.session_state.get('route_type') == "Express":
+                    for idx, row in inc_interactions.iterrows():
+                        sheet_row = idx + 2
+                        interaction_type = row.get('Interaction', 'Interaction')
+                        person_name = row.get('People', 'Unknown')
+                        date_val = row.get('Date', '')
+                        
+                        start_time_val = row.get('Start Time', row.get('Time', ''))
+                        end_time_val = row.get('End Time', '')
+                        time_display = f"{start_time_val} to {end_time_val}" if end_time_val else start_time_val
+                        
+                        dur_val = row.get('Duration', '')
+                        
+                        st.markdown(f"**{interaction_type}: {person_name}** | Date: {date_val} | Time: {time_display} | Dur: {dur_val}")
+                        
+                        c_int1, c_int2 = st.columns([3, 1])
+                        with c_int1:
+                            new_topic = st.text_input("Purpose / Topic", key=f"topic_{idx}", label_visibility="collapsed")
+                        with c_int2:
+                            if st.button("Save", key=f"save_topic_{idx}", type="primary"):
+                                if new_topic.strip():
+                                    try:
+                                        headers = int_ws.row_values(1)
+                                        col_idx = headers.index('Purpose / Topic') + 1
+                                        int_ws.update_cell(sheet_row, col_idx, new_topic)
+                                        load_interactions.clear()
+                                        st.success("Updated!")
+                                        st.rerun()
+                                    except Exception as e: st.error(f"Error: {e}")
+                                else: st.warning("Enter Topic")
+                
+                except gspread.exceptions.WorksheetNotFound:
+                    st.error("❌ The tab 'People Interaction' is missing in your 'PEOPLE' Google Sheet!")
+                except Exception as e:
+                    st.warning("⏳ Google Sheets API is currently busy or rate-limited. Please wait 60 seconds for it to cool down.")
         # --- EXPANDABLE EXPRESS ROUTE ---
         with st.expander("🏫 Express School Route", expanded=False):
             if not st.session_state.route_active:

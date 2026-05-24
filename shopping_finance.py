@@ -38,24 +38,40 @@ def load_shopping_data():
 
 config_df = load_config()
 
+# --- FILTERING LOGIC ---
+def get_dependent_options(df, target_col, filter_col=None, filter_val=None):
+    subset = df
+    if filter_col and filter_val:
+        subset = df[df[filter_col].astype(str).str.strip() == str(filter_val).strip()]
+    options = sorted(list(dict.fromkeys([str(x).strip() for x in subset[target_col].dropna() if str(x).strip() != ""])))
+    return options
+
 # ==========================================
 # MAIN APP
 # ==========================================
 st.title("🛒 Shopping List Manager")
-st.subheader("➕ Plan New Purchases")
 
-# Load Past Items for Memory
-df_shop_hist = load_shopping_data()
-past_items = [str(x).strip() for x in df_shop_hist['Item'].dropna().tolist() if str(x).strip() != ""] if not df_shop_hist.empty else []
-p_part_opts = sorted(list(dict.fromkeys(past_items)))
+# --- HIERARCHICAL DROPDOWNS ---
+st.subheader("⚙️ Hierarchy Selection")
 
-# --- INPUTS ---
-# Sub Category Dropdown
-sub_cat_opts = [str(s).strip() for s in config_df['Sub-Categories'].dropna().tolist() if str(s).strip() != ""] if 'Sub-Categories' in config_df.columns else ["GROC", "VEGE", "MISC"]
-default_idx = sub_cat_opts.index("GROC") if "GROC" in sub_cat_opts else 0
-p_sub_cat = st.selectbox("Sub Category", sub_cat_opts, index=default_idx)
+# 1. Entity
+entities = get_dependent_options(config_df, 'Map_Entity')
+default_ent = "PERS" if "PERS" in entities else (entities[0] if entities else None)
+p_entity = st.selectbox("1. Entity", entities, index=entities.index(default_ent) if default_ent else 0)
 
-selected_items = st.multiselect("Select Existing Items", p_part_opts)
+# 2. Category
+categories = get_dependent_options(config_df, 'Map_Category', 'Map_Entity', p_entity)
+default_cat = "NEEDS" if "NEEDS" in categories else (categories[0] if categories else None)
+p_category = st.selectbox("2. Category", categories, index=categories.index(default_cat) if default_cat else 0)
+
+# 3. Sub Category
+subcats = get_dependent_options(config_df, 'Map_SubCat', 'Map_Category', p_category)
+default_sub = "GROC" if "GROC" in subcats else (subcats[0] if subcats else None)
+p_subcat = st.selectbox("3. Sub Category", subcats, index=subcats.index(default_sub) if default_sub else 0)
+
+# 4. Particulars (Existing Items)
+particulars = get_dependent_options(config_df, 'Map_Particular', 'Map_SubCat', p_subcat)
+selected_items = st.multiselect("4. Select Existing Items", particulars)
 custom_items_str = st.text_input("Add New Items (Comma separated)")
 
 # --- SAVE LOGIC ---
@@ -64,39 +80,28 @@ if st.button("➕ Add All to Pending List", use_container_width=True, type="prim
     if all_items:
         try:
             today_str = get_ist_now().strftime("%d-%m-%Y")
-            
-            # HARDCODED DEFAULTS:
-            # Order: Date_Added, Item, Shop_Type, Est_Cost, Actual_Cost, Status, Date_Bought, Fund, Account
-            # Note: We map p_sub_cat (Sub Category) to the 'Date_Bought' field as per your requirement
-            rows_to_add = [[today_str, itm, "Grocery", "", "", "Pending", p_sub_cat, "Salary", "AXIS Bank"] for itm in all_items]
+            # Defaults: Entity=p_entity, Category=p_category, SubCat=p_subcat, Shop=Grocery, Fund=Salary, Account=AXIS Bank
+            # Appending rows: Date, Item, Shop_Type, Est_Cost, Actual_Cost, Status, Date_Bought, Fund, Account
+            # Mapping SubCat to Date_Bought column as before
+            rows_to_add = [[today_str, itm, "Grocery", "", "", "Pending", p_subcat, "Salary", "AXIS Bank"] for itm in all_items]
             
             sh.worksheet("SHOPPING_LIST").append_rows(rows_to_add)
             load_shopping_data.clear() 
-            st.success(f"Added {len(all_items)} items to your list!")
+            st.success(f"Added {len(all_items)} items!")
             st.rerun()
         except Exception as e: st.error(f"Failed to save: {e}")
     else: st.warning("⚠️ Please select or type items.")
 
-# --- PENDING LIST DISPLAY ---
+# --- PENDING LIST ---
 st.divider()
 st.subheader("📋 Pending Items")
 df_shop = load_shopping_data()
-
 if not df_shop.empty:
-    # Filter for pending items
     pending = df_shop[df_shop['Status'] == 'Pending']
-    
     if not pending.empty:
-        # Smart selection: only show columns that exist in your sheet
-        potential_cols = ['Item', 'Shop_Type', 'Date_Bought', 'Fund', 'Account']
-        found_cols = [c for c in potential_cols if c in pending.columns]
-        
-        df_display = pending[found_cols].copy()
-        
-        # Rename 'Date_Bought' to 'Sub Category' for display
-        if 'Date_Bought' in df_display.columns:
-            df_display.rename(columns={'Date_Bought': 'Sub Category'}, inplace=True)
-            
+        # Show items and map the Note/Date_Bought back to Sub Category
+        df_display = pending[['Item', 'Shop_Type', 'Date_Bought']].copy()
+        df_display.rename(columns={'Date_Bought': 'Sub Category'}, inplace=True)
         st.dataframe(df_display, use_container_width=True, hide_index=True)
     else:
         st.write("You have no pending items!")

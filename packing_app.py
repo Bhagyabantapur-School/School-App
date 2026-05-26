@@ -1,96 +1,142 @@
 import streamlit as st
-from datetime import datetime
+import pandas as pd
+from datetime import datetime, timedelta, timezone
 import gspread
 from google.oauth2.service_account import Credentials
 
-# --- Google Sheets Connection ---
-# Make sure your st.secrets["gcp_service_account"] is configured in your Streamlit Cloud deployment
+# ==========================================
+# SETUP & CONNECTION
+# ==========================================
+st.set_page_config(page_title="Packing Tracker", page_icon="🎒", layout="centered")
+
+def get_ist_now():
+    return datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
+
 @st.cache_resource
 def init_connection():
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
     client = gspread.authorize(creds)
-    return client
+    return client.open("sk_money_location")
 
-client = init_connection()
+try:
+    sh = init_connection()
+except Exception as e:
+    st.error(f"Could not connect to Google Sheets. Error: {e}")
+    st.stop()
 
-@st.cache_data(ttl=600)
-def get_sheet():
-    # Opens the sk_money_location sheet and selects the Packing tab
-    return client.open("sk_money_location").worksheet("Packing")
-
-sheet = get_sheet()
-
-# --- Initialize Default Packing List in Session State ---
-if 'packing_items' not in st.session_state:
-    st.session_state.packing_items = [
+# ==========================================
+# APP DATA & STATE
+# ==========================================
+# Grouped items with your exact requested devices and icons
+BASE_ITEMS = {
+    "📱 Smart Devices": [
         "📱 Mi 11x", 
         "⌚ Amazfit GTS 2 Mini", 
-        "🔌 Mi 11x Charger + Cable", 
-        "🔌 Amazfit GTS 2 Mini Charger", 
-        "🔌 Secondary charger + Cable", 
-        "🔋 Mi Powerbank 10000w + Mini Cable", 
-        "🎧 Sony WF-C700N", 
-        "📱 Lenovo Tab 4 10 Plus", 
+        "🎧 Sony WF-C700N",
         "📱 Redmi Pad SE 4G", 
+        "📱 Lenovo Tab 4 10 Plus"
+    ],
+    "🔌 Power & Cables": [
+        "🔌 Mi 11x Charger + Cable", 
+        "🔋 Amazfit GTS 2 Mini Charger",
+        "🔌 Secondary charger + Cable", 
+        "🧱 Mi Powerbank 10000w + Mini Cable",
+        "🔌 Toothbrush Charger"
+    ],
+    "🪥 Toiletries & Misc": [
         "🪥 Philips Sonicare Toothbrush", 
-        "🔌 Toothbrush Charger", 
         "🧴 Babul Toothpaste", 
-        "🥢 Toothpick"
+        "🥢 Tooth pic"
     ]
+}
 
-st.title("🧳 Smart Packing Checklist")
+# Session state to hold user-added custom items during the session
+if 'custom_items' not in st.session_state:
+    st.session_state.custom_items = []
 
-# --- Form for Visit Details ---
-st.subheader("Trip Details")
-visit_location = st.text_input("Visit (Destination/Purpose):", placeholder="e.g., Kolkata for 3 days")
+# ==========================================
+# MAIN APP UI
+# ==========================================
+st.title("🎒 Smart Packing Checklist")
+st.write("Ensure you never forget your important tech and items on long trips!")
 
-# --- Option to Add New Items ---
-with st.expander("➕ Add New Item to Checklist"):
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        new_item = st.text_input("Item name (Include an emoji icon!):", placeholder="e.g., 🕶️ Sunglasses")
-    with col2:
-        st.write("") # Spacing
-        st.write("") # Spacing
-        if st.button("Add Item"):
-            if new_item and new_item not in st.session_state.packing_items:
-                st.session_state.packing_items.append(new_item)
-                st.success(f"Added {new_item}!")
+visit_name = st.text_input("📍 Visit Destination / Purpose", placeholder="e.g., Digha Trip, Village Visit...")
+
+st.divider()
+st.subheader("✅ Checklist")
+
+checked_items = []
+
+# Render base items in 3 distinct columns for a clean look
+cols = st.columns(3)
+for idx, (category, items) in enumerate(BASE_ITEMS.items()):
+    with cols[idx]:
+        st.markdown(f"**{category}**")
+        for item in items:
+            # Checkbox automatically saves its state via the 'key' argument
+            if st.checkbox(item, key=item):
+                checked_items.append(item)
+
+# Render Custom Added Items (if any)
+if st.session_state.custom_items:
+    st.markdown("---")
+    st.markdown("**➕ Added Custom Items**")
+    custom_cols = st.columns(3)
+    for idx, item in enumerate(st.session_state.custom_items):
+        with custom_cols[idx % 3]:
+            if st.checkbox(item, key=item):
+                checked_items.append(item)
+
+# --- ADD NEW ITEM FUNCTIONALITY ---
+st.markdown("---")
+with st.expander("📝 Add Extra Item to Checklist"):
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        new_item_input = st.text_input("Item Name (Add an emoji!)", key="new_item_val", label_visibility="collapsed", placeholder="e.g., 🕶️ Sunglasses")
+    with c2:
+        if st.button("Add Item", use_container_width=True):
+            if new_item_input and new_item_input not in st.session_state.custom_items:
+                st.session_state.custom_items.append(new_item_input)
+                # Automatically check it when added
+                st.session_state[new_item_input] = True 
                 st.rerun()
 
-# --- Checklist ---
-st.subheader("Your Items")
-st.write("Select the items you are packing:")
+st.divider()
 
-# Dictionary to store the checkbox states
-packed_status = {}
-for item in st.session_state.packing_items:
-    packed_status[item] = st.checkbox(item)
-
-# --- Save to Google Sheet ---
-if st.button("💾 Save Packing List to Sheet", type="primary"):
-    if not visit_location:
-        st.error("Please enter a Visit/Destination before saving.")
+# ==========================================
+# SAVE TO GOOGLE SHEETS LOGIC
+# ==========================================
+if st.button("💾 Save Packing Log to Google Sheets", type="primary", use_container_width=True):
+    if not visit_name:
+        st.error("⚠️ Please enter your Visit Destination at the top!")
+    elif not checked_items:
+        st.warning("⚠️ You haven't checked any items to pack!")
     else:
-        # Filter only the items that were checked
-        packed_items_list = [item for item, is_checked in packed_status.items() if is_checked]
-        
-        if not packed_items_list:
-            st.warning("You haven't selected any items to pack!")
-        else:
-            # Format Data
-            now = datetime.now()
-            current_date = now.strftime("%Y-%m-%d")
-            current_time = now.strftime("%H:%M:%S")
-            items_string = ", ".join(packed_items_list)
-            
-            # Prepare row: Date | Time | Items | Visit
-            row_to_insert = [current_date, current_time, items_string, visit_location]
-            
+        try:
+            # Check if 'Packing' tab exists; if not, create it and add headers automatically
             try:
-                sheet.append_row(row_to_insert)
-                st.success(f"Successfully logged {len(packed_items_list)} items for your visit to '{visit_location}'!")
-                st.balloons()
-            except Exception as e:
-                st.error(f"Failed to update Google Sheet: {e}")
+                ws = sh.worksheet("Packing")
+            except gspread.exceptions.WorksheetNotFound:
+                ws = sh.add_worksheet(title="Packing", rows="100", cols="4")
+                ws.append_row(["Date", "Time", "Items", "Visit"])
+
+            # Prepare Data
+            now = get_ist_now()
+            date_str = now.strftime("%d-%m-%Y")
+            time_str = now.strftime("%H:%M")
+            items_str = ", ".join(checked_items) # Combines all packed items into one text string
+            
+            # Save Data
+            ws.append_row([date_str, time_str, items_str, visit_name])
+            
+            st.success(f"🎒 Success! Logged {len(checked_items)} items for '{visit_name}'.")
+            st.info(f"**Packed:** {items_str}")
+            st.balloons()
+            
+            # Optional: Clear checklist after saving
+            # for item in checked_items:
+            #     st.session_state[item] = False
+            
+        except Exception as e:
+            st.error(f"Failed to save to Google Sheets: {e}")

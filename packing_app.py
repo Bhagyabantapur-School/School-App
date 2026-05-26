@@ -25,10 +25,17 @@ except Exception as e:
     st.error(f"Could not connect to Google Sheets. Error: {e}")
     st.stop()
 
+# --- CACHING FOR DESTINATION MEMORY ---
+@st.cache_data(ttl=60)
+def load_packing_data():
+    try: 
+        return pd.DataFrame(sh.worksheet("Packing").get_all_records())
+    except: 
+        return pd.DataFrame()
+
 # ==========================================
 # APP DATA & STATE
 # ==========================================
-# Grouped items with your exact requested devices and icons
 BASE_ITEMS = {
     "📱 Smart Devices": [
         "📱 Mi 11x", 
@@ -43,7 +50,7 @@ BASE_ITEMS = {
         "🔌 Secondary charger + Cable", 
         "🧱 Mi Powerbank 10000w + Mini Cable",
         "🔌 Toothbrush Charger",
-        "🔌 Power Extension Board" # <-- Added Power Extension Board here!
+        "🔌 Power Extension Board"
     ],
     "🪥 Toiletries & Misc": [
         "🪥 Philips Sonicare Toothbrush", 
@@ -53,7 +60,6 @@ BASE_ITEMS = {
     ]
 }
 
-# Session state to hold user-added custom items during the session
 if 'custom_items' not in st.session_state:
     st.session_state.custom_items = []
 
@@ -63,24 +69,37 @@ if 'custom_items' not in st.session_state:
 st.title("🎒 Smart Packing Checklist")
 st.write("Ensure you never forget your important tech and items on long trips!")
 
-visit_name = st.text_input("📍 Visit Destination / Purpose", placeholder="e.g., Digha Trip, Village Visit...")
+# --- SMART DESTINATION DROPDOWN ---
+df_packing = load_packing_data()
+past_visits = []
+if not df_packing.empty and 'Visit' in df_packing.columns:
+    # Get unique, non-empty past destinations
+    past_visits = sorted(list(dict.fromkeys([str(v).strip() for v in df_packing['Visit'].dropna() if str(v).strip() != ""])))
+
+visit_opts = past_visits + ["-- Add New Destination --"]
+selected_visit = st.selectbox("📍 Visit Destination / Purpose", visit_opts)
+
+# Show text input only if they want to add a new one
+if selected_visit == "-- Add New Destination --":
+    visit_name = st.text_input("Type New Destination Name", placeholder="e.g., Digha Trip, Village Visit...")
+else:
+    visit_name = selected_visit
 
 st.divider()
 st.subheader("✅ Checklist")
 
 checked_items = []
 
-# Render base items in 3 distinct columns for a clean look
+# Render base items
 cols = st.columns(3)
 for idx, (category, items) in enumerate(BASE_ITEMS.items()):
     with cols[idx]:
         st.markdown(f"**{category}**")
         for item in items:
-            # Checkbox automatically saves its state via the 'key' argument
             if st.checkbox(item, key=item):
                 checked_items.append(item)
 
-# Render Custom Added Items (if any)
+# Render Custom Added Items
 if st.session_state.custom_items:
     st.markdown("---")
     st.markdown("**➕ Added Custom Items**")
@@ -100,37 +119,36 @@ with st.expander("📝 Add Extra Item to Checklist"):
         if st.button("Add Item", use_container_width=True):
             if new_item_input and new_item_input not in st.session_state.custom_items:
                 st.session_state.custom_items.append(new_item_input)
-                # Automatically check it when added
                 st.session_state[new_item_input] = True 
                 st.rerun()
 
 st.divider()
 
 # ==========================================
-# SAVE TO GOOGLE SHEETS LOGIC
+# SAVE LOGIC
 # ==========================================
 if st.button("💾 Save Packing Log to Google Sheets", type="primary", use_container_width=True):
-    if not visit_name:
-        st.error("⚠️ Please enter your Visit Destination at the top!")
+    if not visit_name or visit_name.strip() == "":
+        st.error("⚠️ Please enter or select your Visit Destination at the top!")
     elif not checked_items:
         st.warning("⚠️ You haven't checked any items to pack!")
     else:
         try:
-            # Check if 'Packing' tab exists; if not, create it and add headers automatically
             try:
                 ws = sh.worksheet("Packing")
             except gspread.exceptions.WorksheetNotFound:
                 ws = sh.add_worksheet(title="Packing", rows="100", cols="4")
                 ws.append_row(["Date", "Time", "Items", "Visit"])
 
-            # Prepare Data
             now = get_ist_now()
             date_str = now.strftime("%d-%m-%Y")
             time_str = now.strftime("%H:%M")
-            items_str = ", ".join(checked_items) # Combines all packed items into one text string
+            items_str = ", ".join(checked_items) 
             
-            # Save Data
-            ws.append_row([date_str, time_str, items_str, visit_name])
+            ws.append_row([date_str, time_str, items_str, visit_name.strip()])
+            
+            # Clear cache so the new destination appears in the dropdown next time
+            load_packing_data.clear()
             
             st.success(f"🎒 Success! Logged {len(checked_items)} items for '{visit_name}'.")
             st.info(f"**Packed:** {items_str}")

@@ -42,12 +42,14 @@ BASE_ITEMS = {
         "🔋 Amazfit GTS 2 Mini Charger",
         "🔌 Secondary charger + Cable", 
         "🧱 Mi Powerbank 10000w + Mini Cable",
-        "🔌 Toothbrush Charger"
+        "🔌 Toothbrush Charger",
+        "🔌 Power Extension Board" # <-- Added Power Extension Board here!
     ],
     "🪥 Toiletries & Misc": [
         "🪥 Philips Sonicare Toothbrush", 
         "🧴 Babul Toothpaste", 
-        "🥢 Tooth pic"
+        "🥢 Tooth pic",
+        "🕶️ Sunglasses"
     ]
 }
 
@@ -93,7 +95,7 @@ st.markdown("---")
 with st.expander("📝 Add Extra Item to Checklist"):
     c1, c2 = st.columns([3, 1])
     with c1:
-        new_item_input = st.text_input("Item Name (Add an emoji!)", key="new_item_val", label_visibility="collapsed", placeholder="e.g., 🕶️ Sunglasses")
+        new_item_input = st.text_input("Item Name (Add an emoji!)", key="new_item_val", label_visibility="collapsed", placeholder="e.g., ☂️ Umbrella")
     with c2:
         if st.button("Add Item", use_container_width=True):
             if new_item_input and new_item_input not in st.session_state.custom_items:
@@ -133,10 +135,6 @@ if st.button("💾 Save Packing Log to Google Sheets", type="primary", use_conta
             st.success(f"🎒 Success! Logged {len(checked_items)} items for '{visit_name}'.")
             st.info(f"**Packed:** {items_str}")
             st.balloons()
-            
-            # Optional: Clear checklist after saving
-            # for item in checked_items:
-            #     st.session_state[item] = False
             
         except Exception as e:
             st.error(f"Failed to save to Google Sheets: {e}")

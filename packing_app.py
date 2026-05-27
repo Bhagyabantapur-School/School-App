@@ -9,6 +9,12 @@ from google.oauth2.service_account import Credentials
 # ==========================================
 st.set_page_config(page_title="Packing Tracker", page_icon="🎒", layout="centered")
 
+# --- BACK BUTTON (STRICTLY REQUIRED) ---
+if st.button("⬅️ Back to Hub", type="secondary"):
+    st.switch_page("routine_app.py")
+st.write("---") 
+# ---------------------------------------
+
 def get_ist_now():
     return datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
 

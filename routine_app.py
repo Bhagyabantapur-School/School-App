@@ -77,7 +77,6 @@ def init_connection():
 def get_cached_sheet(sheet_name):
     return init_connection().open(sheet_name)
 
-# ✨ THE ULTIMATE FIX: We let Google Sheets Native API handle the bottom detection!
 def smart_append_row(sheet, row_data):
     sheet.append_row(row_data, value_input_option="USER_ENTERED")
 
@@ -507,14 +506,16 @@ try:
             st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
 
     app_groups = {
-        "MONEY": [("Money & Location", "money_location.py", "📍"), ("Money Utilities", "money_utilities.py", "💳"), ("Money Tracker", "money_tracker.py", "💵")],
+        "MONEY": [("Money & Location", "money_location.py", "📍"), ("Money Utilities", "money_utilities.py", "💳"), ("Money Tracker", "money_tracker.py", "💵"), ("Product Inventory", "product_inventory.py", "📦")],
+        "LOCATION": [("Packing Tracker", "packing_app.py", "🎒")],
         "ROUTINE": [("Live Routine Hub", "routine_app.py", "⏱️"), ("Routine Audit", "routine_audit.py", "🔍"), ("Routine Editor", "routine_editor.py", "✏️"), ("Project App", "project_app.py", "🚀")],
         "HEALTH": [("Health Hub", "health_app.py", "❤️"), ("Sleep & Water", "sleep_water_app.py", "💧")],
         "SCH WORK": [("MDM Returns", "mdm_return_log.py", "📦"), ("Video Manager", "bps_ytfb_videos.py", "🎬")],
         "HOME": [("Trace Inventory", "trace.py", "🏷️"), ("Monthly Tracker", "monthly_app.py", "📆")],
         "HARDWARE": [("Backup Tracker", "backup_tracker_app.py", "💾")],
         "BALANCE": [("Strong Tracker", "strong.py", "💪")],
-        "ONES": [("Election Duty", "election_duty.py", "🗳️")]
+        "ONES": [("Election Duty", "election_duty.py", "🗳️")],
+        "DASHBOARD": [("Visual Dashboard", "dashboard.py", "🚀")]
     }
     
     base_app_list = [app for group in app_groups.values() for app in group]
@@ -1101,10 +1102,10 @@ try:
                     for j in range(3):
                         if i + j < len(apps):
                             app_name, file_name, icon = apps[i + j]
+                            last_str = get_app_time_str(app_name, tracker_data, now)
                             with cols[j]:
-                                if st.button(f"{icon} {app_name}", key=f"all_{group_name}_{i+j}", use_container_width=True):
-                                    if file_name != "routine_app.py":
-                                        st.switch_page(file_name)
+                                if st.button(f"{icon} {app_name}\n(Last: {last_str})", key=f"all_{group_name}_{i+j}", use_container_width=True):
+                                    log_and_open_app(app_name, file_name, tracker_data, now)
                 st.markdown("<hr style='margin: 5px 0px 10px 0px; border: 0; border-top: 1px solid #f0f2f6;'>", unsafe_allow_html=True)
 
 except Exception as e: st.error(f"System Error: {e}")

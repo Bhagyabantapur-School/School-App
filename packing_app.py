@@ -50,13 +50,17 @@ BASE_ITEMS = {
         "🔌 Secondary charger + Cable", 
         "🧱 Mi Powerbank 10000w + Mini Cable",
         "🔌 Toothbrush Charger",
-        "🔌 Power Extension Board"
+        "🔌 Power Extension Board",
+        "🔦 Rechargeable Mini Light"
     ],
     "🪥 Toiletries & Misc": [
         "🪥 Philips Sonicare Toothbrush", 
         "🧴 Babul Toothpaste", 
         "🥢 Tooth pic",
-        "🕶️ Sunglasses"
+        "👓 Spectacles Glasses",
+        "🧳 Spectacles Glasses Case",
+        "🕶️ Sunglasses",
+        "🧻 Wipes"
     ]
 }
 

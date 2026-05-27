@@ -298,7 +298,8 @@ sync_journey_state()
 # ==========================================
 st.title("📱 SK Ecosystem - Core")
 
-tab_location, tab_money = st.tabs(["📍 Location", "💰 Money"])
+# --- UPDATED TABS ---
+tab_location, tab_money, tab_config = st.tabs(["📍 Location", "💰 Money", "⚙️ Data Config"])
 
 current_loc, loc_duration = get_current_location_details()
 current_shop_type = get_shop_type(current_loc) if current_loc else None
@@ -310,84 +311,6 @@ with tab_location:
     if 'target_destination' not in st.session_state: st.session_state.target_destination = ""
 
     all_places_list = get_list("Places")
-
-    # ==========================================
-    # LOCATION DATA ENTRY
-    # ==========================================
-    with st.expander("📝 Location Data Entry", expanded=False):
-        ld_place_opts = all_places_list + ["-- Type New --"]
-        default_ld_idx = ld_place_opts.index(current_loc) if current_loc in ld_place_opts else 0
-        ld_place = st.selectbox("Select Place", ld_place_opts, index=default_ld_idx, key="ld_place")
-        if ld_place == "-- Type New --": ld_place = st.text_input("Type New Place Name", key="ld_new_place")
-        
-        ld_type = st.selectbox("Entry Type", ["Closed", "-- Type New --"], key="ld_type")
-        
-        if ld_type == "Closed":
-            current_day = get_ist_now().strftime('%A')
-            current_time_str = get_ist_now().strftime('%H:%M')
-            ld_final_remark = f"Closed: {current_day}"
-            st.info(f"📍 Will log: **{ld_final_remark}** (Auto-detected weekday)")
-        else:
-            ld_final_remark = st.text_input("Type New Entry (e.g. Purpose of visit)", key="ld_custom_remark")
-        
-        if st.button("💾 Save Entry", type="primary", use_container_width=True, key="ld_save_btn"):
-            if ld_place and ld_final_remark:
-                try:
-                    time_now = get_ist_now()
-                    sh.worksheet("LOCATION_DATA").append_row([
-                        time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), 
-                        "- Stationary -", ld_place, st.session_state.current_people, ld_final_remark
-                    ])
-                    load_location_data.clear()
-                    st.success(f"Saved: {ld_place} -> {ld_final_remark}")
-                except Exception as e: st.error(f"Error: {e}")
-            else:
-                st.warning("Please provide an entry to save.")
-
-    # ==========================================
-    # WORKING HOURS ENTRY
-    # ==========================================
-    with st.expander("🕒 Working Hours Entry", expanded=False):
-        wh_place_opts = all_places_list + ["-- Type New --"]
-        default_wh_idx = wh_place_opts.index(current_loc) if current_loc in wh_place_opts else 0
-        wh_place = st.selectbox("Select Place", wh_place_opts, index=default_wh_idx, key="wh_place")
-        if wh_place == "-- Type New --": wh_place = st.text_input("Type New Place Name", key="wh_new_place")
-        
-        wh_day_opts = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "All Days", "Mon-Fri", "Sat-Sun"]
-        curr_day = get_ist_now().strftime('%A')
-        default_day_idx = wh_day_opts.index(curr_day) if curr_day in wh_day_opts else 0
-        wh_day = st.selectbox("Day(s)", wh_day_opts, index=default_day_idx, key="wh_day")
-
-        wh_c1, wh_c2 = st.columns(2)
-        with wh_c1: wh_open = st.time_input("Open Time", value=datetime.strptime("09:00", "%H:%M").time())
-        with wh_c2: wh_close = st.time_input("Close Time", value=datetime.strptime("17:00", "%H:%M").time())
-        
-        add_break = st.checkbox("➕ Add Break / Lunch Time")
-        if add_break:
-            b_c1, b_c2 = st.columns(2)
-            with b_c1: wh_b_start = st.time_input("Break Start", value=datetime.strptime("14:00", "%H:%M").time())
-            with b_c2: wh_b_end = st.time_input("Break End", value=datetime.strptime("14:30", "%H:%M").time())
-        
-        if st.button("💾 Save Working Hours", type="primary", use_container_width=True):
-            if wh_place:
-                try:
-                    try:
-                        wh_sheet = sh.worksheet("WORKING_HOURS")
-                        headers = wh_sheet.row_values(1)
-                        if "Break_Start" not in headers:
-                            wh_sheet.update_cell(1, 5, "Break_Start")
-                            wh_sheet.update_cell(1, 6, "Break_End")
-                    except gspread.exceptions.WorksheetNotFound:
-                        wh_sheet = sh.add_worksheet(title="WORKING_HOURS", rows="100", cols="6")
-                        wh_sheet.append_row(["Place", "Day", "Open", "Close", "Break_Start", "Break_End"])
-                    
-                    b_start_str = wh_b_start.strftime("%H:%M") if add_break else ""
-                    b_end_str = wh_b_end.strftime("%H:%M") if add_break else ""
-                    
-                    wh_sheet.append_row([wh_place, wh_day, wh_open.strftime("%H:%M"), wh_close.strftime("%H:%M"), b_start_str, b_end_str])
-                    load_working_hours.clear()
-                    st.success(f"Saved Working Hours for {wh_place} on {wh_day}")
-                except Exception as e: st.error(f"Error: {e}")
 
     # ==========================================
     # DYNAMIC AREA ROUTE EXPANDER
@@ -487,15 +410,21 @@ with tab_location:
                 base_fare = 0.0
                 
                 if current_pair in transit_rules:
-                    if transit_rules[current_pair]['mode'] and transit_rules[current_pair]['mode'] not in ['WALK', 'BIKE', 'BIKE + WALK']:
+                    if transit_rules[current_pair]['mode'] and transit_rules[current_pair]['mode'] not in ['WALK', 'BIKE', 'BIKE + WALK', 'TRAIN']:
                         pre_mode = transit_rules[current_pair]['mode']
                     base_fare = transit_rules[current_pair]['fare']
 
-                move_options = ["BIKE", "WALK", "BIKE + WALK", "TOTO", "AUTO", "BUS"]
-                if pre_mode and pre_mode not in move_options: move_options.append(pre_mode)
+                # --- ADDED 'TRAIN' AND '-- TYPE NEW --' ---
+                move_options = ["BIKE", "WALK", "BIKE + WALK", "TOTO", "AUTO", "BUS", "TRAIN", "-- Type New --"]
+                if pre_mode and pre_mode not in move_options: move_options.insert(0, pre_mode)
                 default_mode_idx = move_options.index(pre_mode) if pre_mode in move_options else 0
                 
-                dyn_move = st.selectbox("Travel Mode", move_options, index=default_mode_idx, key="dyn_move")
+                dyn_move_sel = st.selectbox("Travel Mode", move_options, index=default_mode_idx, key="dyn_move")
+                if dyn_move_sel == "-- Type New --":
+                    dyn_move = st.text_input("Type New Travel Mode", key="dyn_new_move")
+                else:
+                    dyn_move = dyn_move_sel
+                    
                 if dyn_move in ["WALK", "BIKE", "BIKE + WALK"]: base_fare = 0.0
                 
             with d_col2:
@@ -525,6 +454,7 @@ with tab_location:
             with c_btn1:
                 if st.button("🟢 Start Journey (New Area/Road)", key="start_dyn", use_container_width=True, type="primary"):
                     if not dyn_next_stop or str(dyn_next_stop).strip() == "": st.error("⚠️ Please specify the next stop!")
+                    elif not dyn_move or str(dyn_move).strip() == "": st.error("⚠️ Please specify travel mode!")
                     else:
                         try:
                             time_now = get_ist_now()
@@ -559,6 +489,7 @@ with tab_location:
             with c_btn2:
                 if st.button("🚶‍♂️ Move Inside Same Complex", key="internal_dyn", use_container_width=True):
                     if not dyn_next_stop or str(dyn_next_stop).strip() == "": st.error("⚠️ Please specify the next stop!")
+                    elif not dyn_move or str(dyn_move).strip() == "": st.error("⚠️ Please specify travel mode!")
                     else:
                         try:
                             time_now = get_ist_now()
@@ -693,7 +624,7 @@ with tab_location:
                                 today_str, time_now_stop.strftime("%H:%M"), active_m, "", active_p, f"Resumed Route: {active_r} towards {target_dest}"
                             ])
                             
-                        # Log to PEOPLE Sheet if applicable (now sending both Start Time and End Time!)
+                        # Log to PEOPLE Sheet if applicable
                         if contact_name and stop_task in ["Call receive", "Call", "Meet"]:
                             sh_people.worksheet("People Interaction").append_row([
                                 contact_name, stop_task, today_people_str, start_t.strftime("%H:%M"), time_now_stop.strftime("%H:%M"), duration_str_hhmmss, "⚠️ INCOMPLETE"
@@ -753,6 +684,8 @@ with tab_location:
                     st.error("❌ The tab 'People Interaction' is missing in your 'PEOPLE' Google Sheet!")
                 except Exception as e:
                     st.warning("⏳ Google Sheets API is currently busy or rate-limited. Please wait 60 seconds for it to cool down.")
+
+    if not st.session_state.route_active or st.session_state.get('route_type') == "Express":
         # --- EXPANDABLE EXPRESS ROUTE ---
         with st.expander("🏫 Express School Route", expanded=False):
             if not st.session_state.route_active:
@@ -1355,3 +1288,83 @@ with tab_money:
                 st.success(f"Saved: ₹{amount_in if amount_in > 0 else amount_out} logged!")
                 st.session_state.locked_date = get_ist_now().date() 
             except Exception as e: st.error(f"Failed to save: {e}")
+
+# ==========================================
+# TAB 3: DATA CONFIG (NEW)
+# ==========================================
+with tab_config:
+    st.header("⚙️ Data Configuration")
+    
+    # --- MOVED FROM TAB 1 ---
+    with st.expander("📝 Location Data Entry", expanded=True):
+        ld_place_opts = all_places_list + ["-- Type New --"]
+        default_ld_idx = ld_place_opts.index(current_loc) if current_loc in ld_place_opts else 0
+        ld_place = st.selectbox("Select Place", ld_place_opts, index=default_ld_idx, key="ld_place_cfg")
+        if ld_place == "-- Type New --": ld_place = st.text_input("Type New Place Name", key="ld_new_place_cfg")
+        
+        ld_type = st.selectbox("Entry Type", ["Closed", "-- Type New --"], key="ld_type_cfg")
+        
+        if ld_type == "Closed":
+            current_day = get_ist_now().strftime('%A')
+            current_time_str = get_ist_now().strftime('%H:%M')
+            ld_final_remark = f"Closed: {current_day}"
+            st.info(f"📍 Will log: **{ld_final_remark}** (Auto-detected weekday)")
+        else:
+            ld_final_remark = st.text_input("Type New Entry (e.g. Purpose of visit)", key="ld_custom_remark_cfg")
+        
+        if st.button("💾 Save Location Entry", type="primary", use_container_width=True, key="ld_save_btn_cfg"):
+            if ld_place and ld_final_remark:
+                try:
+                    time_now = get_ist_now()
+                    sh.worksheet("LOCATION_DATA").append_row([
+                        time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), 
+                        "- Stationary -", ld_place, st.session_state.current_people, ld_final_remark
+                    ])
+                    load_location_data.clear()
+                    st.success(f"Saved: {ld_place} -> {ld_final_remark}")
+                except Exception as e: st.error(f"Error: {e}")
+            else:
+                st.warning("Please provide an entry to save.")
+
+    # --- MOVED FROM TAB 1 ---
+    with st.expander("🕒 Working Hours Entry", expanded=True):
+        wh_place_opts = all_places_list + ["-- Type New --"]
+        default_wh_idx = wh_place_opts.index(current_loc) if current_loc in wh_place_opts else 0
+        wh_place = st.selectbox("Select Place", wh_place_opts, index=default_wh_idx, key="wh_place_cfg")
+        if wh_place == "-- Type New --": wh_place = st.text_input("Type New Place Name", key="wh_new_place_cfg")
+        
+        wh_day_opts = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "All Days", "Mon-Fri", "Sat-Sun"]
+        curr_day = get_ist_now().strftime('%A')
+        default_day_idx = wh_day_opts.index(curr_day) if curr_day in wh_day_opts else 0
+        wh_day = st.selectbox("Day(s)", wh_day_opts, index=default_day_idx, key="wh_day_cfg")
+
+        wh_c1, wh_c2 = st.columns(2)
+        with wh_c1: wh_open = st.time_input("Open Time", value=datetime.strptime("09:00", "%H:%M").time(), key="wh_open_cfg")
+        with wh_c2: wh_close = st.time_input("Close Time", value=datetime.strptime("17:00", "%H:%M").time(), key="wh_close_cfg")
+        
+        add_break = st.checkbox("➕ Add Break / Lunch Time", key="wh_break_cfg")
+        if add_break:
+            b_c1, b_c2 = st.columns(2)
+            with b_c1: wh_b_start = st.time_input("Break Start", value=datetime.strptime("14:00", "%H:%M").time(), key="wh_b_start_cfg")
+            with b_c2: wh_b_end = st.time_input("Break End", value=datetime.strptime("14:30", "%H:%M").time(), key="wh_b_end_cfg")
+        
+        if st.button("💾 Save Working Hours", type="primary", use_container_width=True, key="wh_save_btn_cfg"):
+            if wh_place:
+                try:
+                    try:
+                        wh_sheet = sh.worksheet("WORKING_HOURS")
+                        headers = wh_sheet.row_values(1)
+                        if "Break_Start" not in headers:
+                            wh_sheet.update_cell(1, 5, "Break_Start")
+                            wh_sheet.update_cell(1, 6, "Break_End")
+                    except gspread.exceptions.WorksheetNotFound:
+                        wh_sheet = sh.add_worksheet(title="WORKING_HOURS", rows="100", cols="6")
+                        wh_sheet.append_row(["Place", "Day", "Open", "Close", "Break_Start", "Break_End"])
+                    
+                    b_start_str = wh_b_start.strftime("%H:%M") if add_break else ""
+                    b_end_str = wh_b_end.strftime("%H:%M") if add_break else ""
+                    
+                    wh_sheet.append_row([wh_place, wh_day, wh_open.strftime("%H:%M"), wh_close.strftime("%H:%M"), b_start_str, b_end_str])
+                    load_working_hours.clear()
+                    st.success(f"Saved Working Hours for {wh_place} on {wh_day}")
+                except Exception as e: st.error(f"Error: {e}")

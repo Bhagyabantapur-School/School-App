@@ -41,6 +41,7 @@ mdm_return = st.Page("mdm_return_log.py", title="MDM Returns", icon="📦")
 ytfb_videos = st.Page("bps_ytfb_videos.py", title="Video Manager", icon="🎬")
 trace_app = st.Page("trace.py", title="Trace Inventory", icon="🏷️")
 sleep_water = st.Page("sleep_water_app.py", title="Sleep & Water", icon="💧")
+packing_tracker = st.Page("packing_app.py", title="Packing Tracker", icon="🎒") # <-- NEW APP
 visual_dashboard = st.Page("dashboard.py", title="Visual Dashboard", icon="🚀")
 
 # --- BPS Digital Pages ---
@@ -63,7 +64,7 @@ if st.session_state.active_system == 'Personal Hub':
             routine_hub, money_location, money_utilities, 
             strong, project, election, monthly, money_tracker, product_inventory,
             health, backup, routine_audit, routine_editor, 
-            mdm_return, ytfb_videos, trace_app, sleep_water, visual_dashboard
+            mdm_return, ytfb_videos, trace_app, sleep_water, packing_tracker, visual_dashboard
         ]
     })
     st.sidebar.caption("🔒 Personal Workspace Active")

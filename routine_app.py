@@ -88,6 +88,7 @@ def smart_append_multiple(sheet, rows_data):
 def get_all_ecosystem_data():
     main_ss = get_cached_sheet("MY ROUTINE 2026")
     money_ss = get_cached_sheet("sk_money_location")
+    dash_ss = get_cached_sheet("Personal_Dashboard_Data")
     
     def process_raw(data, expected_cols, column_names):
         if not data or len(data) <= 1: 
@@ -168,7 +169,12 @@ def get_all_ecosystem_data():
     else:
         loc_df = pd.DataFrame()
 
-    return df, log_df, future_df, holidays_df, payment_df, must_do_df, pre_df, loc_df, prep_chk_df
+    try:
+        t_records = dash_ss.worksheet("Tracker").get_all_records()
+        tracker_data = {row['App Name']: str(row['Last Opened']) for row in t_records}
+    except: tracker_data = {}
+
+    return df, log_df, future_df, holidays_df, payment_df, must_do_df, pre_df, loc_df, prep_chk_df, tracker_data
 
 def get_last_done_str(item_name, log_df, now, col_name='Sub_Activities'):
     completed_logs = log_df[log_df['End_Time'] != 'RUNNING']
@@ -189,11 +195,38 @@ def get_last_done_str(item_name, log_df, now, col_name='Sub_Activities'):
     elif diff.seconds >= 60: return f"{diff.seconds // 60}m ago"
     else: return "Just now"
 
+# --- RESTORED THE TWO MISSING FUNCTIONS HERE ---
+def get_app_time_str(app_name, tracker_data, now_dt):
+    val = tracker_data.get(app_name, "")
+    if not val: return "Never"
+    try:
+        dt_naive = datetime.strptime(val, "%Y-%m-%d %H:%M:%S")
+        dt_aware = now_dt.tzinfo.localize(dt_naive)
+        diff = now_dt - dt_aware
+        if diff.days > 0: return f"{diff.days}d ago"
+        elif diff.seconds >= 3600: return f"{diff.seconds // 3600}h ago"
+        elif diff.seconds >= 60: return f"{diff.seconds // 60}m ago"
+        else: return "Just now"
+    except: return "N/A"
+
+def log_and_open_app(app_name, target_file, cached_data, now_dt):
+    now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        sheet = init_connection().open("Personal_Dashboard_Data").worksheet("Tracker") 
+        cell = sheet.find(app_name)
+        if cell: sheet.update_cell(cell.row, 2, now_str)
+        else: sheet.append_row([app_name, now_str])
+    except Exception as e: print(f"Silent log failure: {e}")
+        
+    cached_data[app_name] = now_str 
+    st.switch_page(target_file) 
+# ------------------------------------------------
+
 # ==========================================
 # Main Logic
 # ==========================================
 try:
-    df, log_df, future_df, holidays_df, payment_df, must_do_df, pre_df, loc_df, prep_chk_df = get_all_ecosystem_data()
+    df, log_df, future_df, holidays_df, payment_df, must_do_df, pre_df, loc_df, prep_chk_df, tracker_data = get_all_ecosystem_data()
 
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist_timezone)
@@ -374,7 +407,7 @@ try:
     running_tasks = log_df[log_df['End_Time'] == 'RUNNING']
     active_count = len(running_tasks)
 
-    # --- HOLIDAY LOGIC MOVED UP ---
+    # --- HOLIDAY LOGIC ---
     holidays_df['Date_dt'] = pd.to_datetime(holidays_df['Date'], dayfirst=True, errors='coerce')
     today_holiday_match = holidays_df[holidays_df['Date_dt'].dt.date == now.date()]
     is_auto_holiday = not today_holiday_match.empty
@@ -610,7 +643,6 @@ try:
         
     if next_activity not in ["NONE", "END OF DAY"]: st.markdown(f'<h4 style="text-align: right; color: #666; margin-bottom: 20px; font-weight: 400; font-size: 1.1rem;">Up Next: <b>{next_activity}</b> at {next_time_str}</h4>', unsafe_allow_html=True)
     elif next_activity == "END OF DAY": st.markdown('<h4 style="text-align: right; color: #666; margin-bottom: 20px; font-weight: 400; font-size: 1.1rem;">Up Next: Schedule Complete</h4>', unsafe_allow_html=True)
-
 
     if not hide_extras:
         all_alert_pays = []

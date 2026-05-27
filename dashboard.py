@@ -109,7 +109,7 @@ with col_title:
     st.title("🚀 My Personal Dashboard")
     st.markdown("Welcome back! Here is a summary of your systems:")
 with col_count:
-    st.metric("Total Active Apps", "17")
+    st.metric("Total Active Apps", "18") # <-- Perfect 18 Apps
 st.write("---") 
 
 # ROW 1 (Finance & Core Focus)
@@ -172,7 +172,7 @@ with r5_col3:
     st.markdown(create_card("🏷️", "Trace Inventory", "Items", "Tracked", "#F3E5F5", "#8E24AA", "#6A1B9A", tracker_data), unsafe_allow_html=True)
     if st.button("Open App", key="btn15", use_container_width=True): log_and_open("Trace Inventory", "trace.py")
 
-# ROW 6 (Sleep, Product Inventory)
+# ROW 6 (Sleep, Product Inventory, Packing Tracker)
 r6_col1, r6_col2, r6_col3 = st.columns(3)
 with r6_col1:
     st.markdown(create_card("💧", "Sleep & Water", "Health", "Logged", "#E3F2FD", "#1E88E5", "#1565C0", tracker_data), unsafe_allow_html=True)
@@ -181,4 +181,5 @@ with r6_col2:
     st.markdown(create_card("📦", "Product Inventory", "Stock", "Active", "#E0F2F1", "#00897B", "#00695C", tracker_data), unsafe_allow_html=True)
     if st.button("Open App", key="btn17", use_container_width=True): log_and_open("Product Inventory", "product_inventory.py")
 with r6_col3:
-    st.empty() # Placeholder
+    st.markdown(create_card("🎒", "Packing Tracker", "Visits", "Ready", "#FFF3E0", "#FB8C00", "#EF6C00", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn18", use_container_width=True): log_and_open("Packing Tracker", "packing_app.py")

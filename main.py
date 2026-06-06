@@ -85,7 +85,7 @@ visual_dashboard = st.Page("dashboard.py", title="Visual Dashboard", icon="🚀"
 # --- BPS Digital Pages ---
 bps_dashboard = st.Page("bps_dashboard.py", title="Main Dashboard", icon="🏫", default=(system_choice == 'BPS Digital System'))
 admission = st.Page("admission_hub.py", title="Admission Hub", icon="📝")
-student_profile = st.Page("student_profile.py", title="Student Profiles", icon="🧑🎓")
+student_profile = st.Page("student_profile.py", title="Student Profiles", icon="🎓")
 id_card = st.Page("id_card_app.py", title="ID Card Generator", icon="🪪")
 school_data = st.Page("school_data.py", title="School Data", icon="📊")
 exam_fees = st.Page("sch_exam_fees.py", title="Exam & Fees", icon="💰")

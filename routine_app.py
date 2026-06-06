@@ -210,14 +210,8 @@ def get_app_time_str(app_name, tracker_data, now_dt):
     except: return "N/A"
 
 def log_and_open_app(app_name, target_file, cached_data, now_dt):
+    # Optimistically updates local UI, main.py handles the Google Sheet logging!
     now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
-    try:
-        sheet = init_connection().open("Personal_Dashboard_Data").worksheet("Tracker") 
-        cell = sheet.find(app_name)
-        if cell: sheet.update_cell(cell.row, 2, now_str)
-        else: sheet.append_row([app_name, now_str])
-    except Exception as e: print(f"Silent log failure: {e}")
-        
     cached_data[app_name] = now_str 
     st.switch_page(target_file) 
 # ------------------------------------------------

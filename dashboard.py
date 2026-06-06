@@ -40,24 +40,10 @@ def get_time_stats(last_opened_str):
         return last_opened_str, "N/A"
 
 def log_and_open(app_name, target_file):
+    # Optimistically updates local UI, main.py handles the Google Sheet logging!
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    # 1. Write to Google silently (Protects against 429 Errors)
-    try:
-        sheet = client.open(SHEET_NAME).worksheet("Tracker") 
-        cell = sheet.find(app_name)
-        if cell:
-            sheet.update_cell(cell.row, 2, now_str)
-        else:
-            sheet.append_row([app_name, now_str])
-    except Exception as e:
-        print(f"Silent log failure: {e}")
-        
-    # 2. OPTIMISTIC UPDATE: Instantly update the UI without reloading Google
     cached_data = get_tracker_data() 
     cached_data[app_name] = now_str 
-    
-    # 3. Switch page
     st.switch_page(target_file)
 
 # 3. SCOPED STYLING

@@ -3,11 +3,13 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 import qrcode
-from io import BytesIO
 import math
 from datetime import datetime, timedelta
 import pytz
 from streamlit_qrcode_scanner import qrcode_scanner
+from fpdf import FPDF
+import tempfile
+import os
 
 # Set Timezone for Haldia, West Bengal
 IST = pytz.timezone('Asia/Kolkata')
@@ -29,7 +31,7 @@ client = get_gspread_client()
 @st.cache_data(ttl=60)
 def load_students():
     try:
-        # Updated to target students_master
+        # Target students_master
         sheet = client.open("BPS_Database").worksheet("students_master")
         df = pd.DataFrame(sheet.get_all_records())
         # Automatically capitalize headers (e.g., 'class' becomes 'Class') to prevent errors
@@ -76,7 +78,7 @@ df_logs = load_sheet_data("Logs")
 tabs = st.tabs(["Add Books & QR", "Issue Book", "Returns & Reminders"])
 
 # ==========================================
-# TAB 1: ADD BOOKS & GENERATE QR
+# TAB 1: ADD BOOKS & GENERATE QR PDF
 # ==========================================
 with tabs[0]:
     st.header("Add New Books")
@@ -95,7 +97,7 @@ with tabs[0]:
                 # Capture accurate IST Date and Time
                 now_ist = datetime.now(IST)
                 today_date = now_ist.strftime("%Y-%m-%d")
-                current_time = now_ist.strftime("%I:%M:%S %p") # 12-hour format with AM/PM
+                current_time = now_ist.strftime("%I:%M:%S %p")
                 
                 append_to_sheet("Books", {
                     "Book_ID": book_id,
@@ -114,25 +116,70 @@ with tabs[0]:
     st.subheader("Generate & Print QR Codes")
     
     if not df_books.empty:
-        # Calculate A4 Pages (Assuming standard sticker sheets: 24 labels per A4 page)
         total_books = len(df_books)
         qrs_per_page = 24
         total_pages = math.ceil(total_books / qrs_per_page)
         
-        st.info(f"🖨️ **Printing Details:** You have {total_books} books. This will require **{total_pages}** A4 page(s) to print (assuming 24 QR codes per page).")
+        st.info(f"🖨️ **Printing Details:** You have {total_books} books. This will require **{total_pages}** A4 page(s) to print (24 stickers per page).")
         
-        if st.button("Generate QR Codes for All Books"):
-            cols = st.columns(4) # Display in a grid
-            for idx, row in df_books.iterrows():
-                qr_data = str(row['Book_ID'])
-                qr = qrcode.make(qr_data)
+        # --- PDF GENERATION LOGIC ---
+        if st.button("Generate A4 PDF for Printing"):
+            with st.spinner("Generating PDF layout..."):
+                pdf = FPDF(orientation='P', unit='mm', format='A4')
+                pdf.set_auto_page_break(auto=False)
+                pdf.add_page()
+                pdf.set_font("helvetica", size=8)
                 
-                # Convert PIL image to display in Streamlit
-                img_buffer = BytesIO()
-                qr.save(img_buffer, format="PNG")
+                # A4 Grid settings
+                col_width = 45
+                row_height = 48
+                margin_x = 15
+                margin_y = 15
+                x, y = margin_x, margin_y
+                col_count = 0
+                row_count = 0
                 
-                with cols[idx % 4]:
-                    st.image(img_buffer, caption=f"{row['Book_ID']}\n{row['Title']}")
+                for idx, row in df_books.iterrows():
+                    qr_data = str(row['Book_ID'])
+                    qr = qrcode.make(qr_data)
+                    
+                    # Save QR temporarily to place in PDF
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
+                        qr.save(tmp.name)
+                        # Place image and text
+                        pdf.image(tmp.name, x=x, y=y, w=40, h=40)
+                        pdf.set_xy(x, y + 40)
+                        pdf.cell(40, 5, txt=str(row['Book_ID']), align='C')
+                        
+                    os.unlink(tmp.name) # Clean up temp file
+                    
+                    # Move to next grid position
+                    col_count += 1
+                    x += col_width
+                    
+                    if col_count >= 4: # 4 columns
+                        col_count = 0
+                        x = margin_x
+                        row_count += 1
+                        y += row_height
+                        
+                    if row_count >= 6: # 6 rows (24 total per page)
+                        pdf.add_page()
+                        row_count = 0
+                        col_count = 0
+                        x = margin_x
+                        y = margin_y
+                
+                # Output PDF to Streamlit
+                pdf_bytes = bytes(pdf.output())
+                
+                st.success("✅ PDF Generated Successfully!")
+                st.download_button(
+                    label="📥 Download PDF to Print",
+                    data=pdf_bytes,
+                    file_name=f"Library_QR_Codes_{datetime.now(IST).strftime('%d-%m-%Y')}.pdf",
+                    mime="application/pdf"
+                )
     else:
         st.write("No books in the library yet.")
 

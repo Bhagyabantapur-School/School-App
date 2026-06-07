@@ -19,7 +19,7 @@ IST = pytz.timezone('Asia/Kolkata')
 st.set_page_config(page_title="BPS Library Manager", page_icon="📚", layout="centered")
 
 # ==========================================
-# SESSION STATE INITIALIZATION (Just like app.py)
+# SESSION STATE INITIALIZATION
 # ==========================================
 if 'lib_scan_msg' not in st.session_state: st.session_state.lib_scan_msg = None
 if 'scanned_book_id' not in st.session_state: st.session_state.scanned_book_id = None
@@ -82,7 +82,8 @@ df_students = load_students()
 df_books = load_sheet_data("Books")
 df_logs = load_sheet_data("Logs")
 
-tabs = st.tabs(["Add Books & QR", "Issue Book", "Returns & Reminders"])
+# --- NEW: Added a 4th Tab for 'All Books Inventory' ---
+tabs = st.tabs(["Add Books & QR", "Issue Book", "Returns & Reminders", "All Books Inventory"])
 
 # ==========================================
 # TAB 1: ADD BOOKS & GENERATE QR PDF
@@ -222,7 +223,7 @@ with tabs[0]:
 with tabs[1]:
     st.header("Scan & Issue Book")
     
-    # 1. State-managed QR Scanner (Identical to app.py logic)
+    # State-managed QR Scanner
     st.write("📸 **Scan Book QR Code:**")
     qv = qrcode_scanner(key='library_qr_scanner')
     
@@ -232,7 +233,6 @@ with tabs[1]:
         
     if qv:
         should_rerun = False
-        # Prevent continuous processing of the same scan
         if st.session_state.scanned_book_id != qv:
             st.session_state.scanned_book_id = qv
             st.session_state.lib_scan_msg = f"✅ Scanned Successfully: {qv}"
@@ -241,11 +241,9 @@ with tabs[1]:
         if should_rerun:
             st.rerun()
 
-    # 2. Proceed if a book is held in session state
     if st.session_state.scanned_book_id:
         active_id = st.session_state.scanned_book_id
         
-        # Check if book exists
         if not df_books.empty and active_id in df_books['Book_ID'].values:
             book_details = df_books[df_books['Book_ID'] == active_id].iloc[0]
             
@@ -274,7 +272,6 @@ with tabs[1]:
             if not is_issued:
                 st.markdown("### Select Student")
                 
-                # Dynamic Dropdowns based on students_master
                 classes = ["Select Class"] + sorted(list(df_students['Class'].unique())) if not df_students.empty else ["Select Class"]
                 sel_class = st.selectbox("Class", classes)
                 
@@ -304,11 +301,9 @@ with tabs[1]:
                                 append_to_sheet("Logs", log_data)
                                 st.success(f"Book issued to {sel_student}. Due back on {due_date.strftime('%d-%m-%Y')}.")
                                 
-                                # Reset scanner state for the next book
                                 st.session_state.scanned_book_id = None
                                 st.rerun()
             
-            # Allow user to clear and scan something else
             if st.button("Cancel & Scan Another Book"):
                 st.session_state.scanned_book_id = None
                 st.rerun()
@@ -356,3 +351,57 @@ with tabs[2]:
             st.success("All issued books have been returned.")
     else:
         st.write("No issue logs found.")
+
+# ==========================================
+# TAB 4: ALL BOOKS INVENTORY (NEW)
+# ==========================================
+with tabs[3]:
+    st.header("📚 All Books Inventory")
+    
+    if not df_books.empty:
+        # Create a display copy so we don't alter the original dataframe
+        display_df = df_books.copy()
+        
+        # 1. Calculate the 'Current Status' (Available vs Issued)
+        if not df_logs.empty:
+            # Find all books that are currently issued
+            active_issues = df_logs[df_logs['Status'] == "Issued"]
+            issued_book_ids = active_issues['Book_ID'].tolist()
+            
+            # Map status to the display dataframe
+            display_df['Current Status'] = display_df['Book_ID'].apply(
+                lambda x: "🔴 Issued" if x in issued_book_ids else "🟢 Available"
+            )
+        else:
+            # If logs are empty, all books are available
+            display_df['Current Status'] = "🟢 Available"
+        
+        # Clean up columns for a better view (hiding the long image URL)
+        if "Cover_Image_URL" in display_df.columns:
+            display_df = display_df.drop(columns=["Cover_Image_URL"])
+            
+        # Reorder columns so Status is highly visible
+        cols = display_df.columns.tolist()
+        if 'Current Status' in cols:
+            cols.insert(2, cols.pop(cols.index('Current Status')))
+            display_df = display_df[cols]
+            
+        # 2. Search Bar Feature
+        search_term = st.text_input("🔍 Search by Book Title, Author, or ID...", "")
+        
+        if search_term:
+            # Filter the dataframe based on the search term (case-insensitive)
+            search_mask = (
+                display_df['Title'].astype(str).str.contains(search_term, case=False, na=False) | 
+                display_df['Author'].astype(str).str.contains(search_term, case=False, na=False) |
+                display_df['Book_ID'].astype(str).str.contains(search_term, case=False, na=False)
+            )
+            display_df = display_df[search_mask]
+            
+        # Display total count
+        st.caption(f"Total Books Found: {len(display_df)}")
+        
+        # Display the interactive dataframe
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No books have been added to the library yet.")

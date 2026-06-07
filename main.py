@@ -118,10 +118,11 @@ visual_dashboard = st.Page("dashboard.py", title="Visual Dashboard", icon="🚀"
 # --- BPS Digital Pages ---
 bps_dashboard = st.Page("bps_dashboard.py", title="Main Dashboard", icon="🏫", default=(system_choice == 'BPS Digital System'))
 admission = st.Page("admission_hub.py", title="Admission Hub", icon="📝")
-student_profile = st.Page("student_profile.py", title="Student Profiles", icon="🎓") # Corrected icon!
+student_profile = st.Page("student_profile.py", title="Student Profiles", icon="🎓")
 id_card = st.Page("id_card_app.py", title="ID Card Generator", icon="🪪")
 school_data = st.Page("school_data.py", title="School Data", icon="📊")
 exam_fees = st.Page("sch_exam_fees.py", title="Exam & Fees", icon="💰")
+library_app = st.Page("library_app.py", title="Library Manager", icon="📚") # <-- NEW BPS APP
 leave = st.Page("leave_app.py", title="Leave Management", icon="🗓️")
 distribution = st.Page("bps_distribution.py", title="Distributions", icon="🎒")
 returns = st.Page("bps_returns.py", title="Returns", icon="📑")
@@ -144,7 +145,7 @@ else:
         "System Home": [bps_dashboard],
         "Staff & Admin": [staff_portal],
         "Student Management": [admission, student_profile, id_card],
-        "Academics & Finance": [school_data, exam_fees],
+        "Academics & Finance": [school_data, exam_fees, library_app], # <-- ADDED HERE
         "Operations": [leave, distribution, returns, form_manager]
     })
     st.sidebar.markdown("#### Bhagyabantapur Primary School")
@@ -154,7 +155,7 @@ else:
 if pg.title != st.session_state.current_tracked_app and pg.title in personal_apps:
     st.session_state.current_tracked_app = pg.title
     st.session_state.last_opened_app = pg.title
-    log_app_change_bg(pg.title) # Instantly fires to Google in the background!
+    log_app_change_bg(pg.title)
 
 # 7. RUN NAVIGATION
 pg.run()

@@ -1,3 +1,5 @@
+import cv2
+import numpy as np
 import streamlit as st
 import pandas as pd
 import gspread
@@ -222,9 +224,30 @@ with tabs[0]:
 with tabs[1]:
     st.header("Scan & Issue Book")
     
-    # 1. Scan QR Code using the requested library
-    scanned_book_id = qrcode_scanner(key='scanner_issue')
+    # 1. Use the reliable Native Camera instead of the plugin
+    st.write("📷 **Hold the QR code up to the camera and take a picture**")
+    qr_photo = st.camera_input("Scan QR Code", key='scanner_issue')
     
+    scanned_book_id = None
+    
+    # Decode the QR Code if a photo was taken
+    if qr_photo is not None:
+        with st.spinner("Reading QR Code..."):
+            # Convert the Streamlit image into a format OpenCV can read
+            file_bytes = np.asarray(bytearray(qr_photo.read()), dtype=np.uint8)
+            img = cv2.imdecode(file_bytes, 1)
+            
+            # Use OpenCV to find and decode the QR code
+            detector = cv2.QRCodeDetector()
+            data, bbox, _ = detector.detectAndDecode(img)
+            
+            if data:
+                scanned_book_id = data
+                st.success(f"✅ QR Code Detected: {scanned_book_id}")
+            else:
+                st.error("⚠️ No QR code detected in the photo. Please ensure it is close and in focus, then try taking the picture again.")
+
+    # 2. Issue Logic (Runs only if a valid ID was scanned)
     if scanned_book_id:
         # Check if book exists
         if not df_books.empty and scanned_book_id in df_books['Book_ID'].values:
@@ -240,9 +263,8 @@ with tabs[1]:
                     st.info("No cover image")
                     
             with col_info:
-                st.success(f"📖 Scanned: {book_details['Title']}")
+                st.success(f"📖 Ready to Issue: {book_details['Title']}")
                 st.write(f"**Author:** {book_details.get('Author', 'N/A')}")
-                st.write(f"**ID:** {scanned_book_id}")
             
             # Check if already issued
             is_issued = False
@@ -255,7 +277,7 @@ with tabs[1]:
             if not is_issued:
                 st.markdown("### Select Student")
                 
-                # 2. Dynamic Dropdowns based on students_master
+                # Dynamic Dropdowns based on students_master
                 classes = ["Select Class"] + sorted(list(df_students['Class'].unique())) if not df_students.empty else ["Select Class"]
                 sel_class = st.selectbox("Class", classes)
                 
@@ -284,6 +306,10 @@ with tabs[1]:
                                 }
                                 append_to_sheet("Logs", log_data)
                                 st.success(f"Book issued to {sel_student}. Due back on {due_date.strftime('%d-%m-%Y')}.")
+                                
+                                # Clear the camera view by removing it from session state so it's ready for the next student
+                                if 'scanner_issue' in st.session_state:
+                                    del st.session_state['scanner_issue']
                                 st.rerun()
         else:
             st.error("Invalid QR Code or Book not found in database.")

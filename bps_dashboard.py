@@ -104,7 +104,7 @@ with col_title:
     st.title("🏫 BPS Digital System")
     st.markdown("Bhagyabantapur Primary School - Administrative Hub")
 with col_count:
-    st.metric("Total Modules", "10") # <-- Updated metric to 10
+    st.metric("Total Modules", "11") # <-- Updated metric to 11
     
 st.write("---") 
 
@@ -114,7 +114,7 @@ with r1_col1:
     st.markdown(create_card("📝", "Admission Hub", "Status", "Active", "#E3F2FD", "#1E88E5", "#1565C0", tracker_data), unsafe_allow_html=True)
     if st.button("Open App", key="btn1", use_container_width=True): log_and_open("Admission Hub", "admission_hub.py")
 with r1_col2:
-    st.markdown(create_card("🧑‍🎓", "Student Profiles", "Records", "Secure", "#E8EAF6", "#3949AB", "#283593", tracker_data), unsafe_allow_html=True)
+    st.markdown(create_card("🎓", "Student Profiles", "Records", "Secure", "#E8EAF6", "#3949AB", "#283593", tracker_data), unsafe_allow_html=True)
     if st.button("Open App", key="btn2", use_container_width=True): log_and_open("Student Profiles", "student_profile.py")
 with r1_col3:
     st.markdown(create_card("🪪", "ID Card Generator", "Format", "14-Digit Ready", "#F3E5F5", "#8E24AA", "#6A1B9A", tracker_data), unsafe_allow_html=True)
@@ -129,23 +129,28 @@ with r2_col2:
     st.markdown(create_card("💰", "Exam & Fees", "Collection", "Tracked", "#E8F5E9", "#43A047", "#2E7D32", tracker_data), unsafe_allow_html=True)
     if st.button("Open App", key="btn5", use_container_width=True): log_and_open("Exam & Fees", "sch_exam_fees.py")
 with r2_col3:
-    st.markdown(create_card("🗓️", "Leave Management", "System", "Operational", "#FFF3E0", "#FB8C00", "#EF6C00", tracker_data), unsafe_allow_html=True)
-    if st.button("Open App", key="btn6", use_container_width=True): log_and_open("Leave Management", "leave_app.py")
+    st.markdown(create_card("📚", "Library Manager", "Books", "Scannable", "#FFF3E0", "#FB8C00", "#EF6C00", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn6", use_container_width=True): log_and_open("Library Manager", "library_app.py")
 
 # ROW 3: Operations & Forms Focus
 r3_col1, r3_col2, r3_col3 = st.columns(3)
 with r3_col1:
-    st.markdown(create_card("🎒", "Distributions", "Inventory", "Monitored", "#FCE4EC", "#D81B60", "#AD1457", tracker_data), unsafe_allow_html=True)
-    if st.button("Open App", key="btn7", use_container_width=True): log_and_open("Distributions", "bps_distribution.py")
+    st.markdown(create_card("🗓️", "Leave Management", "System", "Operational", "#FCE4EC", "#D81B60", "#AD1457", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn7", use_container_width=True): log_and_open("Leave Management", "leave_app.py")
 with r3_col2:
-    st.markdown(create_card("📑", "Returns", "Processing", "Logged", "#FFEBEE", "#E53935", "#C62828", tracker_data), unsafe_allow_html=True)
-    if st.button("Open App", key="btn8", use_container_width=True): log_and_open("Returns", "bps_returns.py")
+    st.markdown(create_card("🎒", "Distributions", "Inventory", "Monitored", "#FFEBEE", "#E53935", "#C62828", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn8", use_container_width=True): log_and_open("Distributions", "bps_distribution.py")
 with r3_col3:
-    st.markdown(create_card("📋", "Form Manager", "Templates", "Available", "#ECEFF1", "#546E7A", "#37474F", tracker_data), unsafe_allow_html=True)
-    if st.button("Open App", key="btn9", use_container_width=True): log_and_open("Form Manager", "form_manager.py")
+    st.markdown(create_card("📑", "Returns", "Processing", "Logged", "#ECEFF1", "#546E7A", "#37474F", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn9", use_container_width=True): log_and_open("Returns", "bps_returns.py")
 
-# ROW 4: Staff Hub Focus (NEW)
+# ROW 4: Staff & Admin Focus
 r4_col1, r4_col2, r4_col3 = st.columns(3)
 with r4_col1:
-    st.markdown(create_card("🔐", "Staff Portal", "Access", "Active", "#F5F5F5", "#9E9E9E", "#616161", tracker_data), unsafe_allow_html=True)
-    if st.button("Open App", key="btn10", use_container_width=True): log_and_open("Staff Portal", "bps_digital_sk.py")
+    st.markdown(create_card("📋", "Form Manager", "Templates", "Available", "#F5F5F5", "#9E9E9E", "#616161", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn10", use_container_width=True): log_and_open("Form Manager", "form_manager.py")
+with r4_col2:
+    st.markdown(create_card("🔐", "Staff Portal", "Access", "Active", "#E8EAF6", "#3949AB", "#283593", tracker_data), unsafe_allow_html=True)
+    if st.button("Open App", key="btn11", use_container_width=True): log_and_open("Staff Portal", "bps_digital_sk.py")
+with r4_col3:
+    st.empty() # Placeholder for future App 12!

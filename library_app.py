@@ -82,10 +82,10 @@ df_students = load_students()
 df_books = load_sheet_data("Books")
 df_logs = load_sheet_data("Logs")
 
-# --- NEW NAVIGATION: Dropdown Menu instead of Tabs to fix hardware camera lock ---
+# --- NAVIGATION MENU (Now with 5 options) ---
 menu_choice = st.selectbox(
     "📌 Main Menu", 
-    ["Add Books & QR", "Issue Book", "Returns & Reminders", "All Books Inventory"]
+    ["Add Books & QR", "Issue Book", "Returns & Reminders", "All Books Inventory", "Book Details & Cover"]
 )
 st.markdown("---")
 
@@ -223,7 +223,6 @@ if menu_choice == "Add Books & QR":
 elif menu_choice == "Issue Book":
     st.header("Scan & Issue Book")
     
-    # Scanner will now load without hardware conflicts
     st.write("📸 **Scan Book QR Code (Uses Rear Camera automatically if available):**")
     qv = qrcode_scanner(key='library_qr_scanner')
     
@@ -389,5 +388,58 @@ elif menu_choice == "All Books Inventory":
             
         st.caption(f"Total Books Found: {len(display_df)}")
         st.dataframe(display_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No books have been added to the library yet.")
+
+# ==========================================
+# PAGE 5: BOOK DETAILS & COVER (NEW)
+# ==========================================
+elif menu_choice == "Book Details & Cover":
+    st.header("📖 View Book Details")
+    
+    if not df_books.empty:
+        # Create an easy-to-read list for the dropdown menu
+        book_options = ["Select a book..."] + df_books.apply(lambda x: f"{x['Book_ID']} - {x['Title']}", axis=1).tolist()
+        
+        selected_book = st.selectbox("Choose a book from the library:", book_options)
+        
+        if selected_book != "Select a book...":
+            # Extract the actual Book_ID from the dropdown selection
+            selected_id = selected_book.split(" - ")[0]
+            
+            # Find the row with the matching Book_ID
+            book_details = df_books[df_books['Book_ID'] == selected_id].iloc[0]
+            
+            st.markdown("---")
+            col_img, col_info = st.columns([1, 2])
+            
+            # Left side: Display the cover image
+            with col_img:
+                if "Cover_Image_URL" in book_details and str(book_details["Cover_Image_URL"]).startswith("http"):
+                    st.image(book_details["Cover_Image_URL"], use_container_width=True)
+                else:
+                    st.info("No cover image available for this book.")
+            
+            # Right side: Display the book details
+            with col_info:
+                st.subheader(book_details['Title'])
+                st.write(f"**Author:** {book_details.get('Author', 'N/A')}")
+                st.write(f"**Book ID:** {book_details['Book_ID']}")
+                st.write(f"**Added On:** {book_details.get('Date', 'N/A')} at {book_details.get('Time', 'N/A')}")
+                
+                # Check the current status of the book from the Logs sheet
+                is_issued = False
+                if not df_logs.empty:
+                    active_logs = df_logs[(df_logs['Book_ID'] == selected_id) & (df_logs['Status'] == "Issued")]
+                    if not active_logs.empty:
+                        is_issued = True
+                        log_info = active_logs.iloc[0]
+                        st.error(f"**Current Status:** 🔴 Issued")
+                        st.write(f"**Issued To:** {log_info['Student_Name']} ({log_info['Class']} - {log_info['Section']})")
+                        st.write(f"**Issue Date:** {log_info['Issue_Date']}")
+                        st.write(f"**Due Date:** {log_info['Due_Date']}")
+                
+                if not is_issued:
+                    st.success(f"**Current Status:** 🟢 Available on Shelf")
     else:
         st.info("No books have been added to the library yet.")

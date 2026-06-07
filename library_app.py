@@ -222,7 +222,7 @@ with tabs[0]:
 with tabs[1]:
     st.header("Scan & Issue Book")
     
-    # 1. Scan QR Code
+    # 1. Scan QR Code using the requested library
     scanned_book_id = qrcode_scanner(key='scanner_issue')
     
     if scanned_book_id:

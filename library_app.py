@@ -82,20 +82,24 @@ df_students = load_students()
 df_books = load_sheet_data("Books")
 df_logs = load_sheet_data("Logs")
 
-# --- NEW: Added a 4th Tab for 'All Books Inventory' ---
-tabs = st.tabs(["Add Books & QR", "Issue Book", "Returns & Reminders", "All Books Inventory"])
+# --- NEW NAVIGATION: Dropdown Menu instead of Tabs to fix hardware camera lock ---
+menu_choice = st.selectbox(
+    "📌 Main Menu", 
+    ["Add Books & QR", "Issue Book", "Returns & Reminders", "All Books Inventory"]
+)
+st.markdown("---")
 
 # ==========================================
-# TAB 1: ADD BOOKS & GENERATE QR PDF
+# PAGE 1: ADD BOOKS & GENERATE QR PDF
 # ==========================================
-with tabs[0]:
+if menu_choice == "Add Books & QR":
     st.header("Add New Books")
-    st.info("⚠️ **Tip:** If you switch to the 'Issue Book' tab to scan a QR code, make sure to click 'Clear photo' or 'X' on this camera first so it doesn't block the scanner!")
     
     col_form, col_cam = st.columns([1, 1])
     
     with col_cam:
         st.write("📷 Capture Book Cover")
+        st.caption("Tip: Tap the 'Switch Camera' icon on your screen to use the rear camera!")
         book_photo = st.camera_input("Take a picture of the front page")
     
     with col_form:
@@ -106,18 +110,16 @@ with tabs[0]:
             
             if submit_btn:
                 if title:
-                    # Generate a unique Book ID
                     next_id_num = len(df_books) + 1 if not df_books.empty else 1
                     book_id = f"BPS-B{next_id_num:03d}"
                     
-                    # Capture accurate IST Date and Time
                     now_ist = datetime.now(IST)
                     today_date = now_ist.strftime("%Y-%m-%d")
                     current_time = now_ist.strftime("%I:%M:%S %p")
                     
                     image_url = "No Image"
                     
-                    # Upload Image to ImgBB if taken
+                    # Upload Image to ImgBB
                     if book_photo is not None:
                         with st.spinner("Uploading image..."):
                             try:
@@ -133,7 +135,6 @@ with tabs[0]:
                             except Exception as e:
                                 st.error(f"Image upload failed: {e}")
                     
-                    # Append all data to Google Sheets
                     append_to_sheet("Books", {
                         "Book_ID": book_id,
                         "Title": title,
@@ -169,7 +170,6 @@ with tabs[0]:
                 pdf.add_page()
                 pdf.set_font("helvetica", size=8)
                 
-                # A4 Grid settings
                 col_width = 45
                 row_height = 48
                 margin_x = 15
@@ -218,13 +218,13 @@ with tabs[0]:
         st.write("No books in the library yet.")
 
 # ==========================================
-# TAB 2: ISSUE BOOK (SCAN & SELECT)
+# PAGE 2: ISSUE BOOK (SCAN & SELECT)
 # ==========================================
-with tabs[1]:
+elif menu_choice == "Issue Book":
     st.header("Scan & Issue Book")
     
-    # State-managed QR Scanner
-    st.write("📸 **Scan Book QR Code:**")
+    # Scanner will now load without hardware conflicts
+    st.write("📸 **Scan Book QR Code (Uses Rear Camera automatically if available):**")
     qv = qrcode_scanner(key='library_qr_scanner')
     
     if st.session_state.lib_scan_msg:
@@ -247,7 +247,6 @@ with tabs[1]:
         if not df_books.empty and active_id in df_books['Book_ID'].values:
             book_details = df_books[df_books['Book_ID'] == active_id].iloc[0]
             
-            # --- DISPLAY BOOK COVER AND DETAILS ---
             col_img, col_info = st.columns([1, 2])
             
             with col_img:
@@ -261,7 +260,6 @@ with tabs[1]:
                 st.write(f"**Author:** {book_details.get('Author', 'N/A')}")
                 st.write(f"**ID:** {active_id}")
             
-            # Check if already issued
             is_issued = False
             if not df_logs.empty:
                 active_logs = df_logs[(df_logs['Book_ID'] == active_id) & (df_logs['Status'] == "Issued")]
@@ -315,9 +313,9 @@ with tabs[1]:
                 st.rerun()
 
 # ==========================================
-# TAB 3: RETURNS & REMINDERS
+# PAGE 3: RETURNS & REMINDERS
 # ==========================================
-with tabs[2]:
+elif menu_choice == "Returns & Reminders":
     st.header("Returns & 7-Day Reminders")
     
     if not df_logs.empty:
@@ -353,44 +351,35 @@ with tabs[2]:
         st.write("No issue logs found.")
 
 # ==========================================
-# TAB 4: ALL BOOKS INVENTORY (NEW)
+# PAGE 4: ALL BOOKS INVENTORY
 # ==========================================
-with tabs[3]:
+elif menu_choice == "All Books Inventory":
     st.header("📚 All Books Inventory")
     
     if not df_books.empty:
-        # Create a display copy so we don't alter the original dataframe
         display_df = df_books.copy()
         
-        # 1. Calculate the 'Current Status' (Available vs Issued)
         if not df_logs.empty:
-            # Find all books that are currently issued
             active_issues = df_logs[df_logs['Status'] == "Issued"]
             issued_book_ids = active_issues['Book_ID'].tolist()
             
-            # Map status to the display dataframe
             display_df['Current Status'] = display_df['Book_ID'].apply(
                 lambda x: "🔴 Issued" if x in issued_book_ids else "🟢 Available"
             )
         else:
-            # If logs are empty, all books are available
             display_df['Current Status'] = "🟢 Available"
         
-        # Clean up columns for a better view (hiding the long image URL)
         if "Cover_Image_URL" in display_df.columns:
             display_df = display_df.drop(columns=["Cover_Image_URL"])
             
-        # Reorder columns so Status is highly visible
         cols = display_df.columns.tolist()
         if 'Current Status' in cols:
             cols.insert(2, cols.pop(cols.index('Current Status')))
             display_df = display_df[cols]
             
-        # 2. Search Bar Feature
         search_term = st.text_input("🔍 Search by Book Title, Author, or ID...", "")
         
         if search_term:
-            # Filter the dataframe based on the search term (case-insensitive)
             search_mask = (
                 display_df['Title'].astype(str).str.contains(search_term, case=False, na=False) | 
                 display_df['Author'].astype(str).str.contains(search_term, case=False, na=False) |
@@ -398,10 +387,7 @@ with tabs[3]:
             )
             display_df = display_df[search_mask]
             
-        # Display total count
         st.caption(f"Total Books Found: {len(display_df)}")
-        
-        # Display the interactive dataframe
         st.dataframe(display_df, use_container_width=True, hide_index=True)
     else:
         st.info("No books have been added to the library yet.")

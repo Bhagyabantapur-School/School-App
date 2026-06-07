@@ -16,6 +16,12 @@ IST = pytz.timezone('Asia/Kolkata')
 
 st.set_page_config(page_title="BPS Library Manager", page_icon="📚", layout="centered")
 
+# --- BACK BUTTON (STRICTLY REQUIRED) ---
+if st.button("⬅️ Back to Dashboard", type="secondary"):
+    st.switch_page("bps_dashboard.py")
+st.write("---") 
+# ---------------------------------------
+
 # ==========================================
 # 1. DATABASE CONNECTION
 # ==========================================

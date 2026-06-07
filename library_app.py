@@ -130,10 +130,20 @@ if menu_choice == "Add Books & QR":
                                     "image": base64.b64encode(book_photo.getvalue()).decode("utf-8")
                                 }
                                 response = requests.post(url, payload)
+                                
                                 if response.status_code == 200:
                                     image_url = response.json()["data"]["url"]
+                                else:
+                                    # This will catch if the API key is wrong or expired!
+                                    st.error(f"ImgBB API Error: {response.text}")
+                                    st.stop() # Stops the app so you can read the error
+                                    
+                            except KeyError:
+                                st.error("⚠️ IMGBB_API_KEY is missing from your Streamlit Secrets!")
+                                st.stop() # Stops the app
                             except Exception as e:
-                                st.error(f"Image upload failed: {e}")
+                                st.error(f"Upload failed: {e}")
+                                st.stop() # Stops the app
                     
                     append_to_sheet("Books", {
                         "Book_ID": book_id,

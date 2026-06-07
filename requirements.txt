@@ -10,3 +10,5 @@ uharfbuzz
 plotly
 pytz
 streamlit-autorefresh
+opencv-python-headless
+numpy

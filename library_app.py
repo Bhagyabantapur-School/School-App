@@ -1,5 +1,3 @@
-import cv2
-import numpy as np
 import streamlit as st
 import pandas as pd
 import gspread
@@ -19,6 +17,12 @@ import base64
 IST = pytz.timezone('Asia/Kolkata')
 
 st.set_page_config(page_title="BPS Library Manager", page_icon="📚", layout="centered")
+
+# ==========================================
+# SESSION STATE INITIALIZATION (Just like app.py)
+# ==========================================
+if 'lib_scan_msg' not in st.session_state: st.session_state.lib_scan_msg = None
+if 'scanned_book_id' not in st.session_state: st.session_state.scanned_book_id = None
 
 # ==========================================
 # 1. DATABASE CONNECTION
@@ -55,7 +59,6 @@ def load_sheet_data(worksheet_name):
 
 def append_to_sheet(worksheet_name, data_dict):
     sheet = client.open("Library_Database").worksheet(worksheet_name)
-    # Convert dict values to list in the correct order based on sheet headers
     headers = sheet.row_values(1)
     row_to_insert = [str(data_dict.get(header, "")) for header in headers]
     sheet.append_row(row_to_insert)
@@ -86,6 +89,7 @@ tabs = st.tabs(["Add Books & QR", "Issue Book", "Returns & Reminders"])
 # ==========================================
 with tabs[0]:
     st.header("Add New Books")
+    st.info("⚠️ **Tip:** If you switch to the 'Issue Book' tab to scan a QR code, make sure to click 'Clear photo' or 'X' on this camera first so it doesn't block the scanner!")
     
     col_form, col_cam = st.columns([1, 1])
     
@@ -157,7 +161,6 @@ with tabs[0]:
         
         st.info(f"🖨️ **Printing Details:** You have {total_books} books. This will require **{total_pages}** A4 page(s) to print (24 stickers per page).")
         
-        # --- PDF GENERATION LOGIC ---
         if st.button("Generate A4 PDF for Printing"):
             with st.spinner("Generating PDF layout..."):
                 pdf = FPDF(orientation='P', unit='mm', format='A4')
@@ -178,36 +181,31 @@ with tabs[0]:
                     qr_data = str(row['Book_ID'])
                     qr = qrcode.make(qr_data)
                     
-                    # Save QR temporarily to place in PDF
                     with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
                         qr.save(tmp.name)
-                        # Place image and text
                         pdf.image(tmp.name, x=x, y=y, w=40, h=40)
                         pdf.set_xy(x, y + 40)
                         pdf.cell(40, 5, txt=str(row['Book_ID']), align='C')
                         
-                    os.unlink(tmp.name) # Clean up temp file
+                    os.unlink(tmp.name)
                     
-                    # Move to next grid position
                     col_count += 1
                     x += col_width
                     
-                    if col_count >= 4: # 4 columns
+                    if col_count >= 4:
                         col_count = 0
                         x = margin_x
                         row_count += 1
                         y += row_height
                         
-                    if row_count >= 6: # 6 rows (24 total per page)
+                    if row_count >= 6:
                         pdf.add_page()
                         row_count = 0
                         col_count = 0
                         x = margin_x
                         y = margin_y
                 
-                # Output PDF to Streamlit
                 pdf_bytes = bytes(pdf.output())
-                
                 st.success("✅ PDF Generated Successfully!")
                 st.download_button(
                     label="📥 Download PDF to Print",
@@ -224,34 +222,32 @@ with tabs[0]:
 with tabs[1]:
     st.header("Scan & Issue Book")
     
-    # 1. Use the reliable Native Camera instead of the plugin
-    st.write("📷 **Hold the QR code up to the camera and take a picture**")
-    qr_photo = st.camera_input("Scan QR Code", key='scanner_issue')
+    # 1. State-managed QR Scanner (Identical to app.py logic)
+    st.write("📸 **Scan Book QR Code:**")
+    qv = qrcode_scanner(key='library_qr_scanner')
     
-    scanned_book_id = None
-    
-    # Decode the QR Code if a photo was taken
-    if qr_photo is not None:
-        with st.spinner("Reading QR Code..."):
-            # Convert the Streamlit image into a format OpenCV can read
-            file_bytes = np.asarray(bytearray(qr_photo.read()), dtype=np.uint8)
-            img = cv2.imdecode(file_bytes, 1)
+    if st.session_state.lib_scan_msg:
+        st.success(st.session_state.lib_scan_msg)
+        st.session_state.lib_scan_msg = None
+        
+    if qv:
+        should_rerun = False
+        # Prevent continuous processing of the same scan
+        if st.session_state.scanned_book_id != qv:
+            st.session_state.scanned_book_id = qv
+            st.session_state.lib_scan_msg = f"✅ Scanned Successfully: {qv}"
+            should_rerun = True
             
-            # Use OpenCV to find and decode the QR code
-            detector = cv2.QRCodeDetector()
-            data, bbox, _ = detector.detectAndDecode(img)
-            
-            if data:
-                scanned_book_id = data
-                st.success(f"✅ QR Code Detected: {scanned_book_id}")
-            else:
-                st.error("⚠️ No QR code detected in the photo. Please ensure it is close and in focus, then try taking the picture again.")
+        if should_rerun:
+            st.rerun()
 
-    # 2. Issue Logic (Runs only if a valid ID was scanned)
-    if scanned_book_id:
+    # 2. Proceed if a book is held in session state
+    if st.session_state.scanned_book_id:
+        active_id = st.session_state.scanned_book_id
+        
         # Check if book exists
-        if not df_books.empty and scanned_book_id in df_books['Book_ID'].values:
-            book_details = df_books[df_books['Book_ID'] == scanned_book_id].iloc[0]
+        if not df_books.empty and active_id in df_books['Book_ID'].values:
+            book_details = df_books[df_books['Book_ID'] == active_id].iloc[0]
             
             # --- DISPLAY BOOK COVER AND DETAILS ---
             col_img, col_info = st.columns([1, 2])
@@ -265,11 +261,12 @@ with tabs[1]:
             with col_info:
                 st.success(f"📖 Ready to Issue: {book_details['Title']}")
                 st.write(f"**Author:** {book_details.get('Author', 'N/A')}")
+                st.write(f"**ID:** {active_id}")
             
             # Check if already issued
             is_issued = False
             if not df_logs.empty:
-                active_logs = df_logs[(df_logs['Book_ID'] == scanned_book_id) & (df_logs['Status'] == "Issued")]
+                active_logs = df_logs[(df_logs['Book_ID'] == active_id) & (df_logs['Status'] == "Issued")]
                 if not active_logs.empty:
                     is_issued = True
                     st.error(f"This book is currently issued to {active_logs.iloc[0]['Student_Name']} and has not been returned.")
@@ -295,7 +292,7 @@ with tabs[1]:
                                 due_date = today + timedelta(days=7)
                                 
                                 log_data = {
-                                    "Book_ID": scanned_book_id,
+                                    "Book_ID": active_id,
                                     "Student_Name": sel_student,
                                     "Class": sel_class,
                                     "Section": sel_sec,
@@ -307,12 +304,20 @@ with tabs[1]:
                                 append_to_sheet("Logs", log_data)
                                 st.success(f"Book issued to {sel_student}. Due back on {due_date.strftime('%d-%m-%Y')}.")
                                 
-                                # Clear the camera view by removing it from session state so it's ready for the next student
-                                if 'scanner_issue' in st.session_state:
-                                    del st.session_state['scanner_issue']
+                                # Reset scanner state for the next book
+                                st.session_state.scanned_book_id = None
                                 st.rerun()
+            
+            # Allow user to clear and scan something else
+            if st.button("Cancel & Scan Another Book"):
+                st.session_state.scanned_book_id = None
+                st.rerun()
+                
         else:
             st.error("Invalid QR Code or Book not found in database.")
+            if st.button("Try Again"):
+                st.session_state.scanned_book_id = None
+                st.rerun()
 
 # ==========================================
 # TAB 3: RETURNS & REMINDERS
@@ -321,15 +326,12 @@ with tabs[2]:
     st.header("Returns & 7-Day Reminders")
     
     if not df_logs.empty:
-        # Filter only active issues
         issued_books = df_logs[df_logs['Status'] == "Issued"].copy()
         
         if not issued_books.empty:
-            # Convert string dates to datetime objects for comparison
             issued_books['Due_Date_Obj'] = pd.to_datetime(issued_books['Due_Date'])
             today = pd.to_datetime(datetime.now(IST).strftime("%Y-%m-%d"))
             
-            # Separate into overdue and on-time
             overdue = issued_books[issued_books['Due_Date_Obj'] < today]
             on_time = issued_books[issued_books['Due_Date_Obj'] >= today]
             

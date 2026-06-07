@@ -10,17 +10,13 @@ from streamlit_qrcode_scanner import qrcode_scanner
 from fpdf import FPDF
 import tempfile
 import os
+import requests
+import base64
 
 # Set Timezone for Haldia, West Bengal
 IST = pytz.timezone('Asia/Kolkata')
 
 st.set_page_config(page_title="BPS Library Manager", page_icon="📚", layout="centered")
-
-# --- BACK BUTTON (STRICTLY REQUIRED) ---
-if st.button("⬅️ Back to Dashboard", type="secondary"):
-    st.switch_page("bps_dashboard.py")
-st.write("---") 
-# ---------------------------------------
 
 # ==========================================
 # 1. DATABASE CONNECTION
@@ -89,34 +85,65 @@ tabs = st.tabs(["Add Books & QR", "Issue Book", "Returns & Reminders"])
 with tabs[0]:
     st.header("Add New Books")
     
-    with st.form("add_book_form"):
-        col1, col2 = st.columns(2)
-        title = col1.text_input("Book Title")
-        author = col2.text_input("Author")
-        
-        if st.form_submit_button("Add to Library"):
-            if title:
-                # Generate a unique Book ID (e.g., BPS-B001)
-                next_id_num = len(df_books) + 1 if not df_books.empty else 1
-                book_id = f"BPS-B{next_id_num:03d}"
-                
-                # Capture accurate IST Date and Time
-                now_ist = datetime.now(IST)
-                today_date = now_ist.strftime("%Y-%m-%d")
-                current_time = now_ist.strftime("%I:%M:%S %p")
-                
-                append_to_sheet("Books", {
-                    "Book_ID": book_id,
-                    "Title": title,
-                    "Author": author,
-                    "QR_Generated": "Yes",
-                    "Date": today_date,
-                    "Time": current_time
-                })
-                st.success(f"Added '{title}' with ID: {book_id} at {current_time}")
-                st.rerun()
-            else:
-                st.error("Please enter a book title.")
+    col_form, col_cam = st.columns([1, 1])
+    
+    with col_cam:
+        st.write("📷 Capture Book Cover")
+        book_photo = st.camera_input("Take a picture of the front page")
+    
+    with col_form:
+        with st.form("add_book_form"):
+            title = st.text_input("Book Title")
+            author = st.text_input("Author")
+            submit_btn = st.form_submit_button("Add to Library")
+            
+            if submit_btn:
+                if title:
+                    # Generate a unique Book ID
+                    next_id_num = len(df_books) + 1 if not df_books.empty else 1
+                    book_id = f"BPS-B{next_id_num:03d}"
+                    
+                    # Capture accurate IST Date and Time
+                    now_ist = datetime.now(IST)
+                    today_date = now_ist.strftime("%Y-%m-%d")
+                    current_time = now_ist.strftime("%I:%M:%S %p")
+                    
+                    image_url = "No Image"
+                    
+                    # Upload Image to ImgBB if taken
+                    if book_photo is not None:
+                        with st.spinner("Uploading image..."):
+                            try:
+                                api_key = st.secrets["IMGBB_API_KEY"]
+                                url = "https://api.imgbb.com/1/upload"
+                                payload = {
+                                    "key": api_key,
+                                    "image": base64.b64encode(book_photo.getvalue()).decode("utf-8")
+                                }
+                                response = requests.post(url, payload)
+                                if response.status_code == 200:
+                                    image_url = response.json()["data"]["url"]
+                            except Exception as e:
+                                st.error(f"Image upload failed: {e}")
+                    
+                    # Append all data to Google Sheets
+                    append_to_sheet("Books", {
+                        "Book_ID": book_id,
+                        "Title": title,
+                        "Author": author,
+                        "QR_Generated": "Yes",
+                        "Date": today_date,
+                        "Time": current_time,
+                        "Cover_Image_URL": image_url
+                    })
+                    
+                    st.success(f"Added '{title}' with ID: {book_id}")
+                    if image_url != "No Image":
+                        st.success("Image successfully uploaded!")
+                        
+                    st.rerun()
+                else:
+                    st.error("Please enter a book title.")
 
     st.markdown("---")
     st.subheader("Generate & Print QR Codes")
@@ -202,7 +229,20 @@ with tabs[1]:
         # Check if book exists
         if not df_books.empty and scanned_book_id in df_books['Book_ID'].values:
             book_details = df_books[df_books['Book_ID'] == scanned_book_id].iloc[0]
-            st.success(f"📖 Scanned: {book_details['Title']} ({scanned_book_id})")
+            
+            # --- DISPLAY BOOK COVER AND DETAILS ---
+            col_img, col_info = st.columns([1, 2])
+            
+            with col_img:
+                if "Cover_Image_URL" in book_details and str(book_details["Cover_Image_URL"]).startswith("http"):
+                    st.image(book_details["Cover_Image_URL"], use_container_width=True)
+                else:
+                    st.info("No cover image")
+                    
+            with col_info:
+                st.success(f"📖 Scanned: {book_details['Title']}")
+                st.write(f"**Author:** {book_details.get('Author', 'N/A')}")
+                st.write(f"**ID:** {scanned_book_id}")
             
             # Check if already issued
             is_issued = False

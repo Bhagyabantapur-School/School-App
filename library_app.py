@@ -25,7 +25,7 @@ if 'lib_scan_msg' not in st.session_state: st.session_state.lib_scan_msg = None
 if 'scanned_book_id' not in st.session_state: st.session_state.scanned_book_id = None
 
 # ==========================================
-# 1. DATABASE CONNECTION
+# 1. DATABASE CONNECTION & CACHING
 # ==========================================
 @st.cache_resource
 def get_gspread_client():
@@ -35,19 +35,17 @@ def get_gspread_client():
 
 client = get_gspread_client()
 
-# Connect to Sheets
 @st.cache_data(ttl=60)
 def load_students():
     try:
-        # Target students_master
         sheet = client.open("BPS_Database").worksheet("students_master")
         df = pd.DataFrame(sheet.get_all_records())
-        # Automatically capitalize headers (e.g., 'class' becomes 'Class') to prevent errors
         df.columns = [str(c).strip().title() for c in df.columns]
         return df
     except Exception:
         return pd.DataFrame(columns=["Class", "Section", "Name"])
 
+@st.cache_data(ttl=60, show_spinner=False)
 def load_sheet_data(worksheet_name):
     try:
         sheet = client.open("Library_Database").worksheet(worksheet_name)
@@ -62,30 +60,32 @@ def append_to_sheet(worksheet_name, data_dict):
     headers = sheet.row_values(1)
     row_to_insert = [str(data_dict.get(header, "")) for header in headers]
     sheet.append_row(row_to_insert)
+    load_sheet_data.clear()
 
 def update_log_status(book_id, student_name):
     sheet = client.open("Library_Database").worksheet("Logs")
     records = sheet.get_all_records()
     today_str = datetime.now(IST).strftime("%Y-%m-%d")
     
-    # Find the active log entry and update it
     for idx, row in enumerate(records):
         if str(row["Book_ID"]) == str(book_id) and row["Student_Name"] == student_name and row["Status"] == "Issued":
-            sheet.update_cell(idx + 2, 7, today_str) # Return_Date is col 7
-            sheet.update_cell(idx + 2, 8, "Returned") # Status is col 8
+            sheet.update_cell(idx + 2, 7, today_str) 
+            sheet.update_cell(idx + 2, 8, "Returned") 
             break
+            
+    load_sheet_data.clear()
 
 st.title("📚 BPS Library Manager")
 
-# Load data
+# Load data safely from memory
 df_students = load_students()
 df_books = load_sheet_data("Books")
 df_logs = load_sheet_data("Logs")
 
-# --- NAVIGATION MENU (Now with 5 options) ---
+# --- NAVIGATION MENU ---
 menu_choice = st.selectbox(
     "📌 Main Menu", 
-    ["Add Books & QR", "Issue Book", "Returns & Reminders", "All Books Inventory", "Book Details & Cover"]
+    ["Add Books & QR", "Issue Book", "Returns & Reminders", "All Books Inventory", "Book Details & Admin"]
 )
 st.markdown("---")
 
@@ -119,7 +119,6 @@ if menu_choice == "Add Books & QR":
                     
                     image_url = "No Image"
                     
-                    # Upload Image to ImgBB
                     if book_photo is not None:
                         with st.spinner("Uploading image..."):
                             try:
@@ -134,16 +133,15 @@ if menu_choice == "Add Books & QR":
                                 if response.status_code == 200:
                                     image_url = response.json()["data"]["url"]
                                 else:
-                                    # This will catch if the API key is wrong or expired!
                                     st.error(f"ImgBB API Error: {response.text}")
-                                    st.stop() # Stops the app so you can read the error
+                                    st.stop() 
                                     
                             except KeyError:
                                 st.error("⚠️ IMGBB_API_KEY is missing from your Streamlit Secrets!")
-                                st.stop() # Stops the app
+                                st.stop() 
                             except Exception as e:
                                 st.error(f"Upload failed: {e}")
-                                st.stop() # Stops the app
+                                st.stop() 
                     
                     append_to_sheet("Books", {
                         "Book_ID": book_id,
@@ -233,7 +231,7 @@ if menu_choice == "Add Books & QR":
 elif menu_choice == "Issue Book":
     st.header("Scan & Issue Book")
     
-    st.write("📸 **Scan Book QR Code (Uses Rear Camera automatically if available):**")
+    st.write("📸 **Scan Book QR Code:**")
     qv = qrcode_scanner(key='library_qr_scanner')
     
     if st.session_state.lib_scan_msg:
@@ -402,42 +400,38 @@ elif menu_choice == "All Books Inventory":
         st.info("No books have been added to the library yet.")
 
 # ==========================================
-# PAGE 5: BOOK DETAILS & COVER (NEW)
+# PAGE 5: BOOK DETAILS & ADMIN
 # ==========================================
-elif menu_choice == "Book Details & Cover":
-    st.header("📖 View Book Details")
+elif menu_choice == "Book Details & Admin":
+    st.header("📖 View & Manage Book Details")
     
     if not df_books.empty:
-        # Create an easy-to-read list for the dropdown menu
         book_options = ["Select a book..."] + df_books.apply(lambda x: f"{x['Book_ID']} - {x['Title']}", axis=1).tolist()
         
         selected_book = st.selectbox("Choose a book from the library:", book_options)
         
         if selected_book != "Select a book...":
-            # Extract the actual Book_ID from the dropdown selection
             selected_id = selected_book.split(" - ")[0]
             
-            # Find the row with the matching Book_ID
             book_details = df_books[df_books['Book_ID'] == selected_id].iloc[0]
             
             st.markdown("---")
             col_img, col_info = st.columns([1, 2])
             
-            # Left side: Display the cover image
+            # --- SHOW BOOK COVER ---
             with col_img:
                 if "Cover_Image_URL" in book_details and str(book_details["Cover_Image_URL"]).startswith("http"):
                     st.image(book_details["Cover_Image_URL"], use_container_width=True)
                 else:
-                    st.info("No cover image available for this book.")
+                    st.info("No cover image available.")
             
-            # Right side: Display the book details
+            # --- SHOW DETAILS & STATUS ---
             with col_info:
                 st.subheader(book_details['Title'])
                 st.write(f"**Author:** {book_details.get('Author', 'N/A')}")
                 st.write(f"**Book ID:** {book_details['Book_ID']}")
                 st.write(f"**Added On:** {book_details.get('Date', 'N/A')} at {book_details.get('Time', 'N/A')}")
                 
-                # Check the current status of the book from the Logs sheet
                 is_issued = False
                 if not df_logs.empty:
                     active_logs = df_logs[(df_logs['Book_ID'] == selected_id) & (df_logs['Status'] == "Issued")]
@@ -451,5 +445,95 @@ elif menu_choice == "Book Details & Cover":
                 
                 if not is_issued:
                     st.success(f"**Current Status:** 🟢 Available on Shelf")
+            
+            # ==========================================
+            # ADMIN ACTIONS: EDIT, ADD PHOTO, DELETE
+            # ==========================================
+            st.markdown("---")
+            st.subheader("⚙️ Admin Actions")
+            
+            # 1. EDIT TITLE & AUTHOR
+            with st.expander("✏️ Edit Book Details"):
+                with st.form(f"edit_form_{selected_id}"):
+                    new_title = st.text_input("Title", book_details['Title'])
+                    new_author = st.text_input("Author", book_details.get('Author', ''))
+                    
+                    if st.form_submit_button("Save Changes"):
+                        with st.spinner("Updating database..."):
+                            try:
+                                sheet = client.open("Library_Database").worksheet("Books")
+                                book_ids = sheet.col_values(1)
+                                row_idx = book_ids.index(selected_id) + 1  # Get exact row number
+                                
+                                # Col 2 is Title, Col 3 is Author
+                                sheet.update_cell(row_idx, 2, new_title)
+                                sheet.update_cell(row_idx, 3, new_author)
+                                
+                                load_sheet_data.clear()
+                                st.success("Book details updated successfully!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed to update details: {e}")
+
+            # 2. UPDATE OR ADD COVER PHOTO
+            with st.expander("📸 Add / Update Cover Photo"):
+                st.info("Taking a new photo will instantly replace the existing cover image.")
+                new_photo = st.camera_input("Take new cover photo", key=f"cam_{selected_id}")
+                
+                if new_photo and st.button("Upload & Save New Photo"):
+                    with st.spinner("Uploading to ImgBB and updating database..."):
+                        try:
+                            api_key = st.secrets["IMGBB_API_KEY"]
+                            url = "https://api.imgbb.com/1/upload"
+                            payload = {
+                                "key": api_key,
+                                "image": base64.b64encode(new_photo.getvalue()).decode("utf-8")
+                            }
+                            response = requests.post(url, payload)
+                            
+                            if response.status_code == 200:
+                                new_image_url = response.json()["data"]["url"]
+                                
+                                # Update Col 7 (Cover_Image_URL)
+                                sheet = client.open("Library_Database").worksheet("Books")
+                                book_ids = sheet.col_values(1)
+                                row_idx = book_ids.index(selected_id) + 1
+                                sheet.update_cell(row_idx, 7, new_image_url)
+                                
+                                load_sheet_data.clear()
+                                st.success("Cover photo updated successfully!")
+                                st.rerun()
+                            else:
+                                st.error("Failed to upload photo to ImgBB.")
+                        except Exception as e:
+                            st.error(f"Error updating photo: {e}")
+
+            # 3. DELETE BOOK
+            with st.expander("🗑️ Delete Book"):
+                if is_issued:
+                    st.error("⚠️ This book is currently issued to a student. You must mark it as 'Returned' before you can delete it from the system.")
+                else:
+                    st.warning("Are you absolutely sure? This will permanently remove the book from the Google Sheets database.")
+                    st.caption("Note: ImgBB does not allow deleting images via code. To permanently remove the photo from the internet, delete it manually inside your ImgBB account dashboard.")
+                    
+                    if st.button("Yes, Permanently Delete Book", type="primary"):
+                        with st.spinner("Deleting record from database..."):
+                            try:
+                                sheet = client.open("Library_Database").worksheet("Books")
+                                book_ids = sheet.col_values(1)
+                                row_idx = book_ids.index(selected_id) + 1
+                                
+                                # Safe delete function
+                                try:
+                                    sheet.delete_rows(row_idx)
+                                except AttributeError:
+                                    sheet.delete_row(row_idx) # Fallback for older library versions
+                                
+                                load_sheet_data.clear()
+                                st.success(f"{book_details['Title']} has been deleted.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed to delete book: {e}")
+
     else:
         st.info("No books have been added to the library yet.")

@@ -47,7 +47,7 @@ def load_students():
         df.columns = [str(c).strip().title() for c in df.columns]
         return df
     except Exception:
-        return pd.DataFrame(columns=["Class", "Section", "Name"])
+        return pd.DataFrame(columns=["Class", "Section", "Name", "Roll"])
 
 @st.cache_data(ttl=60, show_spinner=False)
 def load_sheet_data(worksheet_name):
@@ -289,8 +289,19 @@ elif menu_choice == "Issue Book":
                     sel_sec = st.selectbox("Section", sections)
                     
                     if sel_sec != "Select Section":
-                        students = ["Select Student"] + sorted(list(df_students[(df_students['Class'] == sel_class) & (df_students['Section'] == sel_sec)]['Name'].unique()))
-                        sel_student = st.selectbox("Student Name", students)
+                        # --- NEW: Extracting and Formatting Roll + Name ---
+                        filtered_df = df_students[(df_students['Class'] == sel_class) & (df_students['Section'] == sel_sec)]
+                        
+                        if 'Roll' in filtered_df.columns:
+                            # If Roll column exists, pair it: "Roll - Name"
+                            student_list = filtered_df.apply(lambda x: f"{x['Roll']} - {x['Name']}", axis=1).tolist()
+                        else:
+                            # Fallback if Roll column is missing
+                            student_list = filtered_df['Name'].tolist()
+                            
+                        students = ["Select Student"] + sorted(list(set(student_list)))
+                        
+                        sel_student = st.selectbox("Student Name & Roll", students)
                         
                         if sel_student != "Select Student":
                             if st.button("Confirm Issue"):
@@ -299,7 +310,7 @@ elif menu_choice == "Issue Book":
                                 
                                 log_data = {
                                     "Book_ID": active_id,
-                                    "Student_Name": sel_student,
+                                    "Student_Name": sel_student, # Now saves Roll + Name
                                     "Class": sel_class,
                                     "Section": sel_sec,
                                     "Issue_Date": today.strftime("%Y-%m-%d"),
@@ -329,7 +340,6 @@ elif menu_choice == "Issue Book":
 elif menu_choice == "Returns & Reminders":
     st.header("Scan & Return Book")
     
-    # --- NEW SCAN TO RETURN FEATURE ---
     st.write("📸 **Scan Book QR Code to Return:**")
     ret_qv = qrcode_scanner(key='return_qr_scanner')
     
@@ -357,7 +367,6 @@ elif menu_choice == "Returns & Reminders":
                 student_name = active_logs.iloc[0]['Student_Name']
                 book_title = "Unknown Book"
                 
-                # Try to get book title for display
                 if not df_books.empty and ret_active_id in df_books['Book_ID'].values:
                     book_title = df_books[df_books['Book_ID'] == ret_active_id].iloc[0]['Title']
                 
@@ -387,7 +396,6 @@ elif menu_choice == "Returns & Reminders":
     st.markdown("---")
     st.header("7-Day Reminders & Manual Returns")
     
-    # --- EXISTING MANUAL RETURN LIST ---
     if not df_logs.empty:
         issued_books = df_logs[df_logs['Status'] == "Issued"].copy()
         
@@ -481,14 +489,12 @@ elif menu_choice == "Book Details & Admin":
             st.markdown("---")
             col_img, col_info = st.columns([1, 2])
             
-            # --- SHOW BOOK COVER ---
             with col_img:
                 if "Cover_Image_URL" in book_details and str(book_details["Cover_Image_URL"]).startswith("http"):
                     st.image(book_details["Cover_Image_URL"], use_container_width=True)
                 else:
                     st.info("No cover image available.")
             
-            # --- SHOW DETAILS & STATUS ---
             with col_info:
                 st.subheader(book_details['Title'])
                 st.write(f"**Author:** {book_details.get('Author', 'N/A')}")
@@ -526,9 +532,8 @@ elif menu_choice == "Book Details & Admin":
                             try:
                                 sheet = client.open("Library_Database").worksheet("Books")
                                 book_ids = sheet.col_values(1)
-                                row_idx = book_ids.index(selected_id) + 1  # Get exact row number
+                                row_idx = book_ids.index(selected_id) + 1
                                 
-                                # Col 2 is Title, Col 3 is Author
                                 sheet.update_cell(row_idx, 2, new_title)
                                 sheet.update_cell(row_idx, 3, new_author)
                                 
@@ -557,7 +562,6 @@ elif menu_choice == "Book Details & Admin":
                             if response.status_code == 200:
                                 new_image_url = response.json()["data"]["url"]
                                 
-                                # Update Col 7 (Cover_Image_URL)
                                 sheet = client.open("Library_Database").worksheet("Books")
                                 book_ids = sheet.col_values(1)
                                 row_idx = book_ids.index(selected_id) + 1
@@ -586,7 +590,6 @@ elif menu_choice == "Book Details & Admin":
                                 book_ids = sheet.col_values(1)
                                 row_idx = book_ids.index(selected_id) + 1
                                 
-                                # Safe delete function
                                 try:
                                     sheet.delete_rows(row_idx)
                                 except AttributeError:

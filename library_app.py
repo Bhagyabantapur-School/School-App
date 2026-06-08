@@ -258,13 +258,14 @@ elif menu_choice == "Issue Book":
         if not df_books.empty and active_id in df_books['Book_ID'].values:
             book_details = df_books[df_books['Book_ID'] == active_id].iloc[0]
             
+            st.markdown("---")
             col_img, col_info = st.columns([1, 2])
             
             with col_img:
                 if "Cover_Image_URL" in book_details and str(book_details["Cover_Image_URL"]).startswith("http"):
                     st.image(book_details["Cover_Image_URL"], use_container_width=True)
                 else:
-                    st.info("No cover image")
+                    st.info("No cover image available")
                     
             with col_info:
                 st.success(f"📖 Ready to Issue: {book_details['Title']}")
@@ -291,23 +292,19 @@ elif menu_choice == "Issue Book":
                     if sel_sec != "Select Section":
                         filtered_df = df_students[(df_students['Class'] == sel_class) & (df_students['Section'] == sel_sec)]
                         
-                        # --- THE FIX: Custom Numerical Sorting Logic ---
                         if 'Roll' in filtered_df.columns:
                             student_list = filtered_df.apply(lambda x: f"{x['Roll']} - {x['Name']}", axis=1).tolist()
                             unique_students = list(set(student_list))
                             
-                            # Helper function to extract the integer roll number for sorting
                             def extract_roll(item_string):
                                 try:
                                     return int(str(item_string).split(' - ')[0].strip())
                                 except ValueError:
-                                    return 999999 # Push bad data to the bottom of the list
+                                    return 999999 
                             
-                            # Sort by the actual number value instead of alphabetical string value
                             unique_students.sort(key=lambda x: (extract_roll(x), x))
                             students = ["Select Student"] + unique_students
                         else:
-                            # Fallback if Roll column is missing entirely
                             student_list = filtered_df['Name'].tolist()
                             students = ["Select Student"] + sorted(list(set(student_list)))
                         
@@ -376,22 +373,36 @@ elif menu_choice == "Returns & Reminders":
             if not active_logs.empty:
                 student_name = active_logs.iloc[0]['Student_Name']
                 book_title = "Unknown Book"
+                cover_url = None
                 
+                # Retrieve book details to display the image
                 if not df_books.empty and ret_active_id in df_books['Book_ID'].values:
-                    book_title = df_books[df_books['Book_ID'] == ret_active_id].iloc[0]['Title']
+                    book_row = df_books[df_books['Book_ID'] == ret_active_id].iloc[0]
+                    book_title = book_row['Title']
+                    cover_url = book_row.get('Cover_Image_URL', None)
                 
-                st.success(f"📖 **Book Found:** {book_title} ({ret_active_id})")
-                st.info(f"**Currently Issued To:** {student_name}")
+                st.markdown("---")
+                col_ret_img, col_ret_info = st.columns([1, 2])
                 
-                if st.button("✅ Confirm Return", type="primary"):
-                    update_log_status(ret_active_id, student_name)
-                    st.success(f"Book successfully returned from {student_name}!")
-                    st.session_state.ret_scanned_book_id = None
-                    st.rerun()
+                with col_ret_img:
+                    if cover_url and str(cover_url).startswith("http"):
+                        st.image(cover_url, use_container_width=True)
+                    else:
+                        st.info("No cover image available")
                 
-                if st.button("Cancel"):
-                    st.session_state.ret_scanned_book_id = None
-                    st.rerun()
+                with col_ret_info:
+                    st.success(f"📖 **Book Found:** {book_title} ({ret_active_id})")
+                    st.info(f"**Currently Issued To:** {student_name}")
+                    
+                    if st.button("✅ Confirm Return", type="primary"):
+                        update_log_status(ret_active_id, student_name)
+                        st.success(f"Book successfully returned from {student_name}!")
+                        st.session_state.ret_scanned_book_id = None
+                        st.rerun()
+                    
+                    if st.button("Cancel"):
+                        st.session_state.ret_scanned_book_id = None
+                        st.rerun()
             else:
                 st.warning(f"Book ID '{ret_active_id}' is not currently issued to anyone.")
                 if st.button("Scan a Different Book"):

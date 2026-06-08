@@ -24,6 +24,10 @@ st.set_page_config(page_title="BPS Library Manager", page_icon="📚", layout="c
 if 'lib_scan_msg' not in st.session_state: st.session_state.lib_scan_msg = None
 if 'scanned_book_id' not in st.session_state: st.session_state.scanned_book_id = None
 
+# New session state for the Return Scanner
+if 'ret_scan_msg' not in st.session_state: st.session_state.ret_scan_msg = None
+if 'ret_scanned_book_id' not in st.session_state: st.session_state.ret_scanned_book_id = None
+
 # ==========================================
 # 1. DATABASE CONNECTION & CACHING
 # ==========================================
@@ -323,8 +327,67 @@ elif menu_choice == "Issue Book":
 # PAGE 3: RETURNS & REMINDERS
 # ==========================================
 elif menu_choice == "Returns & Reminders":
-    st.header("Returns & 7-Day Reminders")
+    st.header("Scan & Return Book")
     
+    # --- NEW SCAN TO RETURN FEATURE ---
+    st.write("📸 **Scan Book QR Code to Return:**")
+    ret_qv = qrcode_scanner(key='return_qr_scanner')
+    
+    if st.session_state.ret_scan_msg:
+        st.success(st.session_state.ret_scan_msg)
+        st.session_state.ret_scan_msg = None
+        
+    if ret_qv:
+        should_rerun = False
+        if st.session_state.ret_scanned_book_id != ret_qv:
+            st.session_state.ret_scanned_book_id = ret_qv
+            st.session_state.ret_scan_msg = f"✅ Scanned Successfully: {ret_qv}"
+            should_rerun = True
+            
+        if should_rerun:
+            st.rerun()
+
+    if st.session_state.ret_scanned_book_id:
+        ret_active_id = st.session_state.ret_scanned_book_id
+        
+        if not df_logs.empty:
+            active_logs = df_logs[(df_logs['Book_ID'] == ret_active_id) & (df_logs['Status'] == "Issued")]
+            
+            if not active_logs.empty:
+                student_name = active_logs.iloc[0]['Student_Name']
+                book_title = "Unknown Book"
+                
+                # Try to get book title for display
+                if not df_books.empty and ret_active_id in df_books['Book_ID'].values:
+                    book_title = df_books[df_books['Book_ID'] == ret_active_id].iloc[0]['Title']
+                
+                st.success(f"📖 **Book Found:** {book_title} ({ret_active_id})")
+                st.info(f"**Currently Issued To:** {student_name}")
+                
+                if st.button("✅ Confirm Return", type="primary"):
+                    update_log_status(ret_active_id, student_name)
+                    st.success(f"Book successfully returned from {student_name}!")
+                    st.session_state.ret_scanned_book_id = None
+                    st.rerun()
+                
+                if st.button("Cancel"):
+                    st.session_state.ret_scanned_book_id = None
+                    st.rerun()
+            else:
+                st.warning(f"Book ID '{ret_active_id}' is not currently issued to anyone.")
+                if st.button("Scan a Different Book"):
+                    st.session_state.ret_scanned_book_id = None
+                    st.rerun()
+        else:
+            st.warning("No issue logs found in database.")
+            if st.button("Clear Scanner"):
+                st.session_state.ret_scanned_book_id = None
+                st.rerun()
+
+    st.markdown("---")
+    st.header("7-Day Reminders & Manual Returns")
+    
+    # --- EXISTING MANUAL RETURN LIST ---
     if not df_logs.empty:
         issued_books = df_logs[df_logs['Status'] == "Issued"].copy()
         
@@ -527,7 +590,7 @@ elif menu_choice == "Book Details & Admin":
                                 try:
                                     sheet.delete_rows(row_idx)
                                 except AttributeError:
-                                    sheet.delete_row(row_idx) # Fallback for older library versions
+                                    sheet.delete_row(row_idx) 
                                 
                                 load_sheet_data.clear()
                                 st.success(f"{book_details['Title']} has been deleted.")

@@ -289,17 +289,27 @@ elif menu_choice == "Issue Book":
                     sel_sec = st.selectbox("Section", sections)
                     
                     if sel_sec != "Select Section":
-                        # --- NEW: Extracting and Formatting Roll + Name ---
                         filtered_df = df_students[(df_students['Class'] == sel_class) & (df_students['Section'] == sel_sec)]
                         
+                        # --- THE FIX: Custom Numerical Sorting Logic ---
                         if 'Roll' in filtered_df.columns:
-                            # If Roll column exists, pair it: "Roll - Name"
                             student_list = filtered_df.apply(lambda x: f"{x['Roll']} - {x['Name']}", axis=1).tolist()
-                        else:
-                            # Fallback if Roll column is missing
-                            student_list = filtered_df['Name'].tolist()
+                            unique_students = list(set(student_list))
                             
-                        students = ["Select Student"] + sorted(list(set(student_list)))
+                            # Helper function to extract the integer roll number for sorting
+                            def extract_roll(item_string):
+                                try:
+                                    return int(str(item_string).split(' - ')[0].strip())
+                                except ValueError:
+                                    return 999999 # Push bad data to the bottom of the list
+                            
+                            # Sort by the actual number value instead of alphabetical string value
+                            unique_students.sort(key=lambda x: (extract_roll(x), x))
+                            students = ["Select Student"] + unique_students
+                        else:
+                            # Fallback if Roll column is missing entirely
+                            student_list = filtered_df['Name'].tolist()
+                            students = ["Select Student"] + sorted(list(set(student_list)))
                         
                         sel_student = st.selectbox("Student Name & Roll", students)
                         
@@ -310,7 +320,7 @@ elif menu_choice == "Issue Book":
                                 
                                 log_data = {
                                     "Book_ID": active_id,
-                                    "Student_Name": sel_student, # Now saves Roll + Name
+                                    "Student_Name": sel_student,
                                     "Class": sel_class,
                                     "Section": sel_sec,
                                     "Issue_Date": today.strftime("%Y-%m-%d"),

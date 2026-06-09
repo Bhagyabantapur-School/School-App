@@ -49,4 +49,4 @@ with r4_col1:
 with r4_col2:
     if st.button("🔐 Staff Portal", use_container_width=True): st.switch_page("bps_digital_sk.py")
 with r4_col3:
-    st.empty() # Placeholder for future BPS App
+    if st.button("🥦 Grocery Manager", use_container_width=True): st.switch_page("bps_grocery_ad.py")

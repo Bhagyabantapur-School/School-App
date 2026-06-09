@@ -4,6 +4,7 @@ from google.oauth2.service_account import Credentials
 from datetime import datetime
 import threading
 import pytz
+from streamlit.runtime.scriptrunner import add_script_run_ctx
 
 # 1. GLOBAL PAGE CONFIGURATION
 st.set_page_config(
@@ -31,7 +32,7 @@ bps_apps = [
 all_apps = personal_apps + bps_apps
 
 # ==========================================
-# 3. GLOBAL SHEET CONNECTION (THE FIX)
+# 3. GLOBAL SHEET CONNECTION
 # ==========================================
 @st.cache_resource
 def get_tracker_sheet():
@@ -69,8 +70,7 @@ def get_last_opened_app():
         return "Live Routine Hub"
 
 def log_app_change_bg(app_name):
-    """Safely logs page changes using the globally cached sheet connection."""
-    # We grab the cached sheet safely from the MAIN thread before entering the background
+    """Safely logs page changes using an immortal background thread with Smart Append."""
     sheet = get_tracker_sheet()
     
     def _log():
@@ -78,22 +78,37 @@ def log_app_change_bg(app_name):
             ist = pytz.timezone('Asia/Kolkata')
             now_str = datetime.now(ist).strftime("%Y-%m-%d %H:%M:%S")
             
-            # Fetch all values locally to save API calls and prevent search crashes
             all_rows = sheet.get_all_values()
             found_row = None
+            
+            # ---> FIX 1: BULLETPROOF MATCHING <---
+            # Ignores upper/lowercase and invisible trailing spaces in the Google Sheet
+            clean_target = str(app_name).strip().upper()
             for idx, row in enumerate(all_rows):
-                if row and row[0] == app_name:
-                    found_row = idx + 1 # Google Sheets is 1-indexed
+                if row and str(row[0]).strip().upper() == clean_target:
+                    found_row = idx + 1 
                     break
             
             if found_row:
                 sheet.update_cell(found_row, 2, now_str)
             else:
-                sheet.append_row([app_name, now_str])
+                # ---> FIX 2: SMART APPEND <---
+                # Bypasses the buggy append_row command entirely by forcing the exact next row
+                next_row = len(all_rows) + 1
+                try:
+                    sheet.update(range_name=f"A{next_row}:B{next_row}", values=[[app_name, now_str]], value_input_option="USER_ENTERED")
+                except TypeError:
+                    sheet.update(f"A{next_row}:B{next_row}", [[app_name, now_str]], value_input_option="USER_ENTERED")
+                    
         except Exception as e:
             print(f"Background Logging Failed: {e}")
             
-    threading.Thread(target=_log).start()
+    # Create the thread
+    thread = threading.Thread(target=_log)
+    # Give the thread the Streamlit Badge so it survives page switches!
+    add_script_run_ctx(thread)
+    # Start the immortal thread
+    thread.start()
 
 # ==========================================
 # 5. STATE MANAGEMENT & ROUTING
@@ -195,7 +210,7 @@ else:
 if pg.title != st.session_state.current_tracked_app and pg.title in all_apps:
     st.session_state.current_tracked_app = pg.title
     st.session_state.last_opened_app = pg.title
-    log_app_change_bg(pg.title) # Instantly fires to Google using cached connection!
+    log_app_change_bg(pg.title)
 
 # 8. RUN NAVIGATION
 pg.run()

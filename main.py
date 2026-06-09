@@ -3,6 +3,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 import threading
+import pytz
 
 # 1. GLOBAL PAGE CONFIGURATION
 st.set_page_config(
@@ -66,7 +67,11 @@ def log_app_change_bg(app_name):
             client = gspread.authorize(creds)
             sheet = client.open("Personal_Dashboard_Data").worksheet("Tracker")
             cell = sheet.find(app_name)
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # ---> FIX: Locked strictly to IST timezone <---
+            ist = pytz.timezone('Asia/Kolkata')
+            now_str = datetime.now(ist).strftime("%Y-%m-%d %H:%M:%S")
+            
             if cell:
                 sheet.update_cell(cell.row, 2, now_str)
             else:

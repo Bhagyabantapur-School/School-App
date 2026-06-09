@@ -26,7 +26,7 @@ personal_apps = [
 bps_apps = [
     "Main Dashboard", "Admission Hub", "Student Profiles", "ID Card Generator",
     "School Data", "Exam & Fees", "Library Manager", "Leave Management",
-    "Distributions", "Returns", "Form Manager", "Staff Portal"
+    "Distributions", "Returns", "Form Manager", "Staff Portal", "Grocery Manager"
 ]
 
 all_apps = personal_apps + bps_apps
@@ -81,7 +81,6 @@ def log_app_change_bg(app_name):
             all_rows = sheet.get_all_values()
             found_row = None
             
-            # ---> FIX 1: BULLETPROOF MATCHING <---
             # Ignores upper/lowercase and invisible trailing spaces in the Google Sheet
             clean_target = str(app_name).strip().upper()
             for idx, row in enumerate(all_rows):
@@ -92,8 +91,6 @@ def log_app_change_bg(app_name):
             if found_row:
                 sheet.update_cell(found_row, 2, now_str)
             else:
-                # ---> FIX 2: SMART APPEND <---
-                # Bypasses the buggy append_row command entirely by forcing the exact next row
                 next_row = len(all_rows) + 1
                 try:
                     sheet.update(range_name=f"A{next_row}:B{next_row}", values=[[app_name, now_str]], value_input_option="USER_ENTERED")
@@ -182,6 +179,7 @@ distribution = st.Page("bps_distribution.py", title="Distributions", icon="🎒"
 returns = st.Page("bps_returns.py", title="Returns", icon="📑", default=is_default("Returns", "BPS Digital System"))
 form_manager = st.Page("form_manager.py", title="Form Manager", icon="📋", default=is_default("Form Manager", "BPS Digital System"))
 staff_portal = st.Page("bps_digital_sk.py", title="Staff Portal", icon="🔐", default=is_default("Staff Portal", "BPS Digital System"))
+grocery_app = st.Page("bps_grocery_ad.py", title="Grocery Manager", icon="🥦", default=is_default("Grocery Manager", "BPS Digital System"))
 
 if system_choice == 'Personal Hub':
     pg = st.navigation({
@@ -199,7 +197,7 @@ else:
         "Staff & Admin": [staff_portal],
         "Student Management": [admission, student_profile, id_card],
         "Academics & Finance": [school_data, exam_fees, library_app],
-        "Operations": [leave, distribution, returns, form_manager]
+        "Operations": [leave, distribution, returns, form_manager, grocery_app]
     })
     st.sidebar.markdown("#### Bhagyabantapur Primary School")
     st.sidebar.caption("Head Teacher Dashboard Active")

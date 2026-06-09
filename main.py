@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 2. APP DICTIONARIES (To help the system distinguish workspaces)
+# 2. APP DICTIONARIES
 personal_apps = [
     "Live Routine Hub", "Money & Location", "Money Utilities", "Strong Tracker", 
     "Project App", "Election Duty", "Monthly Tracker", "Money Tracker", 
@@ -30,15 +30,25 @@ bps_apps = [
 
 all_apps = personal_apps + bps_apps
 
-# 3. ASYNCHRONOUS TRACKER & PERSISTENCE
+# ==========================================
+# 3. GLOBAL SHEET CONNECTION (THE FIX)
+# ==========================================
+@st.cache_resource
+def get_tracker_sheet():
+    """Creates a SINGLE connection to Google Sheets that stays open globally."""
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
+    client = gspread.authorize(creds)
+    return client.open("Personal_Dashboard_Data").worksheet("Tracker")
+
+# ==========================================
+# 4. ASYNCHRONOUS TRACKER & PERSISTENCE
+# ==========================================
 @st.cache_data(ttl=300, show_spinner=False)
 def get_last_opened_app():
-    """Fetches the most recently opened app across ALL systems to resume your session."""
+    """Fetches the most recently opened app to resume your session."""
     try:
-        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
-        client = gspread.authorize(creds)
-        sheet = client.open("Personal_Dashboard_Data").worksheet("Tracker")
+        sheet = get_tracker_sheet()
         records = sheet.get_all_records()
         
         latest_app = "Live Routine Hub"
@@ -59,28 +69,35 @@ def get_last_opened_app():
         return "Live Routine Hub"
 
 def log_app_change_bg(app_name):
-    """Silently logs page changes to Google Sheets in the background."""
+    """Safely logs page changes using the globally cached sheet connection."""
+    # We grab the cached sheet safely from the MAIN thread before entering the background
+    sheet = get_tracker_sheet()
+    
     def _log():
         try:
-            scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-            creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
-            client = gspread.authorize(creds)
-            sheet = client.open("Personal_Dashboard_Data").worksheet("Tracker")
-            cell = sheet.find(app_name)
-            
-            # ---> FIX: Locked strictly to IST timezone <---
             ist = pytz.timezone('Asia/Kolkata')
             now_str = datetime.now(ist).strftime("%Y-%m-%d %H:%M:%S")
             
-            if cell:
-                sheet.update_cell(cell.row, 2, now_str)
+            # Fetch all values locally to save API calls and prevent search crashes
+            all_rows = sheet.get_all_values()
+            found_row = None
+            for idx, row in enumerate(all_rows):
+                if row and row[0] == app_name:
+                    found_row = idx + 1 # Google Sheets is 1-indexed
+                    break
+            
+            if found_row:
+                sheet.update_cell(found_row, 2, now_str)
             else:
                 sheet.append_row([app_name, now_str])
-        except:
-            pass
+        except Exception as e:
+            print(f"Background Logging Failed: {e}")
+            
     threading.Thread(target=_log).start()
 
-# 4. STATE MANAGEMENT (With Intelligent Boot-Up)
+# ==========================================
+# 5. STATE MANAGEMENT & ROUTING
+# ==========================================
 if 'last_opened_app' not in st.session_state:
     st.session_state.last_opened_app = get_last_opened_app()
 
@@ -88,13 +105,11 @@ if 'current_tracked_app' not in st.session_state:
     st.session_state.current_tracked_app = st.session_state.last_opened_app
 
 if 'active_system' not in st.session_state:
-    # Auto-detect which system to load based on the last app
     if st.session_state.last_opened_app in bps_apps:
         st.session_state.active_system = 'BPS Digital System'
     else:
         st.session_state.active_system = 'Personal Hub'
 
-# THE SYSTEM SWITCHER
 st.sidebar.markdown("### ⚙️ Workspace Switcher")
 system_choice = st.sidebar.radio(
     "Select your environment:",
@@ -104,25 +119,20 @@ system_choice = st.sidebar.radio(
 st.session_state.active_system = system_choice
 st.sidebar.markdown("---")
 
-# SMART DEFAULT ROUTING
 def is_default(app_name, system_category):
-    """Determines which app should be active upon load or toggle."""
     last_app = st.session_state.last_opened_app
-    
-    # If the workspace matches the app's native workspace AND it was the last opened app
     if system_choice == system_category and last_app == app_name:
         return True
-        
-    # If the user toggles workspaces, safely drop them at the main hub of that workspace
     if system_choice == system_category and last_app not in (personal_apps if system_choice == 'Personal Hub' else bps_apps):
         if system_category == 'Personal Hub' and app_name == "Live Routine Hub": 
             return True
         if system_category == 'BPS Digital System' and app_name == "Main Dashboard": 
             return True
-            
     return False
 
-# 5. DEFINE ALL PAGES
+# ==========================================
+# 6. DEFINE ALL PAGES
+# ==========================================
 # --- Personal Pages ---
 routine_hub = st.Page("routine_app.py", title="Live Routine Hub", icon="⏱️", default=is_default("Live Routine Hub", "Personal Hub"))
 money_location = st.Page("money_location.py", title="Money & Location", icon="📍", default=is_default("Money & Location", "Personal Hub"))
@@ -158,7 +168,6 @@ returns = st.Page("bps_returns.py", title="Returns", icon="📑", default=is_def
 form_manager = st.Page("form_manager.py", title="Form Manager", icon="📋", default=is_default("Form Manager", "BPS Digital System"))
 staff_portal = st.Page("bps_digital_sk.py", title="Staff Portal", icon="🔐", default=is_default("Staff Portal", "BPS Digital System"))
 
-# 6. DYNAMIC NAVIGATION LOGIC
 if system_choice == 'Personal Hub':
     pg = st.navigation({
         "My Personal Hub": [
@@ -180,11 +189,13 @@ else:
     st.sidebar.markdown("#### Bhagyabantapur Primary School")
     st.sidebar.caption("Head Teacher Dashboard Active")
 
-# 7. MASTER LOGGING TRIGGER (Records any page change globally)
+# ==========================================
+# 7. MASTER LOGGING TRIGGER
+# ==========================================
 if pg.title != st.session_state.current_tracked_app and pg.title in all_apps:
     st.session_state.current_tracked_app = pg.title
     st.session_state.last_opened_app = pg.title
-    log_app_change_bg(pg.title) # Instantly fires to Google in the background!
+    log_app_change_bg(pg.title) # Instantly fires to Google using cached connection!
 
 # 8. RUN NAVIGATION
 pg.run()

@@ -12,10 +12,27 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 2. ASYNCHRONOUS TRACKER & PERSISTENCE
+# 2. APP DICTIONARIES (To help the system distinguish workspaces)
+personal_apps = [
+    "Live Routine Hub", "Money & Location", "Money Utilities", "Strong Tracker", 
+    "Project App", "Election Duty", "Monthly Tracker", "Money Tracker", 
+    "Product Inventory", "Health Hub", "Backup Tracker", "Routine Audit", 
+    "Routine Editor", "MDM Returns", "Video Manager", "Trace Inventory", 
+    "Sleep & Water", "Packing Tracker", "Visual Dashboard"
+]
+
+bps_apps = [
+    "Main Dashboard", "Admission Hub", "Student Profiles", "ID Card Generator",
+    "School Data", "Exam & Fees", "Library Manager", "Leave Management",
+    "Distributions", "Returns", "Form Manager", "Staff Portal"
+]
+
+all_apps = personal_apps + bps_apps
+
+# 3. ASYNCHRONOUS TRACKER & PERSISTENCE
 @st.cache_data(ttl=300, show_spinner=False)
 def get_last_opened_app():
-    """Fetches the most recently opened app to resume your session."""
+    """Fetches the most recently opened app across ALL systems to resume your session."""
     try:
         scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
@@ -58,15 +75,19 @@ def log_app_change_bg(app_name):
             pass
     threading.Thread(target=_log).start()
 
-# 3. STATE MANAGEMENT
-if 'active_system' not in st.session_state:
-    st.session_state.active_system = 'Personal Hub'
-
+# 4. STATE MANAGEMENT (With Intelligent Boot-Up)
 if 'last_opened_app' not in st.session_state:
     st.session_state.last_opened_app = get_last_opened_app()
 
 if 'current_tracked_app' not in st.session_state:
     st.session_state.current_tracked_app = st.session_state.last_opened_app
+
+if 'active_system' not in st.session_state:
+    # Auto-detect which system to load based on the last app
+    if st.session_state.last_opened_app in bps_apps:
+        st.session_state.active_system = 'BPS Digital System'
+    else:
+        st.session_state.active_system = 'Personal Hub'
 
 # THE SYSTEM SWITCHER
 st.sidebar.markdown("### ⚙️ Workspace Switcher")
@@ -78,58 +99,61 @@ system_choice = st.sidebar.radio(
 st.session_state.active_system = system_choice
 st.sidebar.markdown("---")
 
-# VALIDATION FOR DEFAULT PAGE
-personal_apps = [
-    "Live Routine Hub", "Money & Location", "Money Utilities", "Strong Tracker", 
-    "Project App", "Election Duty", "Monthly Tracker", "Money Tracker", 
-    "Product Inventory", "Health Hub", "Backup Tracker", "Routine Audit", 
-    "Routine Editor", "MDM Returns", "Video Manager", "Trace Inventory", 
-    "Sleep & Water", "Packing Tracker", "Visual Dashboard"
-]
+# SMART DEFAULT ROUTING
+def is_default(app_name, system_category):
+    """Determines which app should be active upon load or toggle."""
+    last_app = st.session_state.last_opened_app
+    
+    # If the workspace matches the app's native workspace AND it was the last opened app
+    if system_choice == system_category and last_app == app_name:
+        return True
+        
+    # If the user toggles workspaces, safely drop them at the main hub of that workspace
+    if system_choice == system_category and last_app not in (personal_apps if system_choice == 'Personal Hub' else bps_apps):
+        if system_category == 'Personal Hub' and app_name == "Live Routine Hub": 
+            return True
+        if system_category == 'BPS Digital System' and app_name == "Main Dashboard": 
+            return True
+            
+    return False
 
-last_app = st.session_state.last_opened_app
-if last_app not in personal_apps:
-    last_app = "Live Routine Hub"
-
-def is_default(app_name):
-    return (system_choice == 'Personal Hub' and last_app == app_name)
-
-# 4. DEFINE ALL PAGES
-routine_hub = st.Page("routine_app.py", title="Live Routine Hub", icon="⏱️", default=is_default("Live Routine Hub"))
-money_location = st.Page("money_location.py", title="Money & Location", icon="📍", default=is_default("Money & Location"))
-money_utilities = st.Page("money_utilities.py", title="Money Utilities", icon="💳", default=is_default("Money Utilities")) 
-strong = st.Page("strong.py", title="Strong Tracker", icon="💪", default=is_default("Strong Tracker"))
-project = st.Page("project_app.py", title="Project App", icon="🚀", default=is_default("Project App"))
-election = st.Page("election_duty.py", title="Election Duty", icon="🗳️", default=is_default("Election Duty"))
-monthly = st.Page("monthly_app.py", title="Monthly Tracker", icon="📆", default=is_default("Monthly Tracker"))
-money_tracker = st.Page("money_tracker.py", title="Money Tracker", icon="💵", default=is_default("Money Tracker"))
-product_inventory = st.Page("product_inventory.py", title="Product Inventory", icon="📦", default=is_default("Product Inventory"))
-health = st.Page("health_app.py", title="Health Hub", icon="❤️", default=is_default("Health Hub"))
-backup = st.Page("backup_tracker_app.py", title="Backup Tracker", icon="💾", default=is_default("Backup Tracker"))
-routine_audit = st.Page("routine_audit.py", title="Routine Audit", icon="🔍", default=is_default("Routine Audit"))
-routine_editor = st.Page("routine_editor.py", title="Routine Editor", icon="✏️", default=is_default("Routine Editor"))
-mdm_return = st.Page("mdm_return_log.py", title="MDM Returns", icon="📦", default=is_default("MDM Returns"))
-ytfb_videos = st.Page("bps_ytfb_videos.py", title="Video Manager", icon="🎬", default=is_default("Video Manager"))
-trace_app = st.Page("trace.py", title="Trace Inventory", icon="🏷️", default=is_default("Trace Inventory"))
-sleep_water = st.Page("sleep_water_app.py", title="Sleep & Water", icon="💧", default=is_default("Sleep & Water"))
-packing_tracker = st.Page("packing_app.py", title="Packing Tracker", icon="🎒", default=is_default("Packing Tracker")) 
-visual_dashboard = st.Page("dashboard.py", title="Visual Dashboard", icon="🚀", default=is_default("Visual Dashboard"))
+# 5. DEFINE ALL PAGES
+# --- Personal Pages ---
+routine_hub = st.Page("routine_app.py", title="Live Routine Hub", icon="⏱️", default=is_default("Live Routine Hub", "Personal Hub"))
+money_location = st.Page("money_location.py", title="Money & Location", icon="📍", default=is_default("Money & Location", "Personal Hub"))
+money_utilities = st.Page("money_utilities.py", title="Money Utilities", icon="💳", default=is_default("Money Utilities", "Personal Hub")) 
+strong = st.Page("strong.py", title="Strong Tracker", icon="💪", default=is_default("Strong Tracker", "Personal Hub"))
+project = st.Page("project_app.py", title="Project App", icon="🚀", default=is_default("Project App", "Personal Hub"))
+election = st.Page("election_duty.py", title="Election Duty", icon="🗳️", default=is_default("Election Duty", "Personal Hub"))
+monthly = st.Page("monthly_app.py", title="Monthly Tracker", icon="📆", default=is_default("Monthly Tracker", "Personal Hub"))
+money_tracker = st.Page("money_tracker.py", title="Money Tracker", icon="💵", default=is_default("Money Tracker", "Personal Hub"))
+product_inventory = st.Page("product_inventory.py", title="Product Inventory", icon="📦", default=is_default("Product Inventory", "Personal Hub"))
+health = st.Page("health_app.py", title="Health Hub", icon="❤️", default=is_default("Health Hub", "Personal Hub"))
+backup = st.Page("backup_tracker_app.py", title="Backup Tracker", icon="💾", default=is_default("Backup Tracker", "Personal Hub"))
+routine_audit = st.Page("routine_audit.py", title="Routine Audit", icon="🔍", default=is_default("Routine Audit", "Personal Hub"))
+routine_editor = st.Page("routine_editor.py", title="Routine Editor", icon="✏️", default=is_default("Routine Editor", "Personal Hub"))
+mdm_return = st.Page("mdm_return_log.py", title="MDM Returns", icon="📦", default=is_default("MDM Returns", "Personal Hub"))
+ytfb_videos = st.Page("bps_ytfb_videos.py", title="Video Manager", icon="🎬", default=is_default("Video Manager", "Personal Hub"))
+trace_app = st.Page("trace.py", title="Trace Inventory", icon="🏷️", default=is_default("Trace Inventory", "Personal Hub"))
+sleep_water = st.Page("sleep_water_app.py", title="Sleep & Water", icon="💧", default=is_default("Sleep & Water", "Personal Hub"))
+packing_tracker = st.Page("packing_app.py", title="Packing Tracker", icon="🎒", default=is_default("Packing Tracker", "Personal Hub")) 
+visual_dashboard = st.Page("dashboard.py", title="Visual Dashboard", icon="🚀", default=is_default("Visual Dashboard", "Personal Hub"))
 
 # --- BPS Digital Pages ---
-bps_dashboard = st.Page("bps_dashboard.py", title="Main Dashboard", icon="🏫", default=(system_choice == 'BPS Digital System'))
-admission = st.Page("admission_hub.py", title="Admission Hub", icon="📝")
-student_profile = st.Page("student_profile.py", title="Student Profiles", icon="🎓")
-id_card = st.Page("id_card_app.py", title="ID Card Generator", icon="🪪")
-school_data = st.Page("school_data.py", title="School Data", icon="📊")
-exam_fees = st.Page("sch_exam_fees.py", title="Exam & Fees", icon="💰")
-library_app = st.Page("library_app.py", title="Library Manager", icon="📚") # <-- NEW BPS APP
-leave = st.Page("leave_app.py", title="Leave Management", icon="🗓️")
-distribution = st.Page("bps_distribution.py", title="Distributions", icon="🎒")
-returns = st.Page("bps_returns.py", title="Returns", icon="📑")
-form_manager = st.Page("form_manager.py", title="Form Manager", icon="📋")
-staff_portal = st.Page("bps_digital_sk.py", title="Staff Portal", icon="🔐")
+bps_dashboard = st.Page("bps_dashboard.py", title="Main Dashboard", icon="🏫", default=is_default("Main Dashboard", "BPS Digital System"))
+admission = st.Page("admission_hub.py", title="Admission Hub", icon="📝", default=is_default("Admission Hub", "BPS Digital System"))
+student_profile = st.Page("student_profile.py", title="Student Profiles", icon="🎓", default=is_default("Student Profiles", "BPS Digital System"))
+id_card = st.Page("id_card_app.py", title="ID Card Generator", icon="🪪", default=is_default("ID Card Generator", "BPS Digital System"))
+school_data = st.Page("school_data.py", title="School Data", icon="📊", default=is_default("School Data", "BPS Digital System"))
+exam_fees = st.Page("sch_exam_fees.py", title="Exam & Fees", icon="💰", default=is_default("Exam & Fees", "BPS Digital System"))
+library_app = st.Page("library_app.py", title="Library Manager", icon="📚", default=is_default("Library Manager", "BPS Digital System")) 
+leave = st.Page("leave_app.py", title="Leave Management", icon="🗓️", default=is_default("Leave Management", "BPS Digital System"))
+distribution = st.Page("bps_distribution.py", title="Distributions", icon="🎒", default=is_default("Distributions", "BPS Digital System"))
+returns = st.Page("bps_returns.py", title="Returns", icon="📑", default=is_default("Returns", "BPS Digital System"))
+form_manager = st.Page("form_manager.py", title="Form Manager", icon="📋", default=is_default("Form Manager", "BPS Digital System"))
+staff_portal = st.Page("bps_digital_sk.py", title="Staff Portal", icon="🔐", default=is_default("Staff Portal", "BPS Digital System"))
 
-# 5. DYNAMIC NAVIGATION LOGIC
+# 6. DYNAMIC NAVIGATION LOGIC
 if system_choice == 'Personal Hub':
     pg = st.navigation({
         "My Personal Hub": [
@@ -145,17 +169,17 @@ else:
         "System Home": [bps_dashboard],
         "Staff & Admin": [staff_portal],
         "Student Management": [admission, student_profile, id_card],
-        "Academics & Finance": [school_data, exam_fees, library_app], # <-- ADDED HERE
+        "Academics & Finance": [school_data, exam_fees, library_app],
         "Operations": [leave, distribution, returns, form_manager]
     })
     st.sidebar.markdown("#### Bhagyabantapur Primary School")
     st.sidebar.caption("Head Teacher Dashboard Active")
 
-# 6. MASTER LOGGING TRIGGER
-if pg.title != st.session_state.current_tracked_app and pg.title in personal_apps:
+# 7. MASTER LOGGING TRIGGER (Records any page change globally)
+if pg.title != st.session_state.current_tracked_app and pg.title in all_apps:
     st.session_state.current_tracked_app = pg.title
     st.session_state.last_opened_app = pg.title
-    log_app_change_bg(pg.title)
+    log_app_change_bg(pg.title) # Instantly fires to Google in the background!
 
-# 7. RUN NAVIGATION
+# 8. RUN NAVIGATION
 pg.run()

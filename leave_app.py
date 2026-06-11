@@ -79,7 +79,7 @@ def create_leave_pdf(name, desig, l_type, n_days, start, end, rsn, app_dt):
     body2 = f"{indent}I could not attend school on & from {start} to {end} on account of my {rsn}."
     pdf.multi_cell(0, 6, txt=body2)
     pdf.ln(2)
-    body3 = f"{indent}I request you to grant my {l_type} for those days and consider my prayer to sanction leave and oblige."
+    body3 = f"{indent}I request you to grant my {l_type} for {n_days} days and consider my prayer to sanction leave and oblige."
     pdf.multi_cell(0, 6, txt=body3)
     pdf.ln(6)
     pdf.cell(0, 6, txt=f"{indent}Expecting your kind-hearted co-operation.", ln=1)

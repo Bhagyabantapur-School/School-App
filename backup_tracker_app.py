@@ -9,11 +9,15 @@ from google.oauth2.service_account import Credentials
 import pandas as pd
 import time
 from datetime import datetime
+import pytz
 
 # ==========================================
 # 1. Configuration & Global Variables
 # ==========================================
 st.set_page_config(page_title="Mi 11X Backup Suite", layout="centered", page_icon="📱")
+
+# Define Indian Standard Time (IST)
+IST = pytz.timezone('Asia/Kolkata')
 
 ROUTINE_DATA = {
     "Day 1: The Purge (Decluttering)": [
@@ -163,7 +167,8 @@ def update_cloud_task(day, task, is_completed):
 
 def add_uninstalled_app(app_name, login_id, size_mb):
     sheet = get_or_create_uninstalled_sheet()
-    date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    # Updated to use IST
+    date_str = datetime.now(IST).strftime("%Y-%m-%d %H:%M")
     sheet.append_row([app_name, login_id, size_mb, date_str])
 
 def add_storage_snapshot(date_label, apps, images, audio, video, apks, docs, sysfiles, system, total):
@@ -274,7 +279,8 @@ try:
         st.subheader("📊 Track Storage Metrics Over Time")
 
         with st.form("storage_entry_form", clear_on_submit=True):
-            log_time = st.text_input("Label/Date:", value=datetime.now().strftime("%Y-%m-%d"))
+            # Updated to use IST
+            log_time = st.text_input("Label/Date:", value=datetime.now(IST).strftime("%Y-%m-%d"))
             
             c1, c2 = st.columns(2)
             with c1:
@@ -315,13 +321,14 @@ try:
         with st.form("update_log_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
-                # Auto-fills with current date and time
-                u_date = st.text_input("Date", value=datetime.now().strftime("%Y-%m-%d"))
+                # Updated to use IST
+                u_date = st.text_input("Date", value=datetime.now(IST).strftime("%Y-%m-%d"))
                 u_ai = st.text_input("AI Used", placeholder="e.g., Gemini 1.5 Pro, ChatGPT 4")
                 u_short = st.text_input("Short Summary", placeholder="e.g., Added Update Tab")
                 u_features = st.text_input("Features Added", placeholder="e.g., Gspread Integration, Forms")
             with col2:
-                u_time = st.text_input("Time", value=datetime.now().strftime("%H:%M"))
+                # Updated to use IST
+                u_time = st.text_input("Time", value=datetime.now(IST).strftime("%H:%M"))
                 u_lines = st.number_input("Lines of Code", min_value=0, step=10)
                 u_selected = st.text_input("Selected from AI", placeholder="e.g., Yes, Snippet #2")
                 u_chat = st.text_input("Chat Reference / Link", placeholder="e.g., Chat: 'Mi 11X Reset'")

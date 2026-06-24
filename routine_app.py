@@ -957,8 +957,12 @@ try:
                                 main_ss = get_cached_sheet("MY ROUTINE 2026")
                                 log_sheet = main_ss.worksheet("activity_log")
                                 
+                                # Update Time AND Energy Level (Column L is the 12th column)
                                 try: log_sheet.update(range_name=f"C{sheet_row}:D{sheet_row}", values=[[now.strftime('%H:%M'), GS_FORMULA]], value_input_option="USER_ENTERED")
                                 except TypeError: log_sheet.update(f"C{sheet_row}:D{sheet_row}", [[now.strftime('%H:%M'), GS_FORMULA]], value_input_option="USER_ENTERED")
+                                
+                                # Push Energy Level to Column L (12)
+                                log_sheet.update_cell(sheet_row, 12, energy_val)
                                 
                                 if str(active_row['Notes']).strip() == "": log_sheet.update_cell(sheet_row, 8, "Auto-logged via Timer") 
                                     

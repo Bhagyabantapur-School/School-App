@@ -109,7 +109,7 @@ try:
 
     st.markdown("<h2 style='text-align: center; color: #555; margin-top: 0px;'>📊 Daily Data & Audit Hub</h2>", unsafe_allow_html=True)
     
-    tab1, tab2, tab3, tab4 = st.tabs(["⏳ Timeline Audit", "📋 Daily Summary", "📅 Weekly Matrix", "📍 Places"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["⏳ Timeline Audit", "📋 Daily Summary", "📅 Weekly Matrix", "📍 Places", "🎯 The Matrix"])
 
     # ==========================================
     # TAB 1: TIMELINE AUDIT
@@ -583,5 +583,61 @@ try:
                         st.error(f"Failed to write to Google Sheets: {e}")
                 else:
                     st.info("No stationary places found to log.")
+
+    # ==========================================
+    # TAB 5: THE EISENHOWER & ENERGY MATRIX
+    # ==========================================
+    with tab5:
+        st.markdown("<h3 style='text-align: center; color: #555;'>🎯 Strategic Focus & Energy Audit</h3>", unsafe_allow_html=True)
+        
+        matrix_logs = log_df[(log_df['End_Time'] != 'RUNNING')].copy()
+        
+        # Ensure new columns are processed correctly
+        matrix_logs['Urgent'] = matrix_logs['Urgent'].astype(str).str.upper() == 'TRUE'
+        matrix_logs['Important'] = matrix_logs['Important'].astype(str).str.upper() == 'TRUE'
+        matrix_logs['Energy_Level'] = pd.to_numeric(matrix_logs['Energy_Level'], errors='coerce').fillna(0)
+        matrix_logs['Total_Minutes'] = matrix_logs['Duration'].apply(parse_duration_to_minutes)
+        
+        col_m1, col_m2 = st.columns([1, 1])
+        
+        with col_m1:
+            st.markdown("#### The Eisenhower Breakdown")
+            st.write("Where is your time *actually* going across all roles?")
+            
+            q1 = matrix_logs[(matrix_logs['Urgent'] == True) & (matrix_logs['Important'] == True)]
+            q2 = matrix_logs[(matrix_logs['Urgent'] == False) & (matrix_logs['Important'] == True)]
+            q3 = matrix_logs[(matrix_logs['Urgent'] == True) & (matrix_logs['Important'] == False)]
+            q4 = matrix_logs[(matrix_logs['Urgent'] == False) & (matrix_logs['Important'] == False)]
+            
+            box_style = "padding: 15px; border-radius: 8px; margin-bottom: 10px; color: white; text-align: center;"
+            
+            # Row 1
+            r1c1, r1c2 = st.columns(2)
+            with r1c1: st.markdown(f"<div style='{box_style} background-color: #d32f2f;'><b>Urgent & Important</b><br><br><h2>{int(q1['Total_Minutes'].sum() // 60)}h {int(q1['Total_Minutes'].sum() % 60)}m</h2></div>", unsafe_allow_html=True)
+            with r1c2: st.markdown(f"<div style='{box_style} background-color: #2e7b32;'><b>Not Urgent & Important</b><br><br><h2>{int(q2['Total_Minutes'].sum() // 60)}h {int(q2['Total_Minutes'].sum() % 60)}m</h2></div>", unsafe_allow_html=True)
+            
+            # Row 2
+            r2c1, r2c2 = st.columns(2)
+            with r2c1: st.markdown(f"<div style='{box_style} background-color: #f57c00;'><b>Urgent, Not Important</b><br><br><h2>{int(q3['Total_Minutes'].sum() // 60)}h {int(q3['Total_Minutes'].sum() % 60)}m</h2></div>", unsafe_allow_html=True)
+            with r2c2: st.markdown(f"<div style='{box_style} background-color: #757575;'><b>Not Urgent, Not Important</b><br><br><h2>{int(q4['Total_Minutes'].sum() // 60)}h {int(q4['Total_Minutes'].sum() % 60)}m</h2></div>", unsafe_allow_html=True)
+
+        with col_m2:
+            st.markdown("#### Energy vs. Role Context")
+            st.write("Which role is draining your energy the most?")
+            
+            # Group by Role and get average energy
+            role_logs = matrix_logs[matrix_logs['Role'].str.strip() != ""]
+            if not role_logs.empty:
+                energy_stats = role_logs.groupby('Role')['Energy_Level'].mean().reset_index()
+                energy_stats = energy_stats.sort_values(by='Energy_Level', ascending=False)
+                
+                import plotly.express as px
+                fig = px.bar(energy_stats, x='Energy_Level', y='Role', orientation='h', 
+                             title="Average Energy Level by Role (1-10)",
+                             color='Energy_Level', color_continuous_scale='RdYlGn')
+                fig.update_layout(xaxis=dict(range=[0, 10]))
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            else:
+                st.info("Log tasks with your new Role dropdown to see energy analytics.")
 
 except Exception as e: st.error(f"System Error: {e}")

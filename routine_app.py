@@ -131,7 +131,7 @@ def get_all_ecosystem_data():
     log_df = log_df[log_df["Date"].astype(str).str.strip() != ""] 
     log_df["Activity"] = log_df["Activity"].astype(str).str.strip().str.upper()
 
-    future_df = process_raw(ft_data, 8, ["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason"])
+    future_df = process_raw(ft_data, 12, ["Due_Date", "Due_Time", "Activity", "Type", "Task_Name", "Entity", "Status", "Cancel_Reason", "Role", "Urgent", "Important", "Energy_Level"])
     future_df = future_df[future_df["Due_Date"].astype(str).str.strip() != ""] 
     future_df['row_index'] = future_df.index + 2 
 
@@ -1048,6 +1048,19 @@ try:
                 
                 f_type = st.radio("Task Type", ["Checklist", "Sub-Activity"], horizontal=True, key="f_type")
                 f_name = st.text_input("Task Details", placeholder="e.g., Pay Electricity Bill", key="f_name")
+                
+                # -- NEW: Dual-Mode Strategy Inputs for Future Tasks --
+                st.markdown("**Context & Expected Energy**")
+                col_f1, col_f2, col_f3 = st.columns([2, 1, 1])
+                with col_f1:
+                    f_role = st.selectbox("Role Context", ["Head Teacher (BPS)", "Developer (BPS Digital)", "YouTube Creator", "Personal / Yoga", "Transition"], key="f_role")
+                with col_f2: f_urg = st.checkbox("🔥 Urgent", key="f_urg")
+                with col_f3: f_imp = st.checkbox("⭐ Important", key="f_imp")
+                
+                f_energy = st.slider("Expected Energy Requirement", 1, 10, 5, key="f_energy", help="1 = Routine/Draining, 10 = High Focus/Creative")
+                st.markdown("<hr style='margin: 10px 0px;'>", unsafe_allow_html=True)
+                # ----------------------------------------------------
+
                 time_opts = [f"{str(h).zfill(2)}:{str(m).zfill(2)}" for h in range(24) for m in range(60)]
                 col1, col2 = st.columns(2)
                 with col1: f_date = st.date_input("Due Date", value=now.date(), key="f_date")
@@ -1057,10 +1070,28 @@ try:
                     final_act = f_act_custom.strip().upper() if f_act_custom.strip() else f_act.strip().upper()
                     if f_name:
                         main_ss = get_cached_sheet("MY ROUTINE 2026")
-                        smart_append_row(main_ss.worksheet("future_tasks"), [f_date.strftime('%Y-%m-%d'), f_time.strftime('%H:%M'), final_act, f_type, f_name.strip(), "Personal", "Pending", ""])
+                        
+                        # -- UPDATED APPEND WITH 12 COLUMNS --
+                        smart_append_row(main_ss.worksheet("future_tasks"), [
+                            f_date.strftime('%Y-%m-%d'), 
+                            f_time.strftime('%H:%M'), 
+                            final_act, 
+                            f_type, 
+                            f_name.strip(), 
+                            "Personal", 
+                            "Pending", 
+                            "",
+                            f_role,         # Col 9: Role
+                            str(f_urg),     # Col 10: Urgent
+                            str(f_imp),     # Col 11: Important
+                            f_energy        # Col 12: Energy_Level
+                        ])
                         get_all_ecosystem_data.clear() 
+                        st.success("Future Task Scheduled with Matrix Data!")
+                        time.sleep(1.0)
                         st.rerun()
-                    else: st.error("Please enter task details.")
+                    else: 
+                        st.error("Please enter task details.")
 
         with st.expander("📝 Manual Log Activity"):
             unique_acts = sorted(list(set([a.strip().upper() for a in df['Activity'] if a.strip()])))

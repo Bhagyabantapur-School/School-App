@@ -123,11 +123,11 @@ def get_all_ecosystem_data():
         try: prep_data = main_ss.worksheet("prep_checklists").get_all_values()
         except: prep_data = []
 
-    df = process_raw(rm_data, 8, ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App"])
+    df = process_raw(rm_data, 12, ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Role", "Urgent", "Important", "Energy_Level"])
     df = df[df["Day"].astype(str).str.strip() != ""]
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
 
-    log_df = process_raw(al_data, 8, ["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"])
+    log_df = process_raw(al_data, 12, ["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes", "Role", "Urgent", "Important", "Energy_Level"])
     log_df = log_df[log_df["Date"].astype(str).str.strip() != ""] 
     log_df["Activity"] = log_df["Activity"].astype(str).str.strip().str.upper()
 

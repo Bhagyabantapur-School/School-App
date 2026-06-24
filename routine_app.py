@@ -1061,6 +1061,15 @@ try:
             unique_acts = sorted(list(set([a.strip().upper() for a in df['Activity'] if a.strip()])))
             log_date = st.date_input("Date", value=now.date(), key="log_date")
             
+            # -- NEW: Dual-Mode Strategy Inputs --
+            st.markdown("**Context & Matrix**")
+            col_r1, col_r2, col_r3 = st.columns([2, 1, 1])
+            with col_r1: 
+                log_role = st.selectbox("Role Context", ["Head Teacher (BPS)", "Developer (BPS Digital)", "YouTube Creator", "Personal / Yoga", "Transition"], key="log_role")
+            with col_r2: log_urg = st.checkbox("🔥 Urgent", key="log_urg")
+            with col_r3: log_imp = st.checkbox("⭐ Important", key="log_imp")
+            
+            # -- Existing Activity Inputs --
             col_act1, col_act2 = st.columns(2)
             with col_act1: 
                 default_act_idx = unique_acts.index(current_activity) + 1 if current_activity in unique_acts else 0
@@ -1078,8 +1087,7 @@ try:
 
                 sel_sub = st.selectbox("Sub-Activity", ["-- None / Type Custom --"] + dependent_subs, index=0, key="sel_sub")
                 log_sub_activity = st.text_input("Type Custom Sub-Activity", key="txt_sub") if sel_sub == "-- None / Type Custom --" else sel_sub
-                if sel_sub == "-- None / Type Custom --" and not log_sub_activity: 
-                    log_sub_activity = ""
+                if sel_sub == "-- None / Type Custom --" and not log_sub_activity: log_sub_activity = ""
                 
             hours = [f"{i:02d}" for i in range(24)]
             minutes = [f"{i:02d}" for i in range(60)]
@@ -1088,35 +1096,30 @@ try:
             
             col1, col2 = st.columns(2)
             with col1: 
-                st.markdown('<div style="font-size: 14px; font-weight: bold; margin-bottom: 5px; color: #333;">Started At (HH : MM)</div>', unsafe_allow_html=True)
                 c_sh, c_sm = st.columns(2)
-                s_hour = c_sh.selectbox("Start Hour", hours, index=curr_h, key="s_hour", label_visibility="collapsed")
-                s_min = c_sm.selectbox("Start Min", minutes, index=curr_m, key="s_min", label_visibility="collapsed")
+                s_hour = c_sh.selectbox("Start Hour", hours, index=curr_h, key="s_hour")
+                s_min = c_sm.selectbox("Start Min", minutes, index=curr_m, key="s_min")
                 
             with col2: 
-                st.markdown('<div style="font-size: 14px; font-weight: bold; margin-bottom: 5px; color: #333;">Ended At (HH : MM)</div>', unsafe_allow_html=True)
                 c_eh, c_em = st.columns(2)
-                e_hour = c_eh.selectbox("End Hour", hours, index=curr_h, key="e_hour", label_visibility="collapsed")
-                e_min = c_em.selectbox("End Min", minutes, index=curr_m, key="e_min", label_visibility="collapsed")
+                e_hour = c_eh.selectbox("End Hour", hours, index=curr_h, key="e_hour")
+                e_min = c_em.selectbox("End Min", minutes, index=curr_m, key="e_min")
             
-            log_chk = st.text_input("Checklist Item (Optional)", key="log_chk")    
+            log_chk = st.text_input("Checklist Item", key="log_chk")    
             log_notes = st.text_area("Notes", key="log_notes")
+            log_energy = st.slider("Energy Level During Task", 1, 10, 5, key="log_nrg")
             
             if st.button("💾 Save to Activity Log", use_container_width=True, type="primary"):
                 if log_activity:
                     main_ss = get_cached_sheet("MY ROUTINE 2026")
+                    # -- UPDATED APPEND WITH 12 COLUMNS --
                     smart_append_row(main_ss.worksheet("activity_log"), [
-                        log_date.strftime('%Y-%m-%d'), 
-                        f"{s_hour}:{s_min}", 
-                        f"{e_hour}:{e_min}", 
-                        GS_FORMULA, 
-                        log_activity.upper().strip(), 
-                        log_sub_activity.title().strip(), 
-                        log_chk.strip(), 
-                        log_notes
+                        log_date.strftime('%Y-%m-%d'), f"{s_hour}:{s_min}", f"{e_hour}:{e_min}", GS_FORMULA, 
+                        log_activity.upper().strip(), log_sub_activity.title().strip(), log_chk.strip(), log_notes,
+                        log_role, str(log_urg), str(log_imp), log_energy
                     ])
                     get_all_ecosystem_data.clear() 
-                    st.success("Activity Logged!")
+                    st.success("Activity Logged with Context!")
                     time.sleep(1.0)
                     st.rerun()
                 else: 

@@ -186,7 +186,6 @@ def get_current_location_details():
 # --- BULLETPROOF SHOP TYPE MATCHER ---
 def get_shop_type(place_name):
     if not place_name: return None
-    # Find column names flexibly ignoring spaces and case
     place_col = next((c for c in config_df.columns if str(c).strip().replace('_', ' ').lower() in ['specific place', 'place']), None)
     type_col = next((c for c in config_df.columns if str(c).strip().replace('_', ' ').lower() in ['shop type', 'shop category']), None)
     
@@ -271,7 +270,7 @@ def sync_journey_state():
                         break
             st.session_state.last_used_route = recent_route
 
-           last_record = df_loc.iloc[-1].to_dict()
+            last_record = df_loc.iloc[-1].to_dict()
             move_val = str(last_record.get('Move', '')).strip()
             place_val = str(last_record.get('Place', '')).strip().upper()
             
@@ -554,7 +553,9 @@ with tab_location:
                         final_arr_people = active_p
                         
                         if dyn_place == "Girishmore Bus Stop" and "Suborno" in active_p: arr_remark = "Waiting for School Bus"
-                        elif dyn_place == "HOME": final_arr_people = get_home_occupants(active_p)
+                        elif dyn_place == "HOME": 
+                            final_arr_people = get_home_occupants(active_p)
+                            st.session_state.current_people = "I" # Reset companions for next trip
                             
                         sh.worksheet("LOCATION_DATA").append_row([
                             time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), "- Stationary -", dyn_place, final_arr_people, arr_remark
@@ -760,6 +761,7 @@ with tab_location:
                             arr_remark_exp = "Waiting for School Bus"
                         elif express_place == "HOME":
                             final_arr_people = get_home_occupants(arrival_people)
+                            st.session_state.current_people = "I" # Reset companions for next trip
                             
                         sh.worksheet("LOCATION_DATA").append_row([today_str, time_now.strftime("%H:%M"), "- Stationary -", express_place, final_arr_people, arr_remark_exp])
                         load_location_data.clear()
@@ -866,6 +868,11 @@ with tab_location:
                 final_move = "" if move == "- Stationary -" else move
                 sh.worksheet("LOCATION_DATA").append_row([formatted_date, formatted_time, final_move, specific_place, people, loc_remark])
                 load_location_data.clear()
+                
+                # Reset if manual entry was arriving HOME
+                if specific_place.strip().upper() == "HOME" and move == "- Stationary -":
+                    st.session_state.current_people = "I"
+                    
                 st.success("Logged successfully!")
                 st.session_state.locked_date = get_ist_now().date()
                 st.session_state.locked_time = get_ist_now().time()

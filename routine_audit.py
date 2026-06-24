@@ -53,9 +53,9 @@ def get_activity_log():
     data = get_main_spreadsheet().worksheet("activity_log").get_all_values()
     if len(data) <= 1: return pd.DataFrame(columns=["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"])
     df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 8: df[df.shape[1]] = ""
-    df = df.iloc[:, :8]
-    df.columns = ["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes"]
+    while df.shape[1] < 12: df[df.shape[1]] = ""
+    df = df.iloc[:, :12]
+    df.columns = ["Date", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "Notes", "Role", "Urgent", "Important", "Energy_Level"]
     df = df[df["Date"].astype(str).str.strip() != ""] 
     return df
 

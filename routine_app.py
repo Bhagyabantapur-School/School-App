@@ -951,17 +951,22 @@ try:
                         st.markdown(f"<div style='text-align:center; color:#888; font-size:13px; margin-bottom:5px; font-weight:bold;'><i>⏳ This timer will automatically close in {mins_remaining} minutes.</i></div>", unsafe_allow_html=True)
                         st.markdown("<div style='text-align:center; color:#d84315; font-size:11px; margin-bottom:15px;'><i>📝 Note: Auto-Fix your sheet above if you start a new activity before this finishes!</i></div>", unsafe_allow_html=True)
                     else:
+                        # 1. Render the slider OUTSIDE the button block so it always exists
+                        st.markdown("<div style='margin-top: 10px; font-size: 13px; font-weight: bold;'>🔋 Energy Level Post-Task:</div>", unsafe_allow_html=True)
+                        energy_val = st.slider("Energy", 1, 10, 5, key=f"nrg_{sheet_row}", label_visibility="collapsed")
+
+                        # 2. Render the action buttons
                         col_stop, col_cancel = st.columns(2)
                         with col_stop:
                             if st.button("🛑 SAVE", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
                                 main_ss = get_cached_sheet("MY ROUTINE 2026")
                                 log_sheet = main_ss.worksheet("activity_log")
                                 
-                                # Update Time AND Energy Level (Column L is the 12th column)
+                                # Update Time
                                 try: log_sheet.update(range_name=f"C{sheet_row}:D{sheet_row}", values=[[now.strftime('%H:%M'), GS_FORMULA]], value_input_option="USER_ENTERED")
                                 except TypeError: log_sheet.update(f"C{sheet_row}:D{sheet_row}", [[now.strftime('%H:%M'), GS_FORMULA]], value_input_option="USER_ENTERED")
                                 
-                                # Push Energy Level to Column L (12)
+                                # 3. Save the Energy value to Column L (12th column)
                                 log_sheet.update_cell(sheet_row, 12, energy_val)
                                 
                                 if str(active_row['Notes']).strip() == "": log_sheet.update_cell(sheet_row, 8, "Auto-logged via Timer") 

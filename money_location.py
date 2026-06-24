@@ -271,9 +271,15 @@ def sync_journey_state():
                         break
             st.session_state.last_used_route = recent_route
 
-            last_record = df_loc.iloc[-1].to_dict()
+           last_record = df_loc.iloc[-1].to_dict()
             move_val = str(last_record.get('Move', '')).strip()
-            st.session_state.current_people = str(last_record.get('People', 'I'))
+            place_val = str(last_record.get('Place', '')).strip().upper()
+            
+            # --- Auto-Default to "I" if at HOME ---
+            if move_val in ["", "- Stationary -", "nan"] and place_val == "HOME":
+                st.session_state.current_people = "I"
+            else:
+                st.session_state.current_people = str(last_record.get('People', 'I'))
             
             if move_val not in ["", "- Stationary -", "nan"]:
                 st.session_state.route_active = True

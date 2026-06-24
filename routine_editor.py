@@ -106,9 +106,9 @@ def auto_adjust_schedule(df):
 def get_routine_data():
     data = get_sheet("routine_master").get_all_values()
     df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 8: df[df.shape[1]] = ""
-    df = df.iloc[:, :8]
-    df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App"]
+    while df.shape[1] < 12: df[df.shape[1]] = ""
+    df = df.iloc[:, :12]
+    df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Role", "Urgent", "Important", "Energy_Level"]
     df = df[df["Day"].astype(str).str.strip() != ""]
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
     df = auto_adjust_schedule(df)

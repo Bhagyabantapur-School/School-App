@@ -195,7 +195,6 @@ def get_last_done_str(item_name, log_df, now, col_name='Sub_Activities'):
     elif diff.seconds >= 60: return f"{diff.seconds // 60}m ago"
     else: return "Just now"
 
-# --- RESTORED THE TWO MISSING FUNCTIONS HERE ---
 def get_app_time_str(app_name, tracker_data, now_dt):
     val = tracker_data.get(app_name, "")
     if not val: return "Never"
@@ -210,11 +209,9 @@ def get_app_time_str(app_name, tracker_data, now_dt):
     except: return "N/A"
 
 def log_and_open_app(app_name, target_file, cached_data, now_dt):
-    # Optimistically updates local UI, main.py handles the Google Sheet logging!
     now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
     cached_data[app_name] = now_str 
     st.switch_page(target_file) 
-# ------------------------------------------------
 
 # ==========================================
 # Main Logic
@@ -727,7 +724,8 @@ try:
                 with st.expander(header_text, expanded=False):
                     for idx_task, (dt, r, time_text, is_overdue) in enumerate(upcoming_ui_elements_raw):
                         item_bg = "#d32f2f" if is_overdue else "#0068c9" 
-                        st.markdown(f'<div style="background-color: {item_bg}; color: white; padding: 12px; border-radius: 6px; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);"><strong style="font-size: 16px;">{r["Task_Name"]} ({r["Activity"]})</strong><br><span style="font-size: 14px; opacity: 0.95;">{time_text}</span></div>', unsafe_allow_html=True)
+                        
+                        st.markdown(f'<div style="background-color: {item_bg}; color: white; padding: 8px 12px; border-radius: 6px; margin-bottom: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);"><strong style="font-size: 15px;">{r["Task_Name"]} - {time_text}</strong> <span style="font-size: 13px; opacity: 0.9;">({r["Activity"]})</span></div>', unsafe_allow_html=True)
                         
                         col_run, col_manage = st.columns(2)
                         with col_run:
@@ -773,7 +771,8 @@ try:
                                             smart_append_row(main_ss.worksheet("activity_log"), [today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), GS_FORMULA, str(r['Activity']).upper(), "", f"{r['Task_Name']} [CANCELED]", f"Cancel Reason: {cancel_reason}"])
                                             get_all_ecosystem_data.clear() 
                                             st.rerun()
-                        if idx_task < len(upcoming_ui_elements_raw) - 1: st.markdown('<hr style="margin: 5px 0px 15px 0px; border: 0; border-top: 1px solid #eee;">', unsafe_allow_html=True)
+                        
+                        if idx_task < len(upcoming_ui_elements_raw) - 1: st.markdown('<div style="margin-bottom: 8px;"></div>', unsafe_allow_html=True)
                 st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
 
             future_holidays = holidays_df[holidays_df['Date_dt'].dt.date > now.date()].sort_values('Date_dt')
@@ -951,22 +950,18 @@ try:
                         st.markdown(f"<div style='text-align:center; color:#888; font-size:13px; margin-bottom:5px; font-weight:bold;'><i>⏳ This timer will automatically close in {mins_remaining} minutes.</i></div>", unsafe_allow_html=True)
                         st.markdown("<div style='text-align:center; color:#d84315; font-size:11px; margin-bottom:15px;'><i>📝 Note: Auto-Fix your sheet above if you start a new activity before this finishes!</i></div>", unsafe_allow_html=True)
                     else:
-                        # 1. Render the slider OUTSIDE the button block so it always exists
                         st.markdown("<div style='margin-top: 10px; font-size: 13px; font-weight: bold;'>🔋 Energy Level Post-Task:</div>", unsafe_allow_html=True)
                         energy_val = st.slider("Energy", 1, 10, 5, key=f"nrg_{sheet_row}", label_visibility="collapsed")
 
-                        # 2. Render the action buttons
                         col_stop, col_cancel = st.columns(2)
                         with col_stop:
                             if st.button("🛑 SAVE", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
                                 main_ss = get_cached_sheet("MY ROUTINE 2026")
                                 log_sheet = main_ss.worksheet("activity_log")
                                 
-                                # Update Time
                                 try: log_sheet.update(range_name=f"C{sheet_row}:D{sheet_row}", values=[[now.strftime('%H:%M'), GS_FORMULA]], value_input_option="USER_ENTERED")
                                 except TypeError: log_sheet.update(f"C{sheet_row}:D{sheet_row}", [[now.strftime('%H:%M'), GS_FORMULA]], value_input_option="USER_ENTERED")
                                 
-                                # 3. Save the Energy value to Column L (12th column)
                                 log_sheet.update_cell(sheet_row, 12, energy_val)
                                 
                                 if str(active_row['Notes']).strip() == "": log_sheet.update_cell(sheet_row, 8, "Auto-logged via Timer") 
@@ -1049,7 +1044,6 @@ try:
                 f_type = st.radio("Task Type", ["Checklist", "Sub-Activity"], horizontal=True, key="f_type")
                 f_name = st.text_input("Task Details", placeholder="e.g., Pay Electricity Bill", key="f_name")
                 
-                # -- NEW: Dual-Mode Strategy Inputs for Future Tasks --
                 st.markdown("**Context & Expected Energy**")
                 col_f1, col_f2, col_f3 = st.columns([2, 1, 1])
                 with col_f1:
@@ -1059,7 +1053,6 @@ try:
                 
                 f_energy = st.slider("Expected Energy Requirement", 1, 10, 5, key="f_energy", help="1 = Routine/Draining, 10 = High Focus/Creative")
                 st.markdown("<hr style='margin: 10px 0px;'>", unsafe_allow_html=True)
-                # ----------------------------------------------------
 
                 time_opts = [f"{str(h).zfill(2)}:{str(m).zfill(2)}" for h in range(24) for m in range(60)]
                 col1, col2 = st.columns(2)
@@ -1071,7 +1064,6 @@ try:
                     if f_name:
                         main_ss = get_cached_sheet("MY ROUTINE 2026")
                         
-                        # -- UPDATED APPEND WITH 12 COLUMNS --
                         smart_append_row(main_ss.worksheet("future_tasks"), [
                             f_date.strftime('%Y-%m-%d'), 
                             f_time.strftime('%H:%M'), 
@@ -1081,10 +1073,10 @@ try:
                             "Personal", 
                             "Pending", 
                             "",
-                            f_role,         # Col 9: Role
-                            str(f_urg),     # Col 10: Urgent
-                            str(f_imp),     # Col 11: Important
-                            f_energy        # Col 12: Energy_Level
+                            f_role,         
+                            str(f_urg),     
+                            str(f_imp),     
+                            f_energy        
                         ])
                         get_all_ecosystem_data.clear() 
                         st.success("Future Task Scheduled with Matrix Data!")
@@ -1097,7 +1089,6 @@ try:
             unique_acts = sorted(list(set([a.strip().upper() for a in df['Activity'] if a.strip()])))
             log_date = st.date_input("Date", value=now.date(), key="log_date")
             
-            # -- NEW: Dual-Mode Strategy Inputs --
             st.markdown("**Context & Matrix**")
             col_r1, col_r2, col_r3 = st.columns([2, 1, 1])
             with col_r1: 
@@ -1105,7 +1096,6 @@ try:
             with col_r2: log_urg = st.checkbox("🔥 Urgent", key="log_urg")
             with col_r3: log_imp = st.checkbox("⭐ Important", key="log_imp")
             
-            # -- Existing Activity Inputs --
             col_act1, col_act2 = st.columns(2)
             with col_act1: 
                 default_act_idx = unique_acts.index(current_activity) + 1 if current_activity in unique_acts else 0
@@ -1148,7 +1138,6 @@ try:
             if st.button("💾 Save to Activity Log", use_container_width=True, type="primary"):
                 if log_activity:
                     main_ss = get_cached_sheet("MY ROUTINE 2026")
-                    # -- UPDATED APPEND WITH 12 COLUMNS --
                     smart_append_row(main_ss.worksheet("activity_log"), [
                         log_date.strftime('%Y-%m-%d'), f"{s_hour}:{s_min}", f"{e_hour}:{e_min}", GS_FORMULA, 
                         log_activity.upper().strip(), log_sub_activity.title().strip(), log_chk.strip(), log_notes,

@@ -20,7 +20,7 @@ personal_apps = [
     "Project App", "Election Duty", "Monthly Tracker", "Money Tracker", 
     "Product Inventory", "Health Hub", "Backup Tracker", "Routine Audit", 
     "Routine Editor", "MDM Returns", "Video Manager", "Trace Inventory", 
-    "Sleep & Water", "Packing Tracker", "Visual Dashboard", "App Updater" # <-- MOVED HERE
+    "Sleep & Water", "Packing Tracker", "App Updater", "Visual Dashboard" # <-- Dashboard moved to the end
 ]
 
 bps_apps = [
@@ -164,8 +164,8 @@ ytfb_videos = st.Page("bps_ytfb_videos.py", title="Video Manager", icon="🎬", 
 trace_app = st.Page("trace.py", title="Trace Inventory", icon="🏷️", default=is_default("Trace Inventory", "Personal Hub"))
 sleep_water = st.Page("sleep_water_app.py", title="Sleep & Water", icon="💧", default=is_default("Sleep & Water", "Personal Hub"))
 packing_tracker = st.Page("packing_app.py", title="Packing Tracker", icon="🎒", default=is_default("Packing Tracker", "Personal Hub")) 
+app_updater = st.Page("app_update.py", title="App Updater", icon="🔄", default=is_default("App Updater", "Personal Hub"))
 visual_dashboard = st.Page("dashboard.py", title="Visual Dashboard", icon="🚀", default=is_default("Visual Dashboard", "Personal Hub"))
-app_updater = st.Page("app_update.py", title="App Updater", icon="🔄", default=is_default("App Updater", "Personal Hub")) # <-- TIED TO PERSONAL HUB
 
 # --- BPS Digital Pages ---
 bps_dashboard = st.Page("bps_dashboard.py", title="Main Dashboard", icon="🏫", default=is_default("Main Dashboard", "BPS Digital System"))
@@ -188,8 +188,8 @@ if system_choice == 'Personal Hub':
             routine_hub, money_location, money_utilities, 
             strong, project, election, monthly, money_tracker, product_inventory,
             health, backup, routine_audit, routine_editor, 
-            mdm_return, ytfb_videos, trace_app, sleep_water, packing_tracker, visual_dashboard,
-            app_updater # <-- ADDED TO PERSONAL NAVIGATION
+            mdm_return, ytfb_videos, trace_app, sleep_water, packing_tracker,
+            app_updater, visual_dashboard # <-- Dashboard moved to the end here as well
         ]
     })
     st.sidebar.caption("🔒 Personal Workspace Active")

@@ -5,9 +5,10 @@ import pytz
 from datetime import datetime
 
 # --- 1. AUTHENTICATION SETUP ---
-# Define the Google Sheets API scope
+# To search by name, BOTH Sheets and Drive APIs must be in the scope
 scopes = [
     "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
 ]
 
 # Fetch the credentials from Streamlit Secrets
@@ -22,23 +23,24 @@ except Exception as e:
     st.error(f"Authentication failed. Please check your Streamlit Secrets. Error: {e}")
     st.stop()
 
-# --- 2. CONNECT TO THE SHEET (BYPASSING DRIVE API ERROR) ---
-# IMPORTANT: Replace the string below with the EXACT full URL of your "APP UPDATE" Google Sheet
-# It should look something like: "https://docs.google.com/spreadsheets/d/1A2b3C4d5E.../edit"
-SHEET_URL = "PASTE_YOUR_GOOGLE_SHEET_URL_HERE" 
+# --- 2. CONNECT TO THE SHEET BY NAME ---
+SHEET_NAME = "APP UPDATE" 
 
 try:
-    # Use open_by_url to completely bypass the Google Drive API search
-    sheet = client.open_by_url(SHEET_URL)
+    # This searches Google Drive for the exact name
+    sheet = client.open(SHEET_NAME)
     
-    # Connect to the "Update" tab based on your CSV structure
+    # Connect to the "Update" tab
     worksheet = sheet.worksheet("Update") 
     
 except gspread.exceptions.APIError as e:
-    st.error(f"API Error. Ensure the Service Account email is added as an 'Editor' to the Sheet. Details: {e}")
+    st.error(f"API Error. Ensure the 'Google Drive API' is enabled in your Google Cloud Project, and the Service Account is an Editor on the Sheet. Details: {e}")
     st.stop()
-except Exception as e:
-    st.error(f"Could not connect to the Sheet or Tab. Please check the URL and tab name. Details: {e}")
+except gspread.exceptions.SpreadsheetNotFound:
+    st.error(f"Could not find a Google Sheet named '{SHEET_NAME}'. Make sure you shared it with the service account email.")
+    st.stop()
+except gspread.exceptions.WorksheetNotFound:
+    st.error("Could not find a tab named 'Update' in the sheet.")
     st.stop()
 
 # --- 3. TIMEZONE CONFIGURATION ---

@@ -68,3 +68,12 @@ with r6_col2:
     if st.button("📦 Product Inventory", use_container_width=True): st.switch_page("product_inventory.py")
 with r6_col3:
     if st.button("🎒 Packing Tracker", use_container_width=True): st.switch_page("packing_app.py")
+
+# ROW 7
+r7_col1, r7_col2, r7_col3 = st.columns(3)
+with r7_col1:
+    if st.button("🔄 App Updater", use_container_width=True): st.switch_page("app_update.py")
+with r7_col2:
+    st.empty() # Placeholder for future apps
+with r7_col3:
+    st.empty() # Placeholder for future apps

@@ -49,28 +49,27 @@ with st.form("update_form", clear_on_submit=True):
     
     with col1:
         date_input = st.date_input("Date", value=current_ist.date())
-        # Added step=60 for 1-minute granularity
-        time_input = st.time_input("Time", value=current_ist.time(), step=60)
+        time_input = st.time_input("Time", value=current_ist.time(), step=60) # 1-min intervals
         
         app_input = st.text_input("App Name")
         details_input = st.text_area("Details of Update")
-        
         ai_input = st.text_input("AI Used (e.g., Gemini)")
         ai_answer = st.text_area("AI Answer")
         
     with col2:
+        # Put "Short Description" back in its place
         short_input = st.text_input("Short Description")
+        
         lines_input = st.number_input("Lines of Code", min_value=0, step=1)
         features_input = st.text_input("Features Added")
-        
         selected_ai = st.text_area("Selected AI Content (Paste the line here)")
-        
         chat_input = st.text_input("Chat Reference / Link")
 
     submitted = st.form_submit_button("Save to Google Sheet")
 
     # --- 5. APPEND DATA LOGIC ---
     if submitted:
+        # Exactly 11 items to match your Google Sheet
         row_data = [
             str(date_input),
             str(time_input.strftime("%H:%M:%S")),
@@ -78,7 +77,7 @@ with st.form("update_form", clear_on_submit=True):
             details_input,
             ai_input,
             ai_answer,       
-            short_input,
+            short_input,     # Added back
             lines_input,
             features_input,
             selected_ai,     

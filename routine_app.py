@@ -529,9 +529,10 @@ try:
                     st.rerun()
             st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
 
+    # --- UPDATED APP GROUPS ---
     app_groups = {
-        "MONEY": [("Money & Location", "money_location.py", "📍"), ("Money Utilities", "money_utilities.py", "💳"), ("Money Tracker", "money_tracker.py", "💵"), ("Product Inventory", "product_inventory.py", "📦")],
-        "LOCATION": [("Packing Tracker", "packing_app.py", "🎒")],
+        "MONEY": [("Money App", "money_app.py", "💰"), ("Money Utilities", "money_utilities.py", "💳"), ("Money Tracker", "money_tracker.py", "💵"), ("Product Inventory", "product_inventory.py", "📦")],
+        "LOCATION": [("Location App", "location_app.py", "📍"), ("Packing Tracker", "packing_app.py", "🎒")],
         "ROUTINE": [("Live Routine Hub", "routine_app.py", "⏱️"), ("Routine Audit", "routine_audit.py", "🔍"), ("Routine Editor", "routine_editor.py", "✏️"), ("Project App", "project_app.py", "🚀")],
         "HEALTH": [("Health Hub", "health_app.py", "❤️"), ("Sleep & Water", "sleep_water_app.py", "💧")],
         "SCH WORK": [("MDM Returns", "mdm_return_log.py", "📦"), ("Video Manager", "bps_ytfb_videos.py", "🎬")],

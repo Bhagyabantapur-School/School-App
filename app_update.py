@@ -38,7 +38,6 @@ if "update_data" not in st.session_state:
     except:
         st.session_state.update_data = []
 
-# NEW: Cache the Common data for the viewing tab
 if "common_data" not in st.session_state:
     try:
         st.session_state.common_data = worksheet_common.get_all_values()
@@ -75,7 +74,6 @@ current_ist = datetime.now(ist)
 st.title("BPS Digital - App & Feature Logger")
 st.write("Manage app updates and reusable common features.")
 
-# Expanded to 4 Tabs
 tab1, tab2, tab3, tab4 = st.tabs([
     "🚀 Log App Update", 
     "🧩 Log Common Feature", 
@@ -161,7 +159,6 @@ with tab2:
             ]
             try:
                 worksheet_common.append_row(row_data_common)
-                # Instantly update local cache
                 st.session_state.common_data.append(row_data_common)
                 st.success("Successfully logged the feature to the 'Common' tab!")
             except Exception as e:
@@ -174,29 +171,28 @@ with tab3:
     st.subheader("App Update History")
     
     if len(st.session_state.update_data) > 1:
-        # Skip the header row
         records = st.session_state.update_data[1:] 
         
-        # Group records by App Name (Index 2 in your sheet)
         app_groups = {}
         for row in records:
-            if len(row) > 8: # Ensure row is fully populated
+            if len(row) > 8: 
                 app_name = str(row[2]).strip()
                 if app_name not in app_groups:
                     app_groups[app_name] = []
                 app_groups[app_name].append(row)
                 
-        # Display each group as an accordion/expander
         for app_name, logs in sorted(app_groups.items()):
             with st.expander(f"📱 {app_name} ({len(logs)} updates)"):
-                for log in reversed(logs): # Show newest updates first
+                for log in reversed(logs): 
                     date_val = log[0]
                     features_added = log[8]
-                    details = log[3]
+                    
+                    # --- CHANGED: Now grabbing Short Description (index 6) instead of Details (index 3) ---
+                    short_desc = log[6] if len(log) > 6 else ""
                     
                     st.markdown(f"**Date:** {date_val} | **Features:** {features_added}")
-                    if details:
-                        st.caption(f"**Details:** {details}")
+                    if short_desc:
+                        st.caption(f"**Short:** {short_desc}")
                     st.divider()
     else:
         st.info("No app updates logged yet.")
@@ -209,13 +205,10 @@ with tab4:
     st.write("Click on a feature to update where it is being used.")
     
     if len(st.session_state.common_data) > 1:
-        # Skip the header row
         records = st.session_state.common_data[1:]
         
-        # Enumerate to track the exact row number in Google Sheets
         for index, row in enumerate(records):
             if len(row) > 7:
-                # The Google Sheet row is index + 2 (because index 0 is row 2 in the sheet)
                 sheet_row = index + 2 
                 feature_name = str(row[2]).strip()
                 current_apps = str(row[7]).strip()
@@ -224,7 +217,6 @@ with tab4:
                     st.markdown(f"**Original Prompt:** {row[4]}")
                     st.markdown(f"**First used in:** `{row[5]}`")
                     
-                    # Create a unique form to update just this specific row
                     with st.form(key=f"edit_common_{sheet_row}"):
                         new_apps = st.text_area(
                             "Use in other app (Update list here)", 
@@ -234,14 +226,10 @@ with tab4:
                         
                         if st.form_submit_button("Update App List"):
                             try:
-                                # Update only Column 8 (Column H) on this specific row
                                 worksheet_common.update_cell(sheet_row, 8, new_apps)
-                                
-                                # Update the local cache so the app doesn't need to reload from Google
                                 st.session_state.common_data[sheet_row - 1][7] = new_apps
-                                
                                 st.success("Updated successfully!")
-                                st.rerun() # Refresh the UI instantly to show changes
+                                st.rerun() 
                             except Exception as e:
                                 st.error(f"Failed to update Google Sheet: {e}")
     else:

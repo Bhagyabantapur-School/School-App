@@ -38,6 +38,13 @@ if "update_data" not in st.session_state:
     except:
         st.session_state.update_data = []
 
+# NEW: Cache the Common data for the viewing tab
+if "common_data" not in st.session_state:
+    try:
+        st.session_state.common_data = worksheet_common.get_all_values()
+    except:
+        st.session_state.common_data = []
+
 def get_dropdown_options(column_index):
     if not st.session_state.update_data or len(st.session_state.update_data) <= 1:
         return []
@@ -66,12 +73,18 @@ current_ist = datetime.now(ist)
 
 # --- 5. STREAMLIT USER INTERFACE ---
 st.title("BPS Digital - App & Feature Logger")
-st.write("Submit new app updates or log reusable common features directly to the Google Sheet.")
+st.write("Manage app updates and reusable common features.")
 
-tab1, tab2 = st.tabs(["🚀 Log App Update", "🧩 Log Common Feature"])
+# Expanded to 4 Tabs
+tab1, tab2, tab3, tab4 = st.tabs([
+    "🚀 Log App Update", 
+    "🧩 Log Common Feature", 
+    "📊 View Updates", 
+    "🛠️ Manage Common Features"
+])
 
 # ==========================================
-# TAB 1: THE APP UPDATE LOGGER (Interactive Mode)
+# TAB 1: THE APP UPDATE LOGGER 
 # ==========================================
 with tab1:
     st.info("💡 Select an existing option from the dropdowns, or choose '➕ Add New...' to type a new one.")
@@ -112,20 +125,9 @@ with tab1:
 
     if st.button("Save Update to Google Sheet", type="primary"):
         row_data_update = [
-            str(date_input),
-            str(time_input.strftime("%H:%M:%S")),
-            app_input,
-            details_input,
-            ai_input,
-            ai_answer,       
-            short_input,     
-            lines_input,
-            features_input,
-            selected_ai,     
-            chat_input,
-            gs_input         
+            str(date_input), str(time_input.strftime("%H:%M:%S")), app_input, details_input,
+            ai_input, ai_answer, short_input, lines_input, features_input, selected_ai, chat_input, gs_input         
         ]
-        
         try:
             worksheet_update.append_row(row_data_update)
             st.session_state.update_data.append(row_data_update) 
@@ -134,7 +136,7 @@ with tab1:
             st.error(f"An error occurred while saving: {e}")
 
 # ==========================================
-# TAB 2: THE COMMON FEATURE LOGGER (Standard Form)
+# TAB 2: THE COMMON FEATURE LOGGER 
 # ==========================================
 with tab2:
     with st.form("common_form", clear_on_submit=True):
@@ -144,31 +146,103 @@ with tab2:
             date_input_common = st.date_input("Date", value=current_ist.date(), key="d_com")
             time_input_common = st.time_input("Time", value=current_ist.time(), step=60, key="t_com") 
             common_feature = st.text_input("Common Feature Name")
-            
-            # --- NEW FIELD ADDED HERE ---
             ask_for_prompt = st.text_area("Ask for the Prompt (How you asked AI)")
             
         with col4:
-            # Moved Prompt over to the right side to balance the layout perfectly 4 and 4
             prompt_input = st.text_area("Prompt (The resulting AI instruction)")
             used_in_app = st.text_input("Used in App (Where it was first used)")
             chat_input_common = st.text_input("Chat Name")
             use_in_other = st.text_area("Use in other app (Add names as you use this in the future)")
 
         if st.form_submit_button("Save Feature to Google Sheet"):
-            # Ensure this perfectly matches your new 8-column layout in Google Sheets
             row_data_common = [
-                str(date_input_common),
-                str(time_input_common.strftime("%H:%M:%S")),
-                common_feature,
-                ask_for_prompt,  # Inserted in the 4th column
-                prompt_input,
-                used_in_app,
-                chat_input_common,
-                use_in_other
+                str(date_input_common), str(time_input_common.strftime("%H:%M:%S")),
+                common_feature, ask_for_prompt, prompt_input, used_in_app, chat_input_common, use_in_other
             ]
             try:
                 worksheet_common.append_row(row_data_common)
+                # Instantly update local cache
+                st.session_state.common_data.append(row_data_common)
                 st.success("Successfully logged the feature to the 'Common' tab!")
             except Exception as e:
                 st.error(f"An error occurred while saving: {e}")
+
+# ==========================================
+# TAB 3: VIEW UPDATES BY APP (Grouped Layout)
+# ==========================================
+with tab3:
+    st.subheader("App Update History")
+    
+    if len(st.session_state.update_data) > 1:
+        # Skip the header row
+        records = st.session_state.update_data[1:] 
+        
+        # Group records by App Name (Index 2 in your sheet)
+        app_groups = {}
+        for row in records:
+            if len(row) > 8: # Ensure row is fully populated
+                app_name = str(row[2]).strip()
+                if app_name not in app_groups:
+                    app_groups[app_name] = []
+                app_groups[app_name].append(row)
+                
+        # Display each group as an accordion/expander
+        for app_name, logs in sorted(app_groups.items()):
+            with st.expander(f"📱 {app_name} ({len(logs)} updates)"):
+                for log in reversed(logs): # Show newest updates first
+                    date_val = log[0]
+                    features_added = log[8]
+                    details = log[3]
+                    
+                    st.markdown(f"**Date:** {date_val} | **Features:** {features_added}")
+                    if details:
+                        st.caption(f"**Details:** {details}")
+                    st.divider()
+    else:
+        st.info("No app updates logged yet.")
+
+# ==========================================
+# TAB 4: MANAGE COMMON FEATURES (Editable Layout)
+# ==========================================
+with tab4:
+    st.subheader("Manage Common Features")
+    st.write("Click on a feature to update where it is being used.")
+    
+    if len(st.session_state.common_data) > 1:
+        # Skip the header row
+        records = st.session_state.common_data[1:]
+        
+        # Enumerate to track the exact row number in Google Sheets
+        for index, row in enumerate(records):
+            if len(row) > 7:
+                # The Google Sheet row is index + 2 (because index 0 is row 2 in the sheet)
+                sheet_row = index + 2 
+                feature_name = str(row[2]).strip()
+                current_apps = str(row[7]).strip()
+                
+                with st.expander(f"🧩 {feature_name}"):
+                    st.markdown(f"**Original Prompt:** {row[4]}")
+                    st.markdown(f"**First used in:** `{row[5]}`")
+                    
+                    # Create a unique form to update just this specific row
+                    with st.form(key=f"edit_common_{sheet_row}"):
+                        new_apps = st.text_area(
+                            "Use in other app (Update list here)", 
+                            value=current_apps, 
+                            help="Add or edit the names of apps using this feature."
+                        )
+                        
+                        if st.form_submit_button("Update App List"):
+                            try:
+                                # Update only Column 8 (Column H) on this specific row
+                                worksheet_common.update_cell(sheet_row, 8, new_apps)
+                                
+                                # Update the local cache so the app doesn't need to reload from Google
+                                st.session_state.common_data[sheet_row - 1][7] = new_apps
+                                
+                                st.success("Updated successfully!")
+                                st.rerun() # Refresh the UI instantly to show changes
+                            except Exception as e:
+                                st.error(f"Failed to update Google Sheet: {e}")
+    else:
+        st.info("No common features logged yet.")

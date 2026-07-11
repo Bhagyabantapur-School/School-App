@@ -121,6 +121,24 @@ def get_routine_data():
     df = auto_adjust_schedule(df)
     return df
 
+@st.cache_data(ttl=300)
+def get_activity_master():
+    try:
+        sheet = get_main_spreadsheet().worksheet("activity_master")
+    except gspread.exceptions.WorksheetNotFound:
+        spreadsheet = get_main_spreadsheet()
+        sheet = spreadsheet.add_worksheet(title="activity_master", rows="100", cols="3")
+        sheet.update(values=[["Activity", "Sub_Activity", "Duration_Mins"]], range_name="A1")
+        return pd.DataFrame(columns=["Activity", "Sub_Activity", "Duration_Mins"])
+        
+    data = sheet.get_all_values()
+    if len(data) <= 1:
+        return pd.DataFrame(columns=["Activity", "Sub_Activity", "Duration_Mins"])
+    
+    df = pd.DataFrame(data[1:], columns=data[0])
+    df['Duration_Mins'] = pd.to_numeric(df['Duration_Mins'], errors='coerce').fillna(0)
+    return df
+
 # Helper formatting function for summary duration
 def format_mins(total_mins):
     h = int(total_mins) // 60
@@ -140,9 +158,90 @@ def format_matrix_mins(total_mins):
 # ==========================================
 try:
     df = get_routine_data()
+    act_master_df = get_activity_master()
+
+    # Consolidate standard options and Builder DB options to feed Tab 1 dropdowns dynamically
+    all_acts_db = df['Activity'].dropna().tolist()
+    all_acts_builder = act_master_df['Activity'].dropna().tolist()
+    all_acts = sorted(list(set([str(x).strip().upper() for x in all_acts_db + all_acts_builder if str(x).strip()])))
+    
+    all_subs_db = [x.strip() for items in df['Sub_Activities'].dropna() for x in str(items).split(',') if x.strip()]
+    all_subs_builder = act_master_df['Sub_Activity'].dropna().tolist()
+    all_subs = sorted(list(set([str(x).strip() for x in all_subs_db + all_subs_builder if str(x).strip()])))
 
     # Create Tabs for the Interface
-    tab_editor, tab_summary = st.tabs(["⚙️ Routine Editor", "📊 Routine Summary"])
+    tab_editor, tab_summary, tab_builder = st.tabs(["⚙️ Routine Editor", "📊 Routine Summary", "🏗️ Activity Builder"])
+
+    # ==========================================
+    # TAB 3: ACTIVITY BUILDER
+    # ==========================================
+    with tab_builder:
+        st.markdown("### 🏗️ Activity Database & Time Pool")
+        st.info("💡 Create your Activity categories and sub-activities here. Assign expected durations to track your 24-hour capacity. Items added here automatically sync to the Editor dropdowns.")
+        
+        total_used = act_master_df['Duration_Mins'].sum()
+        remaining = 1440 - total_used
+        
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric("Total Day Limit", "24h 0m")
+        col_m2.metric("Total Allocated", format_mins(total_used))
+        col_m3.metric("Remaining Time", format_mins(max(0, remaining)))
+        
+        st.markdown("---")
+        col_add1, col_add2 = st.columns(2)
+        
+        with col_add1:
+            st.markdown("#### 1️⃣ Create New Parent Activity")
+            with st.form("create_act_form"):
+                new_act_input = st.text_input("New Activity Name", placeholder="e.g. MORNING ROUTINE").strip().upper()
+                if st.form_submit_button("➕ Add Activity", use_container_width=True):
+                    if new_act_input:
+                        if new_act_input not in act_master_df['Activity'].values:
+                            sheet = get_main_spreadsheet().worksheet("activity_master")
+                            sheet.append_row([new_act_input, "", 0])
+                            get_activity_master.clear()
+                            st.success(f"✅ Created Activity: {new_act_input}")
+                            time.sleep(1.5)
+                            st.rerun()
+                        else:
+                            st.warning("⚠️ Activity already exists.")
+                            
+        with col_add2:
+            st.markdown("#### 2️⃣ Add Dependent Sub-Activity")
+            with st.form("create_sub_form"):
+                existing_acts = sorted(list(act_master_df['Activity'].unique()))
+                if "" in existing_acts: existing_acts.remove("")
+                
+                sel_act = st.selectbox("Select Parent Activity", existing_acts)
+                new_sub_input = st.text_input("New Sub-Activity Name", placeholder="e.g. Meditation").strip()
+                sub_dur = st.number_input("Duration (Minutes)", min_value=1, max_value=1440, value=30, step=5)
+                
+                if st.form_submit_button("➕ Add Sub-Activity", use_container_width=True):
+                    if sel_act and new_sub_input:
+                        if sub_dur <= remaining:
+                            sheet = get_main_spreadsheet().worksheet("activity_master")
+                            sheet.append_row([sel_act, new_sub_input, sub_dur])
+                            get_activity_master.clear()
+                            st.success(f"✅ Added '{new_sub_input}' under '{sel_act}'")
+                            time.sleep(1.5)
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Cannot allocate {sub_dur} mins. Only {format_mins(remaining)} left in the day!")
+                            
+        st.markdown("---")
+        st.markdown("### 📋 Configured Activities & Durations")
+        
+        if not act_master_df.empty:
+            grouped = act_master_df.groupby("Activity")['Duration_Mins'].sum().sort_values(ascending=False)
+            for act, act_mins in grouped.items():
+                if not act: continue
+                with st.expander(f"📁 **{act}** | Sub-Activities Total: **{format_mins(act_mins)}**"):
+                    sub_df = act_master_df[(act_master_df['Activity'] == act) & (act_master_df['Sub_Activity'] != "")]
+                    if not sub_df.empty:
+                        for _, row in sub_df.iterrows():
+                            st.markdown(f"- 📄 {row['Sub_Activity']}: `{format_mins(row['Duration_Mins'])}`")
+                    else:
+                        st.markdown("*No sub-activities allocated yet.*")
 
     # ==========================================
     # TAB 2: ROUTINE SUMMARY
@@ -318,9 +417,7 @@ try:
 
         # --- 5. SMART EDITOR FORM ---
         sel_row = target_df[target_df['Start_Time'] == sel_start].iloc[0]
-
-        all_acts = sorted(list(set(df['Activity'].dropna().str.upper())))
-        all_subs = sorted(list(set([x.strip() for items in df['Sub_Activities'].dropna() for x in str(items).split(',') if x.strip()])))
+        
         all_chks = sorted(list(set([x.strip() for items in df['check_list'].dropna() for x in str(items).split(',') if x.strip()])))
         all_apps_db = sorted(list(set([x.strip() for items in df['App'].dropna() for x in str(items).split(',') if x.strip()])))
 

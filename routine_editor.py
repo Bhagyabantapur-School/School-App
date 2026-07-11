@@ -132,9 +132,7 @@ try:
     # TAB 2: ROUTINE SUMMARY
     # ==========================================
     with tab_summary:
-        st.markdown("### 📊 Weekly Routine Time Breakdown")
-        st.info("💡 **Note:** If a single time slot has multiple sub-activities, the full duration of that slot is attributed to each sub-activity listed.")
-
+        
         summary_df = df.copy()
         
         # Calculate raw minutes from the Duration column (HH:MM)
@@ -146,15 +144,33 @@ try:
                 return 0
                 
         summary_df['Dur_Mins'] = summary_df['Duration'].apply(parse_dur_to_mins)
+
+        # UI for selecting the Breakdown View
+        col_view1, col_view2 = st.columns([1, 1])
+        with col_view1:
+            view_mode = st.radio("Select Summary View Mode", ["Weekly Routine Breakdown", "Daily (24h) Breakdown"], horizontal=True)
+
+        if view_mode == "Daily (24h) Breakdown":
+            available_days_summary = list(summary_df['Day'].str.title().unique())
+            with col_view2:
+                selected_summary_day = st.selectbox("Select Specific Day", available_days_summary)
+            
+            filtered_summary_df = summary_df[summary_df['Day'].str.title() == selected_summary_day].copy()
+            st.markdown(f"### 📊 Daily Breakdown: {selected_summary_day}")
+        else:
+            filtered_summary_df = summary_df.copy()
+            st.markdown("### 📊 Weekly Routine Time Breakdown")
+
+        st.info("💡 **Note:** If a single time slot has multiple sub-activities, the full duration of that slot is attributed to each sub-activity listed.")
         
-        # Group by Top-Level Activity
-        activity_grouped = summary_df.groupby("Activity")['Dur_Mins'].sum().sort_values(ascending=False)
+        # Group by Top-Level Activity using the filtered dataframe
+        activity_grouped = filtered_summary_df.groupby("Activity")['Dur_Mins'].sum().sort_values(ascending=False)
         
         for act, act_mins in activity_grouped.items():
             act_name = str(act).strip() if str(act).strip() else "UNNAMED ACTIVITY"
             
             with st.expander(f"📁 **{act_name}**  |  Total Time: **{format_mins(act_mins)}**"):
-                act_df = summary_df[summary_df["Activity"] == act].copy()
+                act_df = filtered_summary_df[filtered_summary_df["Activity"] == act].copy()
                 
                 # Explode Sub-Activities so each comma-separated item gets its own grouping
                 act_df['Sub_List'] = act_df['Sub_Activities'].apply(

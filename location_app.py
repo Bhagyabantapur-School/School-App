@@ -214,7 +214,26 @@ sync_journey_state()
 # ==========================================
 st.title("📍 SK Location Tracker")
 
-current_loc, loc_duration = get_current_location_details()
+# --- NEW: LOCATION STATUS & SYNC BUTTON ---
+col_stat, col_sync = st.columns([3, 1])
+with col_stat:
+    current_loc, loc_duration = get_current_location_details()
+    if current_loc:
+        st.info(f"📍 **Current:** {current_loc} &nbsp;|&nbsp; ⏱️ **Duration:** {loc_duration}")
+    else:
+        st.info("📍 **Current:** In Transit / Unknown")
+
+with col_sync:
+    if st.button("🔄 Sync", use_container_width=True):
+        # Clear caches to pull fresh data from Sheets
+        load_location_data.clear()
+        # Delete synced state to force a re-evaluation of your current trip
+        if 'state_synced' in st.session_state:
+            del st.session_state.state_synced
+        st.rerun()
+
+st.divider()
+
 all_places_list = get_list("Places")
 
 if 'target_destination' not in st.session_state: st.session_state.target_destination = ""

@@ -7,7 +7,7 @@ from google.oauth2.service_account import Credentials
 # ==========================================
 # 1. SETUP & HELPER FUNCTIONS
 # ==========================================
-st.set_page_config(page_title="Data Config & Actions", page_icon="⚙️", layout="centered")
+st.set_page_config(page_title="Data Configuration", page_icon="⚙️", layout="centered")
 
 # --- BACK BUTTON ---
 if st.button("⬅️ Back to Hub", type="secondary"):
@@ -18,7 +18,6 @@ def get_ist_now():
     return datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
 
 if 'current_people' not in st.session_state: st.session_state.current_people = "I"
-if 'route_active' not in st.session_state: st.session_state.route_active = False
 
 @st.cache_resource
 def init_connection():
@@ -75,66 +74,19 @@ def sync_journey_state():
         
         if m_val in ["", "- Stationary -", "nan"] and p_val == "HOME": st.session_state.current_people = "I"
         else: st.session_state.current_people = str(last_rec.get('People', 'I'))
-        st.session_state.route_active = (m_val not in ["", "- Stationary -", "nan"])
 
 sync_journey_state()
 
 # ==========================================
 # APP LAYOUT
 # ==========================================
-st.title("⚙️ Quick Actions & Configuration")
+st.title("⚙️ Data Configuration")
 current_loc = get_current_location_details()
 all_places_list = get_list("Places")
 
 # ==========================================
-# QUICK ACTIONS
-# ==========================================
-st.markdown("### ⚡ Quick Actions")
-st.markdown('<div class="green-btn-hook"></div>', unsafe_allow_html=True)
-st.markdown("""
-    <style>
-    div:has(.green-btn-hook) + div + div button { background-color: #28a745 !important; color: white !important; border-color: #28a745 !important; }
-    div:has(.green-btn-hook) + div + div button:hover { background-color: #218838 !important; border-color: #1e7e34 !important; }
-    </style>
-""", unsafe_allow_html=True)
-
-def cb_board_bus():
-    try:
-        time_now = get_ist_now()
-        sh.worksheet("LOCATION_DATA").append_row([time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), "- Stationary -", "Girishmore Bus Stop", "I", "Suborno boarded bus to school"])
-        st.session_state.update(current_people="I")
-        load_location_data.clear()
-    except Exception as e: st.session_state.quick_err = str(e)
-
-def cb_receive_suborno():
-    try:
-        time_now = get_ist_now()
-        new_people = st.session_state.current_people + ", Suborno" if st.session_state.current_people else "I, Suborno"
-        sh.worksheet("LOCATION_DATA").append_row([time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), "- Stationary -", "Girishmore Bus Stop", new_people, "Received Suborno from school bus"])
-        st.session_state.update(current_people=new_people)
-        load_location_data.clear()
-    except Exception as e: st.session_state.quick_err = str(e)
-
-if "quick_err" in st.session_state:
-    st.error(f"Google Sheets Error: {st.session_state.quick_err}")
-    del st.session_state.quick_err
-
-time_now_for_btn = get_ist_now()
-
-if current_loc == "Girishmore Bus Stop" and "Suborno" in st.session_state.current_people and not st.session_state.route_active and (time_now_for_btn.hour == 8):
-    if st.button("🚌 Suborno Boarded Bus", use_container_width=True, type="primary", on_click=cb_board_bus):
-        st.success("Logged Suborno boarding bus. You are now traveling alone.")
-
-if current_loc == "Girishmore Bus Stop" and "Suborno" not in st.session_state.current_people and not st.session_state.route_active and (13 <= time_now_for_btn.hour <= 16):
-    if st.button("👦 Received Suborno from Bus", use_container_width=True, type="primary", on_click=cb_receive_suborno):
-        st.success("Logged Suborno arriving! Companions updated.")
-
-st.divider()
-
-# ==========================================
 # DATA CONFIGURATION
 # ==========================================
-st.markdown("### 📝 Data Setup")
 
 with st.expander("📝 Location Data Entry", expanded=True):
     ld_place_opts = all_places_list + ["-- Type New --"]

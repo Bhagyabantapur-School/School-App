@@ -29,6 +29,16 @@ st.markdown("""
         font-weight: bold;
         margin-bottom: 10px;
     }
+    .total-time-footer {
+        font-size: 20px;
+        font-weight: bold;
+        color: #0068c9;
+        background-color: #e3f2fd;
+        padding: 15px;
+        border-radius: 8px;
+        text-align: center;
+        margin-top: 20px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -119,6 +129,12 @@ def format_mins(total_mins):
         return f"{h}h {m}m"
     return f"{m}m"
 
+# Formatting function for matrix to hide zeros cleanly
+def format_matrix_mins(total_mins):
+    if pd.isna(total_mins) or total_mins == 0:
+        return "-"
+    return format_mins(total_mins)
+
 # ==========================================
 # Main Logic
 # ==========================================
@@ -144,6 +160,9 @@ try:
                 return 0
                 
         summary_df['Dur_Mins'] = summary_df['Duration'].apply(parse_dur_to_mins)
+        
+        # Clean 'Day' format just in case
+        summary_df['Day'] = summary_df['Day'].str.title()
 
         # UI for selecting the Breakdown View
         col_view1, col_view2 = st.columns([1, 1])
@@ -151,25 +170,57 @@ try:
             view_mode = st.radio("Select Summary View Mode", ["Weekly Routine Breakdown", "Daily (24h) Breakdown"], horizontal=True)
 
         if view_mode == "Daily (24h) Breakdown":
-            available_days_summary = list(summary_df['Day'].str.title().unique())
+            available_days_summary = list(summary_df['Day'].unique())
             with col_view2:
                 selected_summary_day = st.selectbox("Select Specific Day", available_days_summary)
             
-            filtered_summary_df = summary_df[summary_df['Day'].str.title() == selected_summary_day].copy()
+            filtered_summary_df = summary_df[summary_df['Day'] == selected_summary_day].copy()
             st.markdown(f"### 📊 Daily Breakdown: {selected_summary_day}")
+            st.info("💡 **Note:** If a single time slot has multiple sub-activities, the full duration of that slot is attributed to each sub-activity listed.")
+            
         else:
             filtered_summary_df = summary_df.copy()
-            st.markdown("### 📊 Weekly Routine Time Breakdown")
-
-        st.info("💡 **Note:** If a single time slot has multiple sub-activities, the full duration of that slot is attributed to each sub-activity listed.")
+            
+            # --- WEEKLY MATRIX TABLE ---
+            st.markdown("### 🗓️ Weekly Activity Matrix")
+            
+            # Create a pivot table mapping Activity vs Day
+            pivot_df = summary_df.pivot_table(
+                index='Activity', 
+                columns='Day', 
+                values='Dur_Mins', 
+                aggfunc='sum', 
+                fill_value=0
+            )
+            
+            # Reorder and rename columns to MON - SUN
+            day_mapping = {
+                "Monday": "MON", "Tuesday": "TUE", "Wednesday": "WED", 
+                "Thursday": "THU", "Friday": "FRI", "Saturday": "SAT", "Sunday": "SUN"
+            }
+            ordered_days = [d for d in day_mapping.keys() if d in pivot_df.columns]
+            
+            pivot_df = pivot_df[ordered_days]
+            pivot_df.rename(columns=day_mapping, inplace=True)
+            
+            # Format the cells
+            for col in pivot_df.columns:
+                pivot_df[col] = pivot_df[col].apply(format_matrix_mins)
+                
+            st.dataframe(pivot_df, use_container_width=True)
+            
+            st.markdown("---")
+            st.markdown("### 📊 Expandable Breakdown")
+            st.info("💡 **Note:** If a single time slot has multiple sub-activities, the full duration of that slot is attributed to each sub-activity listed.")
         
+        # --- EXPANDABLE ACTIVITY LIST ---
         # Group by Top-Level Activity using the filtered dataframe
         activity_grouped = filtered_summary_df.groupby("Activity")['Dur_Mins'].sum().sort_values(ascending=False)
         
         for act, act_mins in activity_grouped.items():
             act_name = str(act).strip() if str(act).strip() else "UNNAMED ACTIVITY"
             
-            with st.expander(f"📁 **{act_name}**  |  Total Time: **{format_mins(act_mins)}**"):
+            with st.expander(f"📁 **{act_name}** |  Total Time: **{format_mins(act_mins)}**"):
                 act_df = filtered_summary_df[filtered_summary_df["Activity"] == act].copy()
                 
                 # Explode Sub-Activities so each comma-separated item gets its own grouping
@@ -192,6 +243,15 @@ try:
                         
                         display_df = slots_df[["Day", "Start_Time", "End_Time", "Duration"]]
                         st.dataframe(display_df, hide_index=True, use_container_width=True)
+
+        # --- GRAND TOTAL FOOTER ---
+        total_tracked_mins = filtered_summary_df['Dur_Mins'].sum()
+        context_label = "Total Tracked Time for " + (f"{selected_summary_day}" if view_mode == "Daily (24h) Breakdown" else "the Week")
+        
+        st.markdown(
+            f"<div class='total-time-footer'>⏱️ {context_label}: {format_mins(total_tracked_mins)}</div>", 
+            unsafe_allow_html=True
+        )
 
     # ==========================================
     # TAB 1: ROUTINE EDITOR

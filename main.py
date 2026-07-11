@@ -16,11 +16,11 @@ st.set_page_config(
 
 # 2. APP DICTIONARIES
 personal_apps = [
-    "Live Routine Hub", "Money & Location", "Money Utilities", "Strong Tracker", 
+    "Live Routine Hub", "Money App", "Location App", "Money Utilities", "Strong Tracker", 
     "Project App", "Election Duty", "Monthly Tracker", "Money Tracker", 
     "Product Inventory", "Health Hub", "Backup Tracker", "Routine Audit", 
     "Routine Editor", "MDM Returns", "Video Manager", "Trace Inventory", 
-    "Sleep & Water", "Packing Tracker", "App Updater", "Visual Dashboard" # <-- Dashboard moved to the end
+    "Sleep & Water", "Packing Tracker", "App Updater", "Visual Dashboard"
 ]
 
 bps_apps = [
@@ -147,7 +147,8 @@ def is_default(app_name, system_category):
 # ==========================================
 # --- Personal Pages ---
 routine_hub = st.Page("routine_app.py", title="Live Routine Hub", icon="⏱️", default=is_default("Live Routine Hub", "Personal Hub"))
-money_location = st.Page("money_location.py", title="Money & Location", icon="📍", default=is_default("Money & Location", "Personal Hub"))
+money_app = st.Page("money_app.py", title="Money App", icon="💰", default=is_default("Money App", "Personal Hub"))
+location_app = st.Page("location_app.py", title="Location App", icon="📍", default=is_default("Location App", "Personal Hub"))
 money_utilities = st.Page("money_utilities.py", title="Money Utilities", icon="💳", default=is_default("Money Utilities", "Personal Hub")) 
 strong = st.Page("strong.py", title="Strong Tracker", icon="💪", default=is_default("Strong Tracker", "Personal Hub"))
 project = st.Page("project_app.py", title="Project App", icon="🚀", default=is_default("Project App", "Personal Hub"))
@@ -182,15 +183,22 @@ form_manager = st.Page("form_manager.py", title="Form Manager", icon="📋", def
 staff_portal = st.Page("bps_digital_sk.py", title="Staff Portal", icon="🔐", default=is_default("Staff Portal", "BPS Digital System"))
 grocery_app = st.Page("bps_grocery_ad.py", title="Grocery Manager", icon="🥦", default=is_default("Grocery Manager", "BPS Digital System"))
 
+# ==========================================
+# 7. NAVIGATION
+# ==========================================
 if system_choice == 'Personal Hub':
+    # Updated Sidebar Grouping to match the Routine Hub Launchpad
     pg = st.navigation({
-        "My Personal Hub": [
-            routine_hub, money_location, money_utilities, 
-            strong, project, election, monthly, money_tracker, product_inventory,
-            health, backup, routine_audit, routine_editor, 
-            mdm_return, ytfb_videos, trace_app, sleep_water, packing_tracker,
-            app_updater, visual_dashboard # <-- Dashboard moved to the end here as well
-        ]
+        "MONEY": [money_app, money_utilities, money_tracker, product_inventory],
+        "LOCATION": [location_app, packing_tracker],
+        "ROUTINE": [routine_hub, routine_audit, routine_editor, project],
+        "HEALTH": [health, sleep_water],
+        "SCH WORK": [mdm_return, ytfb_videos],
+        "HOME": [trace_app, monthly],
+        "HARDWARE": [backup],
+        "BALANCE": [strong],
+        "ONES": [election, app_updater],
+        "DASHBOARD": [visual_dashboard]
     })
     st.sidebar.caption("🔒 Personal Workspace Active")
 else:
@@ -205,12 +213,12 @@ else:
     st.sidebar.caption("Head Teacher Dashboard Active")
 
 # ==========================================
-# 7. MASTER LOGGING TRIGGER
+# 8. MASTER LOGGING TRIGGER
 # ==========================================
 if pg.title != st.session_state.current_tracked_app and pg.title in all_apps:
     st.session_state.current_tracked_app = pg.title
     st.session_state.last_opened_app = pg.title
     log_app_change_bg(pg.title)
 
-# 8. RUN NAVIGATION
+# RUN NAVIGATION
 pg.run()

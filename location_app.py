@@ -188,23 +188,30 @@ def sync_journey_state():
                         break
             st.session_state.last_used_route = recent_route
 
-            last_rec = df_loc.iloc[-1].to_dict()
-            m_val, p_val = str(last_rec.get('Move','')).strip(), str(last_rec.get('Place','')).strip().upper()
+            last_record = df_loc.iloc[-1].to_dict()
+            move_val = str(last_record.get('Move','')).strip()
+            place_val = str(last_record.get('Place','')).strip().upper()
             
-            if m_val in ["", "- Stationary -", "nan"] and p_val == "HOME": st.session_state.current_people = "I"
-            else: st.session_state.current_people = str(last_rec.get('People', 'I'))
+            # --- Auto-Default to "I" if at HOME ---
+            if move_val in ["", "- Stationary -", "nan"] and place_val == "HOME":
+                st.session_state.current_people = "I"
+            else:
+                st.session_state.current_people = str(last_record.get('People', 'I'))
             
-            if m_val not in ["", "- Stationary -", "nan"]:
+            if move_val not in ["", "- Stationary -", "nan"]:
                 st.session_state.route_active = True
-                rem = str(last_rec.get('Remark',''))
+                rem = str(last_record.get('Remark', ''))
                 if "Started Route:" in rem:
                     st.session_state.active_route = rem.split("Started Route:")[-1].split("towards")[0].strip()
-                    if "towards" in rem: st.session_state.target_destination = rem.split("towards")[-1].strip()
+                    if "towards" in rem:
+                        st.session_state.target_destination = rem.split("towards")[-1].strip()
                     st.session_state.route_type = "Dynamic"
-                else: st.session_state.route_type = "Express" 
+                else:
+                    st.session_state.route_type = "Express" 
             else:
                 st.session_state.route_active = False
                 st.session_state.route_type = None
+                
         st.session_state.state_synced = True
 
 sync_journey_state()
@@ -563,6 +570,50 @@ with st.expander("🏫 Express School Route", expanded=False):
                 st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
+st.divider()
+
+# ==========================================
+# QUICK ACTIONS
+# ==========================================
+st.markdown("### ⚡ Quick Actions")
+st.markdown('<div class="green-btn-hook"></div>', unsafe_allow_html=True)
+st.markdown("""
+    <style>
+    div:has(.green-btn-hook) + div + div button { background-color: #28a745 !important; color: white !important; border-color: #28a745 !important; }
+    div:has(.green-btn-hook) + div + div button:hover { background-color: #218838 !important; border-color: #1e7e34 !important; }
+    </style>
+""", unsafe_allow_html=True)
+
+def cb_board_bus():
+    try:
+        time_now = get_ist_now()
+        sh.worksheet("LOCATION_DATA").append_row([time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), "- Stationary -", "Girishmore Bus Stop", "I", "Suborno boarded bus to school"])
+        st.session_state.update(current_people="I")
+        load_location_data.clear()
+    except Exception as e: st.session_state.quick_err = str(e)
+
+def cb_receive_suborno():
+    try:
+        time_now = get_ist_now()
+        new_people = st.session_state.current_people + ", Suborno" if st.session_state.current_people else "I, Suborno"
+        sh.worksheet("LOCATION_DATA").append_row([time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), "- Stationary -", "Girishmore Bus Stop", new_people, "Received Suborno from school bus"])
+        st.session_state.update(current_people=new_people)
+        load_location_data.clear()
+    except Exception as e: st.session_state.quick_err = str(e)
+
+if "quick_err" in st.session_state:
+    st.error(f"Google Sheets Error: {st.session_state.quick_err}")
+    del st.session_state.quick_err
+
+time_now_for_btn = get_ist_now()
+if current_loc == "Girishmore Bus Stop" and "Suborno" in st.session_state.current_people and not st.session_state.route_active and (time_now_for_btn.hour == 8):
+    if st.button("🚌 Suborno Boarded Bus", use_container_width=True, type="primary", on_click=cb_board_bus):
+        st.success("Logged Suborno boarding bus. You are now traveling alone.")
+
+if current_loc == "Girishmore Bus Stop" and "Suborno" not in st.session_state.current_people and not st.session_state.route_active and (13 <= time_now_for_btn.hour <= 16):
+    if st.button("👦 Received Suborno from Bus", use_container_width=True, type="primary", on_click=cb_receive_suborno):
+        st.success("Logged Suborno arriving! Companions updated.")
+        
 # --- EXPANDABLE MANUAL LOCATION LOG ---
 with st.expander("📝 Manual Location Log", expanded=False):
     location_logic = get_location_logic()

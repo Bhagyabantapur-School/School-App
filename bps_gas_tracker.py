@@ -3,12 +3,13 @@ import pandas as pd
 from datetime import date
 
 # Set page configuration
-st.set_page_config(page_title="School Gas Tracker", page_icon="🔥", layout="centered")
+st.set_page_config(page_title="BPS Gas Tracker", page_icon="🔥", layout="centered")
 
 # --- INITIALIZE SESSION STATE (Mock Database) ---
-# In a production environment, you would pull this initial data from your Google Sheet
 if 'gas_log' not in st.session_state:
-    st.session_state.gas_log = pd.DataFrame(columns=["Date", "Cylinder", "Action", "Cost (₹)", "Ref/Notes"])
+    st.session_state.gas_log = pd.DataFrame(columns=[
+        "Date", "Cylinder", "Action", "Cylinder Cost (₹)", "Delivery Cost (₹)", "Total Cost (₹)", "Ref/Notes"
+    ])
 
 if 'cyl_1_status' not in st.session_state:
     st.session_state.cyl_1_status = "In Use"
@@ -17,8 +18,8 @@ if 'cyl_2_status' not in st.session_state:
     st.session_state.cyl_2_status = "Empty"
 
 # --- MAIN DASHBOARD ---
-st.title("🔥 School Gas Management")
-st.markdown("Track bookings, deliveries, and daily usage for the school's two cylinders.")
+st.title("🔥 Bhagyabantapur Primary School - Gas Tracker")
+st.markdown("Track bookings, deliveries, and itemized costs for the school's cylinders.")
 
 st.divider()
 
@@ -27,7 +28,6 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("Cylinder 1")
-    # Color coding based on status
     if st.session_state.cyl_1_status == "In Use":
         st.success(f"Status: {st.session_state.cyl_1_status}")
     elif st.session_state.cyl_1_status == "Empty":
@@ -62,13 +62,19 @@ with st.form("gas_action_form"):
     with col_b:
         action_type = st.selectbox("Action", ["Booked", "Received (Full)", "Put in Use", "Emptied"])
         
-    expense = st.number_input("Cost / Expense (₹) - if booking/receiving", min_value=0.0, value=0.0, step=50.0)
+    st.markdown("**Expenses (Fill if booking or receiving)**")
+    col_cost1, col_cost2 = st.columns(2)
+    with col_cost1:
+        cylinder_cost = st.number_input("Cylinder Cost (₹)", min_value=0.0, value=0.0, step=10.0)
+    with col_cost2:
+        delivery_cost = st.number_input("Delivery Cost (₹)", min_value=0.0, value=0.0, step=10.0)
+        
     notes = st.text_input("Booking Ref No. / Notes")
     
     submitted = st.form_submit_button("Save Record")
     
     if submitted:
-        # 1. Update the Current Status of the selected cylinder
+        # Update Status
         new_status = ""
         if action_type == "Booked":
             new_status = "Booked"
@@ -84,35 +90,42 @@ with st.form("gas_action_form"):
         else:
             st.session_state.cyl_2_status = new_status
 
-        # 2. Append to the Log DataFrame
+        # Calculate total and append to Log DataFrame
+        total_cost = cylinder_cost + delivery_cost
+        
         new_record = pd.DataFrame([{
             "Date": action_date.strftime("%Y-%m-%d"),
             "Cylinder": target_cylinder,
             "Action": action_type,
-            "Cost (₹)": expense,
+            "Cylinder Cost (₹)": cylinder_cost,
+            "Delivery Cost (₹)": delivery_cost,
+            "Total Cost (₹)": total_cost,
             "Ref/Notes": notes
         }])
         
         st.session_state.gas_log = pd.concat([st.session_state.gas_log, new_record], ignore_index=True)
         
-        # NOTE FOR INTEGRATION: 
-        # This is where you would call your Google Sheets append_row() function.
-        # Example: sheet.append_row([str(action_date), target_cylinder, action_type, expense, notes])
+        # NOTE FOR GOOGLE SHEETS API: Update your append_row logic to match the 7 variables above.
         
-        st.success(f"Successfully logged: {target_cylinder} marked as {action_type}.")
+        st.success(f"Successfully logged: {target_cylinder} marked as {action_type}. Total Cost: ₹{total_cost}")
         st.rerun()
 
 st.divider()
 
 # --- HISTORY & EXPENSES ---
-st.subheader("📊 History & Expenses Tracker")
+st.subheader("📊 History & Expense Breakdown")
 
-# Display the dataframe
 if not st.session_state.gas_log.empty:
     st.dataframe(st.session_state.gas_log, use_container_width=True, hide_index=True)
     
-    # Calculate Total Expenses
-    total_expense = st.session_state.gas_log["Cost (₹)"].sum()
-    st.metric(label="Total Gas Expenses", value=f"₹ {total_expense:,.2f}")
+    # Calculate Expense Breakdown
+    total_cyl = st.session_state.gas_log["Cylinder Cost (₹)"].sum()
+    total_del = st.session_state.gas_log["Delivery Cost (₹)"].sum()
+    grand_total = st.session_state.gas_log["Total Cost (₹)"].sum()
+    
+    col_met1, col_met2, col_met3 = st.columns(3)
+    col_met1.metric(label="Total Cylinder Cost", value=f"₹ {total_cyl:,.2f}")
+    col_met2.metric(label="Total Delivery Cost", value=f"₹ {total_del:,.2f}")
+    col_met3.metric(label="Grand Total Expenses", value=f"₹ {grand_total:,.2f}")
 else:
     st.info("No records found. Log an action above to start tracking.")

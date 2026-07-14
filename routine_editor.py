@@ -5,12 +5,7 @@ import pandas as pd
 from datetime import datetime
 import time
 
-# --- BACK BUTTON ---
-if st.button("⬅️ Back to Hub", type="secondary"):
-    st.switch_page("routine_app.py") 
-st.write("---") 
-# -------------------
-
+# MUST be the first Streamlit command
 st.set_page_config(page_title="Smart Routine Editor", page_icon="⚙️", layout="wide")
 
 st.markdown("""
@@ -54,8 +49,6 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
-
-st.markdown("<div class='edit-header'>⚙️ Smart Schedule Manager</div>", unsafe_allow_html=True)
 
 # ==========================================
 # Database Connection & Helper Functions
@@ -178,6 +171,24 @@ def format_matrix_mins(total_mins):
     if pd.isna(total_mins) or total_mins == 0:
         return "-"
     return format_mins(total_mins)
+
+# ==========================================
+# Top Action Bar
+# ==========================================
+col_nav1, col_nav2, col_nav3 = st.columns([2, 2, 8])
+with col_nav1:
+    if st.button("⬅️ Back to Hub", type="secondary", use_container_width=True):
+        st.switch_page("routine_app.py") 
+with col_nav2:
+    if st.button("🔄 Sync Data", type="primary", use_container_width=True):
+        get_routine_data.clear()
+        get_activity_master.clear()
+        st.toast("✅ Cache cleared! Fetching latest data from Google Sheets...")
+        time.sleep(1)
+        st.rerun()
+st.write("---") 
+
+st.markdown("<div class='edit-header'>⚙️ Smart Schedule Manager</div>", unsafe_allow_html=True)
 
 # ==========================================
 # Main Logic

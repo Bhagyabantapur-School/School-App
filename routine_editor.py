@@ -565,3 +565,122 @@ try:
                         if T_start < L_start_new and T_end > L_start_new:
                             df.loc[idx, 'End_Mins'] = L_start_new
                             df.loc[idx, 'End_Time'] = mins_to_time(L_start_new)
+                        elif T_start >= L_start_new and T_start < L_end_new:
+                            df.loc[idx, 'Start_Mins'] = L_end_new
+                            df.loc[idx, 'Start_Time'] = mins_to_time(L_end_new)
+                            
+                df['Dur_Mins'] = df['End_Mins'] - df['Start_Mins']
+                df = df[df['Dur_Mins'] > 0].copy()
+                df['Duration'] = df['Dur_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")
+                df = sort_routine_df(df)
+                df = df[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App"]]
+                
+                with st.spinner("Healing Overlaps and Saving to Google Sheets..."):
+                    routine_sheet = get_sheet("routine_master")
+                    routine_sheet.clear()
+                    routine_sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name="A1")
+                    get_routine_data.clear()
+                    
+                st.success(f"✅ Successfully updated and seamlessly aligned schedule for {sel_day_opt}!")
+                time.sleep(1.5)
+                st.rerun()
+
+        # --- 6. ADD NEW SLOT FORM ---
+        st.markdown("---")
+        st.markdown("#### ➕ 4. Add a New Time Slot")
+        with st.expander("Click to Create a New Block in the Schedule"):
+            with st.form("add_new_slot_form"):
+                st.markdown("<div style='background-color: #e3f2fd; padding: 15px; border-radius: 8px;'>", unsafe_allow_html=True)
+                
+                st.markdown("**📅 Target Day(s)**")
+                add_day_opt = st.selectbox("Add to Day", day_options, key="add_day")
+                
+                st.markdown("**⏰ Define Time Block**")
+                col_at1, col_at2 = st.columns(2)
+                with col_at1: add_start = st.text_input("Start Time (H:MM)", value="12:00", key="add_start")
+                with col_at2: add_end = st.text_input("End Time (H:MM)", value="12:30", key="add_end")
+                
+                st.markdown("<hr style='margin: 10px 0px;'>", unsafe_allow_html=True)
+                
+                st.markdown("**1️⃣ Activity Category**")
+                col_aa1, col_aa2 = st.columns(2)
+                with col_aa1: add_act_sel = st.selectbox("Select Existing", all_acts, key="add_act_sel")
+                with col_aa2: add_act_txt = st.text_input("Or New Activity", key="add_act_txt")
+                
+                st.markdown("<hr style='margin: 10px 0px;'>", unsafe_allow_html=True)
+                
+                st.markdown("**2️⃣ Sub-Activities & Checklists**")
+                add_subs = st.multiselect("Sub-Activities", opts_sub, key="add_subs")
+                add_chks = st.multiselect("Checklist", opts_chk, key="add_chks")
+                
+                st.markdown("<hr style='margin: 10px 0px;'>", unsafe_allow_html=True)
+                
+                st.markdown("**3️⃣ Connected Apps**")
+                add_apps = st.multiselect("Apps", opts_app, format_func=format_app_display, key="add_apps")
+                
+                st.markdown("</div><br>", unsafe_allow_html=True)
+                
+                if st.form_submit_button("➕ Insert New Slot & Auto-Adjust", type="primary", use_container_width=True):
+                    target_add_days = weekdays if add_day_opt == "Monday to Friday" else [add_day_opt]
+                    
+                    final_add_act = add_act_txt.strip().upper() if add_act_txt.strip() else add_act_sel
+                    final_add_subs = ",".join(filter(None, [x for x in add_subs]))
+                    final_add_chks = ",".join(filter(None, [x for x in add_chks]))
+                    final_add_apps = ",".join(filter(None, [x for x in add_apps]))
+                    
+                    df['Start_Mins'] = df['Start_Time'].apply(time_to_mins)
+                    df['End_Mins'] = df['End_Time'].apply(time_to_mins)
+                    df['End_Mins'] = df.apply(lambda r: r['End_Mins'] + 1440 if r['End_Mins'] <= r['Start_Mins'] and r['End_Mins'] < 120 else r['End_Mins'], axis=1)
+                    
+                    L_start_new = time_to_mins(add_start.strip())
+                    L_end_new = time_to_mins(add_end.strip())
+                    if L_end_new <= L_start_new and L_end_new < 120: L_end_new += 1440
+                    
+                    new_rows = []
+                    
+                    for day in target_add_days:
+                        day_idx = df[df['Day'].str.title() == day].index
+                        for idx in day_idx:
+                            T_start = df.loc[idx, 'Start_Mins']
+                            T_end = df.loc[idx, 'End_Mins']
+                            
+                            if T_start < L_start_new and T_end > L_start_new:
+                                df.loc[idx, 'End_Mins'] = L_start_new
+                                df.loc[idx, 'End_Time'] = mins_to_time(L_start_new)
+                            elif T_start >= L_start_new and T_start < L_end_new:
+                                df.loc[idx, 'Start_Mins'] = L_end_new
+                                df.loc[idx, 'Start_Time'] = mins_to_time(L_end_new)
+                                
+                        new_rows.append({
+                            "Day": day,
+                            "Start_Time": add_start.strip(),
+                            "End_Time": add_end.strip(),
+                            "Start_Mins": L_start_new,
+                            "End_Mins": L_end_new,
+                            "Activity": final_add_act,
+                            "Sub_Activities": final_add_subs,
+                            "check_list": final_add_chks,
+                            "App": final_add_apps
+                        })
+                    
+                    if new_rows:
+                        new_df = pd.DataFrame(new_rows)
+                        df = pd.concat([df, new_df], ignore_index=True)
+                    
+                    df['Dur_Mins'] = df['End_Mins'] - df['Start_Mins']
+                    df = df[df['Dur_Mins'] > 0].copy()
+                    df['Duration'] = df['Dur_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")
+                    df = sort_routine_df(df)
+                    df = df[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App"]]
+                    
+                    with st.spinner("Inserting Time Block and Healing Sequence..."):
+                        routine_sheet = get_sheet("routine_master")
+                        routine_sheet.clear()
+                        routine_sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name="A1")
+                        get_routine_data.clear()
+                    st.success(f"✅ Successfully inserted new block and adjusted schedule for {add_day_opt}!")
+                    time.sleep(1.5)
+                    st.rerun()
+
+except Exception as e:
+    st.error(f"System Error: {e}")

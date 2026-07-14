@@ -250,7 +250,7 @@ try:
                 
                 sel_act = st.selectbox("Select Parent Activity", existing_acts) if existing_acts else st.selectbox("No Parents Available", [""])
                 new_sub_input = st.text_input("New Sub-Activity Name", placeholder="e.g. Meditation").strip()
-                sub_dur = st.number_input("Duration (Minutes)", min_value=1, max_value=1440, value=30, step=5)
+                sub_dur = st.number_input("Duration (Minutes)", min_value=0, max_value=1440, value=30, step=5)
                 
                 if st.form_submit_button("➕ Add Sub-Activity", use_container_width=True):
                     if sel_act and new_sub_input:
@@ -288,7 +288,7 @@ try:
                                 st.markdown(f"<div style='padding-top: 8px;'>📄 <b>{sub_name}</b> <span style='color: #6c757d; font-size: 0.9em; margin-left: 8px;'>({format_mins(curr_dur)})</span></div>", unsafe_allow_html=True)
                             with col_in:
                                 # Track unique keys for the inputs to prevent widget rendering conflicts
-                                new_dur = st.number_input("Mins", value=curr_dur, min_value=1, step=5, key=f"edit_dur_{sheet_row}", label_visibility="collapsed")
+                                new_dur = st.number_input("Mins", value=curr_dur, min_value=0, step=5, key=f"edit_dur_{sheet_row}", label_visibility="collapsed")
                             with col_btn:
                                 if st.button("💾 Save", key=f"save_btn_{sheet_row}", use_container_width=True):
                                     diff = new_dur - curr_dur

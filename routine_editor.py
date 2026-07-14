@@ -46,6 +46,12 @@ st.markdown("""
         margin-bottom: 8px;
         border: 1px solid #e0e0e0;
     }
+    .profile-header {
+        font-size: 18px;
+        font-weight: 600;
+        margin-bottom: -10px;
+        color: #495057;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -134,13 +140,24 @@ def get_activity_master():
         sheet = get_main_spreadsheet().worksheet("activity_master")
     except gspread.exceptions.WorksheetNotFound:
         spreadsheet = get_main_spreadsheet()
-        sheet = spreadsheet.add_worksheet(title="activity_master", rows="100", cols="3")
-        sheet.update(values=[["Activity", "Sub_Activity", "Duration_Mins"]], range_name="A1")
-        return pd.DataFrame(columns=["Activity", "Sub_Activity", "Duration_Mins", "Sheet_Row"])
+        sheet = spreadsheet.add_worksheet(title="activity_master", rows="100", cols="4")
+        sheet.update(values=[["Day_Type", "Activity", "Sub_Activity", "Duration_Mins"]], range_name="A1")
+        return pd.DataFrame(columns=["Day_Type", "Activity", "Sub_Activity", "Duration_Mins", "Sheet_Row"])
         
     data = sheet.get_all_values()
+    if not data:
+        return pd.DataFrame(columns=["Day_Type", "Activity", "Sub_Activity", "Duration_Mins", "Sheet_Row"])
+    
+    # Check for old schema and migrate gracefully without breaking user data
+    if "Day_Type" not in data[0]:
+        df = pd.DataFrame(data[1:], columns=data[0]) if len(data) > 1 else pd.DataFrame(columns=data[0])
+        df.insert(0, "Day_Type", "WEEK DAYS")
+        sheet.clear()
+        sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name="A1")
+        data = sheet.get_all_values()
+
     if len(data) <= 1:
-        return pd.DataFrame(columns=["Activity", "Sub_Activity", "Duration_Mins", "Sheet_Row"])
+        return pd.DataFrame(columns=["Day_Type", "Activity", "Sub_Activity", "Duration_Mins", "Sheet_Row"])
     
     df = pd.DataFrame(data[1:], columns=data[0])
     # Track the exact row number in Google Sheets (header is row 1, data starts at row 2)
@@ -186,14 +203,23 @@ try:
     # ==========================================
     with tab_builder:
         st.markdown("### 🏗️ Activity Database & Time Pool")
-        st.info("💡 Create your Activity categories and sub-activities here. Assign expected durations to track your 24-hour capacity. Items added here automatically sync to the Editor dropdowns.")
         
-        total_used = act_master_df['Duration_Mins'].sum()
+        # Profile Configuration Selector
+        st.markdown("<div class='profile-header'>📅 Select Schedule Profile</div>", unsafe_allow_html=True)
+        profile_options = ["WEEK DAYS", "SATURDAY/HALF WORKING DAY", "SUNDAY", "HOLIDAY"]
+        selected_day_type = st.radio("Profile Config", profile_options, horizontal=True, label_visibility="collapsed")
+        
+        # Filter dataframe for current profile
+        profile_df = act_master_df[act_master_df['Day_Type'] == selected_day_type].copy()
+        
+        total_used = profile_df['Duration_Mins'].sum()
         remaining = 1440 - total_used
+        
+        st.markdown(f"**Managing time pool and activities for:** `{selected_day_type}`")
         
         col_m1, col_m2, col_m3 = st.columns(3)
         col_m1.metric("Total Day Limit", "24h 0m")
-        col_m2.metric("Total Allocated", format_mins(total_used))
+        col_m2.metric("Allocated Time", format_mins(total_used))
         col_m3.metric("Remaining Time", format_mins(max(0, remaining)))
         
         st.markdown("---")
@@ -205,23 +231,24 @@ try:
                 new_act_input = st.text_input("New Activity Name", placeholder="e.g. MORNING ROUTINE").strip().upper()
                 if st.form_submit_button("➕ Add Activity", use_container_width=True):
                     if new_act_input:
-                        if new_act_input not in act_master_df['Activity'].values:
+                        if new_act_input not in profile_df['Activity'].values:
                             sheet = get_main_spreadsheet().worksheet("activity_master")
-                            sheet.append_row([new_act_input, "", 0])
+                            # Schema: Day_Type, Activity, Sub_Activity, Duration_Mins
+                            sheet.append_row([selected_day_type, new_act_input, "", 0])
                             get_activity_master.clear()
-                            st.success(f"✅ Created Activity: {new_act_input}")
+                            st.success(f"✅ Created Activity: {new_act_input} for {selected_day_type}")
                             time.sleep(1.5)
                             st.rerun()
                         else:
-                            st.warning("⚠️ Activity already exists.")
+                            st.warning("⚠️ Activity already exists in this profile.")
                             
         with col_add2:
             st.markdown("#### 2️⃣ Add Dependent Sub-Activity")
             with st.form("create_sub_form"):
-                existing_acts = sorted(list(act_master_df['Activity'].unique()))
+                existing_acts = sorted(list(profile_df['Activity'].unique()))
                 if "" in existing_acts: existing_acts.remove("")
                 
-                sel_act = st.selectbox("Select Parent Activity", existing_acts)
+                sel_act = st.selectbox("Select Parent Activity", existing_acts) if existing_acts else st.selectbox("No Parents Available", [""])
                 new_sub_input = st.text_input("New Sub-Activity Name", placeholder="e.g. Meditation").strip()
                 sub_dur = st.number_input("Duration (Minutes)", min_value=1, max_value=1440, value=30, step=5)
                 
@@ -229,7 +256,7 @@ try:
                     if sel_act and new_sub_input:
                         if sub_dur <= remaining:
                             sheet = get_main_spreadsheet().worksheet("activity_master")
-                            sheet.append_row([sel_act, new_sub_input, sub_dur])
+                            sheet.append_row([selected_day_type, sel_act, new_sub_input, sub_dur])
                             get_activity_master.clear()
                             st.success(f"✅ Added '{new_sub_input}' under '{sel_act}'")
                             time.sleep(1.5)
@@ -238,15 +265,15 @@ try:
                             st.error(f"❌ Cannot allocate {sub_dur} mins. Only {format_mins(remaining)} left in the day!")
                             
         st.markdown("---")
-        st.markdown("### 📋 Configured Activities & Durations")
+        st.markdown(f"### 📋 Configured Activities for {selected_day_type}")
         st.info("💡 Adjust the minutes below and click **Save** to update the sub-activity duration.")
         
-        if not act_master_df.empty:
-            grouped = act_master_df.groupby("Activity")['Duration_Mins'].sum().sort_values(ascending=False)
+        if not profile_df.empty:
+            grouped = profile_df.groupby("Activity")['Duration_Mins'].sum().sort_values(ascending=False)
             for act, act_mins in grouped.items():
                 if not act: continue
                 with st.expander(f"📁 **{act}** | Sub-Activities Total: **{format_mins(act_mins)}**"):
-                    sub_df = act_master_df[(act_master_df['Activity'] == act) & (act_master_df['Sub_Activity'] != "")]
+                    sub_df = profile_df[(profile_df['Activity'] == act) & (profile_df['Sub_Activity'] != "")]
                     
                     if not sub_df.empty:
                         for _, row in sub_df.iterrows():
@@ -270,8 +297,8 @@ try:
                                     elif diff != 0:
                                         with st.spinner("Updating..."):
                                             sheet = get_main_spreadsheet().worksheet("activity_master")
-                                            # Column C contains the durations
-                                            sheet.update_acell(f"C{sheet_row}", new_dur)
+                                            # Column D contains the durations in the new schema
+                                            sheet.update_acell(f"D{sheet_row}", new_dur)
                                             get_activity_master.clear()
                                         st.success("✅ Saved!")
                                         time.sleep(1)
@@ -281,6 +308,8 @@ try:
                             st.markdown("</div>", unsafe_allow_html=True)
                     else:
                         st.markdown("*No sub-activities allocated yet.*")
+        else:
+            st.markdown(f"*No activities configured for {selected_day_type} yet.*")
 
     # ==========================================
     # TAB 2: ROUTINE SUMMARY

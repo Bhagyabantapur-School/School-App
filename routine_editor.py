@@ -39,6 +39,13 @@ st.markdown("""
         text-align: center;
         margin-top: 20px;
     }
+    .sub-act-row {
+        background-color: #f8f9fa;
+        padding: 10px;
+        border-radius: 6px;
+        margin-bottom: 8px;
+        border: 1px solid #e0e0e0;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -129,13 +136,15 @@ def get_activity_master():
         spreadsheet = get_main_spreadsheet()
         sheet = spreadsheet.add_worksheet(title="activity_master", rows="100", cols="3")
         sheet.update(values=[["Activity", "Sub_Activity", "Duration_Mins"]], range_name="A1")
-        return pd.DataFrame(columns=["Activity", "Sub_Activity", "Duration_Mins"])
+        return pd.DataFrame(columns=["Activity", "Sub_Activity", "Duration_Mins", "Sheet_Row"])
         
     data = sheet.get_all_values()
     if len(data) <= 1:
-        return pd.DataFrame(columns=["Activity", "Sub_Activity", "Duration_Mins"])
+        return pd.DataFrame(columns=["Activity", "Sub_Activity", "Duration_Mins", "Sheet_Row"])
     
     df = pd.DataFrame(data[1:], columns=data[0])
+    # Track the exact row number in Google Sheets (header is row 1, data starts at row 2)
+    df['Sheet_Row'] = df.index + 2 
     df['Duration_Mins'] = pd.to_numeric(df['Duration_Mins'], errors='coerce').fillna(0)
     return df
 
@@ -230,6 +239,7 @@ try:
                             
         st.markdown("---")
         st.markdown("### 📋 Configured Activities & Durations")
+        st.info("💡 Adjust the minutes below and click **Save** to update the sub-activity duration.")
         
         if not act_master_df.empty:
             grouped = act_master_df.groupby("Activity")['Duration_Mins'].sum().sort_values(ascending=False)
@@ -237,9 +247,38 @@ try:
                 if not act: continue
                 with st.expander(f"📁 **{act}** | Sub-Activities Total: **{format_mins(act_mins)}**"):
                     sub_df = act_master_df[(act_master_df['Activity'] == act) & (act_master_df['Sub_Activity'] != "")]
+                    
                     if not sub_df.empty:
                         for _, row in sub_df.iterrows():
-                            st.markdown(f"- 📄 {row['Sub_Activity']}: `{format_mins(row['Duration_Mins'])}`")
+                            sub_name = row['Sub_Activity']
+                            curr_dur = int(row['Duration_Mins'])
+                            sheet_row = row['Sheet_Row']
+                            
+                            st.markdown("<div class='sub-act-row'>", unsafe_allow_html=True)
+                            col_sn, col_in, col_btn = st.columns([5, 3, 2])
+                            
+                            with col_sn:
+                                st.markdown(f"<div style='padding-top: 8px;'>📄 <b>{sub_name}</b></div>", unsafe_allow_html=True)
+                            with col_in:
+                                # Track unique keys for the inputs to prevent widget rendering conflicts
+                                new_dur = st.number_input("Mins", value=curr_dur, min_value=1, step=5, key=f"edit_dur_{sheet_row}", label_visibility="collapsed")
+                            with col_btn:
+                                if st.button("💾 Save", key=f"save_btn_{sheet_row}", use_container_width=True):
+                                    diff = new_dur - curr_dur
+                                    if diff > 0 and (total_used + diff > 1440):
+                                        st.error(f"❌ Cannot increase by {diff} mins. Only {format_mins(max(0, remaining))} left!")
+                                    elif diff != 0:
+                                        with st.spinner("Updating..."):
+                                            sheet = get_main_spreadsheet().worksheet("activity_master")
+                                            # Column C contains the durations
+                                            sheet.update_acell(f"C{sheet_row}", new_dur)
+                                            get_activity_master.clear()
+                                        st.success("✅ Saved!")
+                                        time.sleep(1)
+                                        st.rerun()
+                                    else:
+                                        st.warning("No changes made.")
+                            st.markdown("</div>", unsafe_allow_html=True)
                     else:
                         st.markdown("*No sub-activities allocated yet.*")
 

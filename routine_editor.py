@@ -867,6 +867,11 @@ try:
                         new_df = pd.DataFrame(new_rows)
                         df_final = pd.concat([df_clean, new_df], ignore_index=True)
                         
+                        # THE CRITICAL BUG FIX: Safely recalculate Start/End Mins for ALL old data
+                        df_final['Start_Mins'] = df_final['Start_Time'].apply(time_to_mins)
+                        df_final['End_Mins'] = df_final['End_Time'].apply(time_to_mins)
+                        df_final['End_Mins'] = df_final.apply(lambda r: r['End_Mins'] + 1440 if r['End_Mins'] <= r['Start_Mins'] and r['End_Mins'] < 120 else r['End_Mins'], axis=1)
+                        
                         df_final['Dur_Mins'] = df_final['End_Mins'] - df_final['Start_Mins']
                         df_final = df_final[df_final['Dur_Mins'] > 0].copy()
                         df_final['Duration'] = df_final['Dur_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")

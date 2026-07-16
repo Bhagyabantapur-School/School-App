@@ -47,6 +47,13 @@ st.markdown("""
         margin-bottom: -10px;
         color: #495057;
     }
+    .local-warning {
+        background-color: #fff3cd;
+        border-left: 5px solid #ffc107;
+        padding: 15px;
+        border-radius: 5px;
+        margin-bottom: 15px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -168,12 +175,14 @@ def format_matrix_mins(total_mins):
         return "-"
     return format_mins(total_mins)
 
-# Live Routine Editor Swap Function
+# Live Routine Editor Swap Function (Memory-Only to Avoid 429 Errors)
 def shift_routine_slot(df, target_days, curr_i, direction):
     df['Start_Mins'] = df['Start_Time'].apply(time_to_mins)
     df['End_Mins'] = df['End_Time'].apply(time_to_mins)
     df['End_Mins'] = df.apply(lambda r: r['End_Mins'] + 1440 if r['End_Mins'] <= r['Start_Mins'] and r['End_Mins'] < 120 else r['End_Mins'], axis=1)
     df['Dur_Mins'] = df['End_Mins'] - df['Start_Mins']
+    
+    new_start_time = None
     
     for day in target_days:
         day_mask = df['Day'].str.title() == day
@@ -197,6 +206,9 @@ def shift_routine_slot(df, target_days, curr_i, direction):
             df.loc[idx_prev, 'Start_Time'] = mins_to_time(df.loc[idx_prev, 'Start_Mins'])
             df.loc[idx_prev, 'End_Time'] = mins_to_time(df.loc[idx_prev, 'End_Mins'])
             
+            if day == target_days[0]:
+                new_start_time = df.loc[idx_curr, 'Start_Time']
+            
         elif direction == 'down' and curr_i >= 0 and curr_i < len(day_idx) - 1:
             idx_curr = day_idx[curr_i]
             idx_next = day_idx[curr_i + 1]
@@ -215,20 +227,19 @@ def shift_routine_slot(df, target_days, curr_i, direction):
             df.loc[idx_curr, 'Start_Time'] = mins_to_time(df.loc[idx_curr, 'Start_Mins'])
             df.loc[idx_curr, 'End_Time'] = mins_to_time(df.loc[idx_curr, 'End_Mins'])
             
+            if day == target_days[0]:
+                new_start_time = df.loc[idx_curr, 'Start_Time']
+            
     df = df[df['Dur_Mins'] > 0].copy()
     df['Duration'] = df['Dur_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")
     df = sort_routine_df(df)
     df = auto_adjust_schedule(df)
     df = df[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App"]]
     
-    with st.spinner(f"Moving slot {direction}..."):
-        routine_sheet = get_sheet("routine_master")
-        routine_sheet.clear()
-        routine_sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name="A1")
-        get_routine_data.clear()
-    st.success("✅ Sequence updated!")
-    time.sleep(1.5)
-    st.rerun()
+    # Store locally to avoid 429
+    st.session_state.routine_df = df
+    st.session_state.unsaved_sort = True
+    return new_start_time
 
 # ==========================================
 # Top Action Bar
@@ -241,6 +252,12 @@ with col_nav2:
     if st.button("🔄 Sync Data", type="primary", use_container_width=True):
         get_routine_data.clear()
         get_activity_master.clear()
+        if 'routine_df' in st.session_state:
+            del st.session_state.routine_df
+        if 'unsaved_sort' in st.session_state:
+            st.session_state.unsaved_sort = False
+        if 'active_slot_start' in st.session_state:
+            del st.session_state.active_slot_start
         st.toast("✅ Cache cleared! Fetching latest data from Google Sheets...")
         time.sleep(1)
         st.rerun()
@@ -252,7 +269,10 @@ st.markdown("<div class='edit-header'>⚙️ Smart Schedule Manager</div>", unsa
 # Main Logic
 # ==========================================
 try:
-    df = get_routine_data()
+    if 'routine_df' not in st.session_state:
+        st.session_state.routine_df = get_routine_data()
+        
+    df = st.session_state.routine_df
     act_master_df = get_activity_master()
 
     # Consolidate standard options and Builder DB options to feed Tab 1 dropdowns dynamically
@@ -510,27 +530,56 @@ try:
             display_day = sel_day_opt
 
         target_df = df[df['Day'].str.title() == display_day].copy()
-
-        # --- 3. TIME SLOT SELECTION & ARROW SWAPPING ---
-        st.markdown("#### ⏱️ 2. Select Time Slot to Manage or Move")
         target_df['Start_Mins'] = target_df['Start_Time'].apply(time_to_mins)
         target_df = target_df.sort_values('Start_Mins').reset_index(drop=True)
-        
+
+        # --- 3. TIME SLOT SELECTION WITH LOCAL SORT ENGINE ---
+        st.markdown("#### ⏱️ 2. Select Time Slot to Manage or Move")
         slot_opts = [f"{row['Start_Time']} to {row['End_Time']}  |  {row['Activity']}" for _, row in target_df.iterrows()]
+        
+        # State tracking to keep the moved item selected!
+        if 'active_slot_start' not in st.session_state:
+            st.session_state.active_slot_start = None
+            
+        selected_index = 0
+        if st.session_state.active_slot_start:
+            for i, opt in enumerate(slot_opts):
+                if opt.startswith(st.session_state.active_slot_start + " to"):
+                    selected_index = i
+                    break
         
         col_sel, col_up, col_dn = st.columns([8, 1, 1])
         with col_sel:
-            selected_slot = st.selectbox("Choose the specific slot you want to update:", slot_opts, label_visibility="collapsed")
-            
+            selected_slot = st.selectbox("Choose the specific slot you want to update:", slot_opts, index=selected_index, label_visibility="collapsed")
+        
         sel_start = selected_slot.split(" to ")[0].strip()
+        st.session_state.active_slot_start = sel_start
+        
         curr_i = target_df.index[target_df['Start_Time'] == sel_start].tolist()[0]
         
         with col_up:
-            if st.button("⬆️", key="move_up", disabled=(curr_i == 0), use_container_width=True, help="Swap this task with the one above it"):
-                shift_routine_slot(df.copy(), target_days, curr_i, 'up')
+            if st.button("⬆️", key="move_up", disabled=(curr_i == 0), use_container_width=True, help="Move Task Up"):
+                new_start = shift_routine_slot(df.copy(), target_days, curr_i, 'up')
+                if new_start: st.session_state.active_slot_start = new_start
+                st.rerun()
         with col_dn:
-            if st.button("⬇️", key="move_dn", disabled=(curr_i == len(target_df)-1), use_container_width=True, help="Swap this task with the one below it"):
-                shift_routine_slot(df.copy(), target_days, curr_i, 'down')
+            if st.button("⬇️", key="move_dn", disabled=(curr_i == len(target_df)-1), use_container_width=True, help="Move Task Down"):
+                new_start = shift_routine_slot(df.copy(), target_days, curr_i, 'down')
+                if new_start: st.session_state.active_slot_start = new_start
+                st.rerun()
+
+        if st.session_state.get('unsaved_sort', False):
+            st.markdown("<div class='local-warning'>⚠️ <b>Sequence modified locally!</b> Click save to update Google Sheets to avoid losing changes.</div>", unsafe_allow_html=True)
+            if st.button("💾 Push Reordered Schedule to Cloud", type="primary", use_container_width=True):
+                with st.spinner("Pushing new sequence to the cloud..."):
+                    routine_sheet = get_sheet("routine_master")
+                    routine_sheet.clear()
+                    routine_sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name="A1")
+                    get_routine_data.clear()
+                    st.session_state.unsaved_sort = False
+                st.success("✅ Sequence successfully saved to Google Sheets!")
+                time.sleep(1.5)
+                st.rerun()
 
         # --- 4. HIGHLIGHTED SCHEDULE DISPLAY ---
         st.markdown(f"**Full Schedule for {display_day}** *(Editing row highlighted in yellow)*")
@@ -669,7 +718,9 @@ try:
                     routine_sheet.clear()
                     routine_sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name="A1")
                     get_routine_data.clear()
-                    
+                    st.session_state.routine_df = df
+                    st.session_state.unsaved_sort = False
+                    st.session_state.active_slot_start = new_start_txt.strip()
                 st.success(f"✅ Successfully updated and seamlessly aligned schedule for {sel_day_opt}!")
                 time.sleep(1.5)
                 st.rerun()
@@ -778,6 +829,9 @@ try:
                         routine_sheet.clear()
                         routine_sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name="A1")
                         get_routine_data.clear()
+                        st.session_state.routine_df = df
+                        st.session_state.unsaved_sort = False
+                        st.session_state.active_slot_start = mins_to_time(L_start_new)
                     st.success(f"✅ Successfully inserted new block and adjusted schedule for {add_day_opt}!")
                     time.sleep(1.5)
                     st.rerun()
@@ -898,6 +952,8 @@ try:
                             routine_sheet.clear()
                             routine_sheet.update(values=[df_final.columns.values.tolist()] + df_final.values.tolist(), range_name="A1")
                             get_routine_data.clear()
+                            st.session_state.routine_df = df_final
+                            st.session_state.unsaved_sort = False
                         st.success(f"✅ Auto-Generated schedule for {gen_day_opt}!")
                         time.sleep(1.5)
                         st.rerun()

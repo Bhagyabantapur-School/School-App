@@ -627,8 +627,8 @@ try:
 
         # --- 6. ADD NEW SLOT FORM ---
         st.markdown("---")
-        st.markdown("#### ➕ 4. Add a New Time Slot")
-        with st.expander("Click to Create a New Block in the Schedule"):
+        st.markdown("#### ➕ 4. Add a Single Time Slot")
+        with st.expander("Click to Create a New Block in the Schedule manually"):
             with st.form("add_new_slot_form"):
                 st.markdown("<div style='background-color: #e3f2fd; padding: 15px; border-radius: 8px;'>", unsafe_allow_html=True)
                 
@@ -638,7 +638,7 @@ try:
                 st.markdown("**⏰ Define Time Block**")
                 col_at1, col_at2 = st.columns(2)
                 with col_at1: add_start = st.text_input("Start Time (H:MM)", value="12:00", key="add_start")
-                with col_at2: add_end = st.text_input("End Time (H:MM)", value="12:30", key="add_end")
+                with col_at2: add_end = st.text_input("End Time (H:MM)", value="", placeholder="Leave blank to auto-calc duration", key="add_end")
                 
                 st.markdown("<hr style='margin: 10px 0px;'>", unsafe_allow_html=True)
                 
@@ -673,7 +673,19 @@ try:
                     df['End_Mins'] = df.apply(lambda r: r['End_Mins'] + 1440 if r['End_Mins'] <= r['Start_Mins'] and r['End_Mins'] < 120 else r['End_Mins'], axis=1)
                     
                     L_start_new = time_to_mins(add_start.strip())
-                    L_end_new = time_to_mins(add_end.strip())
+                    
+                    # Smart duration calculation if end time is left blank!
+                    if add_end.strip():
+                        L_end_new = time_to_mins(add_end.strip())
+                    else:
+                        selected_dur = 0
+                        for sub in add_subs:
+                            match = act_master_df[act_master_df['Sub_Activity'] == sub]
+                            if not match.empty:
+                                selected_dur += int(match['Duration_Mins'].iloc[0])
+                        if selected_dur == 0: selected_dur = 30 # fallback if no profile found
+                        L_end_new = L_start_new + selected_dur
+
                     if L_end_new <= L_start_new and L_end_new < 120: L_end_new += 1440
                     
                     new_rows = []
@@ -693,8 +705,8 @@ try:
                                 
                         new_rows.append({
                             "Day": day,
-                            "Start_Time": add_start.strip(),
-                            "End_Time": add_end.strip(),
+                            "Start_Time": mins_to_time(L_start_new),
+                            "End_Time": mins_to_time(L_end_new),
                             "Start_Mins": L_start_new,
                             "End_Mins": L_end_new,
                             "Activity": final_add_act,
@@ -721,6 +733,122 @@ try:
                     st.success(f"✅ Successfully inserted new block and adjusted schedule for {add_day_opt}!")
                     time.sleep(1.5)
                     st.rerun()
+
+        # --- 7. AUTO-GENERATE DAY SCHEDULE ---
+        st.markdown("---")
+        st.markdown("#### ⚡ 5. Auto-Generate Day Schedule")
+        with st.expander("Click to Auto-Build from Activity Profile"):
+            st.info("💡 Pulls all sub-activities for a selected profile in order. Enter an anchor **Start Time** for the first task (e.g. 6:00). Leave subsequent times blank to auto-chain them based on your Builder durations!")
+            
+            col_gen1, col_gen2 = st.columns(2)
+            with col_gen1:
+                gen_day_opt = st.selectbox("Select Schedule Day to Build", day_options, key="gen_day")
+            
+            if gen_day_opt == "Monday to Friday":
+                default_type = "WEEK DAYS"
+            elif gen_day_opt == "Saturday":
+                default_type = "SATURDAY/HALF WORKING DAY"
+            elif gen_day_opt == "Sunday":
+                default_type = "SUNDAY"
+            else:
+                default_type = "WEEK DAYS"
+                
+            with col_gen2:
+                override_type = st.selectbox("Profile to Apply", ["WEEK DAYS", "SATURDAY/HALF WORKING DAY", "SUNDAY", "HOLIDAY"], index=["WEEK DAYS", "SATURDAY/HALF WORKING DAY", "SUNDAY", "HOLIDAY"].index(default_type))
+            
+            profile_df_gen = act_master_df[(act_master_df['Day_Type'] == override_type) & (act_master_df['Sub_Activity'] != "")].copy()
+            
+            if profile_df_gen.empty:
+                st.warning(f"No sub-activities found for {override_type} in the Builder.")
+            else:
+                gen_df = profile_df_gen[['Activity', 'Sub_Activity', 'Duration_Mins']].copy()
+                gen_df['Start_Time (H:MM)'] = ""
+                gen_df['End_Time (H:MM)'] = ""
+                
+                apply_mode = st.radio("Apply Mode", ["Overwrite Day (Replace completely)", "Append (Add to existing schedule)"], horizontal=True)
+                
+                st.markdown("**Adjust Times & Generate:**")
+                edited_gen_df = st.data_editor(
+                    gen_df,
+                    column_config={
+                        "Activity": st.column_config.TextColumn("Activity", disabled=True),
+                        "Sub_Activity": st.column_config.TextColumn("Sub-Activity", disabled=True),
+                        "Duration_Mins": st.column_config.NumberColumn("Duration (Mins)", disabled=True),
+                        "Start_Time (H:MM)": st.column_config.TextColumn("Start Time (Optional)"),
+                        "End_Time (H:MM)": st.column_config.TextColumn("End Time (Optional)")
+                    },
+                    hide_index=True,
+                    use_container_width=True
+                )
+                
+                if st.button("🚀 Generate & Save Schedule", type="primary", use_container_width=True):
+                    new_rows = []
+                    current_mins = 0
+                    
+                    for _, row in edited_gen_df.iterrows():
+                        act = row['Activity']
+                        sub_act = row['Sub_Activity']
+                        dur = int(row['Duration_Mins'])
+                        st_str = str(row['Start_Time (H:MM)']).strip()
+                        et_str = str(row['End_Time (H:MM)']).strip()
+                        
+                        if st_str:
+                            start_mins = time_to_mins(st_str)
+                        else:
+                            start_mins = current_mins
+                            
+                        if et_str:
+                            end_mins = time_to_mins(et_str)
+                        else:
+                            end_mins = start_mins + dur
+                            
+                        if end_mins <= start_mins and end_mins < 120:
+                            end_mins += 1440
+                            
+                        current_mins = end_mins
+                        
+                        if start_mins == end_mins:
+                            continue
+                            
+                        target_gen_days = weekdays if gen_day_opt == "Monday to Friday" else [gen_day_opt]
+                        for d in target_gen_days:
+                            new_rows.append({
+                                "Day": d,
+                                "Start_Time": mins_to_time(start_mins),
+                                "End_Time": mins_to_time(end_mins),
+                                "Start_Mins": start_mins,
+                                "End_Mins": end_mins,
+                                "Activity": act,
+                                "Sub_Activities": sub_act,
+                                "check_list": "",
+                                "App": ""
+                            })
+                    
+                    if new_rows:
+                        target_gen_days = weekdays if gen_day_opt == "Monday to Friday" else [gen_day_opt]
+                        
+                        if apply_mode.startswith("Overwrite"):
+                            df_clean = df[~df['Day'].str.title().isin([d.title() for d in target_gen_days])].copy()
+                        else:
+                            df_clean = df.copy()
+                            
+                        new_df = pd.DataFrame(new_rows)
+                        df_final = pd.concat([df_clean, new_df], ignore_index=True)
+                        
+                        df_final['Dur_Mins'] = df_final['End_Mins'] - df_final['Start_Mins']
+                        df_final = df_final[df_final['Dur_Mins'] > 0].copy()
+                        df_final['Duration'] = df_final['Dur_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")
+                        df_final = sort_routine_df(df_final)
+                        df_final = df_final[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App"]]
+                        
+                        with st.spinner("Generating Schedule and Saving to Google Sheets..."):
+                            routine_sheet = get_sheet("routine_master")
+                            routine_sheet.clear()
+                            routine_sheet.update(values=[df_final.columns.values.tolist()] + df_final.values.tolist(), range_name="A1")
+                            get_routine_data.clear()
+                        st.success(f"✅ Auto-Generated schedule for {gen_day_opt}!")
+                        time.sleep(1.5)
+                        st.rerun()
 
 except Exception as e:
     st.error(f"System Error: {e}")

@@ -175,6 +175,12 @@ def format_matrix_mins(total_mins):
         return "-"
     return format_mins(total_mins)
 
+def parse_dur_to_mins(d_str):
+    try:
+        parts = str(d_str).split(":")
+        return int(parts[0]) * 60 + int(parts[1])
+    except: return 0
+
 # Live Routine Editor Swap Function (Memory-Only to Avoid 429 Errors)
 def shift_routine_slot(df, target_days, curr_i, direction):
     df['Start_Mins'] = df['Start_Time'].apply(time_to_mins)
@@ -400,13 +406,6 @@ try:
     # ==========================================
     with tab_summary:
         summary_df = df.copy()
-        
-        def parse_dur_to_mins(d_str):
-            try:
-                parts = str(d_str).split(":")
-                return int(parts[0]) * 60 + int(parts[1])
-            except: return 0
-                
         summary_df['Dur_Mins'] = summary_df['Duration'].apply(parse_dur_to_mins)
         summary_df['Day'] = summary_df['Day'].str.title()
 
@@ -489,6 +488,57 @@ try:
     # TAB 1: ROUTINE EDITOR
     # ==========================================
     with tab_editor:
+        # --- 0. SCHEDULE HEALTH AUDIT ---
+        st.markdown("#### 🏥 Schedule Health Audit")
+        
+        mismatches = []
+        for idx, row in df.iterrows():
+            day = str(row['Day']).title()
+            
+            day_type = "WEEK DAYS"
+            if day == "Saturday": day_type = "SATURDAY/HALF WORKING DAY"
+            elif day == "Sunday": day_type = "SUNDAY"
+            elif day == "Holiday": day_type = "HOLIDAY"
+            
+            act = str(row['Activity']).strip()
+            subs = [x.strip() for x in str(row['Sub_Activities']).split(',') if x.strip()]
+            slot_dur = parse_dur_to_mins(row['Duration'])
+            
+            if not subs:
+                continue
+                
+            expected_dur = 0
+            found = False
+            
+            for sub in subs:
+                match = act_master_df[(act_master_df['Day_Type'] == day_type) & (act_master_df['Sub_Activity'] == sub)]
+                if match.empty:
+                    match = act_master_df[act_master_df['Sub_Activity'] == sub]
+                    
+                if not match.empty:
+                    expected_dur += int(match['Duration_Mins'].iloc[0])
+                    found = True
+                    
+            if found and expected_dur > 0 and slot_dur != expected_dur:
+                mismatches.append({
+                    "Day": day,
+                    "Time": f"{row['Start_Time']} - {row['End_Time']}",
+                    "Task": act,
+                    "Sub-Tasks": ", ".join(subs),
+                    "Live Mins": slot_dur,
+                    "Expected Mins": expected_dur
+                })
+                
+        if not mismatches:
+            st.success("✅ **Everything is OK!** All scheduled time slots perfectly match your configured Activity Builder durations.")
+        else:
+            st.warning(f"⚠️ **Mismatch Warning!** Found {len(mismatches)} time slots where the live schedule duration does not strictly follow your builder configuration.")
+            with st.expander("🔍 Click to view mismatch details"):
+                st.dataframe(pd.DataFrame(mismatches), use_container_width=True, hide_index=True)
+        
+        st.markdown("---")
+
+        # --- 1. SMART DAY GROUPING LOGIC ---
         weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
         has_all_weekdays = all(d in df['Day'].str.title().unique() for d in weekdays)
 

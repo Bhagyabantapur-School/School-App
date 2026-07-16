@@ -141,7 +141,6 @@ def get_activity_master():
     if not data:
         return pd.DataFrame(columns=["Day_Type", "Activity", "Sub_Activity", "Duration_Mins", "Sheet_Row"])
     
-    # Check for old schema and migrate gracefully without breaking user data
     if "Day_Type" not in data[0]:
         df = pd.DataFrame(data[1:], columns=data[0]) if len(data) > 1 else pd.DataFrame(columns=data[0])
         df.insert(0, "Day_Type", "WEEK DAYS")
@@ -153,12 +152,10 @@ def get_activity_master():
         return pd.DataFrame(columns=["Day_Type", "Activity", "Sub_Activity", "Duration_Mins", "Sheet_Row"])
     
     df = pd.DataFrame(data[1:], columns=data[0])
-    # Track the exact row number in Google Sheets (header is row 1, data starts at row 2)
     df['Sheet_Row'] = df.index + 2 
     df['Duration_Mins'] = pd.to_numeric(df['Duration_Mins'], errors='coerce').fillna(0)
     return df
 
-# Helper formatting function for summary duration
 def format_mins(total_mins):
     h = int(total_mins) // 60
     m = int(total_mins) % 60
@@ -166,11 +163,72 @@ def format_mins(total_mins):
         return f"{h}h {m}m"
     return f"{m}m"
 
-# Formatting function for matrix to hide zeros cleanly
 def format_matrix_mins(total_mins):
     if pd.isna(total_mins) or total_mins == 0:
         return "-"
     return format_mins(total_mins)
+
+# Live Routine Editor Swap Function
+def shift_routine_slot(df, target_days, curr_i, direction):
+    df['Start_Mins'] = df['Start_Time'].apply(time_to_mins)
+    df['End_Mins'] = df['End_Time'].apply(time_to_mins)
+    df['End_Mins'] = df.apply(lambda r: r['End_Mins'] + 1440 if r['End_Mins'] <= r['Start_Mins'] and r['End_Mins'] < 120 else r['End_Mins'], axis=1)
+    df['Dur_Mins'] = df['End_Mins'] - df['Start_Mins']
+    
+    for day in target_days:
+        day_mask = df['Day'].str.title() == day
+        day_idx = df[day_mask].sort_values('Start_Mins').index
+        
+        if direction == 'up' and curr_i > 0 and curr_i < len(day_idx):
+            idx_curr = day_idx[curr_i]
+            idx_prev = day_idx[curr_i - 1]
+            
+            dur_curr = df.loc[idx_curr, 'Dur_Mins']
+            dur_prev = df.loc[idx_prev, 'Dur_Mins']
+            anchor_start = df.loc[idx_prev, 'Start_Mins']
+            
+            df.loc[idx_curr, 'Start_Mins'] = anchor_start
+            df.loc[idx_curr, 'End_Mins'] = anchor_start + dur_curr
+            df.loc[idx_curr, 'Start_Time'] = mins_to_time(df.loc[idx_curr, 'Start_Mins'])
+            df.loc[idx_curr, 'End_Time'] = mins_to_time(df.loc[idx_curr, 'End_Mins'])
+            
+            df.loc[idx_prev, 'Start_Mins'] = anchor_start + dur_curr
+            df.loc[idx_prev, 'End_Mins'] = anchor_start + dur_curr + dur_prev
+            df.loc[idx_prev, 'Start_Time'] = mins_to_time(df.loc[idx_prev, 'Start_Mins'])
+            df.loc[idx_prev, 'End_Time'] = mins_to_time(df.loc[idx_prev, 'End_Mins'])
+            
+        elif direction == 'down' and curr_i >= 0 and curr_i < len(day_idx) - 1:
+            idx_curr = day_idx[curr_i]
+            idx_next = day_idx[curr_i + 1]
+            
+            dur_curr = df.loc[idx_curr, 'Dur_Mins']
+            dur_next = df.loc[idx_next, 'Dur_Mins']
+            anchor_start = df.loc[idx_curr, 'Start_Mins']
+            
+            df.loc[idx_next, 'Start_Mins'] = anchor_start
+            df.loc[idx_next, 'End_Mins'] = anchor_start + dur_next
+            df.loc[idx_next, 'Start_Time'] = mins_to_time(df.loc[idx_next, 'Start_Mins'])
+            df.loc[idx_next, 'End_Time'] = mins_to_time(df.loc[idx_next, 'End_Mins'])
+            
+            df.loc[idx_curr, 'Start_Mins'] = anchor_start + dur_next
+            df.loc[idx_curr, 'End_Mins'] = anchor_start + dur_next + dur_curr
+            df.loc[idx_curr, 'Start_Time'] = mins_to_time(df.loc[idx_curr, 'Start_Mins'])
+            df.loc[idx_curr, 'End_Time'] = mins_to_time(df.loc[idx_curr, 'End_Mins'])
+            
+    df = df[df['Dur_Mins'] > 0].copy()
+    df['Duration'] = df['Dur_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")
+    df = sort_routine_df(df)
+    df = auto_adjust_schedule(df)
+    df = df[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App"]]
+    
+    with st.spinner(f"Moving slot {direction}..."):
+        routine_sheet = get_sheet("routine_master")
+        routine_sheet.clear()
+        routine_sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name="A1")
+        get_routine_data.clear()
+    st.success("✅ Sequence updated!")
+    time.sleep(1.5)
+    st.rerun()
 
 # ==========================================
 # Top Action Bar
@@ -215,12 +273,10 @@ try:
     with tab_builder:
         st.markdown("### 🏗️ Activity Database & Time Pool")
         
-        # Profile Configuration Selector
         st.markdown("<div class='profile-header'>📅 Select Schedule Profile</div>", unsafe_allow_html=True)
         profile_options = ["WEEK DAYS", "SATURDAY/HALF WORKING DAY", "SUNDAY", "HOLIDAY"]
         selected_day_type = st.radio("Profile Config", profile_options, horizontal=True, label_visibility="collapsed")
         
-        # Filter dataframe for current profile
         profile_df = act_master_df[act_master_df['Day_Type'] == selected_day_type].copy()
         
         total_used = profile_df['Duration_Mins'].sum()
@@ -244,7 +300,6 @@ try:
                     if new_act_input:
                         if new_act_input not in profile_df['Activity'].values:
                             sheet = get_main_spreadsheet().worksheet("activity_master")
-                            # Schema: Day_Type, Activity, Sub_Activity, Duration_Mins
                             sheet.append_row([selected_day_type, new_act_input, "", 0])
                             get_activity_master.clear()
                             st.success(f"✅ Created Activity: {new_act_input} for {selected_day_type}")
@@ -277,33 +332,30 @@ try:
                             
         st.markdown("---")
         st.markdown(f"### 📋 Configured Activities for {selected_day_type}")
-        st.info("💡 Adjust times and use the **⬆️ / ⬇️ buttons** to rearrange the sequence for the Auto-Generator.")
+        st.info("💡 Adjust the minutes below and click **Save** to update the sub-activity duration.")
         
         if not profile_df.empty:
-            # We want to group while preserving order. Groupby usually sorts keys, but we can iterate over unique activities in order of appearance
             unique_acts_ordered = profile_df['Activity'].dropna().unique()
             
             for act in unique_acts_ordered:
                 if not act: continue
-                # Calculate total for this specific activity block
                 act_mins = profile_df[profile_df['Activity'] == act]['Duration_Mins'].sum()
                 
                 with st.expander(f"📁 **{act}** | Sub-Activities Total: **{format_mins(act_mins)}**"):
                     sub_df = profile_df[(profile_df['Activity'] == act) & (profile_df['Sub_Activity'] != "")]
                     
                     if not sub_df.empty:
-                        for i, (index, row) in enumerate(sub_df.iterrows()):
+                        for _, row in sub_df.iterrows():
                             sub_name = row['Sub_Activity']
                             curr_dur = int(row['Duration_Mins'])
                             sheet_row = row['Sheet_Row']
                             
                             st.markdown("<div class='sub-act-row'>", unsafe_allow_html=True)
-                            col_sn, col_in, col_btn, col_up, col_dn = st.columns([4, 2, 2, 1, 1])
+                            col_sn, col_in, col_btn = st.columns([5, 3, 2])
                             
                             with col_sn:
                                 st.markdown(f"<div style='padding-top: 8px;'>📄 <b>{sub_name}</b> <span style='color: #6c757d; font-size: 0.9em; margin-left: 8px;'>({format_mins(curr_dur)})</span></div>", unsafe_allow_html=True)
                             with col_in:
-                                # Track unique keys for the inputs to prevent widget rendering conflicts
                                 new_dur = st.number_input("Mins", value=curr_dur, min_value=0, step=5, key=f"edit_dur_{sheet_row}", label_visibility="collapsed")
                             with col_btn:
                                 if st.button("💾 Save", key=f"save_btn_{sheet_row}", use_container_width=True):
@@ -313,7 +365,6 @@ try:
                                     elif diff != 0:
                                         with st.spinner("Updating..."):
                                             sheet = get_main_spreadsheet().worksheet("activity_master")
-                                            # Column D contains the durations in the new schema
                                             sheet.update_acell(f"D{sheet_row}", new_dur)
                                             get_activity_master.clear()
                                         st.success("✅ Saved!")
@@ -321,33 +372,6 @@ try:
                                         st.rerun()
                                     else:
                                         st.warning("No changes made.")
-                            with col_up:
-                                if st.button("⬆️", key=f"up_{sheet_row}", disabled=(i==0), use_container_width=True):
-                                    idx_above = sub_df.index[i-1]
-                                    temp_curr, temp_above = act_master_df.loc[index].copy(), act_master_df.loc[idx_above].copy()
-                                    act_master_df.loc[index], act_master_df.loc[idx_above] = temp_above, temp_curr
-                                    
-                                    with st.spinner("Moving up..."):
-                                        sheet = get_main_spreadsheet().worksheet("activity_master")
-                                        save_df = act_master_df.drop(columns=['Sheet_Row'])
-                                        sheet.clear()
-                                        sheet.update(values=[save_df.columns.values.tolist()] + save_df.values.tolist(), range_name="A1")
-                                        get_activity_master.clear()
-                                    st.rerun()
-                            with col_dn:
-                                if st.button("⬇️", key=f"dn_{sheet_row}", disabled=(i==len(sub_df)-1), use_container_width=True):
-                                    idx_below = sub_df.index[i+1]
-                                    temp_curr, temp_below = act_master_df.loc[index].copy(), act_master_df.loc[idx_below].copy()
-                                    act_master_df.loc[index], act_master_df.loc[idx_below] = temp_below, temp_curr
-                                    
-                                    with st.spinner("Moving down..."):
-                                        sheet = get_main_spreadsheet().worksheet("activity_master")
-                                        save_df = act_master_df.drop(columns=['Sheet_Row'])
-                                        sheet.clear()
-                                        sheet.update(values=[save_df.columns.values.tolist()] + save_df.values.tolist(), range_name="A1")
-                                        get_activity_master.clear()
-                                    st.rerun()
-                                    
                             st.markdown("</div>", unsafe_allow_html=True)
                     else:
                         st.markdown("*No sub-activities allocated yet.*")
@@ -358,23 +382,17 @@ try:
     # TAB 2: ROUTINE SUMMARY
     # ==========================================
     with tab_summary:
-        
         summary_df = df.copy()
         
-        # Calculate raw minutes from the Duration column (HH:MM)
         def parse_dur_to_mins(d_str):
             try:
                 parts = str(d_str).split(":")
                 return int(parts[0]) * 60 + int(parts[1])
-            except:
-                return 0
+            except: return 0
                 
         summary_df['Dur_Mins'] = summary_df['Duration'].apply(parse_dur_to_mins)
-        
-        # Clean 'Day' format just in case
         summary_df['Day'] = summary_df['Day'].str.title()
 
-        # UI for selecting the Breakdown View
         col_view1, col_view2 = st.columns([1, 1])
         with col_view1:
             view_mode = st.radio("Select Summary View Mode", ["Weekly Routine Breakdown", "Daily (24h) Breakdown"], horizontal=True)
@@ -390,11 +408,8 @@ try:
             
         else:
             filtered_summary_df = summary_df.copy()
-            
-            # --- WEEKLY MATRIX TABLE ---
             st.markdown("### 🗓️ Weekly Activity Matrix")
             
-            # Create a pivot table mapping Activity vs Day
             pivot_df = summary_df.pivot_table(
                 index='Activity', 
                 columns='Day', 
@@ -403,7 +418,6 @@ try:
                 fill_value=0
             )
             
-            # Reorder and rename columns to MON - SUN
             day_mapping = {
                 "Monday": "MON", "Tuesday": "TUE", "Wednesday": "WED", 
                 "Thursday": "THU", "Friday": "FRI", "Saturday": "SAT", "Sunday": "SUN"
@@ -413,7 +427,6 @@ try:
             pivot_df = pivot_df[ordered_days]
             pivot_df.rename(columns=day_mapping, inplace=True)
             
-            # Format the cells
             for col in pivot_df.columns:
                 pivot_df[col] = pivot_df[col].apply(format_matrix_mins)
                 
@@ -423,8 +436,6 @@ try:
             st.markdown("### 📊 Expandable Breakdown")
             st.info("💡 **Note:** If a single time slot has multiple sub-activities, the full duration of that slot is attributed to each sub-activity listed.")
         
-        # --- EXPANDABLE ACTIVITY LIST ---
-        # Group by Top-Level Activity using the filtered dataframe
         activity_grouped = filtered_summary_df.groupby("Activity")['Dur_Mins'].sum().sort_values(ascending=False)
         
         for act, act_mins in activity_grouped.items():
@@ -432,20 +443,15 @@ try:
             
             with st.expander(f"📁 **{act_name}** |  Total Time: **{format_mins(act_mins)}**"):
                 act_df = filtered_summary_df[filtered_summary_df["Activity"] == act].copy()
-                
-                # Explode Sub-Activities so each comma-separated item gets its own grouping
                 act_df['Sub_List'] = act_df['Sub_Activities'].apply(
                     lambda x: [i.strip() for i in str(x).split(',') if i.strip()] if str(x).strip() else ["No Sub-Activity"]
                 )
                 exploded_df = act_df.explode('Sub_List')
-                
                 sub_grouped = exploded_df.groupby("Sub_List")['Dur_Mins'].sum().sort_values(ascending=False)
                 
                 for sub_act, sub_mins in sub_grouped.items():
                     with st.expander(f"📄 {sub_act}  |  Time: {format_mins(sub_mins)}"):
                         slots_df = exploded_df[exploded_df["Sub_List"] == sub_act].copy()
-                        
-                        # Sort slots logically by Day and Time
                         day_order = {d: i for i, d in enumerate(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"])}
                         slots_df['Day_Idx'] = slots_df['Day'].str.title().map(day_order).fillna(99)
                         slots_df['Start_Sort'] = slots_df['Start_Time'].apply(time_to_mins)
@@ -454,7 +460,6 @@ try:
                         display_df = slots_df[["Day", "Start_Time", "End_Time", "Duration"]]
                         st.dataframe(display_df, hide_index=True, use_container_width=True)
 
-        # --- GRAND TOTAL FOOTER ---
         total_tracked_mins = filtered_summary_df['Dur_Mins'].sum()
         context_label = "Total Tracked Time for " + (f"{selected_summary_day}" if view_mode == "Daily (24h) Breakdown" else "the Week")
         
@@ -467,7 +472,6 @@ try:
     # TAB 1: ROUTINE EDITOR
     # ==========================================
     with tab_editor:
-        # --- 1. SMART DAY GROUPING LOGIC ---
         weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
         has_all_weekdays = all(d in df['Day'].str.title().unique() for d in weekdays)
 
@@ -494,7 +498,6 @@ try:
         else:
             day_options = list(df['Day'].str.title().unique())
 
-        # --- 2. DAY SELECTION ---
         st.markdown("#### 📅 1. Select Day to Manage")
         sel_day_opt = st.selectbox("Select Schedule Day", day_options, label_visibility="collapsed")
         
@@ -508,12 +511,26 @@ try:
 
         target_df = df[df['Day'].str.title() == display_day].copy()
 
-        # --- 3. TIME SLOT SELECTION ---
-        st.markdown("#### ⏱️ 2. Select Time Slot")
-        slot_opts = [f"{row['Start_Time']} to {row['End_Time']}  |  {row['Activity']}" for _, row in target_df.iterrows()]
-        selected_slot = st.selectbox("Choose the specific slot you want to update:", slot_opts)
+        # --- 3. TIME SLOT SELECTION & ARROW SWAPPING ---
+        st.markdown("#### ⏱️ 2. Select Time Slot to Manage or Move")
+        target_df['Start_Mins'] = target_df['Start_Time'].apply(time_to_mins)
+        target_df = target_df.sort_values('Start_Mins').reset_index(drop=True)
         
+        slot_opts = [f"{row['Start_Time']} to {row['End_Time']}  |  {row['Activity']}" for _, row in target_df.iterrows()]
+        
+        col_sel, col_up, col_dn = st.columns([8, 1, 1])
+        with col_sel:
+            selected_slot = st.selectbox("Choose the specific slot you want to update:", slot_opts, label_visibility="collapsed")
+            
         sel_start = selected_slot.split(" to ")[0].strip()
+        curr_i = target_df.index[target_df['Start_Time'] == sel_start].tolist()[0]
+        
+        with col_up:
+            if st.button("⬆️", key="move_up", disabled=(curr_i == 0), use_container_width=True, help="Swap this task with the one above it"):
+                shift_routine_slot(df.copy(), target_days, curr_i, 'up')
+        with col_dn:
+            if st.button("⬇️", key="move_dn", disabled=(curr_i == len(target_df)-1), use_container_width=True, help="Swap this task with the one below it"):
+                shift_routine_slot(df.copy(), target_days, curr_i, 'down')
 
         # --- 4. HIGHLIGHTED SCHEDULE DISPLAY ---
         st.markdown(f"**Full Schedule for {display_day}** *(Editing row highlighted in yellow)*")
@@ -522,7 +539,7 @@ try:
             is_target = s['Start_Time'] == sel_start
             return ['background-color: #fff59d; color: black; font-weight: bold;' if is_target else '' for _ in s]
 
-        st.dataframe(target_df.style.apply(highlight_target_row, axis=1), use_container_width=True, hide_index=True)
+        st.dataframe(target_df.drop(columns=['Start_Mins']).style.apply(highlight_target_row, axis=1), use_container_width=True, hide_index=True)
 
         st.markdown("---")
 
@@ -706,7 +723,6 @@ try:
                     
                     L_start_new = time_to_mins(add_start.strip())
                     
-                    # Smart duration calculation if end time is left blank!
                     if add_end.strip():
                         L_end_new = time_to_mins(add_end.strip())
                     else:
@@ -715,7 +731,7 @@ try:
                             match = act_master_df[act_master_df['Sub_Activity'] == sub]
                             if not match.empty:
                                 selected_dur += int(match['Duration_Mins'].iloc[0])
-                        if selected_dur == 0: selected_dur = 30 # fallback if no profile found
+                        if selected_dur == 0: selected_dur = 30
                         L_end_new = L_start_new + selected_dur
 
                     if L_end_new <= L_start_new and L_end_new < 120: L_end_new += 1440
@@ -867,7 +883,6 @@ try:
                         new_df = pd.DataFrame(new_rows)
                         df_final = pd.concat([df_clean, new_df], ignore_index=True)
                         
-                        # THE CRITICAL BUG FIX: Safely recalculate Start/End Mins for ALL old data
                         df_final['Start_Mins'] = df_final['Start_Time'].apply(time_to_mins)
                         df_final['End_Mins'] = df_final['End_Time'].apply(time_to_mins)
                         df_final['End_Mins'] = df_final.apply(lambda r: r['End_Mins'] + 1440 if r['End_Mins'] <= r['Start_Mins'] and r['End_Mins'] < 120 else r['End_Mins'], axis=1)

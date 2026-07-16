@@ -277,23 +277,28 @@ try:
                             
         st.markdown("---")
         st.markdown(f"### 📋 Configured Activities for {selected_day_type}")
-        st.info("💡 Adjust the minutes below and click **Save** to update the sub-activity duration.")
+        st.info("💡 Adjust times and use the **⬆️ / ⬇️ buttons** to rearrange the sequence for the Auto-Generator.")
         
         if not profile_df.empty:
-            grouped = profile_df.groupby("Activity")['Duration_Mins'].sum().sort_values(ascending=False)
-            for act, act_mins in grouped.items():
+            # We want to group while preserving order. Groupby usually sorts keys, but we can iterate over unique activities in order of appearance
+            unique_acts_ordered = profile_df['Activity'].dropna().unique()
+            
+            for act in unique_acts_ordered:
                 if not act: continue
+                # Calculate total for this specific activity block
+                act_mins = profile_df[profile_df['Activity'] == act]['Duration_Mins'].sum()
+                
                 with st.expander(f"📁 **{act}** | Sub-Activities Total: **{format_mins(act_mins)}**"):
                     sub_df = profile_df[(profile_df['Activity'] == act) & (profile_df['Sub_Activity'] != "")]
                     
                     if not sub_df.empty:
-                        for _, row in sub_df.iterrows():
+                        for i, (index, row) in enumerate(sub_df.iterrows()):
                             sub_name = row['Sub_Activity']
                             curr_dur = int(row['Duration_Mins'])
                             sheet_row = row['Sheet_Row']
                             
                             st.markdown("<div class='sub-act-row'>", unsafe_allow_html=True)
-                            col_sn, col_in, col_btn = st.columns([5, 3, 2])
+                            col_sn, col_in, col_btn, col_up, col_dn = st.columns([4, 2, 2, 1, 1])
                             
                             with col_sn:
                                 st.markdown(f"<div style='padding-top: 8px;'>📄 <b>{sub_name}</b> <span style='color: #6c757d; font-size: 0.9em; margin-left: 8px;'>({format_mins(curr_dur)})</span></div>", unsafe_allow_html=True)
@@ -316,6 +321,33 @@ try:
                                         st.rerun()
                                     else:
                                         st.warning("No changes made.")
+                            with col_up:
+                                if st.button("⬆️", key=f"up_{sheet_row}", disabled=(i==0), use_container_width=True):
+                                    idx_above = sub_df.index[i-1]
+                                    temp_curr, temp_above = act_master_df.loc[index].copy(), act_master_df.loc[idx_above].copy()
+                                    act_master_df.loc[index], act_master_df.loc[idx_above] = temp_above, temp_curr
+                                    
+                                    with st.spinner("Moving up..."):
+                                        sheet = get_main_spreadsheet().worksheet("activity_master")
+                                        save_df = act_master_df.drop(columns=['Sheet_Row'])
+                                        sheet.clear()
+                                        sheet.update(values=[save_df.columns.values.tolist()] + save_df.values.tolist(), range_name="A1")
+                                        get_activity_master.clear()
+                                    st.rerun()
+                            with col_dn:
+                                if st.button("⬇️", key=f"dn_{sheet_row}", disabled=(i==len(sub_df)-1), use_container_width=True):
+                                    idx_below = sub_df.index[i+1]
+                                    temp_curr, temp_below = act_master_df.loc[index].copy(), act_master_df.loc[idx_below].copy()
+                                    act_master_df.loc[index], act_master_df.loc[idx_below] = temp_below, temp_curr
+                                    
+                                    with st.spinner("Moving down..."):
+                                        sheet = get_main_spreadsheet().worksheet("activity_master")
+                                        save_df = act_master_df.drop(columns=['Sheet_Row'])
+                                        sheet.clear()
+                                        sheet.update(values=[save_df.columns.values.tolist()] + save_df.values.tolist(), range_name="A1")
+                                        get_activity_master.clear()
+                                    st.rerun()
+                                    
                             st.markdown("</div>", unsafe_allow_html=True)
                     else:
                         st.markdown("*No sub-activities allocated yet.*")

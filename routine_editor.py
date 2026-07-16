@@ -517,19 +517,32 @@ try:
             expected_df = act_master_df[(act_master_df['Day_Type'] == day_type) & (act_master_df['Sub_Activity'] != "")]
             exp_dict = dict(zip(expected_df['Sub_Activity'].str.strip(), expected_df['Duration_Mins'].astype(int)))
             
-            all_subs = set(list(live_dict.keys()) + list(exp_dict.keys()))
+            # Using audit_subs instead of all_subs to prevent global overwrite bug
+            audit_subs = set(list(live_dict.keys()) + list(exp_dict.keys()))
             
-            for sub in all_subs:
+            for sub in audit_subs:
                 if not sub: continue
                 l_mins = live_dict.get(sub, 0)
                 e_mins = exp_dict.get(sub, 0)
                 
                 if l_mins != e_mins:
+                    # Dynamically pull the Parent Task (Activity)
+                    task_name = "Unknown"
+                    builder_match = expected_df[expected_df['Sub_Activity'] == sub]
+                    if not builder_match.empty:
+                        task_name = builder_match['Activity'].iloc[0]
+                    else:
+                        live_match = exploded_audit[(exploded_audit['Day'].str.title() == day_str) & (exploded_audit['Sub_List'] == sub)]
+                        if not live_match.empty:
+                            task_name = live_match['Activity'].iloc[0]
+
                     if day_str not in mismatched_subs_per_day:
                         mismatched_subs_per_day[day_str] = []
                     mismatched_subs_per_day[day_str].append(sub)
+                    
                     mismatches.append({
                         "Day": day_str,
+                        "Task": task_name,
                         "Sub-Task": sub,
                         "Live Total Mins": l_mins,
                         "Expected Mins": e_mins,

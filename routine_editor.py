@@ -236,7 +236,6 @@ def shift_routine_slot(df, target_days, curr_i, direction):
     df = auto_adjust_schedule(df)
     df = df[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App"]]
     
-    # Store locally to avoid 429
     st.session_state.routine_df = df
     st.session_state.unsaved_sort = True
     return new_start_time
@@ -275,7 +274,6 @@ try:
     df = st.session_state.routine_df
     act_master_df = get_activity_master()
 
-    # Consolidate standard options and Builder DB options to feed Tab 1 dropdowns dynamically
     all_acts_db = df['Activity'].dropna().tolist()
     all_acts_builder = act_master_df['Activity'].dropna().tolist()
     all_acts = sorted(list(set([str(x).strip().upper() for x in all_acts_db + all_acts_builder if str(x).strip()])))
@@ -284,7 +282,6 @@ try:
     all_subs_builder = act_master_df['Sub_Activity'].dropna().tolist()
     all_subs = sorted(list(set([str(x).strip() for x in all_subs_db + all_subs_builder if str(x).strip()])))
 
-    # Create Tabs for the Interface
     tab_editor, tab_summary, tab_builder = st.tabs(["⚙️ Routine Editor", "📊 Routine Summary", "🏗️ Activity Builder"])
 
     # ==========================================
@@ -537,7 +534,6 @@ try:
         st.markdown("#### ⏱️ 2. Select Time Slot to Manage or Move")
         slot_opts = [f"{row['Start_Time']} to {row['End_Time']}  |  {row['Activity']}" for _, row in target_df.iterrows()]
         
-        # State tracking to keep the moved item selected!
         if 'active_slot_start' not in st.session_state:
             st.session_state.active_slot_start = None
             
@@ -679,10 +675,41 @@ try:
                 L_end_new = time_to_mins(new_end_txt.strip())
                 if L_end_new <= L_start_new and L_end_new < 120: L_end_new += 1440
                 
+                new_remainder_rows = []
+                
                 for day in target_days:
                     row_mask = (df['Day'].str.title() == day) & (df['Start_Time'] == sel_start)
                     if not row_mask.any(): continue
                     idx_to_edit = df[row_mask].index[0]
+                    
+                    old_start_mins = df.loc[idx_to_edit, 'Start_Mins']
+                    old_end_mins = df.loc[idx_to_edit, 'End_Mins']
+                    old_act = df.loc[idx_to_edit, 'Activity']
+                    old_subs = df.loc[idx_to_edit, 'Sub_Activities']
+                    old_chks = df.loc[idx_to_edit, 'check_list']
+                    old_app = df.loc[idx_to_edit, 'App']
+                    
+                    vacated_intervals = []
+                    if L_start_new >= old_end_mins or L_end_new <= old_start_mins:
+                        vacated_intervals.append((old_start_mins, old_end_mins))
+                    else:
+                        if L_start_new > old_start_mins:
+                            vacated_intervals.append((old_start_mins, L_start_new))
+                        if L_end_new < old_end_mins:
+                            vacated_intervals.append((L_end_new, old_end_mins))
+                            
+                    for v_start, v_end in vacated_intervals:
+                        new_remainder_rows.append({
+                            "Day": day,
+                            "Start_Time": mins_to_time(v_start),
+                            "End_Time": mins_to_time(v_end),
+                            "Start_Mins": v_start,
+                            "End_Mins": v_end,
+                            "Activity": old_act,
+                            "Sub_Activities": old_subs,
+                            "check_list": old_chks,
+                            "App": old_app
+                        })
                     
                     df.loc[idx_to_edit, 'Start_Time'] = new_start_txt.strip()
                     df.loc[idx_to_edit, 'End_Time'] = new_end_txt.strip()
@@ -700,13 +727,33 @@ try:
                         T_start = df.loc[idx, 'Start_Mins']
                         T_end = df.loc[idx, 'End_Mins']
                         
-                        if T_start < L_start_new and T_end > L_start_new:
+                        if T_start < L_start_new and T_end > L_end_new:
                             df.loc[idx, 'End_Mins'] = L_start_new
                             df.loc[idx, 'End_Time'] = mins_to_time(L_start_new)
-                        elif T_start >= L_start_new and T_start < L_end_new:
+                            new_remainder_rows.append({
+                                "Day": day,
+                                "Start_Time": mins_to_time(L_end_new),
+                                "End_Time": mins_to_time(T_end),
+                                "Start_Mins": L_end_new,
+                                "End_Mins": T_end,
+                                "Activity": df.loc[idx, 'Activity'],
+                                "Sub_Activities": df.loc[idx, 'Sub_Activities'],
+                                "check_list": df.loc[idx, 'check_list'],
+                                "App": df.loc[idx, 'App']
+                            })
+                        elif T_start >= L_start_new and T_start < L_end_new and T_end > L_end_new:
                             df.loc[idx, 'Start_Mins'] = L_end_new
                             df.loc[idx, 'Start_Time'] = mins_to_time(L_end_new)
+                        elif T_start < L_start_new and T_end > L_start_new and T_end <= L_end_new:
+                            df.loc[idx, 'End_Mins'] = L_start_new
+                            df.loc[idx, 'End_Time'] = mins_to_time(L_start_new)
+                        elif T_start >= L_start_new and T_end <= L_end_new:
+                            df.loc[idx, 'Start_Mins'] = 0
+                            df.loc[idx, 'End_Mins'] = 0
                             
+                if new_remainder_rows:
+                    df = pd.concat([df, pd.DataFrame(new_remainder_rows)], ignore_index=True)
+                    
                 df['Dur_Mins'] = df['End_Mins'] - df['Start_Mins']
                 df = df[df['Dur_Mins'] > 0].copy()
                 df['Duration'] = df['Dur_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")
@@ -787,7 +834,7 @@ try:
 
                     if L_end_new <= L_start_new and L_end_new < 120: L_end_new += 1440
                     
-                    new_rows = []
+                    new_remainder_rows = []
                     
                     for day in target_add_days:
                         day_idx = df[df['Day'].str.title() == day].index
@@ -795,14 +842,31 @@ try:
                             T_start = df.loc[idx, 'Start_Mins']
                             T_end = df.loc[idx, 'End_Mins']
                             
-                            if T_start < L_start_new and T_end > L_start_new:
+                            if T_start < L_start_new and T_end > L_end_new:
                                 df.loc[idx, 'End_Mins'] = L_start_new
                                 df.loc[idx, 'End_Time'] = mins_to_time(L_start_new)
-                            elif T_start >= L_start_new and T_start < L_end_new:
+                                new_remainder_rows.append({
+                                    "Day": day,
+                                    "Start_Time": mins_to_time(L_end_new),
+                                    "End_Time": mins_to_time(T_end),
+                                    "Start_Mins": L_end_new,
+                                    "End_Mins": T_end,
+                                    "Activity": df.loc[idx, 'Activity'],
+                                    "Sub_Activities": df.loc[idx, 'Sub_Activities'],
+                                    "check_list": df.loc[idx, 'check_list'],
+                                    "App": df.loc[idx, 'App']
+                                })
+                            elif T_start >= L_start_new and T_start < L_end_new and T_end > L_end_new:
                                 df.loc[idx, 'Start_Mins'] = L_end_new
                                 df.loc[idx, 'Start_Time'] = mins_to_time(L_end_new)
+                            elif T_start < L_start_new and T_end > L_start_new and T_end <= L_end_new:
+                                df.loc[idx, 'End_Mins'] = L_start_new
+                                df.loc[idx, 'End_Time'] = mins_to_time(L_start_new)
+                            elif T_start >= L_start_new and T_end <= L_end_new:
+                                df.loc[idx, 'Start_Mins'] = 0
+                                df.loc[idx, 'End_Mins'] = 0
                                 
-                        new_rows.append({
+                        new_remainder_rows.append({
                             "Day": day,
                             "Start_Time": mins_to_time(L_start_new),
                             "End_Time": mins_to_time(L_end_new),
@@ -814,9 +878,8 @@ try:
                             "App": final_add_apps
                         })
                     
-                    if new_rows:
-                        new_df = pd.DataFrame(new_rows)
-                        df = pd.concat([df, new_df], ignore_index=True)
+                    if new_remainder_rows:
+                        df = pd.concat([df, pd.DataFrame(new_remainder_rows)], ignore_index=True)
                     
                     df['Dur_Mins'] = df['End_Mins'] - df['Start_Mins']
                     df = df[df['Dur_Mins'] > 0].copy()

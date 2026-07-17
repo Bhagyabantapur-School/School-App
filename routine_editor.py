@@ -134,7 +134,6 @@ def get_routine_data():
         
     df = pd.DataFrame(data[1:], columns=data[0])
     
-    # Dynamically ensure required columns exist to avoid rigid header-mapping bugs
     required_cols = ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Locked"]
     for col in required_cols:
         if col not in df.columns:
@@ -659,6 +658,14 @@ try:
                 if new_start: st.session_state.active_slot_start = new_start
                 st.rerun()
 
+        st.markdown("""
+        <div style='font-size: 0.9em; padding: 10px; background-color: #f8f9fa; border-radius: 6px; margin-top: 10px; margin-bottom: 10px; border: 1px solid #e0e0e0;'>
+            <b>🎨 Color Legend:</b><br>
+            🟨 <b>Yellow:</b> Currently selected editing row &nbsp;&nbsp;|&nbsp;&nbsp; 🟥 <b>Dark Red:</b> Missing time / Schedule Gaps<br>
+            🚨 <b>Light Red:</b> Activity Builder duration mismatches &nbsp;&nbsp;|&nbsp;&nbsp; 🔲 <b>Gray:</b> 🔒 Fixed/Locked slots
+        </div>
+        """, unsafe_allow_html=True)
+
         if st.session_state.get('unsaved_sort', False):
             st.markdown("<div class='local-warning'>⚠️ <b>Sequence modified locally!</b> Click save to update Google Sheets to avoid losing changes.</div>", unsafe_allow_html=True)
             if st.button("💾 Push Reordered Schedule to Cloud", type="primary", use_container_width=True):
@@ -673,7 +680,7 @@ try:
                 st.rerun()
 
         # --- 4. HIGHLIGHTED SCHEDULE DISPLAY ---
-        st.markdown(f"**Full Schedule for {display_day}** *(Editing row: Yellow | Mismatches: Light Red | Gaps: Dark Red | Locked: Gray)*")
+        st.markdown(f"#### 📋 Full Schedule for {display_day}")
         
         display_rows = []
         for i in range(len(target_df)):

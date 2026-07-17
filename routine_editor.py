@@ -95,7 +95,6 @@ def auto_adjust_schedule(df):
         day_df['End_Mins'] = day_df.apply(lambda r: r['End_Mins'] + 1440 if r['End_Mins'] <= r['Start_Mins'] and r['End_Mins'] < 120 else r['End_Mins'], axis=1)
         day_df['Dur_Mins'] = day_df['End_Mins'] - day_df['Start_Mins']
         
-        # Sort so locked items take precedence if starting at same time
         day_df['Locked_Sort'] = day_df.get('Locked', '').apply(lambda x: 0 if str(x).title() == 'Yes' else 1)
         day_df = day_df.sort_values(['Start_Mins', 'Locked_Sort', 'Dur_Mins']).reset_index(drop=True)
         
@@ -113,7 +112,6 @@ def auto_adjust_schedule(df):
                             if day_df.loc[j, 'Start_Mins'] > day_df.loc[j, 'End_Mins']:
                                 day_df.loc[j, 'End_Mins'] = day_df.loc[j, 'Start_Mins']
                     else:
-                        # Regardless of B's lock status, A must shrink to not overlap
                         day_df.loc[i, 'End_Mins'] = start_B
                         
         day_df['Start_Time'] = day_df['Start_Mins'].apply(mins_to_time)
@@ -132,7 +130,6 @@ def auto_adjust_schedule(df):
 def get_routine_data():
     data = get_sheet("routine_master").get_all_values()
     df = pd.DataFrame(data[1:], columns=data[0])
-    # Add Locked Column dynamically if it doesn't exist
     while df.shape[1] < 13: df[df.shape[1]] = ""
     df = df.iloc[:, :13]
     df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Role", "Urgent", "Important", "Energy_Level", "Locked"]
@@ -189,7 +186,6 @@ def parse_dur_to_mins(d_str):
         return int(parts[0]) * 60 + int(parts[1])
     except: return 0
 
-# Live Routine Editor Swap Function (Memory-Only to Avoid 429 Errors)
 def shift_routine_slot(df, target_days, curr_i, direction):
     df['Start_Mins'] = df['Start_Time'].apply(time_to_mins)
     df['End_Mins'] = df['End_Time'].apply(time_to_mins)
@@ -218,14 +214,12 @@ def shift_routine_slot(df, target_days, curr_i, direction):
             idx_curr = day_idx[curr_i]
             idx_target = day_idx[target_i]
             
-            # Swap their start minutes
             start_curr = df.loc[idx_curr, 'Start_Mins']
             start_target = df.loc[idx_target, 'Start_Mins']
             
             df.loc[idx_curr, 'Start_Mins'] = start_target
             df.loc[idx_target, 'Start_Mins'] = start_curr
             
-            # Recalculate end minutes preserving their durations
             df.loc[idx_curr, 'End_Mins'] = start_target + df.loc[idx_curr, 'Dur_Mins']
             df.loc[idx_target, 'End_Mins'] = start_curr + df.loc[idx_target, 'Dur_Mins']
             
@@ -756,7 +750,13 @@ try:
 
             st.markdown("</div><br>", unsafe_allow_html=True)
 
-            if st.form_submit_button("💾 Save Changes to Routine", type="primary", use_container_width=True):
+            col_sub1, col_sub2 = st.columns([7, 3])
+            with col_sub1:
+                save_btn = st.form_submit_button("💾 Save Changes to Routine", type="primary", use_container_width=True)
+            with col_sub2:
+                del_btn = st.form_submit_button("🗑️ Delete Slot", type="secondary", use_container_width=True)
+
+            if save_btn:
                 final_act = new_act_txt.strip().upper() if new_act_txt.strip() else new_act_sel
                 final_subs = ",".join(filter(None, [x for x in new_subs_sel] + [x.strip() for x in new_subs_txt.split(',')]))
                 final_chks = ",".join(filter(None, [x for x in new_chks_sel] + [x.strip() for x in new_chks_txt.split(',')]))
@@ -853,7 +853,7 @@ try:
                             if not is_locked:
                                 df.loc[idx, 'Start_Mins'] = 0
                                 df.loc[idx, 'End_Mins'] = 0
-                            
+                                
                 if new_remainder_rows:
                     df = pd.concat([df, pd.DataFrame(new_remainder_rows)], ignore_index=True)
                     
@@ -874,6 +874,35 @@ try:
                 st.success(f"✅ Successfully updated and seamlessly aligned schedule for {sel_day_opt}!")
                 time.sleep(1.5)
                 st.rerun()
+
+            elif del_btn:
+                indices_to_drop = []
+                for day in target_days:
+                    row_mask = (df['Day'].str.title() == day) & (df['Start_Time'] == sel_start)
+                    if row_mask.any():
+                        indices_to_drop.extend(df[row_mask].index.tolist())
+                
+                if indices_to_drop:
+                    df = df.drop(index=indices_to_drop)
+                    
+                    df['Dur_Mins'] = df['End_Mins'] - df['Start_Mins']
+                    df = df[df['Dur_Mins'] > 0].copy()
+                    df['Duration'] = df['Dur_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")
+                    df = sort_routine_df(df)
+                    df = df[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Locked"]]
+                    
+                    with st.spinner("Deleting time block and updating Google Sheets..."):
+                        routine_sheet = get_sheet("routine_master")
+                        routine_sheet.clear()
+                        routine_sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name="A1")
+                        get_routine_data.clear()
+                        st.session_state.routine_df = df
+                        st.session_state.unsaved_sort = False
+                        st.session_state.active_slot_start = None
+                        
+                    st.success(f"✅ Successfully deleted the time slot for {sel_day_opt}!")
+                    time.sleep(1.5)
+                    st.rerun()
 
         # --- 6. ADD NEW SLOT FORM ---
         st.markdown("---")

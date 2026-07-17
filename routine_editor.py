@@ -407,7 +407,6 @@ try:
     # ==========================================
     with tab_summary:
         summary_df = df.copy()
-                
         summary_df['Dur_Mins'] = summary_df['Duration'].apply(parse_dur_to_mins)
         summary_df['Day'] = summary_df['Day'].str.title()
 
@@ -419,21 +418,15 @@ try:
             available_days_summary = list(summary_df['Day'].unique())
             with col_view2:
                 selected_summary_day = st.selectbox("Select Specific Day", available_days_summary)
-            
             filtered_summary_df = summary_df[summary_df['Day'] == selected_summary_day].copy()
             st.markdown(f"### 📊 Daily Breakdown: {selected_summary_day}")
-            st.info("💡 **Note:** If a single time slot has multiple sub-activities, the full duration of that slot is attributed to each sub-activity listed.")
-            
+            days_in_view = [selected_summary_day]
         else:
             filtered_summary_df = summary_df.copy()
             st.markdown("### 🗓️ Weekly Activity Matrix")
             
             pivot_df = summary_df.pivot_table(
-                index='Activity', 
-                columns='Day', 
-                values='Dur_Mins', 
-                aggfunc='sum', 
-                fill_value=0
+                index='Activity', columns='Day', values='Dur_Mins', aggfunc='sum', fill_value=0
             )
             
             day_mapping = {
@@ -441,35 +434,121 @@ try:
                 "Thursday": "THU", "Friday": "FRI", "Saturday": "SAT", "Sunday": "SUN"
             }
             ordered_days = [d for d in day_mapping.keys() if d in pivot_df.columns]
-            
             pivot_df = pivot_df[ordered_days]
             pivot_df.rename(columns=day_mapping, inplace=True)
-            
             for col in pivot_df.columns:
                 pivot_df[col] = pivot_df[col].apply(format_matrix_mins)
                 
             st.dataframe(pivot_df, use_container_width=True)
-            
             st.markdown("---")
-            st.markdown("### 📊 Expandable Breakdown")
-            st.info("💡 **Note:** If a single time slot has multiple sub-activities, the full duration of that slot is attributed to each sub-activity listed.")
-        
-        activity_grouped = filtered_summary_df.groupby("Activity")['Dur_Mins'].sum().sort_values(ascending=False)
-        
-        for act, act_mins in activity_grouped.items():
-            act_name = str(act).strip() if str(act).strip() else "UNNAMED ACTIVITY"
+            st.markdown(f"### 📊 Weekly Breakdown")
+            days_in_view = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+        # --- SMART EDITOR VS BUILDER COMPARISON SYSTEM ---
+        st.markdown("#### 🔍 Compare: Live Editor vs Activity Builder")
+        st.info("💡 Missing tasks and duration mismatches are explicitly highlighted in **Red**. Extra Editor tasks are highlighted in **Gray**.")
+
+        # 1. Calculate Expected (Builder) Times
+        expected_act_sub = {}
+        expected_act = {}
+        for day in days_in_view:
+            day_str = str(day).title()
+            if day_str == 'Saturday': dtype = 'SATURDAY/HALF WORKING DAY'
+            elif day_str == 'Sunday': dtype = 'SUNDAY'
+            elif day_str == 'Holiday': dtype = 'HOLIDAY'
+            else: dtype = 'WEEK DAYS'
             
-            with st.expander(f"📁 **{act_name}** |  Total Time: **{format_mins(act_mins)}**"):
-                act_df = filtered_summary_df[filtered_summary_df["Activity"] == act].copy()
-                act_df['Sub_List'] = act_df['Sub_Activities'].apply(
-                    lambda x: [i.strip() for i in str(x).split(',') if i.strip()] if str(x).strip() else ["No Sub-Activity"]
-                )
-                exploded_df = act_df.explode('Sub_List')
-                sub_grouped = exploded_df.groupby("Sub_List")['Dur_Mins'].sum().sort_values(ascending=False)
+            b_df = act_master_df[(act_master_df['Day_Type'] == dtype) & (act_master_df['Sub_Activity'] != "")]
+            for _, r in b_df.iterrows():
+                a = str(r['Activity']).strip().upper()
+                s = str(r['Sub_Activity']).strip()
+                m = int(r['Duration_Mins'])
+                expected_act_sub[(a, s)] = expected_act_sub.get((a, s), 0) + m
+                expected_act[a] = expected_act.get(a, 0) + m
                 
-                for sub_act, sub_mins in sub_grouped.items():
-                    with st.expander(f"📄 {sub_act}  |  Time: {format_mins(sub_mins)}"):
-                        slots_df = exploded_df[exploded_df["Sub_List"] == sub_act].copy()
+        # 2. Calculate Live (Editor) Times
+        live_act_sub = {}
+        live_act = {}
+        temp_df = filtered_summary_df.copy()
+        temp_df['Sub_List'] = temp_df['Sub_Activities'].apply(
+            lambda x: [i.strip() for i in str(x).split(',') if i.strip()] if str(x).strip() else ["No Sub-Activity"]
+        )
+        exploded_df = temp_df.explode('Sub_List')
+        
+        for _, r in exploded_df.iterrows():
+            a = str(r['Activity']).strip().upper() if str(r['Activity']).strip() else "UNNAMED ACTIVITY"
+            s = str(r['Sub_List']).strip()
+            m = int(r['Dur_Mins'])
+            live_act_sub[(a, s)] = live_act_sub.get((a, s), 0) + m
+            live_act[a] = live_act.get(a, 0) + m
+            
+        # 3. Sort Activities
+        all_acts_view = set(live_act.keys()).union(set(expected_act.keys()))
+        act_sort_list = []
+        for a in all_acts_view:
+            l = live_act.get(a, 0)
+            e = expected_act.get(a, 0)
+            act_sort_list.append({'act': a, 'live': l, 'exp': e, 'is_missing': l == 0})
+        
+        act_sort_list.sort(key=lambda x: (x['is_missing'], -x['live'], -x['exp']))
+        
+        # 4. Render Breakdown
+        for item in act_sort_list:
+            a = item['act']
+            l_act = item['live']
+            e_act = item['exp']
+            
+            act_flag = ""
+            if l_act == e_act: act_flag = "✅"
+            elif l_act == 0: act_flag = "❌ Missing"
+            elif e_act == 0: act_flag = "➕ Extra"
+            else: act_flag = "🚨 Mismatch"
+            
+            expander_label = f"📁 {a} | Live: {format_mins(l_act)} | Builder: {format_mins(e_act)} | {act_flag}"
+            with st.expander(expander_label):
+                
+                subs_for_act = set([s for act, s in live_act_sub.keys() if act == a]).union(
+                               set([s for act, s in expected_act_sub.keys() if act == a]))
+                
+                sub_sort_list = []
+                for s in subs_for_act:
+                    l_s = live_act_sub.get((a, s), 0)
+                    e_s = expected_act_sub.get((a, s), 0)
+                    sub_sort_list.append({'sub': s, 'live': l_s, 'exp': e_s, 'is_missing': l_s == 0})
+                
+                sub_sort_list.sort(key=lambda x: (x['is_missing'], -x['live'], -x['exp']))
+                
+                for s_item in sub_sort_list:
+                    s = s_item['sub']
+                    l_s = s_item['live']
+                    e_s = s_item['exp']
+                    
+                    bg_color = "transparent"
+                    border_color = "#e0e0e0"
+                    
+                    if l_s == e_s:
+                        s_flag = "✅ OK"
+                    elif l_s == 0:
+                        s_flag = "❌ Missing in Editor"
+                        bg_color = "#f8d7da" # Light Red
+                        border_color = "#f5c2c7"
+                    elif e_s == 0:
+                        s_flag = "➕ Extra (Not in Builder)"
+                        bg_color = "#e2e3e5" # Gray
+                        border_color = "#d3d6d8"
+                    else:
+                        s_flag = f"🚨 Mismatch ({l_s - e_s} mins)"
+                        bg_color = "#f8d7da" # Light Red
+                        border_color = "#f5c2c7"
+                        
+                    st.markdown(f"""
+                    <div style='background-color: {bg_color}; border: 1px solid {border_color}; padding: 8px; border-radius: 6px; margin-bottom: 5px;'>
+                        <b>📄 {s}</b> &nbsp;&nbsp;|&nbsp;&nbsp; Live: <b>{format_mins(l_s)}</b> &nbsp;&nbsp;|&nbsp;&nbsp; Builder: <b>{format_mins(e_s)}</b> &nbsp;&nbsp;|&nbsp;&nbsp; {s_flag}
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    if l_s > 0:
+                        slots_df = exploded_df[(exploded_df["Activity"] == a) & (exploded_df["Sub_List"] == s)].copy()
                         day_order = {d: i for i, d in enumerate(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"])}
                         slots_df['Day_Idx'] = slots_df['Day'].str.title().map(day_order).fillna(99)
                         slots_df['Start_Sort'] = slots_df['Start_Time'].apply(time_to_mins)
@@ -479,7 +558,7 @@ try:
                         st.dataframe(display_df, hide_index=True, use_container_width=True)
 
         total_tracked_mins = filtered_summary_df['Dur_Mins'].sum()
-        context_label = "Total Tracked Time for " + (f"{selected_summary_day}" if view_mode == "Daily (24h) Breakdown" else "the Week")
+        context_label = "Total Editor Live Time for " + (f"{selected_summary_day}" if view_mode == "Daily (24h) Breakdown" else "the Week")
         
         st.markdown(
             f"<div class='total-time-footer'>⏱️ {context_label}: {format_mins(total_tracked_mins)}</div>", 

@@ -186,7 +186,6 @@ def parse_dur_to_mins(d_str):
         return int(parts[0]) * 60 + int(parts[1])
     except: return 0
 
-# Live Routine Editor Swap Function (Memory-Only to Avoid 429 Errors)
 def shift_routine_slot(df, target_days, curr_i, direction):
     df['Start_Mins'] = df['Start_Time'].apply(time_to_mins)
     df['End_Mins'] = df['End_Time'].apply(time_to_mins)
@@ -215,26 +214,14 @@ def shift_routine_slot(df, target_days, curr_i, direction):
             idx_curr = day_idx[curr_i]
             idx_target = day_idx[target_i]
             
-            dur_curr = df.loc[idx_curr, 'Dur_Mins']
-            dur_target = df.loc[idx_target, 'Dur_Mins']
+            start_curr = df.loc[idx_curr, 'Start_Mins']
+            start_target = df.loc[idx_target, 'Start_Mins']
             
-            if direction == 'up':
-                anchor_start = df.loc[idx_target, 'Start_Mins']
-                
-                df.loc[idx_curr, 'Start_Mins'] = anchor_start
-                df.loc[idx_curr, 'End_Mins'] = anchor_start + dur_curr
-                
-                df.loc[idx_target, 'Start_Mins'] = anchor_start + dur_curr
-                df.loc[idx_target, 'End_Mins'] = anchor_start + dur_curr + dur_target
-                
-            elif direction == 'down':
-                anchor_start = df.loc[idx_curr, 'Start_Mins']
-                
-                df.loc[idx_target, 'Start_Mins'] = anchor_start
-                df.loc[idx_target, 'End_Mins'] = anchor_start + dur_target
-                
-                df.loc[idx_curr, 'Start_Mins'] = anchor_start + dur_target
-                df.loc[idx_curr, 'End_Mins'] = anchor_start + dur_target + dur_curr
+            df.loc[idx_curr, 'Start_Mins'] = start_target
+            df.loc[idx_target, 'Start_Mins'] = start_curr
+            
+            df.loc[idx_curr, 'End_Mins'] = start_target + df.loc[idx_curr, 'Dur_Mins']
+            df.loc[idx_target, 'End_Mins'] = start_curr + df.loc[idx_target, 'Dur_Mins']
             
             df.loc[idx_curr, 'Start_Time'] = mins_to_time(df.loc[idx_curr, 'Start_Mins'])
             df.loc[idx_curr, 'End_Time'] = mins_to_time(df.loc[idx_curr, 'End_Mins'])
@@ -600,6 +587,8 @@ try:
 
         target_df = df[df['Day'].str.title() == display_day].copy()
         target_df['Start_Mins'] = target_df['Start_Time'].apply(time_to_mins)
+        target_df['End_Mins'] = target_df['End_Time'].apply(time_to_mins)
+        target_df['End_Mins'] = target_df.apply(lambda r: r['End_Mins'] + 1440 if r['End_Mins'] <= r['Start_Mins'] and r['End_Mins'] < 120 else r['End_Mins'], axis=1)
         target_df = target_df.sort_values('Start_Mins').reset_index(drop=True)
 
         # --- 3. TIME SLOT SELECTION WITH LOCAL SORT ENGINE ---
@@ -677,13 +666,41 @@ try:
                 st.rerun()
 
         # --- 4. HIGHLIGHTED SCHEDULE DISPLAY ---
-        st.markdown(f"**Full Schedule for {display_day}** *(Editing row highlighted in yellow)*")
+        st.markdown(f"**Full Schedule for {display_day}** *(Editing row highlighted in yellow, gaps in red)*")
+        
+        display_rows = []
+        for i in range(len(target_df)):
+            row_dict = target_df.iloc[i].to_dict()
+            row_dict['Is_Gap'] = False
+            display_rows.append(row_dict)
+            if i < len(target_df) - 1:
+                curr_end = target_df.iloc[i]['End_Mins']
+                next_start = target_df.iloc[i+1]['Start_Mins']
+                if curr_end < next_start:
+                    gap_dur = next_start - curr_end
+                    gap_row = {col: "" for col in target_df.columns}
+                    gap_row.update({
+                        "Day": row_dict['Day'],
+                        "Start_Time": mins_to_time(curr_end),
+                        "End_Time": mins_to_time(next_start),
+                        "Duration": f"{int(gap_dur)//60:02d}:{int(gap_dur)%60:02d}",
+                        "Activity": "⚠️ TIME GAP",
+                        "Sub_Activities": "-",
+                        "check_list": "-",
+                        "App": "-",
+                        "Locked": "-",
+                        "Is_Gap": True
+                    })
+                    display_rows.append(gap_row)
+        display_df = pd.DataFrame(display_rows)
         
         def highlight_target_row(s):
-            is_target = s['Start_Time'] == sel_start
+            if s.get('Is_Gap', False):
+                return ['background-color: #ffcccc; color: #b30000; font-weight: bold;' for _ in s]
+            is_target = s['Start_Time'] == sel_start and not s.get('Is_Gap', False)
             return ['background-color: #fff59d; color: black; font-weight: bold;' if is_target else '' for _ in s]
 
-        st.dataframe(target_df.drop(columns=['Start_Mins']).style.apply(highlight_target_row, axis=1), use_container_width=True, hide_index=True)
+        st.dataframe(display_df.drop(columns=['Start_Mins', 'End_Mins', 'Is_Gap'], errors='ignore').style.apply(highlight_target_row, axis=1), use_container_width=True, hide_index=True)
 
         st.markdown("---")
 
@@ -883,7 +900,7 @@ try:
                     get_routine_data.clear()
                     st.session_state.routine_df = df
                     st.session_state.unsaved_sort = False
-                    st.session_state.active_slot_start = mins_to_time(L_start_new)
+                    st.session_state.active_slot_start = new_start_txt.strip()
                 st.success(f"✅ Successfully updated and seamlessly aligned schedule for {sel_day_opt}!")
                 time.sleep(1.5)
                 st.rerun()

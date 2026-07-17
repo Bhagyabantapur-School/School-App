@@ -885,6 +885,10 @@ try:
                 if indices_to_drop:
                     df = df.drop(index=indices_to_drop)
                     
+                    df['Start_Mins'] = df['Start_Time'].apply(time_to_mins)
+                    df['End_Mins'] = df['End_Time'].apply(time_to_mins)
+                    df['End_Mins'] = df.apply(lambda r: r['End_Mins'] + 1440 if r['End_Mins'] <= r['Start_Mins'] and r['End_Mins'] < 120 else r['End_Mins'], axis=1)
+                    
                     df['Dur_Mins'] = df['End_Mins'] - df['Start_Mins']
                     df = df[df['Dur_Mins'] > 0].copy()
                     df['Duration'] = df['Dur_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")

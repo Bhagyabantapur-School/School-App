@@ -573,26 +573,28 @@ try:
         st.markdown("#### 🏥 Schedule Health Audit")
         
         mismatches = []
-        mismatched_combinations_per_day = {}
+        mismatched_act_subs_per_day = {}
         
         exp_dicts = {}
         for dtype in ["WEEK DAYS", "SATURDAY/HALF WORKING DAY", "SUNDAY", "HOLIDAY"]:
             expected_df = act_master_df[(act_master_df['Day_Type'] == dtype) & (act_master_df['Sub_Activity'] != "")]
-            exp_dicts[dtype] = expected_df.groupby(expected_df['Sub_Activity'].str.strip())['Duration_Mins'].sum().to_dict()
+            exp_dict = {}
+            for _, r in expected_df.iterrows():
+                k = (str(r['Activity']).strip().upper(), str(r['Sub_Activity']).strip())
+                exp_dict[k] = exp_dict.get(k, 0) + int(r['Duration_Mins'])
+            exp_dicts[dtype] = exp_dict
         
         audit_df = df.copy()
         audit_df['Dur_Mins'] = audit_df['Duration'].apply(parse_dur_to_mins)
+        audit_df['Sub_List'] = audit_df['Sub_Activities'].apply(
+            lambda x: [i.strip() for i in str(x).split(',') if i.strip()] if str(x).strip() else []
+        )
+        exploded_audit = audit_df.explode('Sub_List')
+        exploded_audit = exploded_audit[exploded_audit['Sub_List'] != ""] 
         
-        aggregated_live = audit_df.groupby(['Day', 'Sub_Activities'])['Dur_Mins'].sum().reset_index()
-        
-        for _, row in aggregated_live.iterrows():
-            day_str = str(row['Day']).title()
-            subs_str = str(row['Sub_Activities']).strip()
-            live_mins = row['Dur_Mins']
+        for day in df['Day'].unique():
+            day_str = str(day).title()
             
-            if not subs_str:
-                continue
-                
             day_type = "WEEK DAYS"
             if day_str == "Saturday": day_type = "SATURDAY/HALF WORKING DAY"
             elif day_str == "Sunday": day_type = "SUNDAY"
@@ -600,34 +602,37 @@ try:
             
             exp_dict = exp_dicts.get(day_type, {})
             
-            subs_list = [x.strip() for x in subs_str.split(',') if x.strip()]
-            expected_mins = sum(exp_dict.get(sub, 0) for sub in subs_list)
+            day_live = exploded_audit[exploded_audit['Day'].str.title() == day_str]
+            live_dict = {}
+            for _, r in day_live.iterrows():
+                k = (str(r['Activity']).strip().upper(), str(r['Sub_List']).strip())
+                live_dict[k] = live_dict.get(k, 0) + int(r['Dur_Mins'])
+                
+            all_keys = set(live_dict.keys()).union(set(exp_dict.keys()))
             
-            if live_mins != expected_mins:
-                if day_str not in mismatched_combinations_per_day:
-                    mismatched_combinations_per_day[day_str] = []
-                mismatched_combinations_per_day[day_str].append(subs_str)
+            for k in all_keys:
+                act_name, sub_name = k
+                l_mins = live_dict.get(k, 0)
+                e_mins = exp_dict.get(k, 0)
                 
-                task_names = []
-                for sub in subs_list:
-                    builder_match = act_master_df[(act_master_df['Day_Type'] == day_type) & (act_master_df['Sub_Activity'].str.strip() == sub)]
-                    if not builder_match.empty:
-                        task_names.append(builder_match['Activity'].iloc[0])
-                task_str = ", ".join(list(set(task_names))) if task_names else "Unknown"
-                
-                mismatches.append({
-                    "Day": day_str,
-                    "Task": task_str,
-                    "Sub-Task(s)": subs_str,
-                    "Live Mins": live_mins,
-                    "Expected Mins": expected_mins,
-                    "Difference": live_mins - expected_mins
-                })
+                if l_mins != e_mins:
+                    if day_str not in mismatched_act_subs_per_day:
+                        mismatched_act_subs_per_day[day_str] = set()
+                    mismatched_act_subs_per_day[day_str].add(k)
+                    
+                    mismatches.append({
+                        "Day": day_str,
+                        "Task": act_name,
+                        "Sub-Task(s)": sub_name,
+                        "Live Mins": l_mins,
+                        "Expected Mins": e_mins,
+                        "Difference": l_mins - e_mins
+                    })
                     
         if not mismatches:
             st.success("✅ **Everything is OK!** All scheduled time slots perfectly match your configured Activity Builder durations.")
         else:
-            st.warning(f"⚠️ **Mismatch Warning!** Found {len(mismatches)} sub-activity combinations where the total daily live schedule duration does not match your builder configuration.")
+            st.warning(f"⚠️ **Mismatch Warning!** Found {len(mismatches)} sub-activity assignments where the total daily live schedule duration does not match your builder configuration.")
             with st.expander("🔍 Click to view mismatch details"):
                 st.dataframe(pd.DataFrame(mismatches), use_container_width=True, hide_index=True)
         
@@ -679,17 +684,20 @@ try:
         # --- 3. TIME SLOT SELECTION WITH LOCAL SORT ENGINE ---
         st.markdown("#### ⏱️ 2. Select Time Slot to Manage or Move")
         
-        day_mismatches = mismatched_combinations_per_day.get(display_day, [])
+        day_mismatches = mismatched_act_subs_per_day.get(display_day, set())
         slot_opts = []
         for _, row in target_df.iterrows():
+            act = str(row['Activity']).strip().upper()
             base_str = f"{row['Start_Time']} to {row['End_Time']}  |  {row['Activity']}"
             row_subs_str = str(row['Sub_Activities']).strip()
+            row_subs_list = [x.strip() for x in row_subs_str.split(',') if x.strip()]
             
             if row_subs_str:
                 base_str += f"  |  {row_subs_str}"
             if str(row.get('Locked', '')).title() == 'Yes':
                 base_str += " 🔒 [FIXED]"
-            if row_subs_str in day_mismatches:
+            
+            if any((act, sub) in day_mismatches for sub in row_subs_list):
                 base_str += " ⚠️ [MISMATCH]"
                 
             slot_opts.append(base_str)
@@ -765,8 +773,12 @@ try:
         for i in range(len(target_df)):
             row_dict = target_df.iloc[i].to_dict()
             row_dict['Is_Gap'] = False
+            
+            act = str(row_dict.get('Activity', '')).strip().upper()
             row_subs_str = str(row_dict.get('Sub_Activities', '')).strip()
-            row_dict['Is_Mismatch'] = row_subs_str in day_mismatches and row_subs_str != ""
+            row_subs_list = [x.strip() for x in row_subs_str.split(',') if x.strip()]
+            
+            row_dict['Is_Mismatch'] = any((act, sub) in day_mismatches for sub in row_subs_list)
             
             display_rows.append(row_dict)
             

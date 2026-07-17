@@ -129,10 +129,17 @@ def auto_adjust_schedule(df):
 @st.cache_data(ttl=300) 
 def get_routine_data():
     data = get_sheet("routine_master").get_all_values()
+    if not data or len(data) <= 1:
+        return pd.DataFrame(columns=["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Locked"])
+        
     df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 13: df[df.shape[1]] = ""
-    df = df.iloc[:, :13]
-    df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Role", "Urgent", "Important", "Energy_Level", "Locked"]
+    
+    # Dynamically ensure required columns exist to avoid rigid header-mapping bugs
+    required_cols = ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Locked"]
+    for col in required_cols:
+        if col not in df.columns:
+            df[col] = ""
+            
     df["Locked"] = df["Locked"].astype(str).str.strip().str.title()
     df = df[df["Day"].astype(str).str.strip() != ""]
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
@@ -677,7 +684,6 @@ try:
             
             display_rows.append(row_dict)
             
-            # Identify schedule gaps!
             if i < len(target_df) - 1:
                 curr_end = target_df.iloc[i]['End_Mins']
                 next_start = target_df.iloc[i+1]['Start_Mins']

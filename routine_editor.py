@@ -666,13 +666,18 @@ try:
                 st.rerun()
 
         # --- 4. HIGHLIGHTED SCHEDULE DISPLAY ---
-        st.markdown(f"**Full Schedule for {display_day}** *(Editing row highlighted in yellow, gaps in red)*")
+        st.markdown(f"**Full Schedule for {display_day}** *(Editing row highlighted in yellow, Mismatches & Gaps in red)*")
         
         display_rows = []
         for i in range(len(target_df)):
             row_dict = target_df.iloc[i].to_dict()
             row_dict['Is_Gap'] = False
+            row_subs_str = str(row_dict.get('Sub_Activities', '')).strip()
+            row_dict['Is_Mismatch'] = row_subs_str in day_mismatches and row_subs_str != ""
+            
             display_rows.append(row_dict)
+            
+            # Identify schedule gaps!
             if i < len(target_df) - 1:
                 curr_end = target_df.iloc[i]['End_Mins']
                 next_start = target_df.iloc[i+1]['Start_Mins']
@@ -689,18 +694,30 @@ try:
                         "check_list": "-",
                         "App": "-",
                         "Locked": "-",
-                        "Is_Gap": True
+                        "Is_Gap": True,
+                        "Is_Mismatch": False
                     })
                     display_rows.append(gap_row)
+                    
         display_df = pd.DataFrame(display_rows)
         
         def highlight_target_row(s):
-            if s.get('Is_Gap', False):
+            is_gap = s.get('Is_Gap', False)
+            is_mismatch = s.get('Is_Mismatch', False)
+            is_target = s.get('Start_Time') == sel_start and not is_gap
+            
+            if is_gap:
                 return ['background-color: #ffcccc; color: #b30000; font-weight: bold;' for _ in s]
-            is_target = s['Start_Time'] == sel_start and not s.get('Is_Gap', False)
-            return ['background-color: #fff59d; color: black; font-weight: bold;' if is_target else '' for _ in s]
+            elif is_target and is_mismatch:
+                return ['background-color: #ffb74d; color: black; font-weight: bold;' for _ in s]
+            elif is_mismatch:
+                return ['background-color: #f8d7da; color: #842029; font-weight: bold;' for _ in s]
+            elif is_target:
+                return ['background-color: #fff59d; color: black; font-weight: bold;' for _ in s]
+            else:
+                return ['' for _ in s]
 
-        st.dataframe(display_df.drop(columns=['Start_Mins', 'End_Mins', 'Is_Gap'], errors='ignore').style.apply(highlight_target_row, axis=1), use_container_width=True, hide_index=True)
+        st.dataframe(display_df.drop(columns=['Start_Mins', 'End_Mins', 'Is_Gap', 'Is_Mismatch', 'Locked_Sort'], errors='ignore').style.apply(highlight_target_row, axis=1), use_container_width=True, hide_index=True)
 
         st.markdown("---")
 

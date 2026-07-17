@@ -186,6 +186,7 @@ def parse_dur_to_mins(d_str):
         return int(parts[0]) * 60 + int(parts[1])
     except: return 0
 
+# Live Routine Editor Swap Function (Memory-Only to Avoid 429 Errors)
 def shift_routine_slot(df, target_days, curr_i, direction):
     df['Start_Mins'] = df['Start_Time'].apply(time_to_mins)
     df['End_Mins'] = df['End_Time'].apply(time_to_mins)
@@ -214,14 +215,26 @@ def shift_routine_slot(df, target_days, curr_i, direction):
             idx_curr = day_idx[curr_i]
             idx_target = day_idx[target_i]
             
-            start_curr = df.loc[idx_curr, 'Start_Mins']
-            start_target = df.loc[idx_target, 'Start_Mins']
+            dur_curr = df.loc[idx_curr, 'Dur_Mins']
+            dur_target = df.loc[idx_target, 'Dur_Mins']
             
-            df.loc[idx_curr, 'Start_Mins'] = start_target
-            df.loc[idx_target, 'Start_Mins'] = start_curr
-            
-            df.loc[idx_curr, 'End_Mins'] = start_target + df.loc[idx_curr, 'Dur_Mins']
-            df.loc[idx_target, 'End_Mins'] = start_curr + df.loc[idx_target, 'Dur_Mins']
+            if direction == 'up':
+                anchor_start = df.loc[idx_target, 'Start_Mins']
+                
+                df.loc[idx_curr, 'Start_Mins'] = anchor_start
+                df.loc[idx_curr, 'End_Mins'] = anchor_start + dur_curr
+                
+                df.loc[idx_target, 'Start_Mins'] = anchor_start + dur_curr
+                df.loc[idx_target, 'End_Mins'] = anchor_start + dur_curr + dur_target
+                
+            elif direction == 'down':
+                anchor_start = df.loc[idx_curr, 'Start_Mins']
+                
+                df.loc[idx_target, 'Start_Mins'] = anchor_start
+                df.loc[idx_target, 'End_Mins'] = anchor_start + dur_target
+                
+                df.loc[idx_curr, 'Start_Mins'] = anchor_start + dur_target
+                df.loc[idx_curr, 'End_Mins'] = anchor_start + dur_target + dur_curr
             
             df.loc[idx_curr, 'Start_Time'] = mins_to_time(df.loc[idx_curr, 'Start_Mins'])
             df.loc[idx_curr, 'End_Time'] = mins_to_time(df.loc[idx_curr, 'End_Mins'])
@@ -870,7 +883,7 @@ try:
                     get_routine_data.clear()
                     st.session_state.routine_df = df
                     st.session_state.unsaved_sort = False
-                    st.session_state.active_slot_start = new_start_txt.strip()
+                    st.session_state.active_slot_start = mins_to_time(L_start_new)
                 st.success(f"✅ Successfully updated and seamlessly aligned schedule for {sel_day_opt}!")
                 time.sleep(1.5)
                 st.rerun()

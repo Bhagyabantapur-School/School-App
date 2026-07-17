@@ -666,7 +666,7 @@ try:
                 st.rerun()
 
         # --- 4. HIGHLIGHTED SCHEDULE DISPLAY ---
-        st.markdown(f"**Full Schedule for {display_day}** *(Editing row highlighted in yellow, Mismatches & Gaps in red)*")
+        st.markdown(f"**Full Schedule for {display_day}** *(Editing row: Yellow | Mismatches: Light Red | Gaps: Dark Red | Locked: Gray)*")
         
         display_rows = []
         for i in range(len(target_df)):
@@ -705,19 +705,32 @@ try:
             is_gap = s.get('Is_Gap', False)
             is_mismatch = s.get('Is_Mismatch', False)
             is_target = s.get('Start_Time') == sel_start and not is_gap
+            is_locked = str(s.get('Locked', '')).title() == 'Yes'
             
             if is_gap:
                 return ['background-color: #ffcccc; color: #b30000; font-weight: bold;' for _ in s]
             elif is_target and is_mismatch:
                 return ['background-color: #ffb74d; color: black; font-weight: bold;' for _ in s]
-            elif is_mismatch:
-                return ['background-color: #f8d7da; color: #842029; font-weight: bold;' for _ in s]
             elif is_target:
                 return ['background-color: #fff59d; color: black; font-weight: bold;' for _ in s]
+            elif is_mismatch:
+                return ['background-color: #f8d7da; color: #842029; font-weight: bold;' for _ in s]
+            elif is_locked:
+                return ['background-color: #e2e3e5; color: #41464b;' for _ in s]
             else:
                 return ['' for _ in s]
 
-        st.dataframe(display_df.drop(columns=['Start_Mins', 'End_Mins', 'Is_Gap', 'Is_Mismatch', 'Locked_Sort'], errors='ignore').style.apply(highlight_target_row, axis=1), use_container_width=True, hide_index=True)
+        styled_df = display_df.style.apply(highlight_target_row, axis=1)
+        
+        cols_to_hide = ['Start_Mins', 'End_Mins', 'Is_Gap', 'Is_Mismatch', 'Locked_Sort']
+        hidden_columns_config = {col: None for col in cols_to_hide if col in display_df.columns}
+
+        st.dataframe(
+            styled_df, 
+            use_container_width=True, 
+            hide_index=True,
+            column_config=hidden_columns_config
+        )
 
         st.markdown("---")
 
@@ -917,7 +930,7 @@ try:
                     get_routine_data.clear()
                     st.session_state.routine_df = df
                     st.session_state.unsaved_sort = False
-                    st.session_state.active_slot_start = new_start_txt.strip()
+                    st.session_state.active_slot_start = mins_to_time(L_start_new)
                 st.success(f"✅ Successfully updated and seamlessly aligned schedule for {sel_day_opt}!")
                 time.sleep(1.5)
                 st.rerun()

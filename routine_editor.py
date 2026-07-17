@@ -94,20 +94,26 @@ def auto_adjust_schedule(df):
         day_df['End_Mins'] = day_df['End_Time'].apply(time_to_mins)
         day_df['End_Mins'] = day_df.apply(lambda r: r['End_Mins'] + 1440 if r['End_Mins'] <= r['Start_Mins'] and r['End_Mins'] < 120 else r['End_Mins'], axis=1)
         day_df['Dur_Mins'] = day_df['End_Mins'] - day_df['Start_Mins']
-        day_df = day_df.sort_values(['Start_Mins', 'Dur_Mins']).reset_index(drop=True)
+        
+        # Sort so locked items take precedence if starting at same time
+        day_df['Locked_Sort'] = day_df.get('Locked', '').apply(lambda x: 0 if str(x).title() == 'Yes' else 1)
+        day_df = day_df.sort_values(['Start_Mins', 'Locked_Sort', 'Dur_Mins']).reset_index(drop=True)
         
         for i in range(len(day_df) - 1):
             for j in range(i+1, len(day_df)):
                 start_A = day_df.loc[i, 'Start_Mins']
                 end_A = day_df.loc[i, 'End_Mins']
                 start_B = day_df.loc[j, 'Start_Mins']
+                locked_B = str(day_df.loc[j].get('Locked', '')).title() == 'Yes'
                 
                 if start_B < end_A:
                     if start_A == start_B:
-                        day_df.loc[j, 'Start_Mins'] = end_A
-                        if day_df.loc[j, 'Start_Mins'] > day_df.loc[j, 'End_Mins']:
-                            day_df.loc[j, 'End_Mins'] = day_df.loc[j, 'Start_Mins']
+                        if not locked_B:
+                            day_df.loc[j, 'Start_Mins'] = end_A
+                            if day_df.loc[j, 'Start_Mins'] > day_df.loc[j, 'End_Mins']:
+                                day_df.loc[j, 'End_Mins'] = day_df.loc[j, 'Start_Mins']
                     else:
+                        # Regardless of B's lock status, A must shrink to not overlap
                         day_df.loc[i, 'End_Mins'] = start_B
                         
         day_df['Start_Time'] = day_df['Start_Mins'].apply(mins_to_time)
@@ -119,16 +125,18 @@ def auto_adjust_schedule(df):
         
     if final_rows:
         fixed_df = pd.concat(final_rows, ignore_index=True)
-        return fixed_df[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App"]]
+        return fixed_df[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Locked"]]
     return df
 
 @st.cache_data(ttl=300) 
 def get_routine_data():
     data = get_sheet("routine_master").get_all_values()
     df = pd.DataFrame(data[1:], columns=data[0])
-    while df.shape[1] < 12: df[df.shape[1]] = ""
-    df = df.iloc[:, :12]
-    df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Role", "Urgent", "Important", "Energy_Level"]
+    # Add Locked Column dynamically if it doesn't exist
+    while df.shape[1] < 13: df[df.shape[1]] = ""
+    df = df.iloc[:, :13]
+    df.columns = ["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Role", "Urgent", "Important", "Energy_Level", "Locked"]
+    df["Locked"] = df["Locked"].astype(str).str.strip().str.title()
     df = df[df["Day"].astype(str).str.strip() != ""]
     df["Activity"] = df["Activity"].astype(str).str.strip().str.upper()
     df = auto_adjust_schedule(df)
@@ -194,44 +202,37 @@ def shift_routine_slot(df, target_days, curr_i, direction):
         day_mask = df['Day'].str.title() == day
         day_idx = df[day_mask].sort_values('Start_Mins').index
         
-        if direction == 'up' and curr_i > 0 and curr_i < len(day_idx):
+        target_i = None
+        if direction == 'up':
+            for k in range(curr_i - 1, -1, -1):
+                if str(df.loc[day_idx[k], 'Locked']).title() != 'Yes':
+                    target_i = k
+                    break
+        elif direction == 'down':
+            for k in range(curr_i + 1, len(day_idx)):
+                if str(df.loc[day_idx[k], 'Locked']).title() != 'Yes':
+                    target_i = k
+                    break
+        
+        if target_i is not None:
             idx_curr = day_idx[curr_i]
-            idx_prev = day_idx[curr_i - 1]
+            idx_target = day_idx[target_i]
             
-            dur_curr = df.loc[idx_curr, 'Dur_Mins']
-            dur_prev = df.loc[idx_prev, 'Dur_Mins']
-            anchor_start = df.loc[idx_prev, 'Start_Mins']
+            # Swap their start minutes
+            start_curr = df.loc[idx_curr, 'Start_Mins']
+            start_target = df.loc[idx_target, 'Start_Mins']
             
-            df.loc[idx_curr, 'Start_Mins'] = anchor_start
-            df.loc[idx_curr, 'End_Mins'] = anchor_start + dur_curr
+            df.loc[idx_curr, 'Start_Mins'] = start_target
+            df.loc[idx_target, 'Start_Mins'] = start_curr
+            
+            # Recalculate end minutes preserving their durations
+            df.loc[idx_curr, 'End_Mins'] = start_target + df.loc[idx_curr, 'Dur_Mins']
+            df.loc[idx_target, 'End_Mins'] = start_curr + df.loc[idx_target, 'Dur_Mins']
+            
             df.loc[idx_curr, 'Start_Time'] = mins_to_time(df.loc[idx_curr, 'Start_Mins'])
             df.loc[idx_curr, 'End_Time'] = mins_to_time(df.loc[idx_curr, 'End_Mins'])
-            
-            df.loc[idx_prev, 'Start_Mins'] = anchor_start + dur_curr
-            df.loc[idx_prev, 'End_Mins'] = anchor_start + dur_curr + dur_prev
-            df.loc[idx_prev, 'Start_Time'] = mins_to_time(df.loc[idx_prev, 'Start_Mins'])
-            df.loc[idx_prev, 'End_Time'] = mins_to_time(df.loc[idx_prev, 'End_Mins'])
-            
-            if day == target_days[0]:
-                new_start_time = df.loc[idx_curr, 'Start_Time']
-            
-        elif direction == 'down' and curr_i >= 0 and curr_i < len(day_idx) - 1:
-            idx_curr = day_idx[curr_i]
-            idx_next = day_idx[curr_i + 1]
-            
-            dur_curr = df.loc[idx_curr, 'Dur_Mins']
-            dur_next = df.loc[idx_next, 'Dur_Mins']
-            anchor_start = df.loc[idx_curr, 'Start_Mins']
-            
-            df.loc[idx_next, 'Start_Mins'] = anchor_start
-            df.loc[idx_next, 'End_Mins'] = anchor_start + dur_next
-            df.loc[idx_next, 'Start_Time'] = mins_to_time(df.loc[idx_next, 'Start_Mins'])
-            df.loc[idx_next, 'End_Time'] = mins_to_time(df.loc[idx_next, 'End_Mins'])
-            
-            df.loc[idx_curr, 'Start_Mins'] = anchor_start + dur_next
-            df.loc[idx_curr, 'End_Mins'] = anchor_start + dur_next + dur_curr
-            df.loc[idx_curr, 'Start_Time'] = mins_to_time(df.loc[idx_curr, 'Start_Mins'])
-            df.loc[idx_curr, 'End_Time'] = mins_to_time(df.loc[idx_curr, 'End_Mins'])
+            df.loc[idx_target, 'Start_Time'] = mins_to_time(df.loc[idx_target, 'Start_Mins'])
+            df.loc[idx_target, 'End_Time'] = mins_to_time(df.loc[idx_target, 'End_Mins'])
             
             if day == target_days[0]:
                 new_start_time = df.loc[idx_curr, 'Start_Time']
@@ -240,7 +241,7 @@ def shift_routine_slot(df, target_days, curr_i, direction):
     df['Duration'] = df['Dur_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")
     df = sort_routine_df(df)
     df = auto_adjust_schedule(df)
-    df = df[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App"]]
+    df = df[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Locked"]]
     
     st.session_state.routine_df = df
     st.session_state.unsaved_sort = True
@@ -495,7 +496,6 @@ try:
         mismatches = []
         mismatched_combinations_per_day = {}
         
-        # Pre-calculate exp_dict per day_type to handle duplicates safely
         exp_dicts = {}
         for dtype in ["WEEK DAYS", "SATURDAY/HALF WORKING DAY", "SUNDAY", "HOLIDAY"]:
             expected_df = act_master_df[(act_master_df['Day_Type'] == dtype) & (act_master_df['Sub_Activity'] != "")]
@@ -504,7 +504,6 @@ try:
         audit_df = df.copy()
         audit_df['Dur_Mins'] = audit_df['Duration'].apply(parse_dur_to_mins)
         
-        # Group by the EXACT comma-separated combination to prevent inflation
         aggregated_live = audit_df.groupby(['Day', 'Sub_Activities'])['Dur_Mins'].sum().reset_index()
         
         for _, row in aggregated_live.iterrows():
@@ -530,7 +529,6 @@ try:
                     mismatched_combinations_per_day[day_str] = []
                 mismatched_combinations_per_day[day_str].append(subs_str)
                 
-                # Try to find Parent Task name for better UI
                 task_names = []
                 for sub in subs_list:
                     builder_match = act_master_df[(act_master_df['Day_Type'] == day_type) & (act_master_df['Sub_Activity'].str.strip() == sub)]
@@ -605,8 +603,14 @@ try:
         for _, row in target_df.iterrows():
             base_str = f"{row['Start_Time']} to {row['End_Time']}  |  {row['Activity']}"
             row_subs_str = str(row['Sub_Activities']).strip()
+            
+            if row_subs_str:
+                base_str += f"  |  {row_subs_str}"
+            if str(row.get('Locked', '')).title() == 'Yes':
+                base_str += " 🔒 [FIXED]"
             if row_subs_str in day_mismatches:
                 base_str += " ⚠️ [MISMATCH]"
+                
             slot_opts.append(base_str)
         
         if 'active_slot_start' not in st.session_state:
@@ -627,14 +631,27 @@ try:
         st.session_state.active_slot_start = sel_start
         
         curr_i = target_df.index[target_df['Start_Time'] == sel_start].tolist()[0]
+        is_curr_locked = str(target_df.loc[curr_i, 'Locked']).title() == 'Yes'
+        
+        can_move_up = False
+        for k in range(curr_i - 1, -1, -1):
+            if str(target_df.loc[k, 'Locked']).title() != 'Yes':
+                can_move_up = True
+                break
+                
+        can_move_dn = False
+        for k in range(curr_i + 1, len(target_df)):
+            if str(target_df.loc[k, 'Locked']).title() != 'Yes':
+                can_move_dn = True
+                break
         
         with col_up:
-            if st.button("⬆️", key="move_up", disabled=(curr_i == 0), use_container_width=True, help="Move Task Up"):
+            if st.button("⬆️", key="move_up", disabled=(is_curr_locked or not can_move_up), use_container_width=True, help="Move Task Up (Skips Fixed Slots)"):
                 new_start = shift_routine_slot(df.copy(), target_days, curr_i, 'up')
                 if new_start: st.session_state.active_slot_start = new_start
                 st.rerun()
         with col_dn:
-            if st.button("⬇️", key="move_dn", disabled=(curr_i == len(target_df)-1), use_container_width=True, help="Move Task Down"):
+            if st.button("⬇️", key="move_dn", disabled=(is_curr_locked or not can_move_dn), use_container_width=True, help="Move Task Down (Skips Fixed Slots)"):
                 new_start = shift_routine_slot(df.copy(), target_days, curr_i, 'down')
                 if new_start: st.session_state.active_slot_start = new_start
                 st.rerun()
@@ -685,6 +702,7 @@ try:
         curr_sub_list = [x.strip() for x in str(sel_row['Sub_Activities']).split(',') if x.strip()]
         curr_chk_list = [x.strip() for x in str(sel_row['check_list']).split(',') if x.strip()]
         curr_app_list = [x.strip() for x in str(sel_row['App']).split(',') if x.strip()]
+        curr_locked = str(sel_row.get('Locked', '')).title() == 'Yes'
 
         opts_sub = sorted(list(set(all_subs + curr_sub_list)))
         opts_chk = sorted(list(set(all_chks + curr_chk_list)))
@@ -708,6 +726,8 @@ try:
             col_t1, col_t2 = st.columns(2)
             with col_t1: new_start_txt = st.text_input("Start Time (H:MM)", value=sel_row['Start_Time'])
             with col_t2: new_end_txt = st.text_input("End Time (H:MM)", value=sel_row['End_Time'])
+            
+            new_locked = st.checkbox("🔒 Lock this Time Slot (Fixed time, cannot be moved)", value=curr_locked)
             
             st.markdown("<hr style='margin: 10px 0px;'>", unsafe_allow_html=True)
 
@@ -741,6 +761,7 @@ try:
                 final_subs = ",".join(filter(None, [x for x in new_subs_sel] + [x.strip() for x in new_subs_txt.split(',')]))
                 final_chks = ",".join(filter(None, [x for x in new_chks_sel] + [x.strip() for x in new_chks_txt.split(',')]))
                 final_apps = ",".join(filter(None, [x for x in new_apps_sel] + [x.strip() for x in new_apps_txt.split(',')]))
+                final_locked_str = "Yes" if new_locked else ""
 
                 df['Start_Mins'] = df['Start_Time'].apply(time_to_mins)
                 df['End_Mins'] = df['End_Time'].apply(time_to_mins)
@@ -763,6 +784,7 @@ try:
                     old_subs = df.loc[idx_to_edit, 'Sub_Activities']
                     old_chks = df.loc[idx_to_edit, 'check_list']
                     old_app = df.loc[idx_to_edit, 'App']
+                    old_locked = df.loc[idx_to_edit, 'Locked']
                     
                     vacated_intervals = []
                     if L_start_new >= old_end_mins or L_end_new <= old_start_mins:
@@ -783,7 +805,8 @@ try:
                             "Activity": old_act,
                             "Sub_Activities": old_subs,
                             "check_list": old_chks,
-                            "App": old_app
+                            "App": old_app,
+                            "Locked": old_locked
                         })
                     
                     df.loc[idx_to_edit, 'Start_Time'] = new_start_txt.strip()
@@ -794,6 +817,7 @@ try:
                     df.loc[idx_to_edit, 'App'] = final_apps
                     df.loc[idx_to_edit, 'Start_Mins'] = L_start_new
                     df.loc[idx_to_edit, 'End_Mins'] = L_end_new
+                    df.loc[idx_to_edit, 'Locked'] = final_locked_str
                     
                     day_idx = df[df['Day'].str.title() == day].index
                     for idx in day_idx:
@@ -801,6 +825,7 @@ try:
                         
                         T_start = df.loc[idx, 'Start_Mins']
                         T_end = df.loc[idx, 'End_Mins']
+                        is_locked = str(df.loc[idx].get('Locked', '')).title() == 'Yes'
                         
                         if T_start < L_start_new and T_end > L_end_new:
                             df.loc[idx, 'End_Mins'] = L_start_new
@@ -814,17 +839,20 @@ try:
                                 "Activity": df.loc[idx, 'Activity'],
                                 "Sub_Activities": df.loc[idx, 'Sub_Activities'],
                                 "check_list": df.loc[idx, 'check_list'],
-                                "App": df.loc[idx, 'App']
+                                "App": df.loc[idx, 'App'],
+                                "Locked": df.loc[idx].get('Locked', '')
                             })
                         elif T_start >= L_start_new and T_start < L_end_new and T_end > L_end_new:
-                            df.loc[idx, 'Start_Mins'] = L_end_new
-                            df.loc[idx, 'Start_Time'] = mins_to_time(L_end_new)
+                            if not is_locked:
+                                df.loc[idx, 'Start_Mins'] = L_end_new
+                                df.loc[idx, 'Start_Time'] = mins_to_time(L_end_new)
                         elif T_start < L_start_new and T_end > L_start_new and T_end <= L_end_new:
                             df.loc[idx, 'End_Mins'] = L_start_new
                             df.loc[idx, 'End_Time'] = mins_to_time(L_start_new)
                         elif T_start >= L_start_new and T_end <= L_end_new:
-                            df.loc[idx, 'Start_Mins'] = 0
-                            df.loc[idx, 'End_Mins'] = 0
+                            if not is_locked:
+                                df.loc[idx, 'Start_Mins'] = 0
+                                df.loc[idx, 'End_Mins'] = 0
                             
                 if new_remainder_rows:
                     df = pd.concat([df, pd.DataFrame(new_remainder_rows)], ignore_index=True)
@@ -833,7 +861,7 @@ try:
                 df = df[df['Dur_Mins'] > 0].copy()
                 df['Duration'] = df['Dur_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")
                 df = sort_routine_df(df)
-                df = df[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App"]]
+                df = df[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Locked"]]
                 
                 with st.spinner("Healing Overlaps and Saving to Google Sheets..."):
                     routine_sheet = get_sheet("routine_master")
@@ -862,6 +890,8 @@ try:
                 with col_at1: add_start = st.text_input("Start Time (H:MM)", value="12:00", key="add_start")
                 with col_at2: add_end = st.text_input("End Time (H:MM)", value="", placeholder="Leave blank to auto-calc duration", key="add_end")
                 
+                add_locked = st.checkbox("🔒 Lock this Time Slot (Fixed time)")
+
                 st.markdown("<hr style='margin: 10px 0px;'>", unsafe_allow_html=True)
                 
                 st.markdown("**1️⃣ Activity Category**")
@@ -889,6 +919,7 @@ try:
                     final_add_subs = ",".join(filter(None, [x for x in add_subs]))
                     final_add_chks = ",".join(filter(None, [x for x in add_chks]))
                     final_add_apps = ",".join(filter(None, [x for x in add_apps]))
+                    final_add_locked = "Yes" if add_locked else ""
                     
                     df['Start_Mins'] = df['Start_Time'].apply(time_to_mins)
                     df['End_Mins'] = df['End_Time'].apply(time_to_mins)
@@ -916,6 +947,7 @@ try:
                         for idx in day_idx:
                             T_start = df.loc[idx, 'Start_Mins']
                             T_end = df.loc[idx, 'End_Mins']
+                            is_locked = str(df.loc[idx].get('Locked', '')).title() == 'Yes'
                             
                             if T_start < L_start_new and T_end > L_end_new:
                                 df.loc[idx, 'End_Mins'] = L_start_new
@@ -929,17 +961,20 @@ try:
                                     "Activity": df.loc[idx, 'Activity'],
                                     "Sub_Activities": df.loc[idx, 'Sub_Activities'],
                                     "check_list": df.loc[idx, 'check_list'],
-                                    "App": df.loc[idx, 'App']
+                                    "App": df.loc[idx, 'App'],
+                                    "Locked": df.loc[idx].get('Locked', '')
                                 })
                             elif T_start >= L_start_new and T_start < L_end_new and T_end > L_end_new:
-                                df.loc[idx, 'Start_Mins'] = L_end_new
-                                df.loc[idx, 'Start_Time'] = mins_to_time(L_end_new)
+                                if not is_locked:
+                                    df.loc[idx, 'Start_Mins'] = L_end_new
+                                    df.loc[idx, 'Start_Time'] = mins_to_time(L_end_new)
                             elif T_start < L_start_new and T_end > L_start_new and T_end <= L_end_new:
                                 df.loc[idx, 'End_Mins'] = L_start_new
                                 df.loc[idx, 'End_Time'] = mins_to_time(L_start_new)
                             elif T_start >= L_start_new and T_end <= L_end_new:
-                                df.loc[idx, 'Start_Mins'] = 0
-                                df.loc[idx, 'End_Mins'] = 0
+                                if not is_locked:
+                                    df.loc[idx, 'Start_Mins'] = 0
+                                    df.loc[idx, 'End_Mins'] = 0
                                 
                         new_remainder_rows.append({
                             "Day": day,
@@ -950,7 +985,8 @@ try:
                             "Activity": final_add_act,
                             "Sub_Activities": final_add_subs,
                             "check_list": final_add_chks,
-                            "App": final_add_apps
+                            "App": final_add_apps,
+                            "Locked": final_add_locked
                         })
                     
                     if new_remainder_rows:
@@ -960,7 +996,7 @@ try:
                     df = df[df['Dur_Mins'] > 0].copy()
                     df['Duration'] = df['Dur_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")
                     df = sort_routine_df(df)
-                    df = df[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App"]]
+                    df = df[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Locked"]]
                     
                     with st.spinner("Inserting Time Block and Healing Sequence..."):
                         routine_sheet = get_sheet("routine_master")
@@ -1061,7 +1097,8 @@ try:
                                 "Activity": act,
                                 "Sub_Activities": sub_act,
                                 "check_list": "",
-                                "App": ""
+                                "App": "",
+                                "Locked": ""
                             })
                     
                     if new_rows:
@@ -1083,7 +1120,7 @@ try:
                         df_final = df_final[df_final['Dur_Mins'] > 0].copy()
                         df_final['Duration'] = df_final['Dur_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")
                         df_final = sort_routine_df(df_final)
-                        df_final = df_final[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App"]]
+                        df_final = df_final[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Locked"]]
                         
                         with st.spinner("Generating Schedule and Saving to Google Sheets..."):
                             routine_sheet = get_sheet("routine_master")

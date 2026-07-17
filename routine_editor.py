@@ -220,14 +220,26 @@ def shift_routine_slot(df, target_days, curr_i, direction):
             idx_curr = day_idx[curr_i]
             idx_target = day_idx[target_i]
             
-            start_curr = df.loc[idx_curr, 'Start_Mins']
-            start_target = df.loc[idx_target, 'Start_Mins']
+            dur_curr = df.loc[idx_curr, 'Dur_Mins']
+            dur_target = df.loc[idx_target, 'Dur_Mins']
             
-            df.loc[idx_curr, 'Start_Mins'] = start_target
-            df.loc[idx_target, 'Start_Mins'] = start_curr
-            
-            df.loc[idx_curr, 'End_Mins'] = start_target + df.loc[idx_curr, 'Dur_Mins']
-            df.loc[idx_target, 'End_Mins'] = start_curr + df.loc[idx_target, 'Dur_Mins']
+            if direction == 'up':
+                anchor_start = df.loc[idx_target, 'Start_Mins']
+                
+                df.loc[idx_curr, 'Start_Mins'] = anchor_start
+                df.loc[idx_curr, 'End_Mins'] = anchor_start + dur_curr
+                
+                df.loc[idx_target, 'Start_Mins'] = anchor_start + dur_curr
+                df.loc[idx_target, 'End_Mins'] = anchor_start + dur_curr + dur_target
+                
+            elif direction == 'down':
+                anchor_start = df.loc[idx_curr, 'Start_Mins']
+                
+                df.loc[idx_target, 'Start_Mins'] = anchor_start
+                df.loc[idx_target, 'End_Mins'] = anchor_start + dur_target
+                
+                df.loc[idx_curr, 'Start_Mins'] = anchor_start + dur_target
+                df.loc[idx_curr, 'End_Mins'] = anchor_start + dur_target + dur_curr
             
             df.loc[idx_curr, 'Start_Time'] = mins_to_time(df.loc[idx_curr, 'Start_Mins'])
             df.loc[idx_curr, 'End_Time'] = mins_to_time(df.loc[idx_curr, 'End_Mins'])

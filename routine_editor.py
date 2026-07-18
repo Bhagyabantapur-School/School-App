@@ -948,6 +948,9 @@ try:
                 df['End_Mins'] = df['End_Time'].apply(time_to_mins)
                 df['End_Mins'] = df.apply(lambda r: r['End_Mins'] + 1440 if r['End_Mins'] <= r['Start_Mins'] and r['End_Mins'] < 120 else r['End_Mins'], axis=1)
                 
+                # FIX: Pre-calculate Dur_Mins before entering the Auto-Balance Engine
+                df['Dur_Mins'] = df['End_Mins'] - df['Start_Mins'] 
+                
                 L_start_new = time_to_mins(new_start_txt.strip())
                 L_end_new = time_to_mins(new_end_txt.strip())
                 if L_end_new <= L_start_new and L_end_new < 120: L_end_new += 1440

@@ -948,7 +948,7 @@ try:
                 df['End_Mins'] = df['End_Time'].apply(time_to_mins)
                 df['End_Mins'] = df.apply(lambda r: r['End_Mins'] + 1440 if r['End_Mins'] <= r['Start_Mins'] and r['End_Mins'] < 120 else r['End_Mins'], axis=1)
                 
-                # CRITICAL FIX: Pre-calculate durations so the Auto-Balance Engine can do the math
+                # Pre-calculate Dur_Mins to power the advanced logic engines
                 df['Dur_Mins'] = df['End_Mins'] - df['Start_Mins']
                 
                 L_start_new = time_to_mins(new_start_txt.strip())
@@ -1022,22 +1022,10 @@ try:
                             
                             auto_balance_success = True
                 
-                # --- SMART GAP ABSORPTION & RELOCATION ENGINE ---
+                # --- SMART CONVEYOR BELT RELOCATION ENGINE ---
                 if not auto_balance_success:
-                    vacated_intervals = []
-                    
-                    # Calculate the vacuum left behind
-                    if L_start_new >= old_end_mins or L_end_new <= old_start_mins:
-                        vacated_intervals.append((old_start_mins, old_end_mins))
-                    else:
-                        if L_start_new > old_start_mins:
-                            vacated_intervals.append((old_start_mins, L_start_new))
-                        if L_end_new < old_end_mins:
-                            vacated_intervals.append((L_end_new, old_end_mins))
-                            
                     for day in target_days:
-                        day_idx = df[df['Day'].str.title() == day].index.tolist()
-                        
+                        day_idx = df[df['Day'].str.title() == day].sort_values('Start_Mins').index.tolist()
                         idx_to_edit = None
                         for k in day_idx:
                             if df.loc[k, 'Start_Time'] == sel_start:
@@ -1045,35 +1033,24 @@ try:
                                 break
                         if idx_to_edit is None: continue
 
-                        # 1. Absorb the vacuum using neighbor tasks
-                        for v_start, v_end in vacated_intervals:
-                            absorbed = False
-                            prev_idx = None
-                            next_idx = None
+                        curr_pos = day_idx.index(idx_to_edit)
+                        
+                        # 1. Slide subsequent tasks UP to fill the vacated space
+                        shift_up_mins = 0
+                        if L_start_new != old_start_mins:
+                            shift_up_mins = old_dur # Task Teleported
+                        elif L_start_new == old_start_mins and L_end_new < old_end_mins:
+                            shift_up_mins = old_end_mins - L_end_new # Task shrunk in place
                             
-                            for k in day_idx:
-                                if k == idx_to_edit: continue
-                                is_k_locked = str(df.loc[k, 'Locked']).title() == 'Yes'
-                                
-                                if df.loc[k, 'End_Mins'] == v_start and not is_k_locked:
-                                    prev_idx = k
-                                if df.loc[k, 'Start_Mins'] == v_end and not is_k_locked:
-                                    next_idx = k
-                                    
-                            if prev_idx is not None and next_idx is not None:
-                                v_mid = v_start + ((v_end - v_start) // 2)
-                                df.loc[prev_idx, 'End_Mins'] = v_mid
-                                df.loc[prev_idx, 'End_Time'] = mins_to_time(v_mid)
-                                df.loc[next_idx, 'Start_Mins'] = v_mid
-                                df.loc[next_idx, 'Start_Time'] = mins_to_time(v_mid)
-                            elif prev_idx is not None:
-                                df.loc[prev_idx, 'End_Mins'] = v_end
-                                df.loc[prev_idx, 'End_Time'] = mins_to_time(v_end)
-                            elif next_idx is not None:
-                                df.loc[next_idx, 'Start_Mins'] = v_start
-                                df.loc[next_idx, 'Start_Time'] = mins_to_time(v_start)
-                                
-                            # (If no neighbors are unlocked to absorb it, it remains a clean gap. No cloning!)
+                        if shift_up_mins > 0:
+                            for i in range(curr_pos + 1, len(day_idx)):
+                                k = day_idx[i]
+                                if str(df.loc[k, 'Locked']).title() == 'Yes':
+                                    break # Stop pulling when hitting a locked wall
+                                df.loc[k, 'Start_Mins'] -= shift_up_mins
+                                df.loc[k, 'End_Mins'] -= shift_up_mins
+                                df.loc[k, 'Start_Time'] = mins_to_time(df.loc[k, 'Start_Mins'])
+                                df.loc[k, 'End_Time'] = mins_to_time(df.loc[k, 'End_Mins'])
 
                         # 2. Update the edited task to its new Location
                         df.loc[idx_to_edit, 'Start_Time'] = new_start_txt.strip()
@@ -1130,6 +1107,7 @@ try:
                 df = df[df['Dur_Mins'] > 0].copy()
                 df['Duration'] = df['Dur_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")
                 df = sort_routine_df(df)
+                df = auto_adjust_schedule(df)
                 df = df[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Locked"]]
                 
                 with st.spinner("Healing Overlaps and Saving to Google Sheets..."):

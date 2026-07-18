@@ -192,7 +192,7 @@ def parse_dur_to_mins(d_str):
         return int(parts[0]) * 60 + int(parts[1])
     except: return 0
 
-# The Slide vs Jump Engine for ⬆️/⬇️ Arrows
+# --- THE MAGNETIC ARROW ENGINE ---
 def shift_routine_slot(df, target_days, curr_i, direction):
     df['Start_Mins'] = df['Start_Time'].apply(time_to_mins)
     df['End_Mins'] = df['End_Time'].apply(time_to_mins)
@@ -220,40 +220,48 @@ def shift_routine_slot(df, target_days, curr_i, direction):
         if target_i is not None:
             idx_curr = day_idx[curr_i]
             idx_target = day_idx[target_i]
-            
             dur_curr = df.loc[idx_curr, 'Dur_Mins']
-            dur_target = df.loc[idx_target, 'Dur_Mins']
             
-            # --- PERFECT SLIDE vs DISTANT JUMP LOGIC ---
-            if abs(curr_i - target_i) == 1:
-                # 1. Adjacent Slide: Tasks pack together without gaps
-                if direction == 'up':
-                    anchor_start = df.loc[idx_target, 'Start_Mins']
-                    df.loc[idx_curr, 'Start_Mins'] = anchor_start
-                    df.loc[idx_curr, 'End_Mins'] = anchor_start + dur_curr
-                    df.loc[idx_target, 'Start_Mins'] = anchor_start + dur_curr
-                    df.loc[idx_target, 'End_Mins'] = anchor_start + dur_curr + dur_target
-                elif direction == 'down':
-                    anchor_start = df.loc[idx_curr, 'Start_Mins']
-                    df.loc[idx_target, 'Start_Mins'] = anchor_start
-                    df.loc[idx_target, 'End_Mins'] = anchor_start + dur_target
-                    df.loc[idx_curr, 'Start_Mins'] = anchor_start + dur_target
-                    df.loc[idx_curr, 'End_Mins'] = anchor_start + dur_target + dur_curr
-            else:
-                # 2. Distant Jump: Perfect coordinate swap across locked walls
-                start_curr = df.loc[idx_curr, 'Start_Mins']
-                start_target = df.loc[idx_target, 'Start_Mins']
+            if direction == 'up':
+                L_start_new = df.loc[idx_target, 'Start_Mins']
+                L_end_new = L_start_new + dur_curr
                 
-                df.loc[idx_curr, 'Start_Mins'] = start_target
-                df.loc[idx_curr, 'End_Mins'] = start_target + dur_curr
+                # Pull tasks DOWN
+                shift_down_mins = dur_curr
+                for k in range(curr_i - 1, target_i - 1, -1):
+                    idx_k = day_idx[k]
+                    if str(df.loc[idx_k, 'Locked']).title() == 'Yes': continue
+                    df.loc[idx_k, 'Start_Mins'] += shift_down_mins
+                    df.loc[idx_k, 'End_Mins'] += shift_down_mins
+                    df.loc[idx_k, 'Start_Time'] = mins_to_time(df.loc[idx_k, 'Start_Mins'])
+                    df.loc[idx_k, 'End_Time'] = mins_to_time(df.loc[idx_k, 'End_Mins'])
                 
-                df.loc[idx_target, 'Start_Mins'] = start_curr
-                df.loc[idx_target, 'End_Mins'] = start_curr + dur_target
+                df.loc[idx_curr, 'Start_Mins'] = L_start_new
+                df.loc[idx_curr, 'End_Mins'] = L_end_new
+                
+            elif direction == 'down':
+                # Pull tasks UP
+                shift_up_mins = dur_curr
+                dur_skipped = 0
+                for k in range(curr_i + 1, target_i + 1):
+                    idx_k = day_idx[k]
+                    if str(df.loc[idx_k, 'Locked']).title() == 'Yes': continue
+                    dur_skipped += df.loc[idx_k, 'Dur_Mins']
+                    
+                    df.loc[idx_k, 'Start_Mins'] -= shift_up_mins
+                    df.loc[idx_k, 'End_Mins'] -= shift_up_mins
+                    df.loc[idx_k, 'Start_Time'] = mins_to_time(df.loc[idx_k, 'Start_Mins'])
+                    df.loc[idx_k, 'End_Time'] = mins_to_time(df.loc[idx_k, 'End_Mins'])
+                    
+                old_start = df.loc[idx_curr, 'Start_Mins']
+                L_start_new = old_start + dur_skipped
+                L_end_new = L_start_new + dur_curr
+                
+                df.loc[idx_curr, 'Start_Mins'] = L_start_new
+                df.loc[idx_curr, 'End_Mins'] = L_end_new
             
             df.loc[idx_curr, 'Start_Time'] = mins_to_time(df.loc[idx_curr, 'Start_Mins'])
             df.loc[idx_curr, 'End_Time'] = mins_to_time(df.loc[idx_curr, 'End_Mins'])
-            df.loc[idx_target, 'Start_Time'] = mins_to_time(df.loc[idx_target, 'Start_Mins'])
-            df.loc[idx_target, 'End_Time'] = mins_to_time(df.loc[idx_target, 'End_Mins'])
             
             if day == target_days[0]:
                 new_start_time = df.loc[idx_curr, 'Start_Time']
@@ -904,7 +912,7 @@ try:
             
             col_chk1, col_chk2 = st.columns(2)
             with col_chk1: new_locked = st.checkbox("🔒 Lock this Time Slot (Fixed time)", value=curr_locked)
-            with col_chk2: move_slide_chk = st.checkbox("🧲 Teleport & Slide (Pull tasks up to fill gap left behind)")
+            with col_chk2: move_slide_chk = st.checkbox("🧲 Teleport & Slide (Pull tasks Up/Down to fill gaps left behind)")
             
             st.markdown("<hr style='margin: 10px 0px;'>", unsafe_allow_html=True)
 
@@ -965,6 +973,7 @@ try:
                 delta_dur = (L_end_new - L_start_new) - old_dur
                 auto_balance_success = False
                 
+                # Only auto-balance if they changed the END time (expanding/shrinking forward) AND kept Start time the same
                 if delta_dur != 0 and L_start_new == old_start_mins:
                     for day in target_days:
                         day_mask = df['Day'].str.title() == day
@@ -1021,7 +1030,7 @@ try:
 
                 if not auto_balance_success:
                     if move_slide_chk and L_start_new != old_start_mins:
-                        # --- SMART CONVEYOR BELT RELOCATION ENGINE ---
+                        # --- MAGNETIC TELEPORT & SLIDE ENGINE ---
                         for day in target_days:
                             day_idx = df[df['Day'].str.title() == day].sort_values('Start_Mins').index.tolist()
                             idx_to_edit = None
@@ -1031,24 +1040,32 @@ try:
                                     break
                             if idx_to_edit is None: continue
 
-                            curr_pos = day_idx.index(idx_to_edit)
-                            
-                            shift_up_mins = 0
-                            if L_start_new != old_start_mins:
-                                shift_up_mins = old_dur 
-                            elif L_start_new == old_start_mins and L_end_new < old_end_mins:
-                                shift_up_mins = old_end_mins - L_end_new 
-                                
-                            if shift_up_mins > 0:
-                                for i in range(curr_pos + 1, len(day_idx)):
-                                    k = day_idx[i]
-                                    if str(df.loc[k, 'Locked']).title() == 'Yes':
-                                        break 
-                                    df.loc[k, 'Start_Mins'] -= shift_up_mins
-                                    df.loc[k, 'End_Mins'] -= shift_up_mins
-                                    df.loc[k, 'Start_Time'] = mins_to_time(df.loc[k, 'Start_Mins'])
-                                    df.loc[k, 'End_Time'] = mins_to_time(df.loc[k, 'End_Mins'])
+                            if L_start_new < old_start_mins:
+                                # Moving UPWARD -> Pull intermediate tasks DOWN
+                                shift_down_mins = L_end_new - L_start_new
+                                for k in day_idx:
+                                    if k == idx_to_edit: continue
+                                    if str(df.loc[k, 'Locked']).title() == 'Yes': continue
+                                    t_start = df.loc[k, 'Start_Mins']
+                                    if t_start >= L_start_new and t_start < old_start_mins:
+                                        df.loc[k, 'Start_Mins'] += shift_down_mins
+                                        df.loc[k, 'End_Mins'] += shift_down_mins
+                                        df.loc[k, 'Start_Time'] = mins_to_time(df.loc[k, 'Start_Mins'])
+                                        df.loc[k, 'End_Time'] = mins_to_time(df.loc[k, 'End_Mins'])
+                            else:
+                                # Moving DOWNWARD -> Pull intermediate tasks UP
+                                shift_up_mins = old_dur
+                                for k in day_idx:
+                                    if k == idx_to_edit: continue
+                                    if str(df.loc[k, 'Locked']).title() == 'Yes': continue
+                                    t_start = df.loc[k, 'Start_Mins']
+                                    if t_start >= old_end_mins and t_start < L_end_new:
+                                        df.loc[k, 'Start_Mins'] -= shift_up_mins
+                                        df.loc[k, 'End_Mins'] -= shift_up_mins
+                                        df.loc[k, 'Start_Time'] = mins_to_time(df.loc[k, 'Start_Mins'])
+                                        df.loc[k, 'End_Time'] = mins_to_time(df.loc[k, 'End_Mins'])
 
+                            # Update the edited task to its new Location
                             df.loc[idx_to_edit, 'Start_Time'] = new_start_txt.strip()
                             df.loc[idx_to_edit, 'End_Time'] = new_end_txt.strip()
                             df.loc[idx_to_edit, 'Activity'] = final_act

@@ -948,8 +948,8 @@ try:
                 df['End_Mins'] = df['End_Time'].apply(time_to_mins)
                 df['End_Mins'] = df.apply(lambda r: r['End_Mins'] + 1440 if r['End_Mins'] <= r['Start_Mins'] and r['End_Mins'] < 120 else r['End_Mins'], axis=1)
                 
-                # FIX: Pre-calculate Dur_Mins before entering the Auto-Balance Engine
-                df['Dur_Mins'] = df['End_Mins'] - df['Start_Mins'] 
+                # CRITICAL FIX: Pre-calculate durations so the Auto-Balance Engine can do the math
+                df['Dur_Mins'] = df['End_Mins'] - df['Start_Mins']
                 
                 L_start_new = time_to_mins(new_start_txt.strip())
                 L_end_new = time_to_mins(new_end_txt.strip())
@@ -964,7 +964,7 @@ try:
                 delta_dur = (L_end_new - L_start_new) - old_dur
                 auto_balance_success = False
                 
-                # Only auto-balance if they changed the END time (expanding/shrinking forward)
+                # Only auto-balance if they changed the END time (expanding/shrinking forward) AND kept Start time the same
                 if delta_dur != 0 and L_start_new == old_start_mins:
                     for day in target_days:
                         day_mask = df['Day'].str.title() == day
@@ -1022,46 +1022,60 @@ try:
                             
                             auto_balance_success = True
                 
-                # --- STANDARD CLIPPING LOGIC (If no donor found or user changed Start Time) ---
+                # --- SMART GAP ABSORPTION & RELOCATION ENGINE ---
                 if not auto_balance_success:
-                    new_remainder_rows = []
+                    vacated_intervals = []
                     
+                    # Calculate the vacuum left behind
+                    if L_start_new >= old_end_mins or L_end_new <= old_start_mins:
+                        vacated_intervals.append((old_start_mins, old_end_mins))
+                    else:
+                        if L_start_new > old_start_mins:
+                            vacated_intervals.append((old_start_mins, L_start_new))
+                        if L_end_new < old_end_mins:
+                            vacated_intervals.append((L_end_new, old_end_mins))
+                            
                     for day in target_days:
-                        row_mask = (df['Day'].str.title() == day) & (df['Start_Time'] == sel_start)
-                        if not row_mask.any(): continue
-                        idx_to_edit = df[row_mask].index[0]
+                        day_idx = df[df['Day'].str.title() == day].index.tolist()
                         
-                        old_start_mins = df.loc[idx_to_edit, 'Start_Mins']
-                        old_end_mins = df.loc[idx_to_edit, 'End_Mins']
-                        old_act = df.loc[idx_to_edit, 'Activity']
-                        old_subs = df.loc[idx_to_edit, 'Sub_Activities']
-                        old_chks = df.loc[idx_to_edit, 'check_list']
-                        old_app = df.loc[idx_to_edit, 'App']
-                        old_locked = df.loc[idx_to_edit, 'Locked']
-                        
-                        vacated_intervals = []
-                        if L_start_new >= old_end_mins or L_end_new <= old_start_mins:
-                            vacated_intervals.append((old_start_mins, old_end_mins))
-                        else:
-                            if L_start_new > old_start_mins:
-                                vacated_intervals.append((old_start_mins, L_start_new))
-                            if L_end_new < old_end_mins:
-                                vacated_intervals.append((L_end_new, old_end_mins))
-                                
+                        idx_to_edit = None
+                        for k in day_idx:
+                            if df.loc[k, 'Start_Time'] == sel_start:
+                                idx_to_edit = k
+                                break
+                        if idx_to_edit is None: continue
+
+                        # 1. Absorb the vacuum using neighbor tasks
                         for v_start, v_end in vacated_intervals:
-                            new_remainder_rows.append({
-                                "Day": day,
-                                "Start_Time": mins_to_time(v_start),
-                                "End_Time": mins_to_time(v_end),
-                                "Start_Mins": v_start,
-                                "End_Mins": v_end,
-                                "Activity": old_act,
-                                "Sub_Activities": old_subs,
-                                "check_list": old_chks,
-                                "App": old_app,
-                                "Locked": old_locked
-                            })
-                        
+                            absorbed = False
+                            prev_idx = None
+                            next_idx = None
+                            
+                            for k in day_idx:
+                                if k == idx_to_edit: continue
+                                is_k_locked = str(df.loc[k, 'Locked']).title() == 'Yes'
+                                
+                                if df.loc[k, 'End_Mins'] == v_start and not is_k_locked:
+                                    prev_idx = k
+                                if df.loc[k, 'Start_Mins'] == v_end and not is_k_locked:
+                                    next_idx = k
+                                    
+                            if prev_idx is not None and next_idx is not None:
+                                v_mid = v_start + ((v_end - v_start) // 2)
+                                df.loc[prev_idx, 'End_Mins'] = v_mid
+                                df.loc[prev_idx, 'End_Time'] = mins_to_time(v_mid)
+                                df.loc[next_idx, 'Start_Mins'] = v_mid
+                                df.loc[next_idx, 'Start_Time'] = mins_to_time(v_mid)
+                            elif prev_idx is not None:
+                                df.loc[prev_idx, 'End_Mins'] = v_end
+                                df.loc[prev_idx, 'End_Time'] = mins_to_time(v_end)
+                            elif next_idx is not None:
+                                df.loc[next_idx, 'Start_Mins'] = v_start
+                                df.loc[next_idx, 'Start_Time'] = mins_to_time(v_start)
+                                
+                            # (If no neighbors are unlocked to absorb it, it remains a clean gap. No cloning!)
+
+                        # 2. Update the edited task to its new Location
                         df.loc[idx_to_edit, 'Start_Time'] = new_start_txt.strip()
                         df.loc[idx_to_edit, 'End_Time'] = new_end_txt.strip()
                         df.loc[idx_to_edit, 'Activity'] = final_act
@@ -1072,7 +1086,8 @@ try:
                         df.loc[idx_to_edit, 'End_Mins'] = L_end_new
                         df.loc[idx_to_edit, 'Locked'] = final_locked_str
                         
-                        day_idx = df[df['Day'].str.title() == day].index
+                        # 3. Handle collisions at the NEW destination
+                        new_remainder_rows = []
                         for idx in day_idx:
                             if idx == idx_to_edit: continue
                             
@@ -1107,8 +1122,8 @@ try:
                                     df.loc[idx, 'Start_Mins'] = 0
                                     df.loc[idx, 'End_Mins'] = 0
                                     
-                    if new_remainder_rows:
-                        df = pd.concat([df, pd.DataFrame(new_remainder_rows)], ignore_index=True)
+                        if new_remainder_rows:
+                            df = pd.concat([df, pd.DataFrame(new_remainder_rows)], ignore_index=True)
                         
                 # Final Save execution for both methods
                 df['Dur_Mins'] = df['End_Mins'] - df['Start_Mins']

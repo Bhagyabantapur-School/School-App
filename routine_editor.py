@@ -192,7 +192,7 @@ def parse_dur_to_mins(d_str):
         return int(parts[0]) * 60 + int(parts[1])
     except: return 0
 
-# --- THE MAGNETIC ARROW ENGINE ---
+# --- THE DUAL-ENGINE FOR ARROWS (SLIDE & JUMP) ---
 def shift_routine_slot(df, target_days, curr_i, direction):
     df['Start_Mins'] = df['Start_Time'].apply(time_to_mins)
     df['End_Mins'] = df['End_Time'].apply(time_to_mins)
@@ -220,48 +220,40 @@ def shift_routine_slot(df, target_days, curr_i, direction):
         if target_i is not None:
             idx_curr = day_idx[curr_i]
             idx_target = day_idx[target_i]
-            dur_curr = df.loc[idx_curr, 'Dur_Mins']
             
-            if direction == 'up':
-                L_start_new = df.loc[idx_target, 'Start_Mins']
-                L_end_new = L_start_new + dur_curr
+            dur_curr = df.loc[idx_curr, 'Dur_Mins']
+            dur_target = df.loc[idx_target, 'Dur_Mins']
+            
+            # --- PERFECT SLIDE vs DISTANT JUMP LOGIC ---
+            if abs(curr_i - target_i) == 1:
+                # 1. Adjacent Slide: Tasks pack together without gaps
+                if direction == 'up':
+                    anchor_start = df.loc[idx_target, 'Start_Mins']
+                    df.loc[idx_curr, 'Start_Mins'] = anchor_start
+                    df.loc[idx_curr, 'End_Mins'] = anchor_start + dur_curr
+                    df.loc[idx_target, 'Start_Mins'] = anchor_start + dur_curr
+                    df.loc[idx_target, 'End_Mins'] = anchor_start + dur_curr + dur_target
+                elif direction == 'down':
+                    anchor_start = df.loc[idx_curr, 'Start_Mins']
+                    df.loc[idx_target, 'Start_Mins'] = anchor_start
+                    df.loc[idx_target, 'End_Mins'] = anchor_start + dur_target
+                    df.loc[idx_curr, 'Start_Mins'] = anchor_start + dur_target
+                    df.loc[idx_curr, 'End_Mins'] = anchor_start + dur_target + dur_curr
+            else:
+                # 2. Distant Jump: Perfect coordinate swap across locked walls
+                start_curr = df.loc[idx_curr, 'Start_Mins']
+                start_target = df.loc[idx_target, 'Start_Mins']
                 
-                # Pull tasks DOWN
-                shift_down_mins = dur_curr
-                for k in range(curr_i - 1, target_i - 1, -1):
-                    idx_k = day_idx[k]
-                    if str(df.loc[idx_k, 'Locked']).title() == 'Yes': continue
-                    df.loc[idx_k, 'Start_Mins'] += shift_down_mins
-                    df.loc[idx_k, 'End_Mins'] += shift_down_mins
-                    df.loc[idx_k, 'Start_Time'] = mins_to_time(df.loc[idx_k, 'Start_Mins'])
-                    df.loc[idx_k, 'End_Time'] = mins_to_time(df.loc[idx_k, 'End_Mins'])
+                df.loc[idx_curr, 'Start_Mins'] = start_target
+                df.loc[idx_curr, 'End_Mins'] = start_target + dur_curr
                 
-                df.loc[idx_curr, 'Start_Mins'] = L_start_new
-                df.loc[idx_curr, 'End_Mins'] = L_end_new
-                
-            elif direction == 'down':
-                # Pull tasks UP
-                shift_up_mins = dur_curr
-                dur_skipped = 0
-                for k in range(curr_i + 1, target_i + 1):
-                    idx_k = day_idx[k]
-                    if str(df.loc[idx_k, 'Locked']).title() == 'Yes': continue
-                    dur_skipped += df.loc[idx_k, 'Dur_Mins']
-                    
-                    df.loc[idx_k, 'Start_Mins'] -= shift_up_mins
-                    df.loc[idx_k, 'End_Mins'] -= shift_up_mins
-                    df.loc[idx_k, 'Start_Time'] = mins_to_time(df.loc[idx_k, 'Start_Mins'])
-                    df.loc[idx_k, 'End_Time'] = mins_to_time(df.loc[idx_k, 'End_Mins'])
-                    
-                old_start = df.loc[idx_curr, 'Start_Mins']
-                L_start_new = old_start + dur_skipped
-                L_end_new = L_start_new + dur_curr
-                
-                df.loc[idx_curr, 'Start_Mins'] = L_start_new
-                df.loc[idx_curr, 'End_Mins'] = L_end_new
+                df.loc[idx_target, 'Start_Mins'] = start_curr
+                df.loc[idx_target, 'End_Mins'] = start_curr + dur_target
             
             df.loc[idx_curr, 'Start_Time'] = mins_to_time(df.loc[idx_curr, 'Start_Mins'])
             df.loc[idx_curr, 'End_Time'] = mins_to_time(df.loc[idx_curr, 'End_Mins'])
+            df.loc[idx_target, 'Start_Time'] = mins_to_time(df.loc[idx_target, 'Start_Mins'])
+            df.loc[idx_target, 'End_Time'] = mins_to_time(df.loc[idx_target, 'End_Mins'])
             
             if day == target_days[0]:
                 new_start_time = df.loc[idx_curr, 'Start_Time']
@@ -355,7 +347,7 @@ try:
                             sheet = get_main_spreadsheet().worksheet("activity_master")
                             sheet.append_row([selected_day_type, new_act_input, "", 0])
                             get_activity_master.clear()
-                            st.success(f"✅ Created Activity: {new_act_input} for {selected_day_type}")
+                            st.success(f"Created Activity: {new_act_input} for {selected_day_type}")
                             time.sleep(1.5)
                             st.rerun()
                         else:
@@ -377,7 +369,7 @@ try:
                             sheet = get_main_spreadsheet().worksheet("activity_master")
                             sheet.append_row([selected_day_type, sel_act, new_sub_input, sub_dur])
                             get_activity_master.clear()
-                            st.success(f"✅ Added '{new_sub_input}' under '{sel_act}'")
+                            st.success(f"Added '{new_sub_input}' under '{sel_act}'")
                             time.sleep(1.5)
                             st.rerun()
                         else:

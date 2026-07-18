@@ -223,23 +223,31 @@ def shift_routine_slot(df, target_days, curr_i, direction):
             dur_curr = df.loc[idx_curr, 'Dur_Mins']
             dur_target = df.loc[idx_target, 'Dur_Mins']
             
-            if direction == 'up':
-                anchor_start = df.loc[idx_target, 'Start_Mins']
+            # --- DUAL-ENGINE SWAP LOGIC ---
+            if abs(curr_i - target_i) == 1:
+                # 1. Adjacent Slide Math: Smoothly slide past each other
+                if direction == 'up':
+                    anchor_start = df.loc[idx_target, 'Start_Mins']
+                    df.loc[idx_curr, 'Start_Mins'] = anchor_start
+                    df.loc[idx_curr, 'End_Mins'] = anchor_start + dur_curr
+                    df.loc[idx_target, 'Start_Mins'] = anchor_start + dur_curr
+                    df.loc[idx_target, 'End_Mins'] = anchor_start + dur_curr + dur_target
+                elif direction == 'down':
+                    anchor_start = df.loc[idx_curr, 'Start_Mins']
+                    df.loc[idx_target, 'Start_Mins'] = anchor_start
+                    df.loc[idx_target, 'End_Mins'] = anchor_start + dur_target
+                    df.loc[idx_curr, 'Start_Mins'] = anchor_start + dur_target
+                    df.loc[idx_curr, 'End_Mins'] = anchor_start + dur_target + dur_curr
+            else:
+                # 2. Coordinate Swap Math: Jump perfectly over locked walls
+                start_curr = df.loc[idx_curr, 'Start_Mins']
+                start_target = df.loc[idx_target, 'Start_Mins']
                 
-                df.loc[idx_curr, 'Start_Mins'] = anchor_start
-                df.loc[idx_curr, 'End_Mins'] = anchor_start + dur_curr
+                df.loc[idx_curr, 'Start_Mins'] = start_target
+                df.loc[idx_target, 'Start_Mins'] = start_curr
                 
-                df.loc[idx_target, 'Start_Mins'] = anchor_start + dur_curr
-                df.loc[idx_target, 'End_Mins'] = anchor_start + dur_curr + dur_target
-                
-            elif direction == 'down':
-                anchor_start = df.loc[idx_curr, 'Start_Mins']
-                
-                df.loc[idx_target, 'Start_Mins'] = anchor_start
-                df.loc[idx_target, 'End_Mins'] = anchor_start + dur_target
-                
-                df.loc[idx_curr, 'Start_Mins'] = anchor_start + dur_target
-                df.loc[idx_curr, 'End_Mins'] = anchor_start + dur_target + dur_curr
+                df.loc[idx_curr, 'End_Mins'] = start_target + dur_curr
+                df.loc[idx_target, 'End_Mins'] = start_curr + dur_target
             
             df.loc[idx_curr, 'Start_Time'] = mins_to_time(df.loc[idx_curr, 'Start_Mins'])
             df.loc[idx_curr, 'End_Time'] = mins_to_time(df.loc[idx_curr, 'End_Mins'])

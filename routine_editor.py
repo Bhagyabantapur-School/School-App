@@ -698,97 +698,19 @@ try:
         target_df['End_Mins'] = target_df.apply(lambda r: r['End_Mins'] + 1440 if r['End_Mins'] <= r['Start_Mins'] and r['End_Mins'] < 120 else r['End_Mins'], axis=1)
         target_df = target_df.sort_values('Start_Mins').reset_index(drop=True)
 
-        # --- 3. TIME SLOT SELECTION WITH LOCAL SORT ENGINE ---
-        st.markdown("#### ⏱️ 2. Select Time Slot to Manage or Move")
-        st.markdown("<div style='font-size: 0.9em; margin-bottom: 10px; color: #555;'>🖱️ <b>Click directly on any time slot</b> in the scrollable list below to load it into the Editor.</div>", unsafe_allow_html=True)
-        
-        day_mismatches = mismatched_act_subs_per_day.get(display_day, set())
-        slot_opts = []
-        for _, row in target_df.iterrows():
-            act = str(row['Activity']).strip().upper()
-            base_str = f"{row['Start_Time']} to {row['End_Time']}  |  {row['Activity']}"
-            row_subs_str = str(row['Sub_Activities']).strip()
-            row_subs_list = [x.strip() for x in row_subs_str.split(',') if x.strip()]
-            
-            if row_subs_str:
-                base_str += f"  |  {row_subs_str}"
-            if str(row.get('Locked', '')).title() == 'Yes':
-                base_str += " 🔒 [FIXED]"
-            
-            if any((act, sub) in day_mismatches for sub in row_subs_list):
-                base_str += " ⚠️ [MISMATCH]"
-                
-            slot_opts.append(base_str)
-        
         if 'active_slot_start' not in st.session_state:
             st.session_state.active_slot_start = None
             
-        selected_index = 0
-        if st.session_state.active_slot_start:
-            for i, opt in enumerate(slot_opts):
-                if opt.startswith(st.session_state.active_slot_start + " to"):
-                    selected_index = i
-                    break
-        
-        # New Clickable Layout
-        col_sel, col_arrows = st.columns([8, 2])
-        with col_sel:
-            with st.container(height=280):
-                selected_slot = st.radio("Choose the specific slot you want to update:", slot_opts, index=selected_index, label_visibility="collapsed")
-        
-        sel_start = selected_slot.split(" to ")[0].strip()
-        st.session_state.active_slot_start = sel_start
-        
-        curr_i = target_df.index[target_df['Start_Time'] == sel_start].tolist()[0]
-        is_curr_locked = str(target_df.loc[curr_i, 'Locked']).title() == 'Yes'
-        
-        can_move_up = False
-        for k in range(curr_i - 1, -1, -1):
-            if str(target_df.loc[k, 'Locked']).title() != 'Yes':
-                can_move_up = True
-                break
+        if st.session_state.active_slot_start not in target_df['Start_Time'].values:
+            if not target_df.empty:
+                st.session_state.active_slot_start = target_df.iloc[0]['Start_Time']
                 
-        can_move_dn = False
-        for k in range(curr_i + 1, len(target_df)):
-            if str(target_df.loc[k, 'Locked']).title() != 'Yes':
-                can_move_dn = True
-                break
-        
-        with col_arrows:
-            st.markdown("<div style='text-align: left; margin-bottom: 5px; color: #495057;'><b>↕️ Quick Swap</b></div>", unsafe_allow_html=True)
-            if st.button("⬆️ Move Up", key="move_up", disabled=(is_curr_locked or not can_move_up), use_container_width=True, help="Swap position with the task above"):
-                new_start = shift_routine_slot(df.copy(), target_days, curr_i, 'up')
-                if new_start: st.session_state.active_slot_start = new_start
-                st.rerun()
-                
-            if st.button("⬇️ Move Down", key="move_dn", disabled=(is_curr_locked or not can_move_dn), use_container_width=True, help="Swap position with the task below"):
-                new_start = shift_routine_slot(df.copy(), target_days, curr_i, 'down')
-                if new_start: st.session_state.active_slot_start = new_start
-                st.rerun()
+        sel_start = st.session_state.active_slot_start
+        day_mismatches = mismatched_act_subs_per_day.get(display_day, set())
 
-        st.markdown("""
-        <div style='font-size: 0.9em; padding: 10px; background-color: #f8f9fa; border-radius: 6px; margin-top: 10px; margin-bottom: 10px; border: 1px solid #e0e0e0;'>
-            <b>🎨 Color Legend:</b><br>
-            🟨 <b>Yellow:</b> Currently selected editing row &nbsp;&nbsp;|&nbsp;&nbsp; 🟥 <b>Dark Red:</b> Missing time / Schedule Gaps<br>
-            🚨 <b>Light Red:</b> Activity Builder duration mismatches &nbsp;&nbsp;|&nbsp;&nbsp; 🔲 <b>Gray:</b> 🔒 Fixed/Locked slots
-        </div>
-        """, unsafe_allow_html=True)
-
-        if st.session_state.get('unsaved_sort', False):
-            st.markdown("<div class='local-warning'>⚠️ <b>Sequence modified locally!</b> Click save to update Google Sheets to avoid losing changes.</div>", unsafe_allow_html=True)
-            if st.button("💾 Push Reordered Schedule to Cloud", type="primary", use_container_width=True):
-                with st.spinner("Pushing new sequence to the cloud..."):
-                    routine_sheet = get_sheet("routine_master")
-                    routine_sheet.clear()
-                    routine_sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name="A1")
-                    get_routine_data.clear()
-                    st.session_state.unsaved_sort = False
-                st.success("✅ Sequence successfully saved to Google Sheets!")
-                time.sleep(1.5)
-                st.rerun()
-
-        # --- 4. HIGHLIGHTED SCHEDULE DISPLAY ---
-        st.markdown(f"#### 📋 Full Schedule for {display_day}")
+        # --- 2. INTERACTIVE SCHEDULE TABLE ---
+        st.markdown(f"#### 📋 2. Interactive Schedule ({display_day})")
+        st.markdown("<div style='font-size: 0.9em; margin-bottom: 10px; color: #555;'>🖱️ <b>Click directly on any task row below</b> to select it for editing or moving!</div>", unsafe_allow_html=True)
         
         display_rows = []
         for i in range(len(target_df)):
@@ -850,16 +772,80 @@ try:
         cols_to_hide = ['Start_Mins', 'End_Mins', 'Is_Gap', 'Is_Mismatch', 'Locked_Sort']
         hidden_columns_config = {col: None for col in cols_to_hide if col in display_df.columns}
 
-        st.dataframe(
+        selection_event = st.dataframe(
             styled_df, 
             use_container_width=True, 
             hide_index=True,
-            column_config=hidden_columns_config
+            column_config=hidden_columns_config,
+            on_select="rerun",
+            selection_mode="single_row",
+            key="schedule_grid"
         )
+        
+        if selection_event.selection.rows:
+            clicked_idx = selection_event.selection.rows[0]
+            clicked_row = display_df.iloc[clicked_idx]
+            if not clicked_row['Is_Gap']:
+                if clicked_row['Start_Time'] != st.session_state.active_slot_start:
+                    st.session_state.active_slot_start = clicked_row['Start_Time']
+                    st.rerun()
+
+        st.markdown("""
+        <div style='font-size: 0.9em; padding: 10px; background-color: #f8f9fa; border-radius: 6px; margin-top: 5px; margin-bottom: 15px; border: 1px solid #e0e0e0;'>
+            <b>🎨 Color Legend:</b> &nbsp;
+            🟨 <b>Yellow:</b> Currently selected editing row &nbsp;&nbsp;|&nbsp;&nbsp; 🟥 <b>Dark Red:</b> Missing time / Schedule Gaps &nbsp;&nbsp;|&nbsp;&nbsp;
+            🚨 <b>Light Red:</b> Builder mismatch &nbsp;&nbsp;|&nbsp;&nbsp; 🔲 <b>Gray:</b> 🔒 Fixed slot
+        </div>
+        """, unsafe_allow_html=True)
+
+
+        # --- 3. QUICK MOVE ARROWS ---
+        st.markdown(f"#### ↕️ 3. Quick Move Slot: `{sel_start}`")
+        
+        curr_i = target_df.index[target_df['Start_Time'] == sel_start].tolist()[0]
+        is_curr_locked = str(target_df.loc[curr_i, 'Locked']).title() == 'Yes'
+        
+        can_move_up = False
+        for k in range(curr_i - 1, -1, -1):
+            if str(target_df.loc[k, 'Locked']).title() != 'Yes':
+                can_move_up = True
+                break
+                
+        can_move_dn = False
+        for k in range(curr_i + 1, len(target_df)):
+            if str(target_df.loc[k, 'Locked']).title() != 'Yes':
+                can_move_dn = True
+                break
+        
+        col_up, col_dn, _ = st.columns([2, 2, 6])
+        with col_up:
+            if st.button("⬆️ Move Up", key="move_up", disabled=(is_curr_locked or not can_move_up), use_container_width=True, help="Swap position with the task above"):
+                new_start = shift_routine_slot(df.copy(), target_days, curr_i, 'up')
+                if new_start: st.session_state.active_slot_start = new_start
+                st.rerun()
+        with col_dn:
+            if st.button("⬇️ Move Down", key="move_dn", disabled=(is_curr_locked or not can_move_dn), use_container_width=True, help="Swap position with the task below"):
+                new_start = shift_routine_slot(df.copy(), target_days, curr_i, 'down')
+                if new_start: st.session_state.active_slot_start = new_start
+                st.rerun()
+
+        if st.session_state.get('unsaved_sort', False):
+            st.markdown("<div class='local-warning'>⚠️ <b>Sequence modified locally!</b> Click save to update Google Sheets to avoid losing changes.</div>", unsafe_allow_html=True)
+            if st.button("💾 Push Reordered Schedule to Cloud", type="primary", use_container_width=True):
+                with st.spinner("Pushing new sequence to the cloud..."):
+                    routine_sheet = get_sheet("routine_master")
+                    routine_sheet.clear()
+                    routine_sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name="A1")
+                    get_routine_data.clear()
+                    st.session_state.unsaved_sort = False
+                st.success("✅ Sequence successfully saved to Google Sheets!")
+                time.sleep(1.5)
+                st.rerun()
 
         st.markdown("---")
 
-        # --- 5. SMART EDITOR FORM ---
+
+        # --- 4. SMART EDITOR FORM ---
         sel_row = target_df[target_df['Start_Time'] == sel_start].iloc[0]
         
         all_chks = sorted(list(set([x.strip() for items in df['check_list'].dropna() for x in str(items).split(',') if x.strip()])))
@@ -896,7 +882,7 @@ try:
             grp = app_to_group.get(app_name, "CUSTOM")
             return f"[{grp}]  {app_name}"
 
-        st.markdown(f"#### ✏️ 3. Update `{sel_row['Start_Time']}` Slot Details")
+        st.markdown(f"#### ✏️ 4. Update `{sel_row['Start_Time']}` Slot Details")
         
         with st.form("smart_edit_form"):
             st.markdown("<div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px;'>", unsafe_allow_html=True)
@@ -1251,7 +1237,7 @@ try:
 
         # --- 6. ADD NEW SLOT FORM ---
         st.markdown("---")
-        st.markdown("#### ➕ 4. Add a Single Time Slot")
+        st.markdown("#### ➕ 5. Add a Single Time Slot")
         with st.expander("Click to Create a New Block in the Schedule manually"):
             with st.form("add_new_slot_form"):
                 st.markdown("<div style='background-color: #e3f2fd; padding: 15px; border-radius: 8px;'>", unsafe_allow_html=True)
@@ -1386,7 +1372,7 @@ try:
 
         # --- 7. AUTO-GENERATE DAY SCHEDULE ---
         st.markdown("---")
-        st.markdown("#### ⚡ 5. Auto-Generate Day Schedule")
+        st.markdown("#### ⚡ 6. Auto-Generate Day Schedule")
         with st.expander("Click to Auto-Build from Activity Profile"):
             st.info("💡 Pulls all sub-activities for a selected profile in order. Enter an anchor **Start Time** for the first task (e.g. 6:00). Leave subsequent times blank to auto-chain them based on your Builder durations!")
             

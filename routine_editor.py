@@ -347,7 +347,7 @@ try:
                             sheet = get_main_spreadsheet().worksheet("activity_master")
                             sheet.append_row([selected_day_type, new_act_input, "", 0])
                             get_activity_master.clear()
-                            st.success(f"Created Activity: {new_act_input} for {selected_day_type}")
+                            st.success(f"✅ Created Activity: {new_act_input} for {selected_day_type}")
                             time.sleep(1.5)
                             st.rerun()
                         else:
@@ -369,7 +369,7 @@ try:
                             sheet = get_main_spreadsheet().worksheet("activity_master")
                             sheet.append_row([selected_day_type, sel_act, new_sub_input, sub_dur])
                             get_activity_master.clear()
-                            st.success(f"Added '{new_sub_input}' under '{sel_act}'")
+                            st.success(f"✅ Added '{new_sub_input}' under '{sel_act}'")
                             time.sleep(1.5)
                             st.rerun()
                         else:
@@ -700,6 +700,7 @@ try:
 
         # --- 3. TIME SLOT SELECTION WITH LOCAL SORT ENGINE ---
         st.markdown("#### ⏱️ 2. Select Time Slot to Manage or Move")
+        st.markdown("<div style='font-size: 0.9em; margin-bottom: 10px; color: #555;'>🖱️ <b>Click directly on any time slot</b> in the scrollable list below to load it into the Editor.</div>", unsafe_allow_html=True)
         
         day_mismatches = mismatched_act_subs_per_day.get(display_day, set())
         slot_opts = []
@@ -729,9 +730,11 @@ try:
                     selected_index = i
                     break
         
-        col_sel, col_up, col_dn = st.columns([8, 1, 1])
+        # New Clickable Layout
+        col_sel, col_arrows = st.columns([8, 2])
         with col_sel:
-            selected_slot = st.selectbox("Choose the specific slot you want to update:", slot_opts, index=selected_index, label_visibility="collapsed")
+            with st.container(height=280):
+                selected_slot = st.radio("Choose the specific slot you want to update:", slot_opts, index=selected_index, label_visibility="collapsed")
         
         sel_start = selected_slot.split(" to ")[0].strip()
         st.session_state.active_slot_start = sel_start
@@ -751,13 +754,14 @@ try:
                 can_move_dn = True
                 break
         
-        with col_up:
-            if st.button("⬆️", key="move_up", disabled=(is_curr_locked or not can_move_up), use_container_width=True, help="Move Task Up (Skips Fixed Slots)"):
+        with col_arrows:
+            st.markdown("<div style='text-align: left; margin-bottom: 5px; color: #495057;'><b>↕️ Quick Swap</b></div>", unsafe_allow_html=True)
+            if st.button("⬆️ Move Up", key="move_up", disabled=(is_curr_locked or not can_move_up), use_container_width=True, help="Swap position with the task above"):
                 new_start = shift_routine_slot(df.copy(), target_days, curr_i, 'up')
                 if new_start: st.session_state.active_slot_start = new_start
                 st.rerun()
-        with col_dn:
-            if st.button("⬇️", key="move_dn", disabled=(is_curr_locked or not can_move_dn), use_container_width=True, help="Move Task Down (Skips Fixed Slots)"):
+                
+            if st.button("⬇️ Move Down", key="move_dn", disabled=(is_curr_locked or not can_move_dn), use_container_width=True, help="Swap position with the task below"):
                 new_start = shift_routine_slot(df.copy(), target_days, curr_i, 'down')
                 if new_start: st.session_state.active_slot_start = new_start
                 st.rerun()
@@ -965,7 +969,6 @@ try:
                 delta_dur = (L_end_new - L_start_new) - old_dur
                 auto_balance_success = False
                 
-                # Only auto-balance if they changed the END time (expanding/shrinking forward) AND kept Start time the same
                 if delta_dur != 0 and L_start_new == old_start_mins:
                     for day in target_days:
                         day_mask = df['Day'].str.title() == day

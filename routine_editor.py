@@ -772,13 +772,14 @@ try:
         cols_to_hide = ['Start_Mins', 'End_Mins', 'Is_Gap', 'Is_Mismatch', 'Locked_Sort']
         hidden_columns_config = {col: None for col in cols_to_hide if col in display_df.columns}
 
+        # FIX: Changed "single_row" to "single-row"
         selection_event = st.dataframe(
             styled_df, 
             use_container_width=True, 
             hide_index=True,
             column_config=hidden_columns_config,
             on_select="rerun",
-            selection_mode="single_row",
+            selection_mode="single-row",
             key="schedule_grid"
         )
         

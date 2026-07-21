@@ -31,9 +31,9 @@ except Exception as e:
     st.error(f"Failed to connect to sheet or tabs. Details: {e}")
     st.stop()
 
-# --- 3. SMART DATA CACHING (Prevents API Limits) ---
-# Helper function to ensure rows always have 14 columns to prevent indexing errors
-def pad_row(row, length=14):
+# --- 3. SMART DATA CACHING & HELPER FUNCTIONS ---
+# Upgraded to 15 columns!
+def pad_row(row, length=15):
     return row + [""] * (length - len(row))
 
 if "update_data" not in st.session_state:
@@ -75,11 +75,26 @@ def get_last_lines(app_name):
 ist = pytz.timezone('Asia/Kolkata')
 current_ist = datetime.now(ist)
 
+# --- GLOBAL CSS FOR RED HIGHLIGHT ---
+st.markdown("""
+    <style>
+    /* If the expander summary contains 🚨, make the background light red */
+    div[data-testid="stExpander"] details:has(summary:contains("🚨")) {
+        background-color: #fff0f0; 
+        border: 1px solid #ffcccc;
+        border-radius: 8px;
+    }
+    div[data-testid="stExpander"] details:has(summary:contains("🚨")) summary {
+        background-color: #ffe6e6; 
+        border-radius: 8px;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 # --- 5. STREAMLIT USER INTERFACE ---
 st.title("BPS Digital - App & Feature Logger")
 st.write("Manage app updates, record ideas, and track reusable common features.")
 
-# Expanded to 5 Tabs!
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🚀 Log App Update", 
     "💡 Brainstorming Hub",
@@ -89,25 +104,17 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 # ==========================================
-# TAB 1: THE APP UPDATE LOGGER (Handles Direct & Pending Ideas)
+# TAB 1: THE APP UPDATE LOGGER 
 # ==========================================
 with tab1:
-    update_mode = st.radio(
-        "Choose Update Mode:", 
-        ["🚀 Direct Update", "✅ Complete Pending Idea"], 
-        horizontal=True
-    )
+    update_mode = st.radio("Choose Update Mode:", ["🚀 Direct Update", "✅ Complete Pending Idea"], horizontal=True)
     st.divider()
 
-    # Variables to hold pre-filled data if completing an idea
     target_sheet_row = None
     prefill_app = "➕ Add New..."
-    prefill_details = ""
-    prefill_idea_date = ""
-    prefill_idea_time = ""
+    prefill_details, prefill_idea_date, prefill_idea_time = "", "", ""
 
     if update_mode == "✅ Complete Pending Idea":
-        # Find all rows where 'Date' (index 0) is empty, but 'App' (index 2) has text
         pending_ideas = []
         for i, row in enumerate(st.session_state.update_data):
             if i > 0 and str(row[0]).strip() == "" and str(row[2]).strip() != "":
@@ -119,18 +126,11 @@ with tab1:
             opt_dict = {f"{r[2]} ({r[12]}) - {r[3][:40]}...": (i, r) for i, r in pending_ideas}
             selected_opt = st.selectbox("Select Pending Idea to Complete:", list(opt_dict.keys()))
             
-            # Extract the specific row data
             sheet_row_index, idea_row_data = opt_dict[selected_opt]
-            target_sheet_row = sheet_row_index + 1 # +1 for 1-indexed Google Sheets
-            
-            prefill_app = idea_row_data[2]
-            prefill_details = idea_row_data[3]
-            prefill_idea_date = idea_row_data[12]
-            prefill_idea_time = idea_row_data[13]
-            
-            st.info(f"Editing Idea from **{prefill_idea_date}**. Fill out the rest of the details below.")
+            target_sheet_row = sheet_row_index + 1 
+            prefill_app, prefill_details, prefill_idea_date, prefill_idea_time = idea_row_data[2], idea_row_data[3], idea_row_data[12], idea_row_data[13]
+            st.info(f"Editing Idea from **{prefill_idea_date}**. Fill out the details below.")
 
-    # Only show form if it's direct update OR (completing idea AND pending ideas exist)
     if update_mode == "🚀 Direct Update" or (update_mode == "✅ Complete Pending Idea" and target_sheet_row is not None):
         col1, col2 = st.columns(2)
         
@@ -145,10 +145,8 @@ with tab1:
                 app_input = st.text_input("Type New App Name") if app_sel == "➕ Add New..." else app_sel
             
             details_input = st.text_area("Details of Update", value=prefill_details)
-            
             ai_sel = st.selectbox("AI Used", ["➕ Add New..."] + get_dropdown_options(4))
             ai_input = st.text_input("Type New AI") if ai_sel == "➕ Add New..." else ai_sel
-            
             ai_answer = st.text_area("AI Answer")
             
         with col2:
@@ -172,42 +170,42 @@ with tab1:
         btn_text = "Update Pending Idea in Google Sheet" if update_mode == "✅ Complete Pending Idea" else "Save Update to Google Sheet"
         
         if st.button(btn_text, type="primary"):
+            # Check if this app was already added to main app to inherit the "TRUE" state
+            is_in_main = "TRUE" if any(len(r) > 14 and str(r[14]).strip().upper() == "TRUE" for r in st.session_state.update_data if str(r[2]).strip() == app_input) else ""
+            
             row_data_update = [
                 str(date_input), str(time_input.strftime("%H:%M:%S")), app_input, details_input,
                 ai_input, ai_answer, short_input, lines_input, features_input, selected_ai, chat_input, gs_input,
-                prefill_idea_date, prefill_idea_time # Columns 13 & 14 (will remain blank for Direct Updates)
+                prefill_idea_date, prefill_idea_time, is_in_main # Column 15
             ]
             
             try:
                 if update_mode == "✅ Complete Pending Idea":
-                    # Overwrite the exact row instead of appending
-                    worksheet_update.update(values=[row_data_update], range_name=f"A{target_sheet_row}:N{target_sheet_row}")
+                    worksheet_update.update(values=[row_data_update], range_name=f"A{target_sheet_row}:O{target_sheet_row}")
                     st.session_state.update_data[target_sheet_row - 1] = row_data_update
                     st.success("Successfully completed and updated the pending idea!")
                 else:
                     worksheet_update.append_row(row_data_update)
                     st.session_state.update_data.append(row_data_update) 
                     st.success("Successfully logged the new update!")
-                
             except Exception as e:
                 st.error(f"An error occurred while saving: {e}")
 
 # ==========================================
-# TAB 2: BRAINSTORMING HUB (New Ideas)
+# TAB 2: BRAINSTORMING HUB
 # ==========================================
 with tab2:
     st.subheader("💡 Log a New Idea")
     
     app_sel_idea = st.selectbox("App Name", ["➕ Add New..."] + get_dropdown_options(2), key="app_idea")
     app_input_idea = st.text_input("Type New App Name", key="app_idea_new") if app_sel_idea == "➕ Add New..." else app_sel_idea
-    
     idea_details = st.text_area("Record your idea (Saved as 'Details of Update')")
     
     if st.button("Save Idea to Pending List", type="primary"):
-        # Leaves columns 1-12 blank (except app and details), fills 13-14 with Idea Date/Time
+        # Fills 13-14 with Idea Date/Time, keeps 15 blank
         row_data_idea = [
             "", "", app_input_idea, idea_details, "", "", "", "", "", "", "", "", 
-            str(current_ist.date()), str(current_ist.strftime("%H:%M:%S"))
+            str(current_ist.date()), str(current_ist.strftime("%H:%M:%S")), ""
         ]
         try:
             worksheet_update.append_row(row_data_idea)
@@ -262,13 +260,13 @@ with tab3:
                 st.error(f"An error occurred while saving: {e}")
 
 # ==========================================
-# TAB 4: VIEW UPDATES BY APP (Grouped Layout)
+# TAB 4: VIEW UPDATES BY APP (With Highlight Logic)
 # ==========================================
 with tab4:
     st.subheader("App Update History")
     
     if len(st.session_state.update_data) > 1:
-        # Filter OUT pending ideas so they don't show up in completed updates
+        # Filter OUT pending ideas
         completed_records = [r for r in st.session_state.update_data[1:] if str(r[0]).strip() != ""]
         
         app_groups = {}
@@ -279,10 +277,36 @@ with tab4:
             app_groups[app_name].append(row)
                 
         for app_name, logs in sorted(app_groups.items()):
-            with st.expander(f"📱 {app_name} ({len(logs)} updates)"):
+            # Check if this app has EVER been marked as "TRUE" in column 15
+            is_added_to_main = any(len(r) > 14 and str(r[14]).strip().upper() == "TRUE" for r in logs)
+            
+            # Dynamic title that triggers the CSS red highlight if it contains 🚨
+            title = f"✅ 📱 {app_name} ({len(logs)} updates)" if is_added_to_main else f"🚨 📱 {app_name} ({len(logs)} updates)"
+            
+            with st.expander(title):
+                # The Actionable Checkbox (only shows if NOT in main app)
+                if not is_added_to_main:
+                    if st.checkbox("➕ Add in main app", key=f"add_{app_name}"):
+                        try:
+                            # To save API limits, we only append "TRUE" to the most recent log of this app
+                            for i, r in reversed(list(enumerate(st.session_state.update_data))):
+                                if len(r) > 2 and str(r[2]).strip() == app_name:
+                                    sheet_row = i + 1
+                                    worksheet_update.update_cell(sheet_row, 15, "TRUE")
+                                    # Update cache immediately so it triggers a state change
+                                    st.session_state.update_data[i] = pad_row(st.session_state.update_data[i], 15)
+                                    st.session_state.update_data[i][14] = "TRUE"
+                                    # Rerun drops the red background and hides the checkbox!
+                                    st.rerun() 
+                                    break
+                        except Exception as e:
+                            st.error(f"Error communicating with Google Sheets: {e}")
+                    st.divider()
+
+                # Display the actual logs inside the expander
                 for log in reversed(logs): 
                     date_val = log[0]
-                    features_added = log[8]
+                    features_added = log[8] if len(log) > 8 else ""
                     short_desc = log[6] if len(log) > 6 else ""
                     
                     st.markdown(f"**Date:** {date_val} | **Features:** {features_added}")
@@ -293,7 +317,7 @@ with tab4:
         st.info("No app updates logged yet.")
 
 # ==========================================
-# TAB 5: MANAGE COMMON FEATURES (Editable Layout)
+# TAB 5: MANAGE COMMON FEATURES
 # ==========================================
 with tab5:
     st.subheader("Manage Common Features")
@@ -301,7 +325,6 @@ with tab5:
     
     if len(st.session_state.common_data) > 1:
         records = st.session_state.common_data[1:]
-        
         for index, row in enumerate(records):
             if len(row) > 7:
                 sheet_row = index + 2 
@@ -318,7 +341,6 @@ with tab5:
                             value=current_apps, 
                             help="Add or edit the names of apps using this feature."
                         )
-                        
                         if st.form_submit_button("Update App List"):
                             try:
                                 worksheet_common.update_cell(sheet_row, 8, new_apps)

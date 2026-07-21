@@ -4,35 +4,32 @@ from google.oauth2.service_account import Credentials
 import pytz
 from datetime import datetime
 
-# --- 1. AUTHENTICATION SETUP ---
-scopes = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
-
-try:
+# --- 1. CACHED AUTHENTICATION & CONNECTION SETUP ---
+# This prevents Streamlit from pinging the API on every keystroke!
+@st.cache_resource(show_spinner="Connecting to Google Sheets...")
+def init_connection():
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
     credentials = Credentials.from_service_account_info(
         dict(st.secrets["gcp_service_account"]),
         scopes=scopes,
     )
     client = gspread.authorize(credentials)
-except Exception as e:
-    st.error(f"Authentication failed. Please check your Streamlit Secrets. Error: {e}")
-    st.stop()
-
-# --- 2. CONNECT TO THE SHEET & WORKSHEETS ---
-SHEET_NAME = "APP UPDATE" 
+    sheet = client.open("APP UPDATE")
+    ws_update = sheet.worksheet("Update") 
+    ws_common = sheet.worksheet("Common")
+    return ws_update, ws_common
 
 try:
-    sheet = client.open(SHEET_NAME)
-    worksheet_update = sheet.worksheet("Update") 
-    worksheet_common = sheet.worksheet("Common")
+    worksheet_update, worksheet_common = init_connection()
 except Exception as e:
-    st.error(f"Failed to connect to sheet or tabs. Details: {e}")
+    st.error(f"Authentication or connection failed. Details: {e}")
     st.stop()
 
-# --- 3. SMART DATA CACHING & HELPER FUNCTIONS ---
-# Upgraded to 15 columns!
+
+# --- 2. SMART DATA CACHING & HELPER FUNCTIONS ---
 def pad_row(row, length=15):
     return row + [""] * (length - len(row))
 
@@ -40,13 +37,15 @@ if "update_data" not in st.session_state:
     try:
         raw_data = worksheet_update.get_all_values()
         st.session_state.update_data = [pad_row(r) for r in raw_data]
-    except:
+    except Exception as e:
+        st.error(f"Failed to fetch Update data: {e}")
         st.session_state.update_data = []
 
 if "common_data" not in st.session_state:
     try:
         st.session_state.common_data = worksheet_common.get_all_values()
-    except:
+    except Exception as e:
+        st.error(f"Failed to fetch Common data: {e}")
         st.session_state.common_data = []
 
 def get_dropdown_options(column_index):
@@ -71,14 +70,13 @@ def get_last_lines(app_name):
                 continue
     return 0
 
-# --- 4. TIMEZONE CONFIGURATION ---
+# --- 3. TIMEZONE CONFIGURATION ---
 ist = pytz.timezone('Asia/Kolkata')
 current_ist = datetime.now(ist)
 
 # --- GLOBAL CSS FOR RED HIGHLIGHT ---
 st.markdown("""
     <style>
-    /* If the expander summary contains 🚨, make the background light red */
     div[data-testid="stExpander"] details:has(summary:contains("🚨")) {
         background-color: #fff0f0; 
         border: 1px solid #ffcccc;
@@ -91,7 +89,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 5. STREAMLIT USER INTERFACE ---
+# --- 4. STREAMLIT USER INTERFACE ---
 st.title("BPS Digital - App & Feature Logger")
 st.write("Manage app updates, record ideas, and track reusable common features.")
 
@@ -170,13 +168,12 @@ with tab1:
         btn_text = "Update Pending Idea in Google Sheet" if update_mode == "✅ Complete Pending Idea" else "Save Update to Google Sheet"
         
         if st.button(btn_text, type="primary"):
-            # Check if this app was already added to main app to inherit the "TRUE" state
             is_in_main = "TRUE" if any(len(r) > 14 and str(r[14]).strip().upper() == "TRUE" for r in st.session_state.update_data if str(r[2]).strip() == app_input) else ""
             
             row_data_update = [
                 str(date_input), str(time_input.strftime("%H:%M:%S")), app_input, details_input,
                 ai_input, ai_answer, short_input, lines_input, features_input, selected_ai, chat_input, gs_input,
-                prefill_idea_date, prefill_idea_time, is_in_main # Column 15
+                prefill_idea_date, prefill_idea_time, is_in_main 
             ]
             
             try:
@@ -202,7 +199,6 @@ with tab2:
     idea_details = st.text_area("Record your idea (Saved as 'Details of Update')")
     
     if st.button("Save Idea to Pending List", type="primary"):
-        # Fills 13-14 with Idea Date/Time, keeps 15 blank
         row_data_idea = [
             "", "", app_input_idea, idea_details, "", "", "", "", "", "", "", "", 
             str(current_ist.date()), str(current_ist.strftime("%H:%M:%S")), ""
@@ -266,7 +262,6 @@ with tab4:
     st.subheader("App Update History")
     
     if len(st.session_state.update_data) > 1:
-        # Filter OUT pending ideas
         completed_records = [r for r in st.session_state.update_data[1:] if str(r[0]).strip() != ""]
         
         app_groups = {}
@@ -277,18 +272,14 @@ with tab4:
             app_groups[app_name].append(row)
                 
         for app_name, logs in sorted(app_groups.items()):
-            # Check if this app has EVER been marked as "TRUE" in column 15
             is_added_to_main = any(len(r) > 14 and str(r[14]).strip().upper() == "TRUE" for r in logs)
-            
-            # Dynamic title that triggers the CSS red highlight if it contains 🚨
             title = f"✅ 📱 {app_name} ({len(logs)} updates)" if is_added_to_main else f"🚨 📱 {app_name} ({len(logs)} updates)"
             
             with st.expander(title):
-                # The Actionable Checkbox (only shows if NOT in main app)
                 if not is_added_to_main:
                     if st.checkbox("➕ Add in main app", key=f"add_{app_name}"):
                         try:
-                            # To save API limits, we only append "TRUE" to the most recent log of this app
+                            # To save API requests, we only write "TRUE" to the MOST RECENT log of this app.
                             for i, r in reversed(list(enumerate(st.session_state.update_data))):
                                 if len(r) > 2 and str(r[2]).strip() == app_name:
                                     sheet_row = i + 1
@@ -296,14 +287,12 @@ with tab4:
                                     # Update cache immediately so it triggers a state change
                                     st.session_state.update_data[i] = pad_row(st.session_state.update_data[i], 15)
                                     st.session_state.update_data[i][14] = "TRUE"
-                                    # Rerun drops the red background and hides the checkbox!
                                     st.rerun() 
                                     break
                         except Exception as e:
                             st.error(f"Error communicating with Google Sheets: {e}")
                     st.divider()
 
-                # Display the actual logs inside the expander
                 for log in reversed(logs): 
                     date_val = log[0]
                     features_added = log[8] if len(log) > 8 else ""

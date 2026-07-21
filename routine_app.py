@@ -227,174 +227,6 @@ try:
     today_str = now.strftime('%Y-%m-%d')
     current_time = now.time()
 
-    return_predef = prep_chk_df[prep_chk_df['Type'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME']['Task Name'].tolist()
-    return_predef = [str(x).strip() for x in return_predef if str(x).strip()]
-    
-    out_predef = prep_chk_df[prep_chk_df['Type'].str.strip().str.upper() == 'PREPARE BEFORE OUT FROM HOME']['Task Name'].tolist()
-    out_predef = [str(x).strip() for x in out_predef if str(x).strip()]
-
-    # ==========================================
-    # --- AUTO-LOGGER FOR FULL JOURNEY ---
-    # ==========================================
-    try:
-        if not loc_df.empty and 'Place' in loc_df.columns:
-            recent_locs = loc_df.tail(150).copy()
-            if 'Date' in recent_locs.columns: recent_locs['Parsed_Date'] = pd.to_datetime(recent_locs['Date'], dayfirst=True, errors='coerce').dt.date
-            else: recent_locs['Parsed_Date'] = now.date()
-                
-            outings = []
-            preps_before_out = []
-            preps_after_return = []
-            
-            prev_state = None
-            last_dep_time = None
-            last_dep_date = None
-            
-            for _, r in recent_locs.iterrows():
-                place = str(r.get('Place', '')).strip().upper()
-                status = ""
-                for col in ['Type', 'Status', 'Movement', 'Activity']:
-                    if col in recent_locs.columns:
-                        val = str(r[col]).strip().upper()
-                        if val:
-                            status = val
-                            break
-                            
-                is_moving = status in ['BIKE', 'WALK', 'TOTO', 'AUTO', 'BUS', 'TRAIN', 'CAR', 'IN_VEHICLE', 'ON_BICYCLE', 'ON_FOOT', 'RUNNING']
-                if place == 'HOME' and not is_moving: curr_state = 'HOME'
-                elif place != 'HOME' or is_moving: curr_state = 'OUT'
-                else: curr_state = prev_state
-                    
-                row_date_obj = r.get('Parsed_Date', pd.NaT)
-                row_date = row_date_obj.strftime('%Y-%m-%d') if pd.notna(row_date_obj) else today_str
-                
-                row_time = str(r.get('Time', r.get('Start_Time', ''))).strip()
-                if not row_time: continue
-                try: row_time = datetime.strptime(row_time, '%H:%M:%S').strftime('%H:%M')
-                except: pass
-                try: row_time = datetime.strptime(row_time, '%H:%M').strftime('%H:%M')
-                except: pass
-                
-                if curr_state == 'OUT' and prev_state == 'HOME':
-                    last_dep_time = row_time
-                    last_dep_date = row_date
-                    preps_before_out.append({'date': row_date, 'dep_time': row_time})
-                elif curr_state == 'HOME' and prev_state == 'OUT':
-                    arr_time = row_time
-                    preps_after_return.append({'date': row_date, 'arr_time': arr_time})
-                    if last_dep_time:
-                        outings.append({'dep_date': last_dep_date, 'dep_time': last_dep_time, 'arr_date': row_date, 'arr_time': arr_time})
-                        last_dep_time = None
-                prev_state = curr_state
-
-            logs_to_append = []
-
-            for prep in preps_before_out:
-                p_date = prep['date']
-                p_dep = prep['dep_time']
-                day_logs = log_df[log_df['Date'] == p_date]
-                already_logged = False
-                for _, log_r in day_logs.iterrows():
-                    if str(log_r['Sub_Activities']).strip().upper() == 'PREPARE BEFORE OUT FROM HOME':
-                        log_end = str(log_r['End_Time']).strip()
-                        try: log_end = datetime.strptime(log_end, '%H:%M').strftime('%H:%M')
-                        except: pass
-                        if log_end == p_dep:
-                            already_logged = True
-                            break
-                if not already_logged:
-                    try:
-                        dep_dt = datetime.strptime(f"{p_date} {p_dep}", "%Y-%m-%d %H:%M")
-                        start_dt = dep_dt - timedelta(minutes=10)
-                        logs_to_append.append([p_date, start_dt.strftime('%H:%M'), p_dep, "0:10", "PRE", "Prepare before out from Home", "", "Auto-logged backwards from Location Data"])
-                    except: pass
-
-            for out in outings:
-                p_date = out['dep_date']
-                p_dep = out['dep_time']
-                day_logs = log_df[log_df['Date'] == p_date]
-                already_logged = False
-                for _, log_r in day_logs.iterrows():
-                    if str(log_r['Activity']).strip().upper() == 'OUT':
-                        log_start = str(log_r['Start_Time']).strip()
-                        try: log_start = datetime.strptime(log_start, '%H:%M').strftime('%H:%M')
-                        except: pass
-                        if log_start == p_dep:
-                            already_logged = True
-                            break
-                if not already_logged:
-                    try:
-                        dep_dt = datetime.strptime(f"{out['dep_date']} {out['dep_time']}", "%Y-%m-%d %H:%M")
-                        arr_dt = datetime.strptime(f"{out['arr_date']} {out['arr_time']}", "%Y-%m-%d %H:%M")
-                        dur_mins = int((arr_dt - dep_dt).total_seconds() / 60)
-                        if dur_mins > 0:
-                            dur_str = f"{dur_mins // 60}:{dur_mins % 60:02d}"
-                            logs_to_append.append([out['dep_date'], out['dep_time'], out['arr_time'], dur_str, "OUT", "Outing", "", "Auto-logged from Location Data"])
-                    except: pass
-
-            for prep in preps_after_return:
-                p_date = prep['date']
-                p_arr = prep['arr_time']
-                day_logs = log_df[log_df['Date'] == p_date]
-                already_logged = False
-                for _, log_r in day_logs.iterrows():
-                    if str(log_r['Sub_Activities']).strip().upper() == 'PREPARE AFTER RETURN BACK HOME':
-                        log_start = str(log_r['Start_Time']).strip()
-                        try: log_start = datetime.strptime(log_start, '%H:%M').strftime('%H:%M')
-                        except: pass
-                        if log_start == p_arr:
-                            already_logged = True
-                            break
-                if not already_logged:
-                    is_latest = (prep == preps_after_return[-1])
-                    try:
-                        arr_dt = datetime.strptime(f"{p_date} {p_arr}", "%Y-%m-%d %H:%M")
-                        arr_dt_aware = ist_timezone.localize(arr_dt)
-                        mins_since = (now - arr_dt_aware).total_seconds() / 60.0
-                        
-                        if mins_since >= 10 or not is_latest or p_date != today_str:
-                            end_dt = arr_dt + timedelta(minutes=10)
-                            logs_to_append.append([p_date, p_arr, end_dt.strftime('%H:%M'), "0:10", "PRE", "Prepare after return back home", "", "Auto-completed from Location Data"])
-                        else:
-                            main_ss = get_cached_sheet("MY ROUTINE 2026")
-                            smart_append_row(main_ss.worksheet("activity_log"), [p_date, p_arr, "RUNNING", GS_FORMULA, "PRE", "Prepare after return back home", "", "Auto-started from Location Data"])
-                            get_all_ecosystem_data.clear()
-                            st.toast("🏠 Welcome Home! Started your 10m prep timer.")
-                            time.sleep(1.0)
-                            st.rerun()
-                    except: pass
-
-            if logs_to_append:
-                main_ss = get_cached_sheet("MY ROUTINE 2026")
-                sheet = main_ss.worksheet("activity_log")
-                smart_append_multiple(sheet, logs_to_append)
-                get_all_ecosystem_data.clear()
-                st.rerun()
-
-        running_preps = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME')]
-        for idx, p_row in running_preps.iterrows():
-            p_start = str(p_row['Start_Time']).strip()
-            arr_dt = datetime.strptime(f"{today_str} {p_start}", "%Y-%m-%d %H:%M")
-            arr_dt = ist_timezone.localize(arr_dt)
-            mins_since = (now - arr_dt).total_seconds() / 60.0
-            
-            if mins_since >= 10:
-                sheet_row = idx + 2
-                end_dt = arr_dt + timedelta(minutes=10)
-                main_ss = get_cached_sheet("MY ROUTINE 2026")
-                log_sheet = main_ss.worksheet("activity_log")
-                
-                try: log_sheet.update(range_name=f"C{sheet_row}:D{sheet_row}", values=[[end_dt.strftime('%H:%M'), GS_FORMULA]], value_input_option="USER_ENTERED")
-                except TypeError: log_sheet.update(f"C{sheet_row}:D{sheet_row}", [[end_dt.strftime('%H:%M'), GS_FORMULA]], value_input_option="USER_ENTERED")
-                
-                get_all_ecosystem_data.clear()
-                st.toast("✅ Auto-saved 10m Home Prep block.")
-                time.sleep(1.0)
-                st.rerun()
-
-    except Exception as e:
-        print(f"Location Sync Error: {e}")
-
     running_tasks = log_df[log_df['End_Time'] == 'RUNNING']
     active_count = len(running_tasks)
 
@@ -404,93 +236,6 @@ try:
     is_auto_holiday = not today_holiday_match.empty
     auto_occasion = today_holiday_match.iloc[0]['Occasion'] if is_auto_holiday else ""
     effective_day = "Holiday" if is_auto_holiday else current_day
-
-    # ==========================================
-    # --- PENDING EDITS AUDIT SCANNER ---
-    # ==========================================
-    pending_edits = []
-    try:
-        prep_logs = log_df[log_df['Sub_Activities'].str.strip().str.upper().isin(['PREPARE AFTER RETURN BACK HOME', 'PREPARE BEFORE OUT FROM HOME'])]
-        recent_preps = prep_logs.tail(20) 
-        
-        for idx, p_row in recent_preps.iterrows():
-            p_date = str(p_row['Date']).strip()
-            p_start_str = str(p_row['Start_Time']).strip()
-            try:
-                p_start_dt = datetime.strptime(f"{p_date} {p_start_str}", "%Y-%m-%d %H:%M")
-                p_end_dt = p_start_dt + timedelta(minutes=10)
-            except: continue
-
-            conflict_found = False
-            conflict_reasons = []
-            earliest_conflict_dt = p_end_dt
-
-            same_day_logs = log_df[log_df['Date'] == p_date]
-            for log_idx, log_r in same_day_logs.iterrows():
-                if log_idx == idx: continue
-                if str(log_r['Sub_Activities']).strip().upper() in ['PREPARE AFTER RETURN BACK HOME', 'PREPARE BEFORE OUT FROM HOME']:
-                    continue
-                
-                log_start_str = str(log_r['Start_Time']).strip()
-                log_end_str = str(log_r['End_Time']).strip()
-                
-                if log_start_str == log_end_str: continue
-
-                try:
-                    log_start_dt = datetime.strptime(f"{p_date} {log_start_str}", "%Y-%m-%d %H:%M")
-                    if p_start_dt < log_start_dt < p_end_dt:
-                        conflict_found = True
-                        conflict_reasons.append(f"Started '{str(log_r['Activity']).strip()}' at {log_start_str}")
-                        if log_start_dt < earliest_conflict_dt:
-                            earliest_conflict_dt = log_start_dt
-                except: pass
-
-            if not loc_df.empty and 'Place' in loc_df.columns:
-                loc_df_day = loc_df.copy()
-                if 'Date' in loc_df_day.columns:
-                    loc_df_day['Parsed_Date'] = pd.to_datetime(loc_df_day['Date'], dayfirst=True, errors='coerce').dt.strftime('%Y-%m-%d')
-                    loc_df_day = loc_df_day[loc_df_day['Parsed_Date'] == p_date]
-                else:
-                    loc_df_day = loc_df_day.tail(100)
-
-                for _, loc_r in loc_df_day.iterrows():
-                    loc_place = str(loc_r.get('Place', '')).strip().upper()
-                    if loc_place and loc_place != 'HOME':
-                        loc_time_str = str(loc_r.get('Time', loc_r.get('Start_Time', ''))).strip()
-                        try:
-                            try: loc_time_str = datetime.strptime(loc_time_str, '%H:%M:%S').strftime('%H:%M')
-                            except: pass
-                            try: loc_time_str = datetime.strptime(loc_time_str, '%H:%M').strftime('%H:%M')
-                            except: pass
-                            
-                            loc_time_dt = datetime.strptime(f"{p_date} {loc_time_str}", "%Y-%m-%d %H:%M")
-                            if p_start_dt < loc_time_dt < p_end_dt:
-                                conflict_found = True
-                                conflict_reasons.append(f"Left for '{loc_r.get('Place', '')}' at {loc_time_str}")
-                                if loc_time_dt < earliest_conflict_dt:
-                                    earliest_conflict_dt = loc_time_dt
-                        except: pass
-
-            if conflict_found:
-                actual_end_str = str(p_row['End_Time']).strip()
-                needs_edit = False
-                if actual_end_str == 'RUNNING': needs_edit = True
-                else:
-                    try:
-                        actual_end_dt = datetime.strptime(f"{p_date} {actual_end_str}", "%Y-%m-%d %H:%M")
-                        if actual_end_dt > earliest_conflict_dt: needs_edit = True
-                    except: pass
-
-                if needs_edit:
-                    pending_edits.append({
-                        'sheet_row': idx + 2, 
-                        'date': p_date,
-                        'start': p_start_str,
-                        'reasons': ", ".join(conflict_reasons),
-                        'suggested_end': earliest_conflict_dt.strftime('%H:%M')
-                    })
-    except Exception as e:
-        pass
 
     # ==========================================
     # --- ROUTINE HUB UI HEADER ---
@@ -510,24 +255,6 @@ try:
             st.toast("✅ Force Synced with Google Sheets!")
             time.sleep(1.0)
             st.rerun()
-
-    if pending_edits:
-        with st.expander(f"⚠️ Action Required: Pending Sheet Edits ({len(pending_edits)})", expanded=True):
-            st.markdown("<p style='font-size:13px; color:#666; margin-top:-10px;'>You started a task or left home before your 10m prep finished. Click Auto-Fix to perfectly align the times!</p>", unsafe_allow_html=True)
-            for edit in pending_edits:
-                st.markdown(f"<div style='background-color:#fff4f4; border-left:4px solid #d32f2f; padding:8px; margin-bottom:5px; font-size:14px;'><b>{edit['date']} at {edit['start']}</b><br><span style='color:#555;'>Conflict: {edit['reasons']}</span></div>", unsafe_allow_html=True)
-                if st.button(f"🔧 Auto-Fix to {edit['suggested_end']}", key=f"fix_{edit['sheet_row']}", use_container_width=True):
-                    main_ss = get_cached_sheet("MY ROUTINE 2026")
-                    log_sheet = main_ss.worksheet("activity_log")
-                    
-                    try: log_sheet.update(range_name=f"C{edit['sheet_row']}:D{edit['sheet_row']}", values=[[edit['suggested_end'], GS_FORMULA]], value_input_option="USER_ENTERED")
-                    except TypeError: log_sheet.update(f"C{edit['sheet_row']}:D{edit['sheet_row']}", [[edit['suggested_end'], GS_FORMULA]], value_input_option="USER_ENTERED")
-                    
-                    get_all_ecosystem_data.clear()
-                    st.toast(f"✅ Fixed! End time perfectly adjusted to {edit['suggested_end']}.")
-                    time.sleep(1.0)
-                    st.rerun()
-            st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
 
     # --- UPDATED APP GROUPS ---
     app_groups = {
@@ -590,17 +317,10 @@ try:
     current_sub_activities = scheduled_sub_activities
     current_check_list = scheduled_check_list
 
-    is_prep_running = any(running_tasks['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME')
-    if is_prep_running:
-        current_activity = "Welcome Home"
-        prep_row = running_tasks[running_tasks['Sub_Activities'].str.strip().str.upper() == 'PREPARE AFTER RETURN BACK HOME'].iloc[0]
-        try: current_activity_start = datetime.strptime(str(prep_row['Start_Time']).strip(), '%H:%M').time()
-        except: pass
-
     if current_activity in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"]: color = "#ff4b4b" 
     elif current_activity in ["WORK", "REPORT", "TASK", "HOME TASK", "HOME UTILITIES"]: color = "#0068c9" 
     elif current_activity == "HEALTH": color = "#2e7b32" 
-    elif current_activity in ["SLEEP", "PRE", "TEA", "OUT", "PREPARE AFTER RETURN BACK HOME", "Welcome Home"]: color = "#ff9f36" 
+    elif current_activity in ["SLEEP", "PRE", "TEA", "OUT"]: color = "#ff9f36" 
     else: color = "#333333" 
 
     hide_extras = (current_activity == "SLEEP")
@@ -672,14 +392,6 @@ try:
         sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
         chk_list = [c.strip() for c in current_check_list.split(',') if c.strip()]
         all_logged_items = log_df['check_list'].tolist() + log_df['Sub_Activities'].tolist()
-        
-        running_subs_upper_for_chk = [str(x).strip().upper() for x in running_tasks['Sub_Activities'].tolist()]
-        if 'PREPARE AFTER RETURN BACK HOME' in running_subs_upper_for_chk:
-            for item in return_predef:
-                if item not in chk_list: chk_list.append(item)
-        if 'PREPARE BEFORE OUT FROM HOME' in running_subs_upper_for_chk:
-            for item in out_predef:
-                if item not in chk_list: chk_list.append(item)
         
         if not hide_extras:
             upcoming_ui_elements_raw = []
@@ -900,7 +612,7 @@ try:
                         
                         checked = st.checkbox(f"{task} (Last: {get_last_done_str(task, log_df, now, col_name='check_list')})", value=is_done, disabled=is_done, key=f"chk_{task}_{current_activity}")
                         if checked and not is_done:
-                            log_act = "PRE" if task in (return_predef + out_predef) else current_activity
+                            log_act = current_activity
                             main_ss = get_cached_sheet("MY ROUTINE 2026")
                             smart_append_row(main_ss.worksheet("activity_log"), [today_str, now.strftime('%H:%M'), now.strftime('%H:%M'), GS_FORMULA, log_act, "", task, "Checked off"])
                             if "[Due:" in task:
@@ -918,7 +630,6 @@ try:
                 for idx, active_row in running_tasks.iterrows():
                     sheet_row = idx + 2 
                     display_name = str(active_row['Sub_Activities']) or str(active_row['Activity'])
-                    is_home_prep = (str(active_row['Sub_Activities']).strip().upper() == 'PREPARE AFTER RETURN BACK HOME')
                     
                     try:
                         dt_naive = datetime.strptime(f"{active_row['Date']} {active_row['Start_Time']}", "%Y-%m-%d %H:%M")
@@ -946,40 +657,35 @@ try:
 
                     st.markdown(f'<div style="background-color: #f8f9fa; border-left: 5px solid {p_color}; padding: 12px; border-radius: 6px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);"><div style="display: flex; justify-content: space-between; align-items: center;"><strong style="font-size: 16px; color: #333;">⏳ {display_name}</strong><span style="color: #666; font-size: 14px;">Total: {dur_str_running}</span></div><div style="margin-top: 8px; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;"><span style="color: {p_color}; font-weight: bold; font-size: 14px;">{p_state} (Cycle {pomodoro_count})</span><span style="color: #555; font-size: 13px; font-weight: bold;">{p_left}m left</span></div><div style="width: 100%; background-color: #e0e0e0; border-radius: 4px; height: 6px;"><div style="width: {p_prog * 100}%; background-color: {p_color}; height: 6px; border-radius: 4px; transition: width 0.5s ease;"></div></div></div>', unsafe_allow_html=True)
 
-                    if is_home_prep:
-                        mins_remaining = max(0, 10 - mins_elapsed)
-                        st.markdown(f"<div style='text-align:center; color:#888; font-size:13px; margin-bottom:5px; font-weight:bold;'><i>⏳ This timer will automatically close in {mins_remaining} minutes.</i></div>", unsafe_allow_html=True)
-                        st.markdown("<div style='text-align:center; color:#d84315; font-size:11px; margin-bottom:15px;'><i>📝 Note: Auto-Fix your sheet above if you start a new activity before this finishes!</i></div>", unsafe_allow_html=True)
-                    else:
-                        st.markdown("<div style='margin-top: 10px; font-size: 13px; font-weight: bold;'>🔋 Energy Level Post-Task:</div>", unsafe_allow_html=True)
-                        energy_val = st.slider("Energy", 1, 10, 5, key=f"nrg_{sheet_row}", label_visibility="collapsed")
+                    st.markdown("<div style='margin-top: 10px; font-size: 13px; font-weight: bold;'>🔋 Energy Level Post-Task:</div>", unsafe_allow_html=True)
+                    energy_val = st.slider("Energy", 1, 10, 5, key=f"nrg_{sheet_row}", label_visibility="collapsed")
 
-                        col_stop, col_cancel = st.columns(2)
-                        with col_stop:
-                            if st.button("🛑 SAVE", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
-                                main_ss = get_cached_sheet("MY ROUTINE 2026")
-                                log_sheet = main_ss.worksheet("activity_log")
+                    col_stop, col_cancel = st.columns(2)
+                    with col_stop:
+                        if st.button("🛑 SAVE", key=f"save_{sheet_row}", use_container_width=True, type="primary"):
+                            main_ss = get_cached_sheet("MY ROUTINE 2026")
+                            log_sheet = main_ss.worksheet("activity_log")
+                            
+                            try: log_sheet.update(range_name=f"C{sheet_row}:D{sheet_row}", values=[[now.strftime('%H:%M'), GS_FORMULA]], value_input_option="USER_ENTERED")
+                            except TypeError: log_sheet.update(f"C{sheet_row}:D{sheet_row}", [[now.strftime('%H:%M'), GS_FORMULA]], value_input_option="USER_ENTERED")
+                            
+                            log_sheet.update_cell(sheet_row, 12, energy_val)
+                            
+                            if str(active_row['Notes']).strip() == "": log_sheet.update_cell(sheet_row, 8, "Auto-logged via Timer") 
                                 
-                                try: log_sheet.update(range_name=f"C{sheet_row}:D{sheet_row}", values=[[now.strftime('%H:%M'), GS_FORMULA]], value_input_option="USER_ENTERED")
-                                except TypeError: log_sheet.update(f"C{sheet_row}:D{sheet_row}", [[now.strftime('%H:%M'), GS_FORMULA]], value_input_option="USER_ENTERED")
-                                
-                                log_sheet.update_cell(sheet_row, 12, energy_val)
-                                
-                                if str(active_row['Notes']).strip() == "": log_sheet.update_cell(sheet_row, 8, "Auto-logged via Timer") 
-                                    
-                                if "[Due:" in str(active_row['Sub_Activities']):
-                                    matches = future_df[(future_df['Task_Name'].str.strip() == str(active_row['Sub_Activities']).split(" [Due:")[0].strip()) & (future_df['Type'] == 'Sub-Activity')]
-                                    if not matches.empty:
-                                        main_ss.worksheet("future_tasks").update_cell(int(matches.iloc[0]['row_index']), 7, "Completed") 
-                                get_all_ecosystem_data.clear() 
-                                st.rerun()
+                            if "[Due:" in str(active_row['Sub_Activities']):
+                                matches = future_df[(future_df['Task_Name'].str.strip() == str(active_row['Sub_Activities']).split(" [Due:")[0].strip()) & (future_df['Type'] == 'Sub-Activity')]
+                                if not matches.empty:
+                                    main_ss.worksheet("future_tasks").update_cell(int(matches.iloc[0]['row_index']), 7, "Completed") 
+                            get_all_ecosystem_data.clear() 
+                            st.rerun()
 
-                        with col_cancel:
-                            if st.button("❌ CANCEL", key=f"cancel_{sheet_row}", use_container_width=True):
-                                main_ss = get_cached_sheet("MY ROUTINE 2026")
-                                main_ss.worksheet("activity_log").delete_rows(sheet_row)
-                                get_all_ecosystem_data.clear() 
-                                st.rerun()
+                    with col_cancel:
+                        if st.button("❌ CANCEL", key=f"cancel_{sheet_row}", use_container_width=True):
+                            main_ss = get_cached_sheet("MY ROUTINE 2026")
+                            main_ss.worksheet("activity_log").delete_rows(sheet_row)
+                            get_all_ecosystem_data.clear() 
+                            st.rerun()
             
             avail_subs = [t for t in sub_list if t not in running_tasks['Sub_Activities'].tolist()]
             if avail_subs:

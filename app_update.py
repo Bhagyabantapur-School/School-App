@@ -5,7 +5,6 @@ import pytz
 from datetime import datetime
 
 # --- 1. CACHED AUTHENTICATION & CONNECTION SETUP ---
-# This prevents Streamlit from pinging the API on every keystroke!
 @st.cache_resource(show_spinner="Connecting to Google Sheets...")
 def init_connection():
     scopes = [
@@ -277,20 +276,22 @@ with tab4:
             
             with st.expander(title):
                 if not is_added_to_main:
-                    if st.checkbox("➕ Add in main app", key=f"add_{app_name}"):
-                        try:
-                            # To save API requests, we only write "TRUE" to the MOST RECENT log of this app.
-                            for i, r in reversed(list(enumerate(st.session_state.update_data))):
-                                if len(r) > 2 and str(r[2]).strip() == app_name:
-                                    sheet_row = i + 1
-                                    worksheet_update.update_cell(sheet_row, 15, "TRUE")
-                                    # Update cache immediately so it triggers a state change
-                                    st.session_state.update_data[i] = pad_row(st.session_state.update_data[i], 15)
-                                    st.session_state.update_data[i][14] = "TRUE"
-                                    st.rerun() 
-                                    break
-                        except Exception as e:
-                            st.error(f"Error communicating with Google Sheets: {e}")
+                    # CHANGED: Now using a button instead of a checkbox
+                    if st.button("➕ Add in main app", key=f"btn_{app_name}"):
+                        with st.spinner(f"Updating {app_name} in Google Sheets..."):
+                            try:
+                                for i, r in reversed(list(enumerate(st.session_state.update_data))):
+                                    if len(r) > 2 and str(r[2]).strip() == app_name:
+                                        sheet_row = i + 1
+                                        # CHANGED: Using highly optimized update_acell
+                                        worksheet_update.update_acell(f"O{sheet_row}", "TRUE")
+                                        
+                                        st.session_state.update_data[i] = pad_row(st.session_state.update_data[i], 15)
+                                        st.session_state.update_data[i][14] = "TRUE"
+                                        st.rerun() 
+                                        break
+                            except Exception as e:
+                                st.error(f"Error communicating with Google Sheets: {e}")
                     st.divider()
 
                 for log in reversed(logs): 

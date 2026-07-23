@@ -68,7 +68,12 @@ def load_slides():
         client = get_gspread_client()
         sheet = client.open("BPS_Database").worksheet("Slides")
         return pd.DataFrame(sheet.get_all_records())
-    except: return pd.DataFrame()
+    except gspread.exceptions.WorksheetNotFound:
+        st.error("❌ Error: Could not find a worksheet named 'Slides' in BPS_Database.")
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"❌ Google Sheets API Error: {e}")
+        return pd.DataFrame()
 
 # Navigation Functions
 def next_slide(total):
@@ -81,7 +86,7 @@ def prev_slide():
 slides_df = load_slides()
 
 if slides_df.empty:
-    st.warning("No slide data found. Check your 'Slides' worksheet in Google Sheets.")
+    st.warning("⚠️ No slide data is loading. Please check the error messages above or ensure your 'Slides' worksheet has data.")
 else:
     total_slides = len(slides_df)
     
@@ -102,7 +107,7 @@ else:
         if slide_type.lower() == 'title' or current_slide == 0:
             c1, c2, c3 = st.columns([1, 2, 1])
             with c2:
-                # Local Base64 Logo Rendering Logic (matching app.py exactly)
+                # Local Base64 Logo Rendering Logic
                 if os.path.exists("logo.png"):
                     with open("logo.png", "rb") as f:
                         img_b64 = base64.b64encode(f.read()).decode()

@@ -166,7 +166,6 @@ with tab1:
 
         st.divider()
         
-        # --- Smart Checkbox Logic ---
         is_already_main = False
         if app_input and app_input != "➕ Add New...":
             is_already_main = any(len(r) > 14 and str(r[14]).strip().upper() == "TRUE" for r in st.session_state.update_data if str(r[2]).strip() == app_input)
@@ -283,8 +282,6 @@ with tab4:
             app_groups[app_name].append(row)
                 
         for app_name, logs in sorted(app_groups.items()):
-            # --- THE FIX: Aligning Tab 4 logic perfectly with Tab 1 ---
-            # It now checks the entire session state (including pending ideas) to see if "TRUE" exists for this app
             is_added_to_main = any(
                 len(r) > 14 and str(r[14]).strip().upper() == "TRUE" 
                 for r in st.session_state.update_data 
@@ -295,13 +292,47 @@ with tab4:
             
             with st.expander(title):
                 for log in reversed(logs): 
-                    date_val = log[0]
-                    features_added = log[8] if len(log) > 8 else ""
+                    # --- Extracting all fields based on their column index ---
+                    date_val = log[0] if len(log) > 0 else ""
+                    details_val = log[3] if len(log) > 3 else ""
+                    ai_answer_val = log[5] if len(log) > 5 else ""
                     short_desc = log[6] if len(log) > 6 else ""
+                    lines_val = log[7] if len(log) > 7 else ""
+                    features_added = log[8] if len(log) > 8 else ""
+                    selected_ai_val = log[9] if len(log) > 9 else ""
+                    chat_val = log[10] if len(log) > 10 else ""
+                    gs_val = log[11] if len(log) > 11 else ""
                     
-                    st.markdown(f"**Date:** {date_val} | **Features:** {features_added}")
+                    # --- Direct Display Data ---
+                    st.markdown(f"**Date:** {date_val} &nbsp;|&nbsp; **Lines:** {lines_val}")
+                    
+                    if features_added:
+                        st.markdown(f"**Features:** {features_added}")
                     if short_desc:
                         st.caption(f"**Short:** {short_desc}")
+                    
+                    # Formatting Chat and Google Sheet links cleanly on one line if they exist
+                    meta_info = []
+                    if chat_val: meta_info.append(f"**Chat:** {chat_val}")
+                    if gs_val: meta_info.append(f"**Google Sheet:** {gs_val}")
+                    if meta_info:
+                        st.markdown(" &nbsp;|&nbsp; ".join(meta_info))
+                        
+                    # --- Hidden Long Data (Inside Expander) ---
+                    if details_val or ai_answer_val or selected_ai_val:
+                        with st.expander("📝 View Full Details & AI Output"):
+                            if details_val:
+                                st.markdown("**Details of Update:**")
+                                st.write(details_val)
+                            
+                            if ai_answer_val:
+                                st.markdown("**AI Answer:**")
+                                st.write(ai_answer_val)
+                                
+                            if selected_ai_val:
+                                st.markdown("**Selected from AI:**")
+                                st.write(selected_ai_val)
+
                     st.divider()
     else:
         st.info("No app updates logged yet.")

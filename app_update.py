@@ -166,29 +166,25 @@ with tab1:
 
         st.divider()
         
-        # --- NEW: Smart Checkbox Logic ---
-        # Checks if this app already has "TRUE" in column 15 anywhere in the sheet
+        # --- Smart Checkbox Logic ---
         is_already_main = False
         if app_input and app_input != "➕ Add New...":
             is_already_main = any(len(r) > 14 and str(r[14]).strip().upper() == "TRUE" for r in st.session_state.update_data if str(r[2]).strip() == app_input)
         
         if is_already_main:
-            # If already added in the past, render it as checked and read-only
             add_to_main = st.checkbox("✅ This app is already added to the Main App", value=True, disabled=True)
         else:
-            # If not, let the user check it now
             add_to_main = st.checkbox("➕ Mark as 'Added to Main App' for this update?")
 
         btn_text = "Update Pending Idea in Google Sheet" if update_mode == "✅ Complete Pending Idea" else "Save Update to Google Sheet"
         
         if st.button(btn_text, type="primary"):
-            # Set the 15th column to "TRUE" if the checkbox is checked, otherwise empty
             col15_value = "TRUE" if add_to_main else ""
             
             row_data_update = [
                 str(date_input), str(time_input.strftime("%H:%M:%S")), app_input, details_input,
                 ai_input, ai_answer, short_input, lines_input, features_input, selected_ai, chat_input, gs_input,
-                prefill_idea_date, prefill_idea_time, col15_value # Now uses the checkbox result
+                prefill_idea_date, prefill_idea_time, col15_value 
             ]
             
             try:
@@ -271,7 +267,7 @@ with tab3:
                 st.error(f"An error occurred while saving: {e}")
 
 # ==========================================
-# TAB 4: VIEW UPDATES BY APP (Highlight Logic only)
+# TAB 4: VIEW UPDATES BY APP 
 # ==========================================
 with tab4:
     st.subheader("App Update History")
@@ -287,12 +283,17 @@ with tab4:
             app_groups[app_name].append(row)
                 
         for app_name, logs in sorted(app_groups.items()):
-            # Checks if this app group has ANY log with "TRUE" in col 15
-            is_added_to_main = any(len(r) > 14 and str(r[14]).strip().upper() == "TRUE" for r in logs)
+            # --- THE FIX: Aligning Tab 4 logic perfectly with Tab 1 ---
+            # It now checks the entire session state (including pending ideas) to see if "TRUE" exists for this app
+            is_added_to_main = any(
+                len(r) > 14 and str(r[14]).strip().upper() == "TRUE" 
+                for r in st.session_state.update_data 
+                if str(r[2]).strip() == app_name
+            )
+            
             title = f"✅ 📱 {app_name} ({len(logs)} updates)" if is_added_to_main else f"🚨 📱 {app_name} ({len(logs)} updates)"
             
             with st.expander(title):
-                # We simply display the logs now; the write functionality is handled in Tab 1
                 for log in reversed(logs): 
                     date_val = log[0]
                     features_added = log[8] if len(log) > 8 else ""

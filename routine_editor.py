@@ -305,6 +305,8 @@ with col_nav2:
             st.session_state.unsaved_sort = False
         if 'active_slot_start' in st.session_state:
             del st.session_state.active_slot_start
+        if 'unsaved_default' in st.session_state:
+            st.session_state.unsaved_default = False
         st.toast("✅ Cache cleared! Fetching latest data from Google Sheets...")
         time.sleep(1)
         st.rerun()
@@ -338,6 +340,10 @@ try:
     with tab_default:
         st.markdown("### 🔁 Build Default Routine")
         st.info("💡 Check the box in the **Available Pool** to instantly append it to your **Default Routine**. Check a box in the Default Routine to remove it and send it back to the pool. Times are automatically calculated starting from 0:00.")
+
+        # State counter to force Streamlit to render fresh, unselected dataframes
+        if 'def_routine_refresh' not in st.session_state:
+            st.session_state.def_routine_refresh = 0
 
         if 'default_routine_df' not in st.session_state:
             st.session_state.default_routine_df = get_default_routine_data()
@@ -386,7 +392,7 @@ try:
                         "Duration": st.column_config.TextColumn("Duration", disabled=True),
                         "Duration_Mins": None  # Hide this
                     },
-                    key="pool_grid_editor"
+                    key=f"pool_grid_editor_{st.session_state.def_routine_refresh}"
                 )
                 
                 selected_to_add = pool_event[pool_event["Add"] == True]
@@ -413,13 +419,10 @@ try:
                         current_mins += dur
                         def_routine_df.loc[i, 'End_Time'] = mins_to_time(current_mins)
                         
-                    with st.spinner("Adding to Default Routine..."):
-                        sheet = get_sheet("Default Routine")
-                        sheet.clear()
-                        sheet.update(values=[def_routine_df.columns.values.tolist()] + def_routine_df.values.tolist(), range_name="A1")
-                        get_default_routine_data.clear()
-                        st.session_state.default_routine_df = def_routine_df
-                    
+                    # Save to local session memory (NO API CALL)
+                    st.session_state.default_routine_df = def_routine_df
+                    st.session_state.unsaved_default = True
+                    st.session_state.def_routine_refresh += 1
                     st.rerun()
 
         with col_routine:
@@ -444,7 +447,7 @@ try:
                         "Sub_Activities": st.column_config.TextColumn("Sub-Activity", disabled=True),
                         "Dur_Mins": None  # Hide this
                     },
-                    key="def_routine_grid_editor"
+                    key=f"def_routine_grid_editor_{st.session_state.def_routine_refresh}"
                 )
                 
                 selected_to_remove = routine_event[routine_event["Remove"] == True]
@@ -461,17 +464,31 @@ try:
                         current_mins += dur
                         def_routine_df.loc[i, 'End_Time'] = mins_to_time(current_mins)
                         
-                    with st.spinner("Removing and rebuilding sequence..."):
-                        sheet = get_sheet("Default Routine")
-                        sheet.clear()
-                        if not def_routine_df.empty:
-                            sheet.update(values=[def_routine_df.columns.values.tolist()] + def_routine_df.values.tolist(), range_name="A1")
-                        else:
-                            sheet.update(values=[["Start_Time", "End_Time", "Duration", "Dur_Mins", "Activity", "Sub_Activities"]], range_name="A1")
-                        get_default_routine_data.clear()
-                        st.session_state.default_routine_df = def_routine_df
-                    
+                    # Save to local session memory (NO API CALL)
+                    st.session_state.default_routine_df = def_routine_df
+                    st.session_state.unsaved_default = True
+                    st.session_state.def_routine_refresh += 1
                     st.rerun()
+                    
+        st.markdown("<hr style='margin: 15px 0px;'>", unsafe_allow_html=True)
+        
+        # ONE SINGLE BUTTON TO SAVE TO GOOGLE SHEETS
+        if st.session_state.get('unsaved_default', False):
+            st.markdown("<div class='local-warning'>⚠️ <b>Default Routine modified locally!</b> Click save below to update Google Sheets.</div>", unsafe_allow_html=True)
+            
+        if st.button("💾 Save Default Routine to Google Sheets", type="primary", use_container_width=True):
+            with st.spinner("Saving sequence to the cloud..."):
+                sheet = get_sheet("Default Routine")
+                sheet.clear()
+                if not def_routine_df.empty:
+                    sheet.update(values=[def_routine_df.columns.values.tolist()] + def_routine_df.values.tolist(), range_name="A1")
+                else:
+                    sheet.update(values=[["Start_Time", "End_Time", "Duration", "Dur_Mins", "Activity", "Sub_Activities"]], range_name="A1")
+                get_default_routine_data.clear()
+                st.session_state.unsaved_default = False
+            st.success("✅ Default Routine successfully saved to Google Sheets!")
+            time.sleep(1.5)
+            st.rerun()
 
 
     # ==========================================

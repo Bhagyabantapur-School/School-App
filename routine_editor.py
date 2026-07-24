@@ -346,7 +346,8 @@ try:
 
         st.markdown("<div class='profile-header'>📅 Select Base Profile to pull Activities from:</div>", unsafe_allow_html=True)
         profile_options = ["WEEK DAYS", "SATURDAY/HALF WORKING DAY", "SUNDAY", "HOLIDAY"]
-        selected_def_profile = st.radio("Profile Config", profile_options, horizontal=True, label_visibility="collapsed")
+        # Added unique key: 'def_profile_radio'
+        selected_def_profile = st.radio("Profile Config", profile_options, horizontal=True, label_visibility="collapsed", key="def_profile_radio")
         
         st.markdown("<hr style='margin: 15px 0px;'>", unsafe_allow_html=True)
 
@@ -460,7 +461,8 @@ try:
         
         st.markdown("<div class='profile-header'>📅 Select Schedule Profile</div>", unsafe_allow_html=True)
         profile_options = ["WEEK DAYS", "SATURDAY/HALF WORKING DAY", "SUNDAY", "HOLIDAY"]
-        selected_day_type = st.radio("Profile Config", profile_options, horizontal=True, label_visibility="collapsed")
+        # Added unique key: 'builder_profile_radio'
+        selected_day_type = st.radio("Profile Config", profile_options, horizontal=True, label_visibility="collapsed", key="builder_profile_radio")
         
         profile_df = act_master_df[act_master_df['Day_Type'] == selected_day_type].copy()
         

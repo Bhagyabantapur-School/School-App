@@ -180,13 +180,23 @@ def get_default_routine_data():
         sheet = get_main_spreadsheet().worksheet("Default Routine")
     except gspread.exceptions.WorksheetNotFound:
         spreadsheet = get_main_spreadsheet()
-        sheet = spreadsheet.add_worksheet(title="Default Routine", rows="100", cols="6")
-        sheet.update(values=[["Start_Time", "End_Time", "Duration", "Dur_Mins", "Activity", "Sub_Activities"]], range_name="A1")
-        return pd.DataFrame(columns=["Start_Time", "End_Time", "Duration", "Dur_Mins", "Activity", "Sub_Activities"])
+        sheet = spreadsheet.add_worksheet(title="Default Routine", rows="100", cols="7")
+        sheet.update(values=[["Day_Type", "Start_Time", "End_Time", "Duration", "Dur_Mins", "Activity", "Sub_Activities"]], range_name="A1")
+        return pd.DataFrame(columns=["Day_Type", "Start_Time", "End_Time", "Duration", "Dur_Mins", "Activity", "Sub_Activities"])
         
     data = sheet.get_all_values()
-    if not data or len(data) <= 1:
-        return pd.DataFrame(columns=["Start_Time", "End_Time", "Duration", "Dur_Mins", "Activity", "Sub_Activities"])
+    if not data:
+        return pd.DataFrame(columns=["Day_Type", "Start_Time", "End_Time", "Duration", "Dur_Mins", "Activity", "Sub_Activities"])
+        
+    if "Day_Type" not in data[0]:
+        df = pd.DataFrame(data[1:], columns=data[0]) if len(data) > 1 else pd.DataFrame(columns=data[0])
+        df.insert(0, "Day_Type", "WEEK DAYS")
+        sheet.clear()
+        sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name="A1")
+        data = sheet.get_all_values()
+
+    if len(data) <= 1:
+        return pd.DataFrame(columns=["Day_Type", "Start_Time", "End_Time", "Duration", "Dur_Mins", "Activity", "Sub_Activities"])
         
     df = pd.DataFrame(data[1:], columns=data[0])
     df['Dur_Mins'] = pd.to_numeric(df['Dur_Mins'], errors='coerce').fillna(0)
@@ -356,11 +366,13 @@ try:
         
         st.markdown("<hr style='margin: 15px 0px;'>", unsafe_allow_html=True)
 
-        # Calculate the Available Pool by subtracting tasks already in the Default Routine
+        # Calculate the Available Pool by subtracting tasks already in the Default Routine FOR THIS PROFILE ONLY
         profile_df = act_master_df[(act_master_df['Day_Type'] == selected_def_profile) & (act_master_df['Sub_Activity'] != "")].copy()
         
-        if not def_routine_df.empty:
-            def_routine_keys = def_routine_df['Activity'] + "|" + def_routine_df['Sub_Activities']
+        curr_def_routine_df = def_routine_df[def_routine_df['Day_Type'] == selected_def_profile]
+        
+        if not curr_def_routine_df.empty:
+            def_routine_keys = curr_def_routine_df['Activity'] + "|" + curr_def_routine_df['Sub_Activities']
             def_routine_keys = def_routine_keys.tolist()
         else:
             def_routine_keys = []
@@ -376,7 +388,7 @@ try:
         with col_pool:
             st.markdown("#### 📥 Window 1: Available Pool")
             if available_pool_df.empty:
-                st.success("✅ All activities from this profile are currently in your Default Routine!")
+                st.success(f"✅ All activities from {selected_def_profile} are currently in your Default Routine!")
             else:
                 # Force a physical "Add" column that we initialize as False on every single render
                 available_pool_df.insert(0, "Add", False)
@@ -401,6 +413,7 @@ try:
                     selected_item = selected_to_add.iloc[0]
                     
                     new_row = {
+                        "Day_Type": selected_def_profile,
                         "Start_Time": "", 
                         "End_Time": "", 
                         "Duration": selected_item['Duration'],
@@ -411,9 +424,12 @@ try:
                     
                     def_routine_df = pd.concat([def_routine_df, pd.DataFrame([new_row])], ignore_index=True)
                     
-                    # Recalculate Times continuously from 0:00
+                    # Recalculate Times continuously from 0:00 FOR THIS PROFILE ONLY
+                    mask = def_routine_df['Day_Type'] == selected_def_profile
+                    profile_indices = def_routine_df[mask].index
+                    
                     current_mins = 0
-                    for i in range(len(def_routine_df)):
+                    for i in profile_indices:
                         dur = int(def_routine_df.loc[i, 'Dur_Mins'])
                         def_routine_df.loc[i, 'Start_Time'] = mins_to_time(current_mins)
                         current_mins += dur
@@ -426,11 +442,11 @@ try:
                     st.rerun()
 
         with col_routine:
-            st.markdown("#### 📤 Window 2: Default Routine Sequence")
-            if def_routine_df.empty:
-                st.info("Your Default Routine is empty. Check tasks in Window 1 to add them.")
+            st.markdown(f"#### 📤 Window 2: Default Routine Sequence")
+            if curr_def_routine_df.empty:
+                st.info(f"Your Default Routine for {selected_def_profile} is empty. Check tasks in Window 1 to add them.")
             else:
-                def_routine_display = def_routine_df.copy()
+                def_routine_display = curr_def_routine_df.copy()
                 # Force a physical "Remove" column that we initialize as False on every single render
                 def_routine_display.insert(0, "Remove", False)
                 
@@ -440,6 +456,7 @@ try:
                     hide_index=True,
                     column_config={
                         "Remove": st.column_config.CheckboxColumn("❌ Remove", default=False),
+                        "Day_Type": None, # Hide this visually
                         "Start_Time": st.column_config.TextColumn("Start Time", disabled=True),
                         "End_Time": st.column_config.TextColumn("End Time", disabled=True),
                         "Duration": st.column_config.TextColumn("Duration", disabled=True),
@@ -452,13 +469,23 @@ try:
                 
                 selected_to_remove = routine_event[routine_event["Remove"] == True]
                 if not selected_to_remove.empty:
-                    # Select the first checked item
-                    idx_to_remove = selected_to_remove.index[0]
+                    # Target the specific row safely independent of editor row indices
+                    act_to_remove = selected_to_remove.iloc[0]['Activity']
+                    sub_to_remove = selected_to_remove.iloc[0]['Sub_Activities']
+                    
+                    idx_mask = (def_routine_df['Day_Type'] == selected_def_profile) & \
+                               (def_routine_df['Activity'] == act_to_remove) & \
+                               (def_routine_df['Sub_Activities'] == sub_to_remove)
+                               
+                    idx_to_remove = def_routine_df[idx_mask].index[0]
                     def_routine_df = def_routine_df.drop(index=idx_to_remove).reset_index(drop=True)
                     
-                    # Recalculate Times continuously from 0:00 after removal
+                    # Recalculate Times continuously from 0:00 after removal FOR THIS PROFILE ONLY
+                    mask = def_routine_df['Day_Type'] == selected_def_profile
+                    profile_indices = def_routine_df[mask].index
+                    
                     current_mins = 0
-                    for i in range(len(def_routine_df)):
+                    for i in profile_indices:
                         dur = int(def_routine_df.loc[i, 'Dur_Mins'])
                         def_routine_df.loc[i, 'Start_Time'] = mins_to_time(current_mins)
                         current_mins += dur
@@ -483,7 +510,7 @@ try:
                 if not def_routine_df.empty:
                     sheet.update(values=[def_routine_df.columns.values.tolist()] + def_routine_df.values.tolist(), range_name="A1")
                 else:
-                    sheet.update(values=[["Start_Time", "End_Time", "Duration", "Dur_Mins", "Activity", "Sub_Activities"]], range_name="A1")
+                    sheet.update(values=[["Day_Type", "Start_Time", "End_Time", "Duration", "Dur_Mins", "Activity", "Sub_Activities"]], range_name="A1")
                 get_default_routine_data.clear()
                 st.session_state.unsaved_default = False
             st.success("✅ Default Routine successfully saved to Google Sheets!")

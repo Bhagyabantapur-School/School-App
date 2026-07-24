@@ -174,6 +174,24 @@ def get_activity_master():
     df['Duration_Mins'] = pd.to_numeric(df['Duration_Mins'], errors='coerce').fillna(0)
     return df
 
+@st.cache_data(ttl=300)
+def get_default_routine_data():
+    try:
+        sheet = get_main_spreadsheet().worksheet("Default Routine")
+    except gspread.exceptions.WorksheetNotFound:
+        spreadsheet = get_main_spreadsheet()
+        sheet = spreadsheet.add_worksheet(title="Default Routine", rows="100", cols="6")
+        sheet.update(values=[["Start_Time", "End_Time", "Duration", "Dur_Mins", "Activity", "Sub_Activities"]], range_name="A1")
+        return pd.DataFrame(columns=["Start_Time", "End_Time", "Duration", "Dur_Mins", "Activity", "Sub_Activities"])
+        
+    data = sheet.get_all_values()
+    if not data or len(data) <= 1:
+        return pd.DataFrame(columns=["Start_Time", "End_Time", "Duration", "Dur_Mins", "Activity", "Sub_Activities"])
+        
+    df = pd.DataFrame(data[1:], columns=data[0])
+    df['Dur_Mins'] = pd.to_numeric(df['Dur_Mins'], errors='coerce').fillna(0)
+    return df
+
 def format_mins(total_mins):
     h = int(total_mins) // 60
     m = int(total_mins) % 60
@@ -278,8 +296,11 @@ with col_nav2:
     if st.button("🔄 Sync Data", type="primary", use_container_width=True):
         get_routine_data.clear()
         get_activity_master.clear()
+        get_default_routine_data.clear()
         if 'routine_df' in st.session_state:
             del st.session_state.routine_df
+        if 'default_routine_df' in st.session_state:
+            del st.session_state.default_routine_df
         if 'unsaved_sort' in st.session_state:
             st.session_state.unsaved_sort = False
         if 'active_slot_start' in st.session_state:
@@ -309,7 +330,127 @@ try:
     all_subs_builder = act_master_df['Sub_Activity'].dropna().tolist()
     all_subs = sorted(list(set([str(x).strip() for x in all_subs_db + all_subs_builder if str(x).strip()])))
 
-    tab_editor, tab_summary, tab_builder = st.tabs(["⚙️ Routine Editor", "📊 Routine Summary", "🏗️ Activity Builder"])
+    tab_editor, tab_summary, tab_builder, tab_default = st.tabs(["⚙️ Routine Editor", "📊 Routine Summary", "🏗️ Activity Builder", "🔁 Default Routine"])
+
+    # ==========================================
+    # TAB 4: DEFAULT ROUTINE BUILDER
+    # ==========================================
+    with tab_default:
+        st.markdown("### 🔁 Build Default Routine")
+        st.info("💡 Click an activity in the **Available Pool** to instantly append it to your **Default Routine**. Click an activity in the Default Routine to remove it and send it back to the pool. Times are automatically calculated starting from 0:00.")
+
+        if 'default_routine_df' not in st.session_state:
+            st.session_state.default_routine_df = get_default_routine_data()
+            
+        def_routine_df = st.session_state.default_routine_df.copy()
+
+        st.markdown("<div class='profile-header'>📅 Select Base Profile to pull Activities from:</div>", unsafe_allow_html=True)
+        profile_options = ["WEEK DAYS", "SATURDAY/HALF WORKING DAY", "SUNDAY", "HOLIDAY"]
+        selected_def_profile = st.selectbox("Profile Config", profile_options, horizontal=True, label_visibility="collapsed")
+        
+        st.markdown("<hr style='margin: 15px 0px;'>", unsafe_allow_html=True)
+
+        # Calculate the Available Pool by subtracting tasks already in the Default Routine
+        profile_df = act_master_df[(act_master_df['Day_Type'] == selected_def_profile) & (act_master_df['Sub_Activity'] != "")].copy()
+        
+        if not def_routine_df.empty:
+            def_routine_keys = def_routine_df['Activity'] + "|" + def_routine_df['Sub_Activities']
+            def_routine_keys = def_routine_keys.tolist()
+        else:
+            def_routine_keys = []
+            
+        profile_df['Match_Key'] = profile_df['Activity'] + "|" + profile_df['Sub_Activity']
+        available_pool_df = profile_df[~profile_df['Match_Key'].isin(def_routine_keys)].copy()
+        
+        available_pool_df['Duration'] = available_pool_df['Duration_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")
+        available_pool_df = available_pool_df[['Activity', 'Sub_Activity', 'Duration', 'Duration_Mins']].reset_index(drop=True)
+
+        col_pool, col_routine = st.columns([1, 1])
+        
+        with col_pool:
+            st.markdown("#### 📥 Window 1: Available Pool")
+            if available_pool_df.empty:
+                st.success("✅ All activities from this profile are currently in your Default Routine!")
+            else:
+                pool_event = st.dataframe(
+                    available_pool_df[['Activity', 'Sub_Activity', 'Duration']],
+                    use_container_width=True,
+                    hide_index=True,
+                    selection_mode="single-row",
+                    on_select="rerun",
+                    key="pool_grid"
+                )
+                
+                # Handling adding to routine
+                if pool_event.selection.rows:
+                    idx = pool_event.selection.rows[0]
+                    selected_item = available_pool_df.iloc[idx]
+                    
+                    new_row = {
+                        "Start_Time": "", 
+                        "End_Time": "", 
+                        "Duration": selected_item['Duration'],
+                        "Dur_Mins": selected_item['Duration_Mins'],
+                        "Activity": selected_item['Activity'],
+                        "Sub_Activities": selected_item['Sub_Activity']
+                    }
+                    
+                    def_routine_df = pd.concat([def_routine_df, pd.DataFrame([new_row])], ignore_index=True)
+                    
+                    # Recalculate Times continuously from 0:00
+                    current_mins = 0
+                    for i in range(len(def_routine_df)):
+                        dur = int(def_routine_df.loc[i, 'Dur_Mins'])
+                        def_routine_df.loc[i, 'Start_Time'] = mins_to_time(current_mins)
+                        current_mins += dur
+                        def_routine_df.loc[i, 'End_Time'] = mins_to_time(current_mins)
+                        
+                    with st.spinner("Adding to Default Routine..."):
+                        sheet = get_sheet("Default Routine")
+                        sheet.clear()
+                        sheet.update(values=[def_routine_df.columns.values.tolist()] + def_routine_df.values.tolist(), range_name="A1")
+                        get_default_routine_data.clear()
+                        st.session_state.default_routine_df = def_routine_df
+                    st.rerun()
+
+        with col_routine:
+            st.markdown("#### 📤 Window 2: Default Routine Sequence")
+            if def_routine_df.empty:
+                st.info("Your Default Routine is empty. Click tasks in Window 1 to add them.")
+            else:
+                routine_event = st.dataframe(
+                    def_routine_df[['Start_Time', 'End_Time', 'Duration', 'Activity', 'Sub_Activities']],
+                    use_container_width=True,
+                    hide_index=True,
+                    selection_mode="single-row",
+                    on_select="rerun",
+                    key="def_routine_grid"
+                )
+                
+                # Handling removing from routine
+                if routine_event.selection.rows:
+                    idx = routine_event.selection.rows[0]
+                    def_routine_df = def_routine_df.drop(index=idx).reset_index(drop=True)
+                    
+                    # Recalculate Times continuously from 0:00 after removal
+                    current_mins = 0
+                    for i in range(len(def_routine_df)):
+                        dur = int(def_routine_df.loc[i, 'Dur_Mins'])
+                        def_routine_df.loc[i, 'Start_Time'] = mins_to_time(current_mins)
+                        current_mins += dur
+                        def_routine_df.loc[i, 'End_Time'] = mins_to_time(current_mins)
+                        
+                    with st.spinner("Removing and rebuilding sequence..."):
+                        sheet = get_sheet("Default Routine")
+                        sheet.clear()
+                        if not def_routine_df.empty:
+                            sheet.update(values=[def_routine_df.columns.values.tolist()] + def_routine_df.values.tolist(), range_name="A1")
+                        else:
+                            sheet.update(values=[["Start_Time", "End_Time", "Duration", "Dur_Mins", "Activity", "Sub_Activities"]], range_name="A1")
+                        get_default_routine_data.clear()
+                        st.session_state.default_routine_df = def_routine_df
+                    st.rerun()
+
 
     # ==========================================
     # TAB 3: ACTIVITY BUILDER
@@ -1175,7 +1316,6 @@ try:
                                 expected[k] = expected.get(k, 0) + int(r['Duration_Mins'])
                                 
                             live_dict = {}
-                            # Temporarily project current state to find true deficits
                             temp_rows = []
                             for idx in day_idx:
                                 if idx == idx_to_edit: continue

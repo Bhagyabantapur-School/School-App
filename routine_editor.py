@@ -224,9 +224,8 @@ def shift_routine_slot(df, target_days, curr_i, direction):
             dur_curr = df.loc[idx_curr, 'Dur_Mins']
             dur_target = df.loc[idx_target, 'Dur_Mins']
             
-            # --- PERFECT SLIDE vs DISTANT JUMP LOGIC ---
             if abs(curr_i - target_i) == 1:
-                # 1. Adjacent Slide: Tasks pack together without gaps
+                # 1. Adjacent Slide
                 if direction == 'up':
                     anchor_start = df.loc[idx_target, 'Start_Mins']
                     df.loc[idx_curr, 'Start_Mins'] = anchor_start
@@ -240,7 +239,7 @@ def shift_routine_slot(df, target_days, curr_i, direction):
                     df.loc[idx_curr, 'Start_Mins'] = anchor_start + dur_target
                     df.loc[idx_curr, 'End_Mins'] = anchor_start + dur_target + dur_curr
             else:
-                # 2. Distant Jump: Perfect coordinate swap across locked walls
+                # 2. Distant Jump across walls
                 start_curr = df.loc[idx_curr, 'Start_Mins']
                 start_target = df.loc[idx_target, 'Start_Mins']
                 
@@ -772,7 +771,6 @@ try:
         cols_to_hide = ['Start_Mins', 'End_Mins', 'Is_Gap', 'Is_Mismatch', 'Locked_Sort']
         hidden_columns_config = {col: None for col in cols_to_hide if col in display_df.columns}
 
-        # FIX: Changed "single_row" to "single-row"
         selection_event = st.dataframe(
             styled_df, 
             use_container_width=True, 
@@ -1096,7 +1094,7 @@ try:
                             if new_remainder_rows:
                                 df = pd.concat([df, pd.DataFrame(new_remainder_rows)], ignore_index=True)
                     else:
-                        # --- STANDARD CLIPPING LOGIC (Fallback) ---
+                        # --- SMART BUILDER GAP-FILL ENGINE (Replaces Standard Overwrite) ---
                         new_remainder_rows = []
                         
                         for day in target_days:
@@ -1106,12 +1104,8 @@ try:
                             
                             old_start_mins = df.loc[idx_to_edit, 'Start_Mins']
                             old_end_mins = df.loc[idx_to_edit, 'End_Mins']
-                            old_act = df.loc[idx_to_edit, 'Activity']
-                            old_subs = df.loc[idx_to_edit, 'Sub_Activities']
-                            old_chks = df.loc[idx_to_edit, 'check_list']
-                            old_app = df.loc[idx_to_edit, 'App']
-                            old_locked = df.loc[idx_to_edit, 'Locked']
                             
+                            # 1. Define Vacated Gap(s) Left Behind
                             vacated_intervals = []
                             if L_start_new >= old_end_mins or L_end_new <= old_start_mins:
                                 vacated_intervals.append((old_start_mins, old_end_mins))
@@ -1121,20 +1115,7 @@ try:
                                 if L_end_new < old_end_mins:
                                     vacated_intervals.append((L_end_new, old_end_mins))
                                     
-                            for v_start, v_end in vacated_intervals:
-                                new_remainder_rows.append({
-                                    "Day": day,
-                                    "Start_Time": mins_to_time(v_start),
-                                    "End_Time": mins_to_time(v_end),
-                                    "Start_Mins": v_start,
-                                    "End_Mins": v_end,
-                                    "Activity": old_act,
-                                    "Sub_Activities": old_subs,
-                                    "check_list": old_chks,
-                                    "App": old_app,
-                                    "Locked": old_locked
-                                })
-                            
+                            # 2. Update the Target Block (Overwrite Destination)
                             df.loc[idx_to_edit, 'Start_Time'] = new_start_txt.strip()
                             df.loc[idx_to_edit, 'End_Time'] = new_end_txt.strip()
                             df.loc[idx_to_edit, 'Activity'] = final_act
@@ -1145,6 +1126,7 @@ try:
                             df.loc[idx_to_edit, 'End_Mins'] = L_end_new
                             df.loc[idx_to_edit, 'Locked'] = final_locked_str
                             
+                            # 3. Clip existing tasks around the new destination
                             day_idx = df[df['Day'].str.title() == day].index
                             for idx in day_idx:
                                 if idx == idx_to_edit: continue
@@ -1179,6 +1161,69 @@ try:
                                     if not is_locked:
                                         df.loc[idx, 'Start_Mins'] = 0
                                         df.loc[idx, 'End_Mins'] = 0
+
+                            # 4. Calculate Live vs Expected for the Day to find deficits
+                            day_type = "WEEK DAYS"
+                            if day.title() == "Saturday": day_type = "SATURDAY/HALF WORKING DAY"
+                            elif day.title() == "Sunday": day_type = "SUNDAY"
+                            elif day.title() == "Holiday": day_type = "HOLIDAY"
+                            
+                            exp_df = act_master_df[(act_master_df['Day_Type'] == day_type) & (act_master_df['Sub_Activity'] != "")]
+                            expected = {}
+                            for _, r in exp_df.iterrows():
+                                k = (str(r['Activity']).strip().upper(), str(r['Sub_Activity']).strip())
+                                expected[k] = expected.get(k, 0) + int(r['Duration_Mins'])
+                                
+                            live_dict = {}
+                            # Temporarily project current state to find true deficits
+                            temp_rows = []
+                            for idx in day_idx:
+                                if idx == idx_to_edit: continue
+                                if df.loc[idx, 'End_Mins'] > df.loc[idx, 'Start_Mins']:
+                                    temp_rows.append(df.loc[idx].to_dict())
+                            temp_rows.append(df.loc[idx_to_edit].to_dict())
+                            temp_rows.extend(new_remainder_rows)
+                            
+                            for r in temp_rows:
+                                if r['Day'].title() != day.title(): continue
+                                dur = r['End_Mins'] - r['Start_Mins']
+                                if dur <= 0: continue
+                                subs = [x.strip() for x in str(r['Sub_Activities']).split(',') if x.strip()]
+                                act = str(r['Activity']).strip().upper()
+                                for s in subs:
+                                    k = (act, s)
+                                    live_dict[k] = live_dict.get(k, 0) + dur
+
+                            deficits = []
+                            for k, exp_mins in expected.items():
+                                l_mins = live_dict.get(k, 0)
+                                if exp_mins > l_mins:
+                                    deficits.append({'act': k[0], 'sub': k[1], 'deficit': exp_mins - l_mins})
+
+                            # 5. Fill Vacated Intervals with Deficit Tasks
+                            for v_start, v_end in vacated_intervals:
+                                curr_start = v_start
+                                for d_item in deficits:
+                                    if curr_start >= v_end: break
+                                    if d_item['deficit'] <= 0: continue
+                                    
+                                    fill_mins = min(d_item['deficit'], v_end - curr_start)
+                                    chunk_end = curr_start + fill_mins
+                                    
+                                    new_remainder_rows.append({
+                                        "Day": day,
+                                        "Start_Time": mins_to_time(curr_start),
+                                        "End_Time": mins_to_time(chunk_end),
+                                        "Start_Mins": curr_start,
+                                        "End_Mins": chunk_end,
+                                        "Activity": d_item['act'],
+                                        "Sub_Activities": d_item['sub'],
+                                        "check_list": "",
+                                        "App": "",
+                                        "Locked": ""
+                                    })
+                                    d_item['deficit'] -= fill_mins
+                                    curr_start = chunk_end
                                         
                         if new_remainder_rows:
                             df = pd.concat([df, pd.DataFrame(new_remainder_rows)], ignore_index=True)

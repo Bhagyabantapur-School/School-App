@@ -346,7 +346,7 @@ try:
 
         st.markdown("<div class='profile-header'>📅 Select Base Profile to pull Activities from:</div>", unsafe_allow_html=True)
         profile_options = ["WEEK DAYS", "SATURDAY/HALF WORKING DAY", "SUNDAY", "HOLIDAY"]
-        selected_def_profile = st.selectbox("Profile Config", profile_options, horizontal=True, label_visibility="collapsed")
+        selected_def_profile = st.radio("Profile Config", profile_options, horizontal=True, label_visibility="collapsed")
         
         st.markdown("<hr style='margin: 15px 0px;'>", unsafe_allow_html=True)
 

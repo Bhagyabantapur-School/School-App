@@ -351,7 +351,6 @@ try:
         st.markdown("### 🔁 Build Default Routine")
         st.info("💡 Check the box in the **Available Pool** to instantly append it to your **Default Routine**. Check a box in the Default Routine to remove it and send it back to the pool. Times are automatically calculated starting from 0:00.")
 
-        # State counter to force Streamlit to render fresh, unselected dataframes
         if 'def_routine_refresh' not in st.session_state:
             st.session_state.def_routine_refresh = 0
 
@@ -366,9 +365,7 @@ try:
         
         st.markdown("<hr style='margin: 15px 0px;'>", unsafe_allow_html=True)
 
-        # Calculate the Available Pool by subtracting tasks already in the Default Routine FOR THIS PROFILE ONLY
         profile_df = act_master_df[(act_master_df['Day_Type'] == selected_def_profile) & (act_master_df['Sub_Activity'] != "")].copy()
-        
         curr_def_routine_df = def_routine_df[def_routine_df['Day_Type'] == selected_def_profile]
         
         if not curr_def_routine_df.empty:
@@ -390,9 +387,7 @@ try:
             if available_pool_df.empty:
                 st.success(f"✅ All activities from {selected_def_profile} are currently in your Default Routine!")
             else:
-                # Force a physical "Add" column that we initialize as False on every single render
                 available_pool_df.insert(0, "Add", False)
-                
                 pool_event = st.data_editor(
                     available_pool_df,
                     use_container_width=True,
@@ -402,16 +397,14 @@ try:
                         "Activity": st.column_config.TextColumn("Activity", disabled=True),
                         "Sub_Activity": st.column_config.TextColumn("Sub-Activity", disabled=True),
                         "Duration": st.column_config.TextColumn("Duration", disabled=True),
-                        "Duration_Mins": None  # Hide this
+                        "Duration_Mins": None  
                     },
                     key=f"pool_grid_editor_{st.session_state.def_routine_refresh}"
                 )
                 
                 selected_to_add = pool_event[pool_event["Add"] == True]
                 if not selected_to_add.empty:
-                    # Select the first checked item
                     selected_item = selected_to_add.iloc[0]
-                    
                     new_row = {
                         "Day_Type": selected_def_profile,
                         "Start_Time": "", 
@@ -421,13 +414,10 @@ try:
                         "Activity": selected_item['Activity'],
                         "Sub_Activities": selected_item['Sub_Activity']
                     }
-                    
                     def_routine_df = pd.concat([def_routine_df, pd.DataFrame([new_row])], ignore_index=True)
                     
-                    # Recalculate Times continuously from 0:00 FOR THIS PROFILE ONLY
                     mask = def_routine_df['Day_Type'] == selected_def_profile
                     profile_indices = def_routine_df[mask].index
-                    
                     current_mins = 0
                     for i in profile_indices:
                         dur = int(def_routine_df.loc[i, 'Dur_Mins'])
@@ -435,7 +425,6 @@ try:
                         current_mins += dur
                         def_routine_df.loc[i, 'End_Time'] = mins_to_time(current_mins)
                         
-                    # Save to local session memory (NO API CALL)
                     st.session_state.default_routine_df = def_routine_df
                     st.session_state.unsaved_default = True
                     st.session_state.def_routine_refresh += 1
@@ -447,29 +436,26 @@ try:
                 st.info(f"Your Default Routine for {selected_def_profile} is empty. Check tasks in Window 1 to add them.")
             else:
                 def_routine_display = curr_def_routine_df.copy()
-                # Force a physical "Remove" column that we initialize as False on every single render
                 def_routine_display.insert(0, "Remove", False)
-                
                 routine_event = st.data_editor(
                     def_routine_display,
                     use_container_width=True,
                     hide_index=True,
                     column_config={
                         "Remove": st.column_config.CheckboxColumn("❌ Remove", default=False),
-                        "Day_Type": None, # Hide this visually
+                        "Day_Type": None,
                         "Start_Time": st.column_config.TextColumn("Start Time", disabled=True),
                         "End_Time": st.column_config.TextColumn("End Time", disabled=True),
                         "Duration": st.column_config.TextColumn("Duration", disabled=True),
                         "Activity": st.column_config.TextColumn("Activity", disabled=True),
                         "Sub_Activities": st.column_config.TextColumn("Sub-Activity", disabled=True),
-                        "Dur_Mins": None  # Hide this
+                        "Dur_Mins": None  
                     },
                     key=f"def_routine_grid_editor_{st.session_state.def_routine_refresh}"
                 )
                 
                 selected_to_remove = routine_event[routine_event["Remove"] == True]
                 if not selected_to_remove.empty:
-                    # Target the specific row safely independent of editor row indices
                     act_to_remove = selected_to_remove.iloc[0]['Activity']
                     sub_to_remove = selected_to_remove.iloc[0]['Sub_Activities']
                     
@@ -480,10 +466,8 @@ try:
                     idx_to_remove = def_routine_df[idx_mask].index[0]
                     def_routine_df = def_routine_df.drop(index=idx_to_remove).reset_index(drop=True)
                     
-                    # Recalculate Times continuously from 0:00 after removal FOR THIS PROFILE ONLY
                     mask = def_routine_df['Day_Type'] == selected_def_profile
                     profile_indices = def_routine_df[mask].index
-                    
                     current_mins = 0
                     for i in profile_indices:
                         dur = int(def_routine_df.loc[i, 'Dur_Mins'])
@@ -491,7 +475,6 @@ try:
                         current_mins += dur
                         def_routine_df.loc[i, 'End_Time'] = mins_to_time(current_mins)
                         
-                    # Save to local session memory (NO API CALL)
                     st.session_state.default_routine_df = def_routine_df
                     st.session_state.unsaved_default = True
                     st.session_state.def_routine_refresh += 1
@@ -499,7 +482,6 @@ try:
                     
         st.markdown("<hr style='margin: 15px 0px;'>", unsafe_allow_html=True)
         
-        # ONE SINGLE BUTTON TO SAVE TO GOOGLE SHEETS
         if st.session_state.get('unsaved_default', False):
             st.markdown("<div class='local-warning'>⚠️ <b>Default Routine modified locally!</b> Click save below to update Google Sheets.</div>", unsafe_allow_html=True)
             
@@ -915,9 +897,72 @@ try:
         day_mismatches = mismatched_act_subs_per_day.get(display_day, set())
 
         # --- 2. INTERACTIVE SCHEDULE TABLE ---
-        st.markdown(f"#### 📋 2. Interactive Schedule ({display_day})")
-        st.markdown("<div style='font-size: 0.9em; margin-bottom: 10px; color: #555;'>🖱️ <b>Click directly on any task row below</b> to select it for editing or moving!</div>", unsafe_allow_html=True)
-        
+        col_sch_head1, col_sch_head2 = st.columns([7, 3])
+        with col_sch_head1:
+            st.markdown(f"#### 📋 2. Interactive Schedule ({display_day})")
+            st.markdown("<div style='font-size: 0.9em; margin-bottom: 10px; color: #555;'>🖱️ <b>Click directly on any task row below</b> to select it for editing or moving!</div>", unsafe_allow_html=True)
+            
+        with col_sch_head2:
+            if sel_day_opt == "Monday to Friday":
+                reset_day_type = "WEEK DAYS"
+            elif display_day.title() == "Saturday":
+                reset_day_type = "SATURDAY/HALF WORKING DAY"
+            elif display_day.title() == "Sunday":
+                reset_day_type = "SUNDAY"
+            elif display_day.title() == "Holiday":
+                reset_day_type = "HOLIDAY"
+            else:
+                reset_day_type = "WEEK DAYS"
+                
+            if st.button(f"🔄 Reset to {reset_day_type} Default", help=f"Overwrite {sel_day_opt} with Default Routine", use_container_width=True):
+                def_routine_df_live = get_default_routine_data()
+                prof_def_df = def_routine_df_live[def_routine_df_live['Day_Type'] == reset_day_type].copy()
+                
+                if prof_def_df.empty:
+                    st.error(f"❌ No Default Routine found for {reset_day_type}. Build it first in the Default Routine tab!")
+                else:
+                    df_clean = df[~df['Day'].str.title().isin([d.title() for d in target_days])].copy()
+                    
+                    new_rows = []
+                    for d in target_days:
+                        for _, r in prof_def_df.iterrows():
+                            new_rows.append({
+                                "Day": d.title(),
+                                "Start_Time": r['Start_Time'],
+                                "End_Time": r['End_Time'],
+                                "Duration": r['Duration'],
+                                "Activity": r['Activity'],
+                                "Sub_Activities": r['Sub_Activities'],
+                                "check_list": "",
+                                "App": "",
+                                "Locked": ""
+                            })
+                    
+                    new_df = pd.DataFrame(new_rows)
+                    df_final = pd.concat([df_clean, new_df], ignore_index=True)
+                    
+                    df_final['Start_Mins'] = df_final['Start_Time'].apply(time_to_mins)
+                    df_final['End_Mins'] = df_final['End_Time'].apply(time_to_mins)
+                    df_final['End_Mins'] = df_final.apply(lambda r: r['End_Mins'] + 1440 if r['End_Mins'] <= r['Start_Mins'] and r['End_Mins'] < 120 else r['End_Mins'], axis=1)
+                    df_final['Dur_Mins'] = df_final['End_Mins'] - df_final['Start_Mins']
+                    df_final = df_final[df_final['Dur_Mins'] > 0].copy()
+                    df_final['Duration'] = df_final['Dur_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")
+                    df_final = sort_routine_df(df_final)
+                    df_final = df_final[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Locked"]]
+                    
+                    with st.spinner(f"Resetting {sel_day_opt} to Default..."):
+                        routine_sheet = get_sheet("routine_master")
+                        routine_sheet.clear()
+                        routine_sheet.update(values=[df_final.columns.values.tolist()] + df_final.values.tolist(), range_name="A1")
+                        get_routine_data.clear()
+                        st.session_state.routine_df = df_final
+                        st.session_state.unsaved_sort = False
+                        if not new_df.empty:
+                            st.session_state.active_slot_start = new_df.iloc[0]['Start_Time']
+                    st.success(f"✅ Successfully reset {sel_day_opt} to {reset_day_type} default!")
+                    time.sleep(1.5)
+                    st.rerun()
+
         display_rows = []
         for i in range(len(target_df)):
             row_dict = target_df.iloc[i].to_dict()

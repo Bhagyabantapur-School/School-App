@@ -337,7 +337,7 @@ try:
     # ==========================================
     with tab_default:
         st.markdown("### 🔁 Build Default Routine")
-        st.info("💡 Click an activity in the **Available Pool** to instantly append it to your **Default Routine**. Click an activity in the Default Routine to remove it and send it back to the pool. Times are automatically calculated starting from 0:00.")
+        st.info("💡 Check the box in the **Available Pool** to instantly append it to your **Default Routine**. Check a box in the Default Routine to remove it and send it back to the pool. Times are automatically calculated starting from 0:00.")
 
         if 'default_routine_df' not in st.session_state:
             st.session_state.default_routine_df = get_default_routine_data()
@@ -346,7 +346,6 @@ try:
 
         st.markdown("<div class='profile-header'>📅 Select Base Profile to pull Activities from:</div>", unsafe_allow_html=True)
         profile_options = ["WEEK DAYS", "SATURDAY/HALF WORKING DAY", "SUNDAY", "HOLIDAY"]
-        # Added unique key: 'def_profile_radio'
         selected_def_profile = st.radio("Profile Config", profile_options, horizontal=True, label_visibility="collapsed", key="def_profile_radio")
         
         st.markdown("<hr style='margin: 15px 0px;'>", unsafe_allow_html=True)
@@ -373,19 +372,27 @@ try:
             if available_pool_df.empty:
                 st.success("✅ All activities from this profile are currently in your Default Routine!")
             else:
-                pool_event = st.dataframe(
-                    available_pool_df[['Activity', 'Sub_Activity', 'Duration']],
+                # Force a physical "Add" column that we initialize as False on every single render
+                available_pool_df.insert(0, "Add", False)
+                
+                pool_event = st.data_editor(
+                    available_pool_df,
                     use_container_width=True,
                     hide_index=True,
-                    selection_mode="single-row",
-                    on_select="rerun",
-                    key="pool_grid"
+                    column_config={
+                        "Add": st.column_config.CheckboxColumn("➕ Add", default=False),
+                        "Activity": st.column_config.TextColumn("Activity", disabled=True),
+                        "Sub_Activity": st.column_config.TextColumn("Sub-Activity", disabled=True),
+                        "Duration": st.column_config.TextColumn("Duration", disabled=True),
+                        "Duration_Mins": None  # Hide this
+                    },
+                    key="pool_grid_editor"
                 )
                 
-                # Handling adding to routine
-                if pool_event.selection.rows:
-                    idx = pool_event.selection.rows[0]
-                    selected_item = available_pool_df.iloc[idx]
+                selected_to_add = pool_event[pool_event["Add"] == True]
+                if not selected_to_add.empty:
+                    # Select the first checked item
+                    selected_item = selected_to_add.iloc[0]
                     
                     new_row = {
                         "Start_Time": "", 
@@ -412,26 +419,39 @@ try:
                         sheet.update(values=[def_routine_df.columns.values.tolist()] + def_routine_df.values.tolist(), range_name="A1")
                         get_default_routine_data.clear()
                         st.session_state.default_routine_df = def_routine_df
+                    
                     st.rerun()
 
         with col_routine:
             st.markdown("#### 📤 Window 2: Default Routine Sequence")
             if def_routine_df.empty:
-                st.info("Your Default Routine is empty. Click tasks in Window 1 to add them.")
+                st.info("Your Default Routine is empty. Check tasks in Window 1 to add them.")
             else:
-                routine_event = st.dataframe(
-                    def_routine_df[['Start_Time', 'End_Time', 'Duration', 'Activity', 'Sub_Activities']],
+                def_routine_display = def_routine_df.copy()
+                # Force a physical "Remove" column that we initialize as False on every single render
+                def_routine_display.insert(0, "Remove", False)
+                
+                routine_event = st.data_editor(
+                    def_routine_display,
                     use_container_width=True,
                     hide_index=True,
-                    selection_mode="single-row",
-                    on_select="rerun",
-                    key="def_routine_grid"
+                    column_config={
+                        "Remove": st.column_config.CheckboxColumn("❌ Remove", default=False),
+                        "Start_Time": st.column_config.TextColumn("Start Time", disabled=True),
+                        "End_Time": st.column_config.TextColumn("End Time", disabled=True),
+                        "Duration": st.column_config.TextColumn("Duration", disabled=True),
+                        "Activity": st.column_config.TextColumn("Activity", disabled=True),
+                        "Sub_Activities": st.column_config.TextColumn("Sub-Activity", disabled=True),
+                        "Dur_Mins": None  # Hide this
+                    },
+                    key="def_routine_grid_editor"
                 )
                 
-                # Handling removing from routine
-                if routine_event.selection.rows:
-                    idx = routine_event.selection.rows[0]
-                    def_routine_df = def_routine_df.drop(index=idx).reset_index(drop=True)
+                selected_to_remove = routine_event[routine_event["Remove"] == True]
+                if not selected_to_remove.empty:
+                    # Select the first checked item
+                    idx_to_remove = selected_to_remove.index[0]
+                    def_routine_df = def_routine_df.drop(index=idx_to_remove).reset_index(drop=True)
                     
                     # Recalculate Times continuously from 0:00 after removal
                     current_mins = 0
@@ -450,6 +470,7 @@ try:
                             sheet.update(values=[["Start_Time", "End_Time", "Duration", "Dur_Mins", "Activity", "Sub_Activities"]], range_name="A1")
                         get_default_routine_data.clear()
                         st.session_state.default_routine_df = def_routine_df
+                    
                     st.rerun()
 
 
@@ -461,7 +482,6 @@ try:
         
         st.markdown("<div class='profile-header'>📅 Select Schedule Profile</div>", unsafe_allow_html=True)
         profile_options = ["WEEK DAYS", "SATURDAY/HALF WORKING DAY", "SUNDAY", "HOLIDAY"]
-        # Added unique key: 'builder_profile_radio'
         selected_day_type = st.radio("Profile Config", profile_options, horizontal=True, label_visibility="collapsed", key="builder_profile_radio")
         
         profile_df = act_master_df[act_master_df['Day_Type'] == selected_day_type].copy()

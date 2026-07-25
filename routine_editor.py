@@ -1187,317 +1187,345 @@ try:
                 final_apps = ",".join(filter(None, [x for x in new_apps_sel] + [x.strip() for x in new_apps_txt.split(',')]))
                 final_locked_str = "Yes" if new_locked else ""
 
-                df['Start_Mins'] = df['Start_Time'].apply(time_to_mins)
-                df['End_Mins'] = df['End_Time'].apply(time_to_mins)
-                df['End_Mins'] = df.apply(lambda r: r['End_Mins'] + 1440 if r['End_Mins'] <= r['Start_Mins'] and r['End_Mins'] < 120 else r['End_Mins'], axis=1)
-                
-                df['Dur_Mins'] = df['End_Mins'] - df['Start_Mins']
-                
                 L_start_new = time_to_mins(new_start_txt.strip())
                 L_end_new = time_to_mins(new_end_txt.strip())
                 if L_end_new <= L_start_new and L_end_new < 120: L_end_new += 1440
+                slot_dur_new = L_end_new - L_start_new
                 
-                # --- SMART AUTO-BALANCE RIPPLE ENGINE ---
-                old_start_mins = time_to_mins(sel_row['Start_Time'])
-                old_end_mins = time_to_mins(sel_row['End_Time'])
-                if old_end_mins <= old_start_mins and old_end_mins < 120: old_end_mins += 1440
-                old_dur = old_end_mins - old_start_mins
+                # --- TIME VALIDATION ENGINE ---
+                check_day_type = "WEEK DAYS"
+                if display_day.title() == "Saturday": check_day_type = "SATURDAY/HALF WORKING DAY"
+                elif display_day.title() == "Sunday": check_day_type = "SUNDAY"
+                elif display_day.title() == "Holiday": check_day_type = "HOLIDAY"
                 
-                delta_dur = (L_end_new - L_start_new) - old_dur
-                auto_balance_success = False
+                exp_df = act_master_df[(act_master_df['Day_Type'] == check_day_type) & (act_master_df['Sub_Activity'] != "")]
+                expected_limits = {}
+                for _, r in exp_df.iterrows():
+                    k = (str(r['Activity']).strip().upper(), str(r['Sub_Activity']).strip())
+                    expected_limits[k] = expected_limits.get(k, 0) + int(r['Duration_Mins'])
+                    
+                live_df = df[df['Day'].str.title() == display_day].copy()
+                live_totals = {}
+                for _, r in live_df.iterrows():
+                    if str(r['Start_Time']) == sel_start: continue
+                    r_act = str(r['Activity']).strip().upper()
+                    r_subs = [x.strip() for x in str(r['Sub_Activities']).split(',') if x.strip()]
+                    
+                    r_st = time_to_mins(r['Start_Time'])
+                    r_et = time_to_mins(r['End_Time'])
+                    if r_et <= r_st and r_et < 120: r_et += 1440
+                    r_dur = r_et - r_st
+                    
+                    for s in r_subs:
+                        k = (r_act, s)
+                        live_totals[k] = live_totals.get(k, 0) + r_dur
+                        
+                new_subs_list = [x.strip() for x in final_subs.split(',') if x.strip()]
+                validation_failed = False
+                error_msg = ""
                 
-                if delta_dur != 0 and L_start_new == old_start_mins:
-                    for day in target_days:
-                        day_mask = df['Day'].str.title() == day
-                        day_indices = df[day_mask].sort_values('Start_Mins').index.tolist()
-                        
-                        idx_to_edit = None
-                        for k in day_indices:
-                            if df.loc[k, 'Start_Time'] == sel_start:
-                                idx_to_edit = k
-                                break
-                                
-                        if idx_to_edit is None: continue
-                        
-                        curr_pos = day_indices.index(idx_to_edit)
-                        donor_idx = None
-                        
-                        for i in range(curr_pos + 1, len(day_indices)):
-                            k = day_indices[i]
-                            if str(df.loc[k, 'Locked']).title() == 'Yes':
-                                break 
-                                
-                            k_subs = set([x.strip() for x in str(df.loc[k, 'Sub_Activities']).split(',') if x.strip()])
-                            edit_subs = set([x.strip() for x in str(final_subs).split(',') if x.strip()])
-                            
-                            if k_subs & edit_subs:
-                                if df.loc[k, 'Dur_Mins'] - delta_dur > 0:
-                                    donor_idx = k
-                                    break
-                                    
-                        if donor_idx is not None:
-                            donor_pos = day_indices.index(donor_idx)
-                            
-                            for i in range(curr_pos + 1, donor_pos):
-                                shift_k = day_indices[i]
-                                df.loc[shift_k, 'Start_Mins'] += delta_dur
-                                df.loc[shift_k, 'End_Mins'] += delta_dur
-                                df.loc[shift_k, 'Start_Time'] = mins_to_time(df.loc[shift_k, 'Start_Mins'])
-                                df.loc[shift_k, 'End_Time'] = mins_to_time(df.loc[shift_k, 'End_Mins'])
-                                
-                            df.loc[idx_to_edit, 'End_Mins'] = L_end_new
-                            df.loc[idx_to_edit, 'End_Time'] = mins_to_time(L_end_new)
-                            df.loc[idx_to_edit, 'Activity'] = final_act
-                            df.loc[idx_to_edit, 'Sub_Activities'] = final_subs
-                            df.loc[idx_to_edit, 'check_list'] = final_chks
-                            df.loc[idx_to_edit, 'App'] = final_apps
-                            df.loc[idx_to_edit, 'Locked'] = final_locked_str
-                            df.loc[idx_to_edit, 'Dur_Mins'] = L_end_new - L_start_new
-                            
-                            df.loc[donor_idx, 'Start_Mins'] += delta_dur
-                            df.loc[donor_idx, 'Start_Time'] = mins_to_time(df.loc[donor_idx, 'Start_Mins'])
-                            df.loc[donor_idx, 'Dur_Mins'] = df.loc[donor_idx, 'End_Mins'] - df.loc[donor_idx, 'Start_Mins']
-                            
-                            auto_balance_success = True
+                for s in new_subs_list:
+                    k = (final_act, s)
+                    if k in expected_limits:
+                        allowed = expected_limits[k]
+                        new_usage = live_totals.get(k, 0) + slot_dur_new
+                        if new_usage > allowed:
+                            validation_failed = True
+                            error_msg = f"❌ Save Blocked: Assigning this time makes '{s}' exceed its Builder limit! (Max: {format_mins(allowed)}, Attempted Total: {format_mins(new_usage)})"
+                            break
 
-                if not auto_balance_success:
-                    if move_slide_chk and L_start_new != old_start_mins:
-                        # --- MAGNETIC TELEPORT & SLIDE ENGINE ---
+                if validation_failed:
+                    st.error(error_msg)
+                else:
+                    # Proceed with existing save logic
+                    df['Start_Mins'] = df['Start_Time'].apply(time_to_mins)
+                    df['End_Mins'] = df['End_Time'].apply(time_to_mins)
+                    df['End_Mins'] = df.apply(lambda r: r['End_Mins'] + 1440 if r['End_Mins'] <= r['Start_Mins'] and r['End_Mins'] < 120 else r['End_Mins'], axis=1)
+                    df['Dur_Mins'] = df['End_Mins'] - df['Start_Mins']
+                    
+                    old_start_mins = time_to_mins(sel_row['Start_Time'])
+                    old_end_mins = time_to_mins(sel_row['End_Time'])
+                    if old_end_mins <= old_start_mins and old_end_mins < 120: old_end_mins += 1440
+                    old_dur = old_end_mins - old_start_mins
+                    
+                    delta_dur = slot_dur_new - old_dur
+                    auto_balance_success = False
+                    
+                    if delta_dur != 0 and L_start_new == old_start_mins:
                         for day in target_days:
-                            day_idx = df[df['Day'].str.title() == day].sort_values('Start_Mins').index.tolist()
+                            day_mask = df['Day'].str.title() == day
+                            day_indices = df[day_mask].sort_values('Start_Mins').index.tolist()
+                            
                             idx_to_edit = None
-                            for k in day_idx:
+                            for k in day_indices:
                                 if df.loc[k, 'Start_Time'] == sel_start:
                                     idx_to_edit = k
                                     break
+                                    
                             if idx_to_edit is None: continue
-
-                            if L_start_new < old_start_mins:
-                                # Moving UPWARD -> Pull intermediate tasks DOWN
-                                shift_down_mins = L_end_new - L_start_new
-                                for k in day_idx:
-                                    if k == idx_to_edit: continue
-                                    if str(df.loc[k, 'Locked']).title() == 'Yes': continue
-                                    t_start = df.loc[k, 'Start_Mins']
-                                    if t_start >= L_start_new and t_start < old_start_mins:
-                                        df.loc[k, 'Start_Mins'] += shift_down_mins
-                                        df.loc[k, 'End_Mins'] += shift_down_mins
-                                        df.loc[k, 'Start_Time'] = mins_to_time(df.loc[k, 'Start_Mins'])
-                                        df.loc[k, 'End_Time'] = mins_to_time(df.loc[k, 'End_Mins'])
-                            else:
-                                # Moving DOWNWARD -> Pull intermediate tasks UP
-                                shift_up_mins = old_dur
-                                for k in day_idx:
-                                    if k == idx_to_edit: continue
-                                    if str(df.loc[k, 'Locked']).title() == 'Yes': continue
-                                    t_start = df.loc[k, 'Start_Mins']
-                                    if t_start >= old_end_mins and t_start < L_end_new:
-                                        df.loc[k, 'Start_Mins'] -= shift_up_mins
-                                        df.loc[k, 'End_Mins'] -= shift_up_mins
-                                        df.loc[k, 'Start_Time'] = mins_to_time(df.loc[k, 'Start_Mins'])
-                                        df.loc[k, 'End_Time'] = mins_to_time(df.loc[k, 'End_Mins'])
-
-                            # Update the edited task to its new Location
-                            df.loc[idx_to_edit, 'Start_Time'] = new_start_txt.strip()
-                            df.loc[idx_to_edit, 'End_Time'] = new_end_txt.strip()
-                            df.loc[idx_to_edit, 'Activity'] = final_act
-                            df.loc[idx_to_edit, 'Sub_Activities'] = final_subs
-                            df.loc[idx_to_edit, 'check_list'] = final_chks
-                            df.loc[idx_to_edit, 'App'] = final_apps
-                            df.loc[idx_to_edit, 'Start_Mins'] = L_start_new
-                            df.loc[idx_to_edit, 'End_Mins'] = L_end_new
-                            df.loc[idx_to_edit, 'Locked'] = final_locked_str
                             
-                            new_remainder_rows = []
-                            for idx in day_idx:
-                                if idx == idx_to_edit: continue
+                            curr_pos = day_indices.index(idx_to_edit)
+                            donor_idx = None
+                            
+                            for i in range(curr_pos + 1, len(day_indices)):
+                                k = day_indices[i]
+                                if str(df.loc[k, 'Locked']).title() == 'Yes':
+                                    break 
+                                    
+                                k_subs = set([x.strip() for x in str(df.loc[k, 'Sub_Activities']).split(',') if x.strip()])
+                                edit_subs = set([x.strip() for x in str(final_subs).split(',') if x.strip()])
                                 
-                                T_start = df.loc[idx, 'Start_Mins']
-                                T_end = df.loc[idx, 'End_Mins']
-                                is_locked = str(df.loc[idx].get('Locked', '')).title() == 'Yes'
-                                
-                                if T_start < L_start_new and T_end > L_end_new:
-                                    df.loc[idx, 'End_Mins'] = L_start_new
-                                    df.loc[idx, 'End_Time'] = mins_to_time(L_start_new)
-                                    new_remainder_rows.append({
-                                        "Day": day,
-                                        "Start_Time": mins_to_time(L_end_new),
-                                        "End_Time": mins_to_time(T_end),
-                                        "Start_Mins": L_end_new,
-                                        "End_Mins": T_end,
-                                        "Activity": df.loc[idx, 'Activity'],
-                                        "Sub_Activities": df.loc[idx, 'Sub_Activities'],
-                                        "check_list": df.loc[idx, 'check_list'],
-                                        "App": df.loc[idx, 'App'],
-                                        "Locked": df.loc[idx].get('Locked', '')
-                                    })
-                                elif T_start >= L_start_new and T_start < L_end_new and T_end > L_end_new:
-                                    if not is_locked:
-                                        df.loc[idx, 'Start_Mins'] = L_end_new
-                                        df.loc[idx, 'Start_Time'] = mins_to_time(L_end_new)
-                                elif T_start < L_start_new and T_end > L_start_new and T_end <= L_end_new:
-                                    df.loc[idx, 'End_Mins'] = L_start_new
-                                    df.loc[idx, 'End_Time'] = mins_to_time(L_start_new)
-                                elif T_start >= L_start_new and T_end <= L_end_new:
-                                    if not is_locked:
-                                        df.loc[idx, 'Start_Mins'] = 0
-                                        df.loc[idx, 'End_Mins'] = 0
+                                if k_subs & edit_subs:
+                                    if df.loc[k, 'Dur_Mins'] - delta_dur > 0:
+                                        donor_idx = k
+                                        break
                                         
+                            if donor_idx is not None:
+                                donor_pos = day_indices.index(donor_idx)
+                                
+                                for i in range(curr_pos + 1, donor_pos):
+                                    shift_k = day_indices[i]
+                                    df.loc[shift_k, 'Start_Mins'] += delta_dur
+                                    df.loc[shift_k, 'End_Mins'] += delta_dur
+                                    df.loc[shift_k, 'Start_Time'] = mins_to_time(df.loc[shift_k, 'Start_Mins'])
+                                    df.loc[shift_k, 'End_Time'] = mins_to_time(df.loc[shift_k, 'End_Mins'])
+                                    
+                                df.loc[idx_to_edit, 'End_Mins'] = L_end_new
+                                df.loc[idx_to_edit, 'End_Time'] = mins_to_time(L_end_new)
+                                df.loc[idx_to_edit, 'Activity'] = final_act
+                                df.loc[idx_to_edit, 'Sub_Activities'] = final_subs
+                                df.loc[idx_to_edit, 'check_list'] = final_chks
+                                df.loc[idx_to_edit, 'App'] = final_apps
+                                df.loc[idx_to_edit, 'Locked'] = final_locked_str
+                                df.loc[idx_to_edit, 'Dur_Mins'] = L_end_new - L_start_new
+                                
+                                df.loc[donor_idx, 'Start_Mins'] += delta_dur
+                                df.loc[donor_idx, 'Start_Time'] = mins_to_time(df.loc[donor_idx, 'Start_Mins'])
+                                df.loc[donor_idx, 'Dur_Mins'] = df.loc[donor_idx, 'End_Mins'] - df.loc[donor_idx, 'Start_Mins']
+                                
+                                auto_balance_success = True
+    
+                    if not auto_balance_success:
+                        if move_slide_chk and L_start_new != old_start_mins:
+                            for day in target_days:
+                                day_idx = df[df['Day'].str.title() == day].sort_values('Start_Mins').index.tolist()
+                                idx_to_edit = None
+                                for k in day_idx:
+                                    if df.loc[k, 'Start_Time'] == sel_start:
+                                        idx_to_edit = k
+                                        break
+                                if idx_to_edit is None: continue
+    
+                                if L_start_new < old_start_mins:
+                                    shift_down_mins = L_end_new - L_start_new
+                                    for k in day_idx:
+                                        if k == idx_to_edit: continue
+                                        if str(df.loc[k, 'Locked']).title() == 'Yes': continue
+                                        t_start = df.loc[k, 'Start_Mins']
+                                        if t_start >= L_start_new and t_start < old_start_mins:
+                                            df.loc[k, 'Start_Mins'] += shift_down_mins
+                                            df.loc[k, 'End_Mins'] += shift_down_mins
+                                            df.loc[k, 'Start_Time'] = mins_to_time(df.loc[k, 'Start_Mins'])
+                                            df.loc[k, 'End_Time'] = mins_to_time(df.loc[k, 'End_Mins'])
+                                else:
+                                    shift_up_mins = old_dur
+                                    for k in day_idx:
+                                        if k == idx_to_edit: continue
+                                        if str(df.loc[k, 'Locked']).title() == 'Yes': continue
+                                        t_start = df.loc[k, 'Start_Mins']
+                                        if t_start >= old_end_mins and t_start < L_end_new:
+                                            df.loc[k, 'Start_Mins'] -= shift_up_mins
+                                            df.loc[k, 'End_Mins'] -= shift_up_mins
+                                            df.loc[k, 'Start_Time'] = mins_to_time(df.loc[k, 'Start_Mins'])
+                                            df.loc[k, 'End_Time'] = mins_to_time(df.loc[k, 'End_Mins'])
+    
+                                df.loc[idx_to_edit, 'Start_Time'] = new_start_txt.strip()
+                                df.loc[idx_to_edit, 'End_Time'] = new_end_txt.strip()
+                                df.loc[idx_to_edit, 'Activity'] = final_act
+                                df.loc[idx_to_edit, 'Sub_Activities'] = final_subs
+                                df.loc[idx_to_edit, 'check_list'] = final_chks
+                                df.loc[idx_to_edit, 'App'] = final_apps
+                                df.loc[idx_to_edit, 'Start_Mins'] = L_start_new
+                                df.loc[idx_to_edit, 'End_Mins'] = L_end_new
+                                df.loc[idx_to_edit, 'Locked'] = final_locked_str
+                                
+                                new_remainder_rows = []
+                                for idx in day_idx:
+                                    if idx == idx_to_edit: continue
+                                    T_start = df.loc[idx, 'Start_Mins']
+                                    T_end = df.loc[idx, 'End_Mins']
+                                    is_locked = str(df.loc[idx].get('Locked', '')).title() == 'Yes'
+                                    
+                                    if T_start < L_start_new and T_end > L_end_new:
+                                        df.loc[idx, 'End_Mins'] = L_start_new
+                                        df.loc[idx, 'End_Time'] = mins_to_time(L_start_new)
+                                        new_remainder_rows.append({
+                                            "Day": day,
+                                            "Start_Time": mins_to_time(L_end_new),
+                                            "End_Time": mins_to_time(T_end),
+                                            "Start_Mins": L_end_new,
+                                            "End_Mins": T_end,
+                                            "Activity": df.loc[idx, 'Activity'],
+                                            "Sub_Activities": df.loc[idx, 'Sub_Activities'],
+                                            "check_list": df.loc[idx, 'check_list'],
+                                            "App": df.loc[idx, 'App'],
+                                            "Locked": df.loc[idx].get('Locked', '')
+                                        })
+                                    elif T_start >= L_start_new and T_start < L_end_new and T_end > L_end_new:
+                                        if not is_locked:
+                                            df.loc[idx, 'Start_Mins'] = L_end_new
+                                            df.loc[idx, 'Start_Time'] = mins_to_time(L_end_new)
+                                    elif T_start < L_start_new and T_end > L_start_new and T_end <= L_end_new:
+                                        df.loc[idx, 'End_Mins'] = L_start_new
+                                        df.loc[idx, 'End_Time'] = mins_to_time(L_start_new)
+                                    elif T_start >= L_start_new and T_end <= L_end_new:
+                                        if not is_locked:
+                                            df.loc[idx, 'Start_Mins'] = 0
+                                            df.loc[idx, 'End_Mins'] = 0
+                                            
+                                if new_remainder_rows:
+                                    df = pd.concat([df, pd.DataFrame(new_remainder_rows)], ignore_index=True)
+                        else:
+                            new_remainder_rows = []
+                            for day in target_days:
+                                row_mask = (df['Day'].str.title() == day) & (df['Start_Time'] == sel_start)
+                                if not row_mask.any(): continue
+                                idx_to_edit = df[row_mask].index[0]
+                                old_start_mins = df.loc[idx_to_edit, 'Start_Mins']
+                                old_end_mins = df.loc[idx_to_edit, 'End_Mins']
+                                
+                                vacated_intervals = []
+                                if L_start_new >= old_end_mins or L_end_new <= old_start_mins:
+                                    vacated_intervals.append((old_start_mins, old_end_mins))
+                                else:
+                                    if L_start_new > old_start_mins:
+                                        vacated_intervals.append((old_start_mins, L_start_new))
+                                    if L_end_new < old_end_mins:
+                                        vacated_intervals.append((L_end_new, old_end_mins))
+                                        
+                                df.loc[idx_to_edit, 'Start_Time'] = new_start_txt.strip()
+                                df.loc[idx_to_edit, 'End_Time'] = new_end_txt.strip()
+                                df.loc[idx_to_edit, 'Activity'] = final_act
+                                df.loc[idx_to_edit, 'Sub_Activities'] = final_subs
+                                df.loc[idx_to_edit, 'check_list'] = final_chks
+                                df.loc[idx_to_edit, 'App'] = final_apps
+                                df.loc[idx_to_edit, 'Start_Mins'] = L_start_new
+                                df.loc[idx_to_edit, 'End_Mins'] = L_end_new
+                                df.loc[idx_to_edit, 'Locked'] = final_locked_str
+                                
+                                day_idx = df[df['Day'].str.title() == day].index
+                                for idx in day_idx:
+                                    if idx == idx_to_edit: continue
+                                    T_start = df.loc[idx, 'Start_Mins']
+                                    T_end = df.loc[idx, 'End_Mins']
+                                    is_locked = str(df.loc[idx].get('Locked', '')).title() == 'Yes'
+                                    
+                                    if T_start < L_start_new and T_end > L_end_new:
+                                        df.loc[idx, 'End_Mins'] = L_start_new
+                                        df.loc[idx, 'End_Time'] = mins_to_time(L_start_new)
+                                        new_remainder_rows.append({
+                                            "Day": day,
+                                            "Start_Time": mins_to_time(L_end_new),
+                                            "End_Time": mins_to_time(T_end),
+                                            "Start_Mins": L_end_new,
+                                            "End_Mins": T_end,
+                                            "Activity": df.loc[idx, 'Activity'],
+                                            "Sub_Activities": df.loc[idx, 'Sub_Activities'],
+                                            "check_list": df.loc[idx, 'check_list'],
+                                            "App": df.loc[idx, 'App'],
+                                            "Locked": df.loc[idx].get('Locked', '')
+                                        })
+                                    elif T_start >= L_start_new and T_start < L_end_new and T_end > L_end_new:
+                                        if not is_locked:
+                                            df.loc[idx, 'Start_Mins'] = L_end_new
+                                            df.loc[idx, 'Start_Time'] = mins_to_time(L_end_new)
+                                    elif T_start < L_start_new and T_end > L_start_new and T_end <= L_end_new:
+                                        df.loc[idx, 'End_Mins'] = L_start_new
+                                        df.loc[idx, 'End_Time'] = mins_to_time(L_start_new)
+                                    elif T_start >= L_start_new and T_end <= L_end_new:
+                                        if not is_locked:
+                                            df.loc[idx, 'Start_Mins'] = 0
+                                            df.loc[idx, 'End_Mins'] = 0
+    
+                                day_type = "WEEK DAYS"
+                                if day.title() == "Saturday": day_type = "SATURDAY/HALF WORKING DAY"
+                                elif day.title() == "Sunday": day_type = "SUNDAY"
+                                elif day.title() == "Holiday": day_type = "HOLIDAY"
+                                
+                                exp_df = act_master_df[(act_master_df['Day_Type'] == day_type) & (act_master_df['Sub_Activity'] != "")]
+                                expected = {}
+                                for _, r in exp_df.iterrows():
+                                    k = (str(r['Activity']).strip().upper(), str(r['Sub_Activity']).strip())
+                                    expected[k] = expected.get(k, 0) + int(r['Duration_Mins'])
+                                    
+                                live_dict = {}
+                                temp_rows = []
+                                for idx in day_idx:
+                                    if idx == idx_to_edit: continue
+                                    if df.loc[idx, 'End_Mins'] > df.loc[idx, 'Start_Mins']:
+                                        temp_rows.append(df.loc[idx].to_dict())
+                                temp_rows.append(df.loc[idx_to_edit].to_dict())
+                                temp_rows.extend(new_remainder_rows)
+                                
+                                for r in temp_rows:
+                                    if r['Day'].title() != day.title(): continue
+                                    dur = r['End_Mins'] - r['Start_Mins']
+                                    if dur <= 0: continue
+                                    subs = [x.strip() for x in str(r['Sub_Activities']).split(',') if x.strip()]
+                                    act = str(r['Activity']).strip().upper()
+                                    for s in subs:
+                                        k = (act, s)
+                                        live_dict[k] = live_dict.get(k, 0) + dur
+    
+                                deficits = []
+                                for k, exp_mins in expected.items():
+                                    l_mins = live_dict.get(k, 0)
+                                    if exp_mins > l_mins:
+                                        deficits.append({'act': k[0], 'sub': k[1], 'deficit': exp_mins - l_mins})
+    
+                                for v_start, v_end in vacated_intervals:
+                                    curr_start = v_start
+                                    for d_item in deficits:
+                                        if curr_start >= v_end: break
+                                        if d_item['deficit'] <= 0: continue
+                                        fill_mins = min(d_item['deficit'], v_end - curr_start)
+                                        chunk_end = curr_start + fill_mins
+                                        new_remainder_rows.append({
+                                            "Day": day,
+                                            "Start_Time": mins_to_time(curr_start),
+                                            "End_Time": mins_to_time(chunk_end),
+                                            "Start_Mins": curr_start,
+                                            "End_Mins": chunk_end,
+                                            "Activity": d_item['act'],
+                                            "Sub_Activities": d_item['sub'],
+                                            "check_list": "",
+                                            "App": "",
+                                            "Locked": ""
+                                        })
+                                        d_item['deficit'] -= fill_mins
+                                        curr_start = chunk_end
+                                            
                             if new_remainder_rows:
                                 df = pd.concat([df, pd.DataFrame(new_remainder_rows)], ignore_index=True)
-                    else:
-                        # --- SMART BUILDER GAP-FILL ENGINE (Replaces Standard Overwrite) ---
-                        new_remainder_rows = []
-                        
-                        for day in target_days:
-                            row_mask = (df['Day'].str.title() == day) & (df['Start_Time'] == sel_start)
-                            if not row_mask.any(): continue
-                            idx_to_edit = df[row_mask].index[0]
                             
-                            old_start_mins = df.loc[idx_to_edit, 'Start_Mins']
-                            old_end_mins = df.loc[idx_to_edit, 'End_Mins']
-                            
-                            # 1. Define Vacated Gap(s) Left Behind
-                            vacated_intervals = []
-                            if L_start_new >= old_end_mins or L_end_new <= old_start_mins:
-                                vacated_intervals.append((old_start_mins, old_end_mins))
-                            else:
-                                if L_start_new > old_start_mins:
-                                    vacated_intervals.append((old_start_mins, L_start_new))
-                                if L_end_new < old_end_mins:
-                                    vacated_intervals.append((L_end_new, old_end_mins))
-                                    
-                            # 2. Update the Target Block (Overwrite Destination)
-                            df.loc[idx_to_edit, 'Start_Time'] = new_start_txt.strip()
-                            df.loc[idx_to_edit, 'End_Time'] = new_end_txt.strip()
-                            df.loc[idx_to_edit, 'Activity'] = final_act
-                            df.loc[idx_to_edit, 'Sub_Activities'] = final_subs
-                            df.loc[idx_to_edit, 'check_list'] = final_chks
-                            df.loc[idx_to_edit, 'App'] = final_apps
-                            df.loc[idx_to_edit, 'Start_Mins'] = L_start_new
-                            df.loc[idx_to_edit, 'End_Mins'] = L_end_new
-                            df.loc[idx_to_edit, 'Locked'] = final_locked_str
-                            
-                            # 3. Clip existing tasks around the new destination
-                            day_idx = df[df['Day'].str.title() == day].index
-                            for idx in day_idx:
-                                if idx == idx_to_edit: continue
-                                
-                                T_start = df.loc[idx, 'Start_Mins']
-                                T_end = df.loc[idx, 'End_Mins']
-                                is_locked = str(df.loc[idx].get('Locked', '')).title() == 'Yes'
-                                
-                                if T_start < L_start_new and T_end > L_end_new:
-                                    df.loc[idx, 'End_Mins'] = L_start_new
-                                    df.loc[idx, 'End_Time'] = mins_to_time(L_start_new)
-                                    new_remainder_rows.append({
-                                        "Day": day,
-                                        "Start_Time": mins_to_time(L_end_new),
-                                        "End_Time": mins_to_time(T_end),
-                                        "Start_Mins": L_end_new,
-                                        "End_Mins": T_end,
-                                        "Activity": df.loc[idx, 'Activity'],
-                                        "Sub_Activities": df.loc[idx, 'Sub_Activities'],
-                                        "check_list": df.loc[idx, 'check_list'],
-                                        "App": df.loc[idx, 'App'],
-                                        "Locked": df.loc[idx].get('Locked', '')
-                                    })
-                                elif T_start >= L_start_new and T_start < L_end_new and T_end > L_end_new:
-                                    if not is_locked:
-                                        df.loc[idx, 'Start_Mins'] = L_end_new
-                                        df.loc[idx, 'Start_Time'] = mins_to_time(L_end_new)
-                                elif T_start < L_start_new and T_end > L_start_new and T_end <= L_end_new:
-                                    df.loc[idx, 'End_Mins'] = L_start_new
-                                    df.loc[idx, 'End_Time'] = mins_to_time(L_start_new)
-                                elif T_start >= L_start_new and T_end <= L_end_new:
-                                    if not is_locked:
-                                        df.loc[idx, 'Start_Mins'] = 0
-                                        df.loc[idx, 'End_Mins'] = 0
-
-                            # 4. Calculate Live vs Expected for the Day to find deficits
-                            day_type = "WEEK DAYS"
-                            if day.title() == "Saturday": day_type = "SATURDAY/HALF WORKING DAY"
-                            elif day.title() == "Sunday": day_type = "SUNDAY"
-                            elif day.title() == "Holiday": day_type = "HOLIDAY"
-                            
-                            exp_df = act_master_df[(act_master_df['Day_Type'] == day_type) & (act_master_df['Sub_Activity'] != "")]
-                            expected = {}
-                            for _, r in exp_df.iterrows():
-                                k = (str(r['Activity']).strip().upper(), str(r['Sub_Activity']).strip())
-                                expected[k] = expected.get(k, 0) + int(r['Duration_Mins'])
-                                
-                            live_dict = {}
-                            temp_rows = []
-                            for idx in day_idx:
-                                if idx == idx_to_edit: continue
-                                if df.loc[idx, 'End_Mins'] > df.loc[idx, 'Start_Mins']:
-                                    temp_rows.append(df.loc[idx].to_dict())
-                            temp_rows.append(df.loc[idx_to_edit].to_dict())
-                            temp_rows.extend(new_remainder_rows)
-                            
-                            for r in temp_rows:
-                                if r['Day'].title() != day.title(): continue
-                                dur = r['End_Mins'] - r['Start_Mins']
-                                if dur <= 0: continue
-                                subs = [x.strip() for x in str(r['Sub_Activities']).split(',') if x.strip()]
-                                act = str(r['Activity']).strip().upper()
-                                for s in subs:
-                                    k = (act, s)
-                                    live_dict[k] = live_dict.get(k, 0) + dur
-
-                            deficits = []
-                            for k, exp_mins in expected.items():
-                                l_mins = live_dict.get(k, 0)
-                                if exp_mins > l_mins:
-                                    deficits.append({'act': k[0], 'sub': k[1], 'deficit': exp_mins - l_mins})
-
-                            # 5. Fill Vacated Intervals with Deficit Tasks
-                            for v_start, v_end in vacated_intervals:
-                                curr_start = v_start
-                                for d_item in deficits:
-                                    if curr_start >= v_end: break
-                                    if d_item['deficit'] <= 0: continue
-                                    
-                                    fill_mins = min(d_item['deficit'], v_end - curr_start)
-                                    chunk_end = curr_start + fill_mins
-                                    
-                                    new_remainder_rows.append({
-                                        "Day": day,
-                                        "Start_Time": mins_to_time(curr_start),
-                                        "End_Time": mins_to_time(chunk_end),
-                                        "Start_Mins": curr_start,
-                                        "End_Mins": chunk_end,
-                                        "Activity": d_item['act'],
-                                        "Sub_Activities": d_item['sub'],
-                                        "check_list": "",
-                                        "App": "",
-                                        "Locked": ""
-                                    })
-                                    d_item['deficit'] -= fill_mins
-                                    curr_start = chunk_end
-                                        
-                        if new_remainder_rows:
-                            df = pd.concat([df, pd.DataFrame(new_remainder_rows)], ignore_index=True)
-                        
-                # Final Save execution
-                df['Dur_Mins'] = df['End_Mins'] - df['Start_Mins']
-                df = df[df['Dur_Mins'] > 0].copy()
-                df['Duration'] = df['Dur_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")
-                df = sort_routine_df(df)
-                df = auto_adjust_schedule(df)
-                df = df[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Locked"]]
-                
-                with st.spinner("Healing Overlaps and Saving to Google Sheets..."):
-                    routine_sheet = get_sheet("routine_master")
-                    routine_sheet.clear()
-                    routine_sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name="A1")
-                    get_routine_data.clear()
-                    st.session_state.routine_df = df
-                    st.session_state.unsaved_sort = False
-                    st.session_state.active_slot_start = mins_to_time(L_start_new)
-                st.success(f"✅ Successfully updated and seamlessly aligned schedule for {sel_day_opt}!")
-                time.sleep(1.5)
-                st.rerun()
+                    df['Dur_Mins'] = df['End_Mins'] - df['Start_Mins']
+                    df = df[df['Dur_Mins'] > 0].copy()
+                    df['Duration'] = df['Dur_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")
+                    df = sort_routine_df(df)
+                    df = auto_adjust_schedule(df)
+                    df = df[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Locked"]]
+                    
+                    with st.spinner("Healing Overlaps and Saving to Google Sheets..."):
+                        routine_sheet = get_sheet("routine_master")
+                        routine_sheet.clear()
+                        routine_sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name="A1")
+                        get_routine_data.clear()
+                        st.session_state.routine_df = df
+                        st.session_state.unsaved_sort = False
+                        st.session_state.active_slot_start = mins_to_time(L_start_new)
+                    st.success(f"✅ Successfully updated and seamlessly aligned schedule for {sel_day_opt}!")
+                    time.sleep(1.5)
+                    st.rerun()
 
             elif del_btn:
                 indices_to_drop = []
@@ -1578,12 +1606,7 @@ try:
                     final_add_apps = ",".join(filter(None, [x for x in add_apps]))
                     final_add_locked = "Yes" if add_locked else ""
                     
-                    df['Start_Mins'] = df['Start_Time'].apply(time_to_mins)
-                    df['End_Mins'] = df['End_Time'].apply(time_to_mins)
-                    df['End_Mins'] = df.apply(lambda r: r['End_Mins'] + 1440 if r['End_Mins'] <= r['Start_Mins'] and r['End_Mins'] < 120 else r['End_Mins'], axis=1)
-                    
                     L_start_new = time_to_mins(add_start.strip())
-                    
                     if add_end.strip():
                         L_end_new = time_to_mins(add_end.strip())
                     else:
@@ -1596,76 +1619,125 @@ try:
                         L_end_new = L_start_new + selected_dur
 
                     if L_end_new <= L_start_new and L_end_new < 120: L_end_new += 1440
+                    slot_dur_new = L_end_new - L_start_new
                     
-                    new_remainder_rows = []
+                    # --- TIME VALIDATION ENGINE ---
+                    test_day = target_add_days[0].title()
+                    check_day_type = "WEEK DAYS"
+                    if test_day == "Saturday": check_day_type = "SATURDAY/HALF WORKING DAY"
+                    elif test_day == "Sunday": check_day_type = "SUNDAY"
+                    elif test_day == "Holiday": check_day_type = "HOLIDAY"
                     
-                    for day in target_add_days:
-                        day_idx = df[df['Day'].str.title() == day].index
-                        for idx in day_idx:
-                            T_start = df.loc[idx, 'Start_Mins']
-                            T_end = df.loc[idx, 'End_Mins']
-                            is_locked = str(df.loc[idx].get('Locked', '')).title() == 'Yes'
+                    exp_df = act_master_df[(act_master_df['Day_Type'] == check_day_type) & (act_master_df['Sub_Activity'] != "")]
+                    expected_limits = {}
+                    for _, r in exp_df.iterrows():
+                        k = (str(r['Activity']).strip().upper(), str(r['Sub_Activity']).strip())
+                        expected_limits[k] = expected_limits.get(k, 0) + int(r['Duration_Mins'])
+                        
+                    live_df = df[df['Day'].str.title() == test_day].copy()
+                    live_totals = {}
+                    for _, r in live_df.iterrows():
+                        r_act = str(r['Activity']).strip().upper()
+                        r_subs = [x.strip() for x in str(r['Sub_Activities']).split(',') if x.strip()]
+                        
+                        r_st = time_to_mins(r['Start_Time'])
+                        r_et = time_to_mins(r['End_Time'])
+                        if r_et <= r_st and r_et < 120: r_et += 1440
+                        r_dur = r_et - r_st
+                        
+                        for s in r_subs:
+                            k = (r_act, s)
+                            live_totals[k] = live_totals.get(k, 0) + r_dur
                             
-                            if T_start < L_start_new and T_end > L_end_new:
-                                df.loc[idx, 'End_Mins'] = L_start_new
-                                df.loc[idx, 'End_Time'] = mins_to_time(L_start_new)
-                                new_remainder_rows.append({
-                                    "Day": day,
-                                    "Start_Time": mins_to_time(L_end_new),
-                                    "End_Time": mins_to_time(T_end),
-                                    "Start_Mins": L_end_new,
-                                    "End_Mins": T_end,
-                                    "Activity": df.loc[idx, 'Activity'],
-                                    "Sub_Activities": df.loc[idx, 'Sub_Activities'],
-                                    "check_list": df.loc[idx, 'check_list'],
-                                    "App": df.loc[idx, 'App'],
-                                    "Locked": df.loc[idx].get('Locked', '')
-                                })
-                            elif T_start >= L_start_new and T_start < L_end_new and T_end > L_end_new:
-                                if not is_locked:
-                                    df.loc[idx, 'Start_Mins'] = L_end_new
-                                    df.loc[idx, 'Start_Time'] = mins_to_time(L_end_new)
-                            elif T_start < L_start_new and T_end > L_start_new and T_end <= L_end_new:
-                                df.loc[idx, 'End_Mins'] = L_start_new
-                                df.loc[idx, 'End_Time'] = mins_to_time(L_start_new)
-                            elif T_start >= L_start_new and T_end <= L_end_new:
-                                if not is_locked:
-                                    df.loc[idx, 'Start_Mins'] = 0
-                                    df.loc[idx, 'End_Mins'] = 0
+                    new_subs_list = [x.strip() for x in final_add_subs.split(',') if x.strip()]
+                    validation_failed = False
+                    error_msg = ""
+                    
+                    for s in new_subs_list:
+                        k = (final_add_act, s)
+                        if k in expected_limits:
+                            allowed = expected_limits[k]
+                            new_usage = live_totals.get(k, 0) + slot_dur_new
+                            if new_usage > allowed:
+                                validation_failed = True
+                                error_msg = f"❌ Insert Blocked: Assigning this time makes '{s}' exceed its Builder limit! (Max allowed: {format_mins(allowed)}, Attempted Daily Total: {format_mins(new_usage)})"
+                                break
+
+                    if validation_failed:
+                        st.error(error_msg)
+                    else:
+                        df['Start_Mins'] = df['Start_Time'].apply(time_to_mins)
+                        df['End_Mins'] = df['End_Time'].apply(time_to_mins)
+                        df['End_Mins'] = df.apply(lambda r: r['End_Mins'] + 1440 if r['End_Mins'] <= r['Start_Mins'] and r['End_Mins'] < 120 else r['End_Mins'], axis=1)
+                        
+                        new_remainder_rows = []
+                        for day in target_add_days:
+                            day_idx = df[df['Day'].str.title() == day].index
+                            for idx in day_idx:
+                                T_start = df.loc[idx, 'Start_Mins']
+                                T_end = df.loc[idx, 'End_Mins']
+                                is_locked = str(df.loc[idx].get('Locked', '')).title() == 'Yes'
                                 
-                        new_remainder_rows.append({
-                            "Day": day,
-                            "Start_Time": mins_to_time(L_start_new),
-                            "End_Time": mins_to_time(L_end_new),
-                            "Start_Mins": L_start_new,
-                            "End_Mins": L_end_new,
-                            "Activity": final_add_act,
-                            "Sub_Activities": final_add_subs,
-                            "check_list": final_add_chks,
-                            "App": final_add_apps,
-                            "Locked": final_add_locked
-                        })
-                    
-                    if new_remainder_rows:
-                        df = pd.concat([df, pd.DataFrame(new_remainder_rows)], ignore_index=True)
-                    
-                    df['Dur_Mins'] = df['End_Mins'] - df['Start_Mins']
-                    df = df[df['Dur_Mins'] > 0].copy()
-                    df['Duration'] = df['Dur_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")
-                    df = sort_routine_df(df)
-                    df = df[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Locked"]]
-                    
-                    with st.spinner("Inserting Time Block and Healing Sequence..."):
-                        routine_sheet = get_sheet("routine_master")
-                        routine_sheet.clear()
-                        routine_sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name="A1")
-                        get_routine_data.clear()
-                        st.session_state.routine_df = df
-                        st.session_state.unsaved_sort = False
-                        st.session_state.active_slot_start = mins_to_time(L_start_new)
-                    st.success(f"✅ Successfully inserted new block and adjusted schedule for {add_day_opt}!")
-                    time.sleep(1.5)
-                    st.rerun()
+                                if T_start < L_start_new and T_end > L_end_new:
+                                    df.loc[idx, 'End_Mins'] = L_start_new
+                                    df.loc[idx, 'End_Time'] = mins_to_time(L_start_new)
+                                    new_remainder_rows.append({
+                                        "Day": day,
+                                        "Start_Time": mins_to_time(L_end_new),
+                                        "End_Time": mins_to_time(T_end),
+                                        "Start_Mins": L_end_new,
+                                        "End_Mins": T_end,
+                                        "Activity": df.loc[idx, 'Activity'],
+                                        "Sub_Activities": df.loc[idx, 'Sub_Activities'],
+                                        "check_list": df.loc[idx, 'check_list'],
+                                        "App": df.loc[idx, 'App'],
+                                        "Locked": df.loc[idx].get('Locked', '')
+                                    })
+                                elif T_start >= L_start_new and T_start < L_end_new and T_end > L_end_new:
+                                    if not is_locked:
+                                        df.loc[idx, 'Start_Mins'] = L_end_new
+                                        df.loc[idx, 'Start_Time'] = mins_to_time(L_end_new)
+                                elif T_start < L_start_new and T_end > L_start_new and T_end <= L_end_new:
+                                    df.loc[idx, 'End_Mins'] = L_start_new
+                                    df.loc[idx, 'End_Time'] = mins_to_time(L_start_new)
+                                elif T_start >= L_start_new and T_end <= L_end_new:
+                                    if not is_locked:
+                                        df.loc[idx, 'Start_Mins'] = 0
+                                        df.loc[idx, 'End_Mins'] = 0
+                                    
+                            new_remainder_rows.append({
+                                "Day": day,
+                                "Start_Time": mins_to_time(L_start_new),
+                                "End_Time": mins_to_time(L_end_new),
+                                "Start_Mins": L_start_new,
+                                "End_Mins": L_end_new,
+                                "Activity": final_add_act,
+                                "Sub_Activities": final_add_subs,
+                                "check_list": final_add_chks,
+                                "App": final_add_apps,
+                                "Locked": final_add_locked
+                            })
+                        
+                        if new_remainder_rows:
+                            df = pd.concat([df, pd.DataFrame(new_remainder_rows)], ignore_index=True)
+                        
+                        df['Dur_Mins'] = df['End_Mins'] - df['Start_Mins']
+                        df = df[df['Dur_Mins'] > 0].copy()
+                        df['Duration'] = df['Dur_Mins'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}")
+                        df = sort_routine_df(df)
+                        df = df[["Day", "Start_Time", "End_Time", "Duration", "Activity", "Sub_Activities", "check_list", "App", "Locked"]]
+                        
+                        with st.spinner("Inserting Time Block and Healing Sequence..."):
+                            routine_sheet = get_sheet("routine_master")
+                            routine_sheet.clear()
+                            routine_sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name="A1")
+                            get_routine_data.clear()
+                            st.session_state.routine_df = df
+                            st.session_state.unsaved_sort = False
+                            st.session_state.active_slot_start = mins_to_time(L_start_new)
+                        st.success(f"✅ Successfully inserted new block and adjusted schedule for {add_day_opt}!")
+                        time.sleep(1.5)
+                        st.rerun()
 
         # --- 7. AUTO-GENERATE DAY SCHEDULE ---
         st.markdown("---")

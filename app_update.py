@@ -64,7 +64,6 @@ def get_last_app_data(app_name):
         return {"lines": 0, "ai": "", "chat": "", "sheet": ""}
     
     for row in reversed(st.session_state.update_data):
-        # We only pull from completed updates (where Date column 0 is not empty)
         if len(row) > 11 and str(row[2]).strip() == app_name and str(row[0]).strip() != "":
             try:
                 lines = int(row[7]) if str(row[7]).strip() else 0
@@ -91,7 +90,7 @@ fk = st.session_state.form_reset_counter
 ist = pytz.timezone('Asia/Kolkata')
 current_ist = datetime.now(ist)
 
-# --- GLOBAL CSS FOR RED HIGHLIGHT & NEW AUTO-FILL HIGHLIGHT ---
+# --- GLOBAL CSS FOR RED HIGHLIGHT & AUTO-FILL HIGHLIGHT ---
 st.markdown("""
     <style>
     /* Tab 4: Red Expander Highlight */
@@ -168,19 +167,20 @@ with tab1:
             date_input = st.date_input("Date", value=current_ist.date(), key=f"d_up_{fk}")
             time_input = st.time_input("Time", value=current_ist.time(), step=60, key=f"t_up_{fk}")
             
+            # --- THE FIX: Generating a dynamic 'app_key' to force Streamlit to refresh widgets on change ---
             if update_mode == "✅ Complete Pending Idea":
-                app_input = st.text_input("App Name", value=prefill_app, disabled=True, key=f"app_in_dis_{fk}")
+                app_input = st.text_input("App Name", value=prefill_app, disabled=True, key=f"app_in_dis_{fk}_{target_sheet_row}")
+                app_key = f"pend_{target_sheet_row}" # Refreshes when a different pending idea is chosen
             else:
                 app_sel = st.selectbox("App Name", ["➕ Add New..."] + get_dropdown_options(2), key=f"app_sel_{fk}")
-                app_input = st.text_input("Type New App Name", key=f"app_in_new_{fk}") if app_sel == "➕ Add New..." else app_sel
+                app_input = st.text_input("Type New App Name", key=f"app_in_new_{fk}_{app_sel}") if app_sel == "➕ Add New..." else app_sel
+                app_key = f"dir_{app_input}" # Refreshes when a different app is chosen
             
-            details_input = st.text_area("Details of Update", value=prefill_details, key=f"det_{fk}")
+            # Details now successfully refreshes because its key changes via app_key
+            details_input = st.text_area("Details of Update", value=prefill_details, key=f"det_{fk}_{app_key}")
             
             # FETCH LAST APP DATA FOR AUTO-FILL
             last_data = get_last_app_data(app_input)
-            
-            # --- FIX: Inject App Name into the Keys to force Streamlit to refresh the input boxes! ---
-            app_key = str(app_input)
             
             # --- Auto-Fill Logic: AI Used ---
             ai_opts = ["➕ Add New..."] + get_dropdown_options(4)
@@ -194,19 +194,19 @@ with tab1:
             else:
                 ai_input = ai_sel
             
-            ai_answer = st.text_area("AI Answer", key=f"ai_ans_{fk}")
+            ai_answer = st.text_area("AI Answer", key=f"ai_ans_{fk}_{app_key}")
             
         with col2:
-            short_sel = st.selectbox("Short Description", ["➕ Add New..."] + get_dropdown_options(6), key=f"sh_sel_{fk}")
-            short_input = st.text_input("Type New Short Description", key=f"sh_in_new_{fk}") if short_sel == "➕ Add New..." else short_sel
+            short_sel = st.selectbox("Short Description", ["➕ Add New..."] + get_dropdown_options(6), key=f"sh_sel_{fk}_{app_key}")
+            short_input = st.text_input("Type New Short Description", key=f"sh_in_new_{fk}_{app_key}") if short_sel == "➕ Add New..." else short_sel
             
             # --- Auto-Fill Logic: Lines of Code ---
             lines_def = last_data["lines"]
             lines_lbl = "Lines of Code ✨ (Last updated)" if lines_def > 0 else "Lines of Code"
             lines_input = st.number_input(lines_lbl, min_value=0, step=1, value=lines_def, key=f"lines_{fk}_{app_key}")
             
-            feat_sel = st.selectbox("Features Added", ["➕ Add New..."] + get_dropdown_options(8), key=f"feat_sel_{fk}")
-            features_input = st.text_input("Type New Feature", key=f"feat_in_new_{fk}") if feat_sel == "➕ Add New..." else feat_sel
+            feat_sel = st.selectbox("Features Added", ["➕ Add New..."] + get_dropdown_options(8), key=f"feat_sel_{fk}_{app_key}")
+            features_input = st.text_input("Type New Feature", key=f"feat_in_new_{fk}_{app_key}") if feat_sel == "➕ Add New..." else feat_sel
             
             # --- Auto-Fill Logic: Chat Reference ---
             chat_opts = ["➕ Add New..."] + get_dropdown_options(10)
@@ -232,7 +232,7 @@ with tab1:
             else:
                 gs_input = gs_sel
             
-            selected_ai = st.text_area("Selected AI Content (Paste the line here)", key=f"sel_ai_{fk}")
+            selected_ai = st.text_area("Selected AI Content (Paste the line here)", key=f"sel_ai_{fk}_{app_key}")
 
         st.divider()
         
@@ -241,9 +241,9 @@ with tab1:
             is_already_main = any(len(r) > 14 and str(r[14]).strip().upper() == "TRUE" for r in st.session_state.update_data if str(r[2]).strip() == app_input)
         
         if is_already_main:
-            add_to_main = st.checkbox("✅ This app is already added to the Main App", value=True, disabled=True, key=f"main_chk_dis_{fk}")
+            add_to_main = st.checkbox("✅ This app is already added to the Main App", value=True, disabled=True, key=f"main_chk_dis_{fk}_{app_key}")
         else:
-            add_to_main = st.checkbox("➕ Mark as 'Added to Main App' for this update?", key=f"main_chk_{fk}")
+            add_to_main = st.checkbox("➕ Mark as 'Added to Main App' for this update?", key=f"main_chk_{fk}_{app_key}")
 
         btn_col1, btn_col2 = st.columns([1, 5])
         

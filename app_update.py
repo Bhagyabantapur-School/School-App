@@ -105,7 +105,7 @@ st.markdown("""
         border-radius: 8px;
     }
     
-    /* Tab 1: Auto-Fill Blue Highlight Logic (Includes Text Inputs now!) */
+    /* Tab 1: Auto-Fill Blue Highlight Logic */
     div[data-testid="stSelectbox"]:has(label:contains("✨")) div[data-baseweb="select"],
     div[data-testid="stNumberInput"]:has(label:contains("✨")) div[data-baseweb="input"],
     div[data-testid="stTextInput"]:has(label:contains("✨")) div[data-baseweb="input"] {
@@ -179,17 +179,18 @@ with tab1:
             # FETCH LAST APP DATA FOR AUTO-FILL
             last_data = get_last_app_data(app_input)
             
-            # --- FIXED: Auto-Fill & Highlight Logic: AI Used ---
+            # --- FIX: Inject App Name into the Keys to force Streamlit to refresh the input boxes! ---
+            app_key = str(app_input)
+            
+            # --- Auto-Fill Logic: AI Used ---
             ai_opts = ["➕ Add New..."] + get_dropdown_options(4)
             ai_def = last_data["ai"]
             ai_sel_lbl = "AI Used ✨ (Last updated)" if ai_def else "AI Used"
             
-            # Keep dropdown on 'Add New...' so the text input box always appears!
-            ai_sel = st.selectbox(ai_sel_lbl, ai_opts, index=0, key=f"ai_sel_{fk}")
+            ai_sel = st.selectbox(ai_sel_lbl, ai_opts, index=0, key=f"ai_sel_{fk}_{app_key}")
             if ai_sel == "➕ Add New...":
                 t_lbl = "Type New AI ✨" if ai_def else "Type New AI"
-                # Inject the data straight into the text input box ("blank fill")
-                ai_input = st.text_input(t_lbl, value=ai_def, key=f"ai_in_new_{fk}")
+                ai_input = st.text_input(t_lbl, value=ai_def, key=f"ai_in_new_{fk}_{app_key}")
             else:
                 ai_input = ai_sel
             
@@ -199,35 +200,35 @@ with tab1:
             short_sel = st.selectbox("Short Description", ["➕ Add New..."] + get_dropdown_options(6), key=f"sh_sel_{fk}")
             short_input = st.text_input("Type New Short Description", key=f"sh_in_new_{fk}") if short_sel == "➕ Add New..." else short_sel
             
-            # --- Auto-Fill & Highlight Logic: Lines of Code ---
+            # --- Auto-Fill Logic: Lines of Code ---
             lines_def = last_data["lines"]
             lines_lbl = "Lines of Code ✨ (Last updated)" if lines_def > 0 else "Lines of Code"
-            lines_input = st.number_input(lines_lbl, min_value=0, step=1, value=lines_def, key=f"lines_{fk}")
+            lines_input = st.number_input(lines_lbl, min_value=0, step=1, value=lines_def, key=f"lines_{fk}_{app_key}")
             
             feat_sel = st.selectbox("Features Added", ["➕ Add New..."] + get_dropdown_options(8), key=f"feat_sel_{fk}")
             features_input = st.text_input("Type New Feature", key=f"feat_in_new_{fk}") if feat_sel == "➕ Add New..." else feat_sel
             
-            # --- FIXED: Auto-Fill & Highlight Logic: Chat Reference ---
+            # --- Auto-Fill Logic: Chat Reference ---
             chat_opts = ["➕ Add New..."] + get_dropdown_options(10)
             chat_def = last_data["chat"]
             chat_sel_lbl = "Chat Reference / Link ✨ (Last updated)" if chat_def else "Chat Reference / Link"
             
-            chat_sel = st.selectbox(chat_sel_lbl, chat_opts, index=0, key=f"chat_sel_{fk}")
+            chat_sel = st.selectbox(chat_sel_lbl, chat_opts, index=0, key=f"chat_sel_{fk}_{app_key}")
             if chat_sel == "➕ Add New...":
                 t_lbl = "Type New Chat Reference ✨" if chat_def else "Type New Chat Reference"
-                chat_input = st.text_input(t_lbl, value=chat_def, key=f"chat_in_new_{fk}")
+                chat_input = st.text_input(t_lbl, value=chat_def, key=f"chat_in_new_{fk}_{app_key}")
             else:
                 chat_input = chat_sel
             
-            # --- FIXED: Auto-Fill & Highlight Logic: Google Sheet ---
+            # --- Auto-Fill Logic: Google Sheet ---
             gs_opts = ["➕ Add New..."] + get_dropdown_options(11)
             gs_def = last_data["sheet"]
             gs_sel_lbl = "Google Sheet (Linked) ✨ (Last updated)" if gs_def else "Google Sheet (Linked)"
             
-            gs_sel = st.selectbox(gs_sel_lbl, gs_opts, index=0, key=f"gs_sel_{fk}")
+            gs_sel = st.selectbox(gs_sel_lbl, gs_opts, index=0, key=f"gs_sel_{fk}_{app_key}")
             if gs_sel == "➕ Add New...":
                 t_lbl = "Type New Google Sheet Name ✨" if gs_def else "Type New Google Sheet Name"
-                gs_input = st.text_input(t_lbl, value=gs_def, key=f"gs_in_new_{fk}")
+                gs_input = st.text_input(t_lbl, value=gs_def, key=f"gs_in_new_{fk}_{app_key}")
             else:
                 gs_input = gs_sel
             

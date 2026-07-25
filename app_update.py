@@ -290,12 +290,18 @@ with tab4:
             
             title = f"✅ 📱 {app_name} ({len(logs)} updates)" if is_added_to_main else f"🚨 📱 {app_name} ({len(logs)} updates)"
             
+            # --- EXPLICIT CHRONOLOGICAL SORTING FIX ---
+            # Combines the 'Date' (index 0) and 'Time' (index 1) columns to properly sort descending. 
+            # Now, even if an old pending Idea row is completed, it shows up top!
+            logs.sort(key=lambda x: f"{str(x[0]).strip()} {str(x[1]).strip()}" if len(x) > 1 else "", reverse=True)
+            
             with st.expander(title):
-                for log in reversed(logs): 
+                # Since it's already sorted strictly by Date/Time above, we no longer need 'reversed()'
+                for log in logs: 
                     # --- Extracting all fields based on their column index ---
                     date_val = log[0] if len(log) > 0 else ""
                     details_val = log[3] if len(log) > 3 else ""
-                    ai_val = log[4] if len(log) > 4 else ""          # <-- AI is extracted here
+                    ai_val = log[4] if len(log) > 4 else ""
                     ai_answer_val = log[5] if len(log) > 5 else ""
                     short_desc = log[6] if len(log) > 6 else ""
                     lines_val = log[7] if len(log) > 7 else ""
@@ -314,7 +320,7 @@ with tab4:
                     
                     # Formatting AI, Chat, and Google Sheet links cleanly on one line
                     meta_info = []
-                    if ai_val: meta_info.append(f"**AI:** {ai_val}")  # <-- Added AI to the display
+                    if ai_val: meta_info.append(f"**AI:** {ai_val}") 
                     if chat_val: meta_info.append(f"**Chat:** {chat_val}")
                     if gs_val: meta_info.append(f"**Google Sheet:** {gs_val}")
                     

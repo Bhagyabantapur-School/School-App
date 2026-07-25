@@ -58,7 +58,7 @@ def get_dropdown_options(column_index):
                 values.append(val)
     return sorted(list(set(values))) 
 
-# --- NEW: Powerful function to pull all default data for a selected app ---
+# --- Powerful function to pull all default data for a selected app ---
 def get_last_app_data(app_name):
     if not app_name or app_name == "➕ Add New..." or not st.session_state.update_data:
         return {"lines": 0, "ai": "", "chat": "", "sheet": ""}
@@ -105,16 +105,15 @@ st.markdown("""
         border-radius: 8px;
     }
     
-    /* NEW Tab 1: Auto-Fill Blue Highlight Logic */
-    /* Highlights the input box itself if the label contains the ✨ emoji */
+    /* Tab 1: Auto-Fill Blue Highlight Logic (Includes Text Inputs now!) */
     div[data-testid="stSelectbox"]:has(label:contains("✨")) div[data-baseweb="select"],
-    div[data-testid="stNumberInput"]:has(label:contains("✨")) div[data-baseweb="input"] {
+    div[data-testid="stNumberInput"]:has(label:contains("✨")) div[data-baseweb="input"],
+    div[data-testid="stTextInput"]:has(label:contains("✨")) div[data-baseweb="input"] {
         background-color: #f0f8ff !important;
         border: 1px solid #1890ff !important;
         border-left: 4px solid #1890ff !important;
         border-radius: 4px;
     }
-    /* Turns the label text bright blue */
     label:has(span:contains("✨")) {
         color: #1890ff !important;
         font-weight: 600;
@@ -180,14 +179,19 @@ with tab1:
             # FETCH LAST APP DATA FOR AUTO-FILL
             last_data = get_last_app_data(app_input)
             
-            # --- Auto-Fill & Highlight Logic: AI Used ---
+            # --- FIXED: Auto-Fill & Highlight Logic: AI Used ---
             ai_opts = ["➕ Add New..."] + get_dropdown_options(4)
             ai_def = last_data["ai"]
-            ai_idx = ai_opts.index(ai_def) if ai_def in ai_opts else 0
-            ai_lbl = "AI Used ✨ (Last updated)" if ai_def and ai_idx != 0 else "AI Used"
+            ai_sel_lbl = "AI Used ✨ (Last updated)" if ai_def else "AI Used"
             
-            ai_sel = st.selectbox(ai_lbl, ai_opts, index=ai_idx, key=f"ai_sel_{fk}")
-            ai_input = st.text_input("Type New AI", key=f"ai_in_new_{fk}") if ai_sel == "➕ Add New..." else ai_sel
+            # Keep dropdown on 'Add New...' so the text input box always appears!
+            ai_sel = st.selectbox(ai_sel_lbl, ai_opts, index=0, key=f"ai_sel_{fk}")
+            if ai_sel == "➕ Add New...":
+                t_lbl = "Type New AI ✨" if ai_def else "Type New AI"
+                # Inject the data straight into the text input box ("blank fill")
+                ai_input = st.text_input(t_lbl, value=ai_def, key=f"ai_in_new_{fk}")
+            else:
+                ai_input = ai_sel
             
             ai_answer = st.text_area("AI Answer", key=f"ai_ans_{fk}")
             
@@ -203,23 +207,29 @@ with tab1:
             feat_sel = st.selectbox("Features Added", ["➕ Add New..."] + get_dropdown_options(8), key=f"feat_sel_{fk}")
             features_input = st.text_input("Type New Feature", key=f"feat_in_new_{fk}") if feat_sel == "➕ Add New..." else feat_sel
             
-            # --- Auto-Fill & Highlight Logic: Chat Reference ---
+            # --- FIXED: Auto-Fill & Highlight Logic: Chat Reference ---
             chat_opts = ["➕ Add New..."] + get_dropdown_options(10)
             chat_def = last_data["chat"]
-            chat_idx = chat_opts.index(chat_def) if chat_def in chat_opts else 0
-            chat_lbl = "Chat Reference / Link ✨ (Last updated)" if chat_def and chat_idx != 0 else "Chat Reference / Link"
+            chat_sel_lbl = "Chat Reference / Link ✨ (Last updated)" if chat_def else "Chat Reference / Link"
             
-            chat_sel = st.selectbox(chat_lbl, chat_opts, index=chat_idx, key=f"chat_sel_{fk}")
-            chat_input = st.text_input("Type New Chat Reference", key=f"chat_in_new_{fk}") if chat_sel == "➕ Add New..." else chat_sel
+            chat_sel = st.selectbox(chat_sel_lbl, chat_opts, index=0, key=f"chat_sel_{fk}")
+            if chat_sel == "➕ Add New...":
+                t_lbl = "Type New Chat Reference ✨" if chat_def else "Type New Chat Reference"
+                chat_input = st.text_input(t_lbl, value=chat_def, key=f"chat_in_new_{fk}")
+            else:
+                chat_input = chat_sel
             
-            # --- Auto-Fill & Highlight Logic: Google Sheet ---
+            # --- FIXED: Auto-Fill & Highlight Logic: Google Sheet ---
             gs_opts = ["➕ Add New..."] + get_dropdown_options(11)
             gs_def = last_data["sheet"]
-            gs_idx = gs_opts.index(gs_def) if gs_def in gs_opts else 0
-            gs_lbl = "Google Sheet (Linked) ✨ (Last updated)" if gs_def and gs_idx != 0 else "Google Sheet (Linked)"
+            gs_sel_lbl = "Google Sheet (Linked) ✨ (Last updated)" if gs_def else "Google Sheet (Linked)"
             
-            gs_sel = st.selectbox(gs_lbl, gs_opts, index=gs_idx, key=f"gs_sel_{fk}")
-            gs_input = st.text_input("Type New Google Sheet Name", key=f"gs_in_new_{fk}") if gs_sel == "➕ Add New..." else gs_sel
+            gs_sel = st.selectbox(gs_sel_lbl, gs_opts, index=0, key=f"gs_sel_{fk}")
+            if gs_sel == "➕ Add New...":
+                t_lbl = "Type New Google Sheet Name ✨" if gs_def else "Type New Google Sheet Name"
+                gs_input = st.text_input(t_lbl, value=gs_def, key=f"gs_in_new_{fk}")
+            else:
+                gs_input = gs_sel
             
             selected_ai = st.text_area("Selected AI Content (Paste the line here)", key=f"sel_ai_{fk}")
 

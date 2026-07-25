@@ -69,6 +69,15 @@ def get_last_lines(app_name):
                 continue
     return 0
 
+# --- NEW: FORM CLEARING LOGIC ---
+if "form_reset_counter" not in st.session_state:
+    st.session_state.form_reset_counter = 0
+
+def clear_form_fields():
+    st.session_state.form_reset_counter += 1
+
+fk = st.session_state.form_reset_counter # Use this variable to append to widget keys
+
 # --- 3. TIMEZONE CONFIGURATION ---
 ist = pytz.timezone('Asia/Kolkata')
 current_ist = datetime.now(ist)
@@ -104,7 +113,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 # TAB 1: THE APP UPDATE LOGGER 
 # ==========================================
 with tab1:
-    update_mode = st.radio("Choose Update Mode:", ["🚀 Direct Update", "✅ Complete Pending Idea"], horizontal=True)
+    update_mode = st.radio("Choose Update Mode:", ["🚀 Direct Update", "✅ Complete Pending Idea"], horizontal=True, key=f"mode_{fk}")
     st.divider()
 
     target_sheet_row = None
@@ -121,7 +130,7 @@ with tab1:
             st.info("🎉 No pending ideas found in the database!")
         else:
             opt_dict = {f"{r[2]} ({r[12]}) - {r[3][:40]}...": (i, r) for i, r in pending_ideas}
-            selected_opt = st.selectbox("Select Pending Idea to Complete:", list(opt_dict.keys()))
+            selected_opt = st.selectbox("Select Pending Idea to Complete:", list(opt_dict.keys()), key=f"pend_sel_{fk}")
             
             sheet_row_index, idea_row_data = opt_dict[selected_opt]
             target_sheet_row = sheet_row_index + 1 
@@ -132,37 +141,37 @@ with tab1:
         col1, col2 = st.columns(2)
         
         with col1:
-            date_input = st.date_input("Date", value=current_ist.date(), key="d_up")
-            time_input = st.time_input("Time", value=current_ist.time(), step=60, key="t_up")
+            date_input = st.date_input("Date", value=current_ist.date(), key=f"d_up_{fk}")
+            time_input = st.time_input("Time", value=current_ist.time(), step=60, key=f"t_up_{fk}")
             
             if update_mode == "✅ Complete Pending Idea":
-                app_input = st.text_input("App Name", value=prefill_app, disabled=True)
+                app_input = st.text_input("App Name", value=prefill_app, disabled=True, key=f"app_in_dis_{fk}")
             else:
-                app_sel = st.selectbox("App Name", ["➕ Add New..."] + get_dropdown_options(2))
-                app_input = st.text_input("Type New App Name") if app_sel == "➕ Add New..." else app_sel
+                app_sel = st.selectbox("App Name", ["➕ Add New..."] + get_dropdown_options(2), key=f"app_sel_{fk}")
+                app_input = st.text_input("Type New App Name", key=f"app_in_new_{fk}") if app_sel == "➕ Add New..." else app_sel
             
-            details_input = st.text_area("Details of Update", value=prefill_details)
-            ai_sel = st.selectbox("AI Used", ["➕ Add New..."] + get_dropdown_options(4))
-            ai_input = st.text_input("Type New AI") if ai_sel == "➕ Add New..." else ai_sel
-            ai_answer = st.text_area("AI Answer")
+            details_input = st.text_area("Details of Update", value=prefill_details, key=f"det_{fk}")
+            ai_sel = st.selectbox("AI Used", ["➕ Add New..."] + get_dropdown_options(4), key=f"ai_sel_{fk}")
+            ai_input = st.text_input("Type New AI", key=f"ai_in_new_{fk}") if ai_sel == "➕ Add New..." else ai_sel
+            ai_answer = st.text_area("AI Answer", key=f"ai_ans_{fk}")
             
         with col2:
-            short_sel = st.selectbox("Short Description", ["➕ Add New..."] + get_dropdown_options(6))
-            short_input = st.text_input("Type New Short Description") if short_sel == "➕ Add New..." else short_sel
+            short_sel = st.selectbox("Short Description", ["➕ Add New..."] + get_dropdown_options(6), key=f"sh_sel_{fk}")
+            short_input = st.text_input("Type New Short Description", key=f"sh_in_new_{fk}") if short_sel == "➕ Add New..." else short_sel
             
             default_lines = get_last_lines(app_input)
-            lines_input = st.number_input("Lines of Code", min_value=0, step=1, value=default_lines)
+            lines_input = st.number_input("Lines of Code", min_value=0, step=1, value=default_lines, key=f"lines_{fk}")
             
-            feat_sel = st.selectbox("Features Added", ["➕ Add New..."] + get_dropdown_options(8))
-            features_input = st.text_input("Type New Feature") if feat_sel == "➕ Add New..." else feat_sel
+            feat_sel = st.selectbox("Features Added", ["➕ Add New..."] + get_dropdown_options(8), key=f"feat_sel_{fk}")
+            features_input = st.text_input("Type New Feature", key=f"feat_in_new_{fk}") if feat_sel == "➕ Add New..." else feat_sel
             
-            chat_sel = st.selectbox("Chat Reference / Link", ["➕ Add New..."] + get_dropdown_options(10))
-            chat_input = st.text_input("Type New Chat Reference") if chat_sel == "➕ Add New..." else chat_sel
+            chat_sel = st.selectbox("Chat Reference / Link", ["➕ Add New..."] + get_dropdown_options(10), key=f"chat_sel_{fk}")
+            chat_input = st.text_input("Type New Chat Reference", key=f"chat_in_new_{fk}") if chat_sel == "➕ Add New..." else chat_sel
             
-            gs_sel = st.selectbox("Google Sheet (Linked)", ["➕ Add New..."] + get_dropdown_options(11))
-            gs_input = st.text_input("Type New Google Sheet Name") if gs_sel == "➕ Add New..." else gs_sel
+            gs_sel = st.selectbox("Google Sheet (Linked)", ["➕ Add New..."] + get_dropdown_options(11), key=f"gs_sel_{fk}")
+            gs_input = st.text_input("Type New Google Sheet Name", key=f"gs_in_new_{fk}") if gs_sel == "➕ Add New..." else gs_sel
             
-            selected_ai = st.text_area("Selected AI Content (Paste the line here)")
+            selected_ai = st.text_area("Selected AI Content (Paste the line here)", key=f"sel_ai_{fk}")
 
         st.divider()
         
@@ -171,13 +180,21 @@ with tab1:
             is_already_main = any(len(r) > 14 and str(r[14]).strip().upper() == "TRUE" for r in st.session_state.update_data if str(r[2]).strip() == app_input)
         
         if is_already_main:
-            add_to_main = st.checkbox("✅ This app is already added to the Main App", value=True, disabled=True)
+            add_to_main = st.checkbox("✅ This app is already added to the Main App", value=True, disabled=True, key=f"main_chk_dis_{fk}")
         else:
-            add_to_main = st.checkbox("➕ Mark as 'Added to Main App' for this update?")
+            add_to_main = st.checkbox("➕ Mark as 'Added to Main App' for this update?", key=f"main_chk_{fk}")
 
-        btn_text = "Update Pending Idea in Google Sheet" if update_mode == "✅ Complete Pending Idea" else "Save Update to Google Sheet"
+        # --- Buttons side-by-side layout ---
+        btn_col1, btn_col2 = st.columns([1, 5])
         
-        if st.button(btn_text, type="primary"):
+        with btn_col1:
+            btn_text = "Update Pending Idea" if update_mode == "✅ Complete Pending Idea" else "Save Update to Sheet"
+            submit_clicked = st.button(btn_text, type="primary")
+            
+        with btn_col2:
+            st.button("🔄 Clear Fields", on_click=clear_form_fields, help="Reset all fields on this tab")
+        
+        if submit_clicked:
             col15_value = "TRUE" if add_to_main else ""
             
             row_data_update = [
@@ -290,15 +307,10 @@ with tab4:
             
             title = f"✅ 📱 {app_name} ({len(logs)} updates)" if is_added_to_main else f"🚨 📱 {app_name} ({len(logs)} updates)"
             
-            # --- EXPLICIT CHRONOLOGICAL SORTING FIX ---
-            # Combines the 'Date' (index 0) and 'Time' (index 1) columns to properly sort descending. 
-            # Now, even if an old pending Idea row is completed, it shows up top!
             logs.sort(key=lambda x: f"{str(x[0]).strip()} {str(x[1]).strip()}" if len(x) > 1 else "", reverse=True)
             
             with st.expander(title):
-                # Since it's already sorted strictly by Date/Time above, we no longer need 'reversed()'
                 for log in logs: 
-                    # --- Extracting all fields based on their column index ---
                     date_val = log[0] if len(log) > 0 else ""
                     details_val = log[3] if len(log) > 3 else ""
                     ai_val = log[4] if len(log) > 4 else ""
@@ -310,7 +322,6 @@ with tab4:
                     chat_val = log[10] if len(log) > 10 else ""
                     gs_val = log[11] if len(log) > 11 else ""
                     
-                    # --- Direct Display Data ---
                     st.markdown(f"**Date:** {date_val} &nbsp;|&nbsp; **Lines:** {lines_val}")
                     
                     if features_added:
@@ -318,7 +329,6 @@ with tab4:
                     if short_desc:
                         st.caption(f"**Short:** {short_desc}")
                     
-                    # Formatting AI, Chat, and Google Sheet links cleanly on one line
                     meta_info = []
                     if ai_val: meta_info.append(f"**AI:** {ai_val}") 
                     if chat_val: meta_info.append(f"**Chat:** {chat_val}")
@@ -327,7 +337,6 @@ with tab4:
                     if meta_info:
                         st.markdown(" &nbsp;|&nbsp; ".join(meta_info))
                         
-                    # --- Hidden Long Data (Inside Expander) ---
                     if details_val or ai_answer_val or selected_ai_val:
                         with st.expander("📝 View Full Details & AI Output"):
                             if details_val:

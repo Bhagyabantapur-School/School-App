@@ -17,7 +17,6 @@ st.title("💰 Bhagyabantapur Primary School - Exam Fees")
 st.markdown("Record and track examination fee collections seamlessly.")
 
 # --- AUTHENTICATION & CONNECTION ---
-# 🛠️ FIX: Removed @st.cache_resource so the session state is never mangled across reruns.
 def get_gspread_client():
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets", 
@@ -30,7 +29,6 @@ def get_gspread_client():
     return gspread.authorize(credentials)
 
 try:
-    # Initial connection test
     _test_gc = get_gspread_client()
 except Exception as e:
     st.error(f"Authentication failed. Please check your st.secrets. Details: {e}")
@@ -39,7 +37,6 @@ except Exception as e:
 # --- DATA LOADING ---
 @st.cache_data(ttl=600)
 def load_data():
-    # Generate a fresh client inside the data loader
     gc = get_gspread_client()
     
     bps_sheet = gc.open("BPS_Database")
@@ -56,14 +53,11 @@ def load_data():
     df_fees = pd.DataFrame(ws_fees.get_all_records())
     
     if not df_fees.empty:
-        # Create row numbers for exact sheet targeting (Row 1 is header, data starts at Row 2)
         df_fees['_Row_Num'] = range(2, len(df_fees) + 2)
         
-        # Ensure the Handover_Status exists even if legacy data is present
         if 'Handover_Status' not in df_fees.columns:
             df_fees['Handover_Status'] = 'Pending'
             if 'Teacher_Involved' in df_fees.columns:
-                # The Head Teacher's self-collections do not need to be handed over
                 df_fees.loc[df_fees['Teacher_Involved'] == 'SUKHAMAY KISKU', 'Handover_Status'] = 'Settled'
     
     return df_students, df_teachers, df_fees, df_mdm
@@ -99,6 +93,28 @@ with tab1:
     with col_fee3:
         payer_type = st.radio("Received From:", ["Student", "Guardian", "Teacher"])
         
+    # --- ADMIN OVERRIDE FOR FORGOTTEN TEACHER LOGS ---
+    actual_collector = st.session_state.user_name
+    if st.session_state.user_role == "admin":
+        st.info("💡 **Admin Override:** If a teacher handed you cash but forgot to log it, select their name below to record it directly into their 'Handed Over' ledger.")
+        
+        # Build a safe list of all teacher names
+        teacher_names = []
+        if not df_teachers.empty:
+            for col in ['Name', 'Teacher Name', 'Teacher_Name', 'Full Name']:
+                if col in df_teachers.columns:
+                    teacher_names = df_teachers[col].dropna().unique().tolist()
+                    break
+        if not df_fees.empty and 'Teacher_Involved' in df_fees.columns:
+            teacher_names.extend(df_fees['Teacher_Involved'].dropna().unique().tolist())
+            
+        teacher_names = list(set(teacher_names))
+        if st.session_state.user_name in teacher_names:
+            teacher_names.remove(st.session_state.user_name)
+            
+        teacher_list = [st.session_state.user_name] + sorted(teacher_names)
+        actual_collector = st.selectbox("Recorded on behalf of (Collected By):", teacher_list)
+
     st.divider()
     
     st.markdown("### Step 2: Select Student & Record")
@@ -128,7 +144,6 @@ with tab1:
             (df_students['Section'] == selected_section)
         ].copy()
 
-    # DISPLAY RESULTS IN DROPDOWN
     if not filtered_students.empty:
         filtered_students['Roll_Numeric'] = pd.to_numeric(filtered_students['Roll'], errors='coerce').fillna(999)
         filtered_students = filtered_students.sort_values('Roll_Numeric')
@@ -221,12 +236,18 @@ with tab1:
                 try:
                     current_time = datetime.now(IST).time()
                     final_datetime_ist = datetime.combine(receipt_date, current_time).strftime("%Y-%m-%d %H:%M:%S")
-                    
                     final_section = str(student_info['Section'])
-                    final_teacher = st.session_state.user_name
                     
-                    # The Head Teacher defaults to "Settled" since they hold the final cash. Assistants default to "Pending".
-                    handover_status = "Settled" if st.session_state.user_role == "admin" else "Pending"
+                    # Core Logic: If Admin enters for themselves, it's Settled. 
+                    # If Admin enters for a Teacher, it immediately becomes "Handed Over" since Admin has the cash.
+                    # If Teacher enters it normally, it's "Pending".
+                    if st.session_state.user_role == "admin":
+                        if actual_collector == st.session_state.user_name:
+                            handover_status = "Settled"
+                        else:
+                            handover_status = "Handed Over"
+                    else:
+                        handover_status = "Pending"
                     
                     # Target Order: Date, Name, Class, Section, Roll, Amount, Payer_Type, Teacher_Involved, Exam Type, Handover_Status
                     new_row = [
@@ -237,12 +258,11 @@ with tab1:
                         roll_no, 
                         amount, 
                         payer_type, 
-                        final_teacher,
+                        actual_collector,
                         exam_type,
                         handover_status 
                     ]
                     
-                    # Call fresh client for write operations
                     gc_write = get_gspread_client()
                     ws_fees_write = gc_write.open("SCH_Exam_Fees").worksheet("Sheet1")
                     ws_fees_write.append_row(new_row)
@@ -388,7 +408,6 @@ if st.session_state.user_role == "admin":
         st.markdown("Select an assistant teacher to securely receive and verify their pending cash collections.")
         
         if not df_fees.empty and 'Handover_Status' in df_fees.columns:
-            # Locate the exact column index for Handover_Status
             handover_col_idx = df_fees.columns.get_loc('Handover_Status') + 1
             
             df_fees['Amount'] = pd.to_numeric(df_fees['Amount'], errors='coerce').fillna(0)
@@ -405,12 +424,11 @@ if st.session_state.user_role == "admin":
                 st.markdown(f"### Pending Cash with {selected_teacher}: **₹ {total_owed:,.2f}**")
                 st.caption("Check the boxes next to the students' fees you are receiving, then click Confirm.")
                 
-                # Interactive Editor for Admin to verify rows
                 edited_df = st.data_editor(
                     teacher_pending[['Receive', 'Date', 'Name', 'Class', 'Amount', 'Exam Type', '_Row_Num']],
                     hide_index=True,
                     disabled=['Date', 'Name', 'Class', 'Amount', 'Exam Type', '_Row_Num'],
-                    column_config={'_Row_Num': None} # Hides the technical row target from UI
+                    column_config={'_Row_Num': None}
                 )
                 
                 selected_rows = edited_df[edited_df['Receive'] == True]
@@ -422,11 +440,9 @@ if st.session_state.user_role == "admin":
                     if st.button("✅ Confirm Receipt of Cash", type="primary"):
                         with st.spinner(f"Verifying receipt of cash from {selected_teacher}..."):
                             try:
-                                # Fetch a fresh client for writing
                                 gc_write = get_gspread_client()
                                 ws_fees_write = gc_write.open("SCH_Exam_Fees").worksheet("Sheet1")
                                 
-                                # Highly stable singular cell update
                                 for r_num in selected_rows['_Row_Num']:
                                     ws_fees_write.update_cell(r_num, handover_col_idx, 'Handed Over')
                                 

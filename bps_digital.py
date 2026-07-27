@@ -1,38 +1,124 @@
-import streamlit as st
+import streamlit as st, streamlit.components.v1 as components, pandas as pd, os, calendar, base64, re, concurrent.futures
+from datetime import datetime, time, timedelta, timezone
+from streamlit_qrcode_scanner import qrcode_scanner
 import gspread
-import pandas as pd
-from datetime import datetime, timedelta
-import pytz
-import plotly.express as px
-import re
-import base64
+from gspread.exceptions import WorksheetNotFound
 from google.oauth2.service_account import Credentials
 from google.auth.transport.requests import AuthorizedSession
 
-# --- GATEKEEPER SECURITY CHECK ---
+# If accessed directly without logging in via app.py, block execution
 if 'authenticated' not in st.session_state or not st.session_state.authenticated:
     st.warning("🔒 Unauthorized Access. Please log in through the main portal.")
     st.stop()
 
-IST = pytz.timezone('Asia/Kolkata')
+# Re-initialize states strictly used by bps_digital.py
+if 'scan_msg' not in st.session_state: st.session_state.scan_msg = None
+if 'admin_scanned_keys' not in st.session_state: st.session_state.admin_scanned_keys = []
+if 'admin_scan_msg' not in st.session_state: st.session_state.admin_scan_msg = None
 
-st.title("💰 Bhagyabantapur Primary School - Funds & Fees")
-st.markdown("Record and track examination fees and confiscated unauthorized cash.")
+TEACHER_INITIALS = {"SUKHAMAY KISKU": "SK", "TAPASI RANA": "TR", "SUJATA BISWAS ROTHA": "SBR", "ROHINI SINGH": "RS", "UDAY NARAYAN JANA": "UNJ", "BIMAL KUMAR PATRA": "BKP", "SUSMITA PAUL": "SP", "TAPAN KUMAR MANDAL": "TKM", "MANJUMA KHATUN": "MK"}
+INV_TEACHER_INITIALS = {v: k for k, v in TEACHER_INITIALS.items()}
+TEACHER_LIST = list(TEACHER_INITIALS.keys())
+CLASS_OPTIONS = ["Select Class...", "CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V"]
+ATTENDANCE_OPTIONS = ["Select Class...", "CLASS PP A", "CLASS I A", "CLASS II A", "CLASS III A", "CLASS IV A", "CLASS IV B", "CLASS V A"]
 
-# --- AUTHENTICATION & SECURE IMAGE FETCHING (Matching bps_digital.py exactly) ---
+def inject_beep_script():
+    components.html("""
+        <script>
+            const doc = window.parent.document;
+            if (!doc.getElementById("beep-listener-setup")) {
+                doc.body.insertAdjacentHTML('beforeend', '<div id="beep-listener-setup" style="display:none;"></div>');
+                doc.body.addEventListener('change', function(e) {
+                    if (e.target && e.target.type === 'checkbox') {
+                        const AudioContext = window.parent.AudioContext || window.parent.webkitAudioContext;
+                        if (AudioContext) {
+                            const ctx = new AudioContext();
+                            const osc = ctx.createOscillator(), gainNode = ctx.createGain();
+                            osc.type = 'sine'; osc.frequency.setValueAtTime(880, ctx.currentTime); 
+                            gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+                            gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+                            osc.connect(gainNode); gainNode.connect(ctx.destination);
+                            osc.start(); osc.stop(ctx.currentTime + 0.1);
+                        }
+                    }
+                });
+            }
+        </script>""", height=0, width=0)
+inject_beep_script()
+
+def inject_security_css(user_name):
+    wm = f"{user_name} - CONFIDENTIAL"
+    st.markdown(f"""<style>
+        body {{ user-select: none; -webkit-user-select: none; }}
+        .watermark {{ position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 9999; background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"><text x="50" y="150" fill="rgba(200, 200, 200, 0.25)" font-size="20" transform="rotate(-45 150 150)" font-family="Arial, sans-serif">{wm}</text></svg>'); background-repeat: repeat; }}
+        .block-container {{ padding-top: 1rem; max-width: 650px; overflow-x: hidden; }}
+        .summary-card {{ background-color: #fff; border: 2px solid #007bff; border-radius: 15px; padding: 20px; margin-bottom: 20px; box-shadow: 0px 4px 10px rgba(0,0,0,0.05); }}
+        .stButton>button {{ width: 100%; border-radius: 12px; height: 3.5em; background-color: #007bff; color: white; font-weight: bold; border: none; }}
+        .routine-card {{ background-color: #f8f9fa; padding: 15px; border-radius: 10px; border-left: 5px solid #007bff; margin-bottom: 15px; border-right: 1px solid #ddd; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; }}
+        .report-table {{ width: 100%; border-collapse: collapse; }} .report-table td, .report-table th {{ border: 1px solid #ddd; padding: 8px; text-align: center; }} .report-table th {{ background-color: #007bff; color: white; }}
+        .att-badge {{ padding: 8px 12px; border-radius: 8px; font-weight: bold; font-size: 15px; display: block; text-align: center; margin-top: 5px; margin-bottom: 5px;}}
+        .att-wait {{ background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }} .att-done {{ background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }}
+        .sub-card {{ background-color: #e3f2fd; padding: 10px; border-radius: 8px; margin-bottom: 5px; border-left: 4px solid #2196f3; }}
+        .floating-counter {{ position: fixed; top: 15px; right: 15px; background: linear-gradient(135deg, #007bff, #0056b3); color: white; padding: 10px 20px; border-radius: 30px; z-index: 999999; font-size: 16px; font-weight: 900; box-shadow: 0px 4px 12px rgba(0,0,0,0.3); border: 2px solid #ffffff; pointer-events: none; transition: all 0.3s ease; }}
+        @media (max-width: 768px) {{
+            .floating-counter {{ top: 10px; right: 10px; font-size: 14px; padding: 8px 16px; }}
+            .roster-container [data-testid="stHorizontalBlock"] {{ display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; align-items: center !important; width: 100% !important; }}
+            .roster-container [data-testid="column"] {{ display: block !important; min-width: 0 !important; margin-top: 0 !important; padding: 0 4px !important; }}
+            .roster-container [data-testid="column"]:nth-child(1) {{ flex: 0 0 55px !important; max-width: 55px !important; width: 55px !important; }}
+            .roster-container [data-testid="column"]:nth-child(2) {{ flex: 1 1 0% !important; max-width: calc(100% - 150px) !important; width: auto !important; }}
+            .roster-container [data-testid="column"]:nth-child(3) {{ flex: 0 0 95px !important; max-width: 95px !important; width: 95px !important; }}
+            .roster-container .stCheckbox p {{ font-size: 13px !important; padding-left: 1.2rem !important; margin-bottom: 0px !important; line-height: 1.2 !important; }}
+            .roster-container .stCheckbox {{ min-height: 1.2rem; }}
+            .header-school-name {{ font-size: 18px !important; }}
+        }}
+    </style><script>document.addEventListener('contextmenu', e => e.preventDefault());</script><div class="watermark"></div>""", unsafe_allow_html=True)
+
 @st.cache_resource
-def get_google_credentials(): 
-    return Credentials.from_service_account_info(
-        dict(st.secrets["gcp_service_account"]), 
-        scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive.readonly"]
-    )
-
-def get_gspread_client():
-    return gspread.authorize(get_google_credentials())
+def get_google_credentials(): return Credentials.from_service_account_info(dict(st.secrets["gcp_service_account"]), scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive.readonly"])
 
 @st.cache_resource
-def get_drive_session(): 
-    return AuthorizedSession(get_google_credentials())
+def init_gsheets():
+    try: return gspread.authorize(get_google_credentials()).open("BPS_Database")
+    except: st.error("⚠️ Google Sheets Connection Failed!"); st.stop()
+
+@st.cache_resource
+def get_drive_session(): return AuthorizedSession(get_google_credentials())
+
+sh = init_gsheets()
+
+@st.cache_data(ttl=600) 
+def fetch_sheet_data(sheet_name):
+    try: return pd.DataFrame(sh.worksheet(sheet_name).get_all_records()).replace({'TRUE': True, 'FALSE': False, 'True': True, 'False': False}).infer_objects(copy=False)
+    except: return pd.DataFrame()
+
+def clear_sheet_cache(): fetch_sheet_data.clear(); get_notice.clear()
+
+def append_sheet_df(sheet_name, df):
+    if df.empty: return
+    try: ws = sh.worksheet(sheet_name)
+    except WorksheetNotFound: ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=20); ws.append_row(list(df.columns))
+    except: st.error("⚠️ API Busy."); return
+    try: ws.append_rows(df.fillna("").astype(str).values.tolist()); clear_sheet_cache()
+    except: st.error("⚠️ Submit Failed.")
+
+def overwrite_sheet_df(sheet_name, df):
+    try: ws = sh.worksheet(sheet_name)
+    except WorksheetNotFound: ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=20)
+    except: return
+    try: ws.clear(); df = df.fillna("").astype(str); ws.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name='A1') if not df.empty else None; clear_sheet_cache()
+    except: st.error("⚠️ Clear Failed.")
+
+@st.cache_data(ttl=600)
+def get_notice():
+    try: return sh.worksheet("notice").acell("A1").value or ""
+    except: return ""
+
+def publish_notice(text):
+    try: ws = sh.worksheet("notice")
+    except: ws = sh.add_worksheet(title="notice", rows=10, cols=10)
+    ws.update_acell("A1", text); clear_sheet_cache()
+
+def get_local_csv(file): return pd.read_csv(file) if os.path.exists(file) else pd.DataFrame()
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_secure_image_bytes(file_id):
@@ -50,457 +136,511 @@ def get_secure_photo_uri(url):
         if b: return f"data:image/jpeg;base64,{base64.b64encode(b).decode()}"
     return url if url.startswith("http") else fb
 
-try:
-    _test_gc = get_gspread_client()
-except Exception as e:
-    st.error(f"Authentication failed. Please check your st.secrets. Details: {e}")
-    st.stop()
+utc_now = datetime.now(timezone.utc)
+now = utc_now + timedelta(hours=5, minutes=30)
+curr_date_str, curr_time = now.strftime("%d-%m-%Y"), now.time()
 
-# --- DATA LOADING ---
-@st.cache_data(ttl=600)
-def load_data():
-    gc = get_gspread_client()
-    
-    bps_sheet = gc.open("BPS_Database")
-    ws_students = bps_sheet.worksheet("students_master")
-    ws_teachers = bps_sheet.worksheet("TEACHERS_DETAIL")
-    ws_mdm = bps_sheet.worksheet("mdm_log")
-    
-    df_students = pd.DataFrame(ws_students.get_all_records())
-    df_teachers = pd.DataFrame(ws_teachers.get_all_records())
-    df_mdm = pd.DataFrame(ws_mdm.get_all_records())
-    
-    fees_sheet = gc.open("SCH_Exam_Fees")
-    ws_fees = fees_sheet.worksheet("Sheet1") 
-    df_fees = pd.DataFrame(ws_fees.get_all_records())
-    
-    if not df_fees.empty:
-        df_fees['_Row_Num'] = range(2, len(df_fees) + 2)
-        
-        if 'Handover_Status' not in df_fees.columns:
-            df_fees['Handover_Status'] = 'Pending'
-            if 'Teacher_Involved' in df_fees.columns:
-                df_fees.loc[df_fees['Teacher_Involved'] == 'SUKHAMAY KISKU', 'Handover_Status'] = 'Settled'
-    
-    return df_students, df_teachers, df_fees, df_mdm
+def parse_time_safe(t_str):
+    for fmt in ('%H:%M', '%I:%M %p', '%H:%M:%S'):
+        try: return datetime.strptime(str(t_str).strip(), fmt).time()
+        except: continue
+    return None
 
-try:
-    with st.spinner("Connecting to BPS Database..."):
-        df_students, df_teachers, df_fees, df_mdm = load_data()
-except Exception as e:
-    st.error(f"Error loading data. Ensure the sheets are named correctly and the 'mdm_log' tab exists. Details: {e}")
-    st.stop()
-
-# --- APP LAYOUT (Tabs Dynamic Routing) ---
-if st.session_state.user_role == "admin":
-    tab1, tab2, tab3 = st.tabs(["📝 Record Funds", "📊 Collection Dashboard", "🤝 Handover Manager"])
-else:
-    tab1, tab2 = st.tabs(["📝 Record Funds", "📊 Collection Dashboard"])
-
-# ==========================================
-# TAB 1: FUND COLLECTION FORM (BATCH MODE)
-# ==========================================
-with tab1:
-    st.markdown("### Step 1: Transaction Details")
-    
-    transaction_nature = st.radio("Nature of Transaction:", ["📥 Collect Funds (In)", "📤 Return Funds (Out)"], horizontal=True)
-    st.write("")
-    
-    col_fee1, col_fee2, col_fee3 = st.columns(3)
-    
-    with col_fee1:
-        receipt_date = st.date_input("Transaction Date", value=datetime.now(IST).date())
-        amount = st.number_input("Amount (₹)", min_value=0, step=5)
-        
-    with col_fee2:
-        collection_type = st.selectbox("Collection Type", ["Evaluation-II", "Britti", "Confiscated Money"], index=0)
-        
-    with col_fee3:
-        if transaction_nature == "📥 Collect Funds (In)":
-            payer_type = st.radio("Received From:", ["Student", "Guardian", "Teacher"])
-        else:
-            payer_type = st.radio("Returned To:", ["Student", "Guardian", "Teacher"])
-        
-    # --- ADMIN OVERRIDE FOR FORGOTTEN TEACHER LOGS ---
-    actual_collector = st.session_state.user_name
-    if st.session_state.user_role == "admin":
-        st.info("💡 **Admin Override:** If you are logging a transaction on behalf of an assistant teacher, select their name below.")
-        
-        teacher_names = []
-        if not df_teachers.empty:
-            for col in ['Name', 'Teacher Name', 'Teacher_Name', 'Full Name']:
-                if col in df_teachers.columns:
-                    teacher_names = df_teachers[col].dropna().unique().tolist()
-                    break
-        if not df_fees.empty and 'Teacher_Involved' in df_fees.columns:
-            teacher_names.extend(df_fees['Teacher_Involved'].dropna().unique().tolist())
-            
-        teacher_names = list(set(teacher_names))
-        if st.session_state.user_name in teacher_names:
-            teacher_names.remove(st.session_state.user_name)
-            
-        teacher_list = [st.session_state.user_name] + sorted(teacher_names)
-        actual_collector = st.selectbox("Transaction Performed By:", teacher_list)
-
-    st.divider()
-    
-    st.markdown("### Step 2: Select Student & Record")
-    
-    search_mode = st.radio("Search Method:", ["Filter by Class & Section", "Search by Name"], horizontal=True, label_visibility="collapsed")
-    
-    filtered_students = pd.DataFrame()
-    selected_display = None
-    
-    if search_mode == "Search by Name":
-        search_query = st.text_input("🔍 Enter part of the student's name (e.g., 'saj')")
-        if search_query:
-            filtered_students = df_students[df_students['Name'].str.contains(search_query, case=False, na=False)].copy()
-        else:
-            st.caption("Start typing above to search the whole school...")
-    else: 
-        col_s1, col_s2 = st.columns(2)
-        with col_s1:
-            classes = [c for c in df_students['Class'].unique() if str(c).strip()]
-            selected_class = st.selectbox("Select Class", options=sorted(classes))
-        with col_s2:
-            sections = [s for s in df_students[df_students['Class'] == selected_class]['Section'].unique() if str(s).strip()]
-            selected_section = st.selectbox("Select Section", options=sorted(sections))
-            
-        filtered_students = df_students[
-            (df_students['Class'] == selected_class) & 
-            (df_students['Section'] == selected_section)
-        ].copy()
-
-    if not filtered_students.empty:
-        filtered_students['Roll_Numeric'] = pd.to_numeric(filtered_students['Roll'], errors='coerce').fillna(999)
-        filtered_students = filtered_students.sort_values('Roll_Numeric')
-        
-        if not df_mdm.empty and 'Date' in df_mdm.columns:
-            df_mdm['Parsed_Date'] = pd.to_datetime(df_mdm['Date'], errors='coerce', dayfirst=True).dt.date
-            ten_days_ago = receipt_date - timedelta(days=10)
-            recent_mdm = df_mdm[(df_mdm['Parsed_Date'] >= ten_days_ago) & (df_mdm['Parsed_Date'] <= receipt_date)]
-            present_keys = set(zip(
-                recent_mdm['Class'].astype(str), 
-                recent_mdm['Section'].astype(str), 
-                recent_mdm['Roll'].astype(str)
-            ))
-        else:
-            present_keys = set()
-        
-        def format_dropdown(row):
-            roll_val = str(row['Roll']).strip()
-            name_val = str(row['Name']).strip()
-            class_val = str(row['Class']).strip()
-            sec_val = str(row['Section']).strip()
-            
-            is_present = (class_val, sec_val, roll_val) in present_keys
-            presence_marker = "✅ " if is_present else ""
-            
-            if search_mode == "Search by Name":
-                return f"{presence_marker}{name_val} - Class {class_val} '{sec_val}' (Roll {roll_val})"
-            else:
-                if roll_val and roll_val.lower() != 'nan':
-                    return f"{presence_marker}Roll {roll_val} - {name_val}"
-                return f"{presence_marker}{name_val}"
-                
-        filtered_students['Dropdown_Display'] = filtered_students.apply(format_dropdown, axis=1)
-        display_options = filtered_students['Dropdown_Display'].tolist()
-        
-        st.markdown("##### Select Profile (✅ = Present in the last 10 days)")
-        selected_display = st.selectbox("Choose the correct student:", options=display_options, label_visibility="collapsed")
-        
-    elif search_mode == "Search by Name" and search_query:
-        st.warning(f"No students found containing '{search_query}'.")
-
-    st.write("") 
-
-    # --- DUPLICATE & RETURN BALANCE CHECKER WITH SECURE THUMBNAIL ---
-    allow_submission = True
-    
-    if selected_display:
-        student_info = filtered_students[filtered_students['Dropdown_Display'] == selected_display].iloc[0]
-        pure_name = str(student_info['Name'])
-        final_class = str(student_info['Class'])
-        roll_no = str(student_info.get('Roll', 'N/A'))
-        
-        raw_thumb_url = str(student_info.get('Thumb_URL', '')).strip()
-
-        col_profile, col_action = st.columns([1, 4])
-        
-        with col_profile:
-            secure_uri = get_secure_photo_uri(raw_thumb_url)
-            st.image(secure_uri, use_container_width=True)
-
-        with col_action:
-            if not df_fees.empty and 'Amount' in df_fees.columns:
-                past_payments = df_fees[
-                    (df_fees['Name'].astype(str) == pure_name) & 
-                    (df_fees['Class'].astype(str) == final_class) & 
-                    (df_fees['Roll'].astype(str) == roll_no)
-                ]
-                
-                has_type_col = 'Collection Type' in df_fees.columns
-                if has_type_col:
-                    past_payments = past_payments[past_payments['Collection Type'].astype(str).str.strip() == str(collection_type).strip()]
-                
-                if not past_payments.empty:
-                    total_paid = pd.to_numeric(past_payments['Amount'], errors='coerce').fillna(0).sum()
-                    
-                    if total_paid > 0 and transaction_nature == "📥 Collect Funds (In)":
-                        st.warning(f"⚠️ **Duplicate Warning:** {pure_name} already has a recorded net balance of **₹{total_paid}** for **{collection_type}**.")
-                        allow_due = st.checkbox(f"Unlock to record an additional entry for {pure_name}")
-                        if not allow_due:
-                            allow_submission = False
-                            
-                    elif total_paid <= 0 and transaction_nature == "📤 Return Funds (Out)":
-                        st.error(f"🚫 **Action Blocked:** {pure_name} has a net balance of ₹{total_paid} for {collection_type}. You cannot return funds that were not collected.")
-                        allow_submission = False
-                    else:
-                        st.success(f"✅ Ready to process transaction for {pure_name}.")
-    
-                    with st.expander("View their past records"):
-                        display_cols = [c for c in ['Date', 'Amount', 'Collection Type', 'Payer_Type', 'Teacher_Involved'] if c in past_payments.columns]
-                        st.dataframe(past_payments[display_cols], hide_index=True, use_container_width=True)
-                else:
-                    if transaction_nature == "📥 Collect Funds (In)":
-                        st.success(f"✅ No past records found. Ready to process collection for {pure_name}.")
-                    else:
-                        st.error(f"🚫 **Action Blocked:** No collection record found for {pure_name} under {collection_type}. You cannot process a return.")
-                        allow_submission = False
-
-    # --- DATA SUBMISSION LOGIC ---
-    st.write("")
-    submit_button = st.button("✅ Record Transaction", type="primary", use_container_width=True, disabled=not allow_submission)
-    
-    if submit_button:
-        if not selected_display:
-            st.error("Please find and select a valid student first.")
-        elif amount <= 0:
-            st.warning("Please enter an amount greater than 0.")
-        else:
-            with st.spinner("Logging transaction to Google Sheets..."):
-                try:
-                    final_amount = amount if transaction_nature == "📥 Collect Funds (In)" else -amount
-                    
-                    current_time = datetime.now(IST).time()
-                    final_datetime_ist = datetime.combine(receipt_date, current_time).strftime("%Y-%m-%d %H:%M:%S")
-                    final_section = str(student_info['Section'])
-                    
-                    if st.session_state.user_role == "admin":
-                        if actual_collector == st.session_state.user_name:
-                            handover_status = "Settled"
-                        else:
-                            handover_status = "Handed Over"
-                    else:
-                        handover_status = "Pending"
-                    
-                    new_row = [
-                        final_datetime_ist, 
-                        pure_name, 
-                        final_class, 
-                        final_section, 
-                        roll_no, 
-                        final_amount, 
-                        payer_type, 
-                        actual_collector,
-                        collection_type,
-                        handover_status 
-                    ]
-                    
-                    gc_write = get_gspread_client()
-                    ws_fees_write = gc_write.open("SCH_Exam_Fees").worksheet("Sheet1")
-                    ws_fees_write.append_row(new_row)
-                    
-                    load_data.clear()
-                    
-                    action_word = "collected from" if final_amount > 0 else "returned to"
-                    st.success(f"✅ Successfully {action_word} {pure_name} (₹{abs(final_amount)} for {collection_type})!")
-                    st.rerun() 
-                except Exception as e:
-                    st.error(f"An error occurred while saving the data: {e}")
-
-
-# ==========================================
-# TAB 2: LIVE DASHBOARD
-# ==========================================
-with tab2:
-    st.subheader("Collection Overview")
-    
-    if st.button("🔄 Refresh Data"):
-        load_data.clear()
-        st.rerun()
-        
-    dash_df = df_fees.copy()
-    
-    # ----------------------------------------------------
-    # ASSISTANT TEACHER DASHBOARD VIEW
-    # ----------------------------------------------------
-    if st.session_state.user_role != "admin":
-        if not dash_df.empty:
-            dash_df = dash_df[dash_df['Teacher_Involved'].astype(str).str.strip() == st.session_state.user_name]
-        
-        st.caption(f"Showing personal transactions managed by: **{st.session_state.user_name}**")
-        
-        if not dash_df.empty and 'Amount' in dash_df.columns:
-            dash_df['Amount'] = pd.to_numeric(dash_df['Amount'], errors='coerce').fillna(0)
-            
-            gross_coll = dash_df[dash_df['Amount'] > 0]['Amount'].sum()
-            total_ret = abs(dash_df[dash_df['Amount'] < 0]['Amount'].sum())
-            net_pending = dash_df[dash_df['Handover_Status'] == 'Pending']['Amount'].sum()
-            handed_over = dash_df[dash_df['Handover_Status'] == 'Handed Over']['Amount'].sum()
-            
-            col_t1, col_t2, col_t3 = st.columns(3)
-            col_t1.metric("💰 Gross Collected", f"₹ {gross_coll:,.2f}", help="Total cash taken in before returns.")
-            col_t2.metric("🤝 Handed to Head Sir", f"₹ {handed_over:,.2f}", help="Total cash given to admin.")
-            col_t3.metric("💵 Net Cash in Hand", f"₹ {net_pending:,.2f}", delta=f"-₹{total_ret:,.0f} Returned", delta_color="normal")
-            
-            st.divider()
-            
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown("##### ✅ Handed Over to Head Sir")
-                handed_df = dash_df[dash_df['Handover_Status'] == 'Handed Over']
-                if not handed_df.empty:
-                    st.dataframe(handed_df[['Date', 'Name', 'Class', 'Amount', 'Collection Type']], hide_index=True)
-                else:
-                    st.info("No funds handed over yet.")
-            
-            with c2:
-                st.markdown("##### ⏳ Cash in Hand Ledger")
-                pend_df = dash_df[dash_df['Handover_Status'] == 'Pending']
-                if not pend_df.empty:
-                    st.dataframe(pend_df[['Date', 'Name', 'Class', 'Amount', 'Collection Type']], hide_index=True)
-                else:
-                    st.success("All clear! No pending cash.")
-        else:
-            st.info(f"No data collected by you ({st.session_state.user_name}) yet.")
-
-    # ----------------------------------------------------
-    # HEAD TEACHER (ADMIN) DASHBOARD VIEW
-    # ----------------------------------------------------
+def render_header():
+    if os.path.exists("logo.png"):
+        with open("logo.png", "rb") as f:
+            img_b64 = base64.b64encode(f.read()).decode()
+        st.markdown(f"""
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e0e0e0; padding-bottom: 15px; margin-bottom: 20px;">
+            <img src="data:image/png;base64,{img_b64}" style="max-width: 80px; max-height: 80px; object-fit: contain;">
+            <div style="text-align: right;">
+                <h2 class="header-school-name" style="margin: 0; color: #007bff; font-weight: 900; font-size: 24px; line-height: 1.1;">BHAGYABANTAPUR</h2>
+                <h2 class="header-school-name" style="margin: 0; color: #007bff; font-weight: 900; font-size: 20px; line-height: 1.1;">PRIMARY SCHOOL</h2>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     else:
-        st.caption("Showing **All School Transactions** (Head Teacher View)")
-            
-        if not dash_df.empty and 'Amount' in dash_df.columns:
-            dash_df['Amount'] = pd.to_numeric(dash_df['Amount'], errors='coerce').fillna(0)
-            
-            # Accurate Admin Accounting
-            admin_collected = dash_df[dash_df['Teacher_Involved'] == 'SUKHAMAY KISKU']['Amount'].sum()
-            teachers_handed_over = dash_df[dash_df['Handover_Status'] == 'Handed Over']['Amount'].sum()
-            admin_cash = admin_collected + teachers_handed_over
-            total_pending = dash_df[dash_df['Handover_Status'] == 'Pending']['Amount'].sum()
-            total_school_net = dash_df['Amount'].sum()
-            total_returns = abs(dash_df[dash_df['Amount'] < 0]['Amount'].sum())
-            
-            col_dash1, col_dash2, col_dash3 = st.columns(3)
-            col_dash1.metric("💰 Net School Funds", f"₹ {total_school_net:,.2f}", delta=f"-₹{total_returns:,.0f} Total Returned", delta_color="normal")
-            col_dash2.metric("🏦 Admin Cash in Hand", f"₹ {admin_cash:,.2f}")
-            col_dash3.metric("💵 Pending with Teachers", f"₹ {total_pending:,.2f}")
-    
-            st.divider()
-            
-            st.markdown("##### 👨‍🏫 Teacher Handover Ledger")
-            def calc_teacher_stats(group):
-                gross = group[group['Amount'] > 0]['Amount'].sum()
-                ret = abs(group[group['Amount'] < 0]['Amount'].sum())
-                handed = group[group['Handover_Status'].isin(['Handed Over', 'Settled'])]['Amount'].sum()
-                pend = group[group['Handover_Status'] == 'Pending']['Amount'].sum()
-                return pd.Series({'Gross Collected': gross, 'Total Returned': ret, 'Handed Over to HT': handed, 'Net Pending Cash': pend})
-    
-            teacher_summary = dash_df.groupby('Teacher_Involved').apply(calc_teacher_stats).reset_index()
-            st.dataframe(teacher_summary, hide_index=True, use_container_width=True)
-            
-            st.markdown("##### 📜 Detailed Handover Log")
-            handed_over_df = dash_df[dash_df['Handover_Status'] == 'Handed Over']
-            if not handed_over_df.empty:
-                st.dataframe(handed_over_df[['Date', 'Teacher_Involved', 'Name', 'Class', 'Amount', 'Collection Type']], hide_index=True)
-            else:
-                st.info("No cash has been handed over by teachers yet.")
-                
-            st.divider()
-            st.markdown("##### 📈 Net Funds by Class & Collection Type")
-            if 'Collection Type' in dash_df.columns:
-                class_totals = dash_df.groupby(['Class', 'Collection Type'])['Amount'].sum().reset_index()
-                fig = px.bar(
-                    class_totals, 
-                    x='Class', 
-                    y='Amount', 
-                    color='Collection Type',
-                    text_auto=True,
-                    barmode='group',
-                    color_discrete_sequence=px.colors.qualitative.Set2
-                )
-                fig.update_layout(xaxis_title="Class", yaxis_title="Net Amount (₹)")
-            else:
-                class_totals = dash_df.groupby('Class')['Amount'].sum().reset_index()
-                fig = px.bar(
-                    class_totals, 
-                    x='Class', 
-                    y='Amount', 
-                    text_auto=True,
-                    color='Amount',
-                    color_continuous_scale='Viridis'
-                )
-                fig.update_layout(xaxis_title="Class", yaxis_title="Net Amount (₹)", showlegend=False)
-                
-            st.plotly_chart(fig, use_container_width=True)
-            
-        else:
-            st.info("No data available yet. Transactions will appear here once recorded.")
+        st.markdown(f"""
+        <div style="border-bottom: 2px solid #e0e0e0; padding-bottom: 15px; margin-bottom: 20px; text-align: center;">
+            <h2 style="margin: 0; color: #007bff; font-weight: 900; font-size: 24px;">BHAGYABANTAPUR PRIMARY SCHOOL</h2>
+        </div>
+        """, unsafe_allow_html=True)
 
-# ==========================================
-# TAB 3: ADMIN HANDOVER MANAGER (ADMIN ONLY)
-# ==========================================
-if st.session_state.user_role == "admin":
-    with tab3:
-        st.subheader("🤝 Cash Handover Manager")
-        st.markdown("Select an assistant teacher to securely receive and verify their pending cash.")
-        
-        if not df_fees.empty and 'Handover_Status' in df_fees.columns:
-            handover_col_idx = df_fees.columns.get_loc('Handover_Status') + 1
-            
-            df_fees['Amount'] = pd.to_numeric(df_fees['Amount'], errors='coerce').fillna(0)
-            pending_df = df_fees[df_fees['Handover_Status'] == 'Pending'].copy()
-            
-            if not pending_df.empty:
-                teachers_with_cash = pending_df['Teacher_Involved'].unique()
-                selected_teacher = st.selectbox("Select Teacher to receive cash from:", teachers_with_cash)
-                
-                teacher_pending = pending_df[pending_df['Teacher_Involved'] == selected_teacher].copy()
-                teacher_pending.insert(0, 'Receive', False)
-                
-                total_owed = teacher_pending['Amount'].sum()
-                st.markdown(f"### Net Pending Cash with {selected_teacher}: **₹ {total_owed:,.2f}**")
-                st.caption("Check the boxes next to the transactions (both collections and returns) you are processing, then click Confirm.")
-                
-                edited_df = st.data_editor(
-                    teacher_pending[['Receive', 'Date', 'Name', 'Class', 'Amount', 'Collection Type', '_Row_Num']],
-                    hide_index=True,
-                    disabled=['Date', 'Name', 'Class', 'Amount', 'Collection Type', '_Row_Num'],
-                    column_config={'_Row_Num': None}
-                )
-                
-                selected_rows = edited_df[edited_df['Receive'] == True]
-                
-                if not selected_rows.empty:
-                    receiving_amount = selected_rows['Amount'].sum()
-                    st.success(f"Ready to reconcile **₹ {receiving_amount:,.2f}** ({len(selected_rows)} transactions).")
-                    
-                    if st.button("✅ Confirm Receipt of Cash", type="primary"):
-                        with st.spinner(f"Verifying receipt of cash from {selected_teacher}..."):
-                            try:
-                                gc_write = get_gspread_client()
-                                ws_fees_write = gc_write.open("SCH_Exam_Fees").worksheet("Sheet1")
-                                
-                                for r_num in selected_rows['_Row_Num']:
-                                    ws_fees_write.update_cell(r_num, handover_col_idx, 'Handed Over')
-                                
-                                load_data.clear()
-                                st.success("Cash securely reconciled and recorded!")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Failed to update Google Sheets: {e}")
+# -------------------------------
+# EXECUTE MAIN APPLICATION
+# -------------------------------
+render_header()
+inject_security_css(st.session_state.user_name)
+
+# Notice Header
+nt = get_notice()
+if nt.strip(): st.info(f"📢 NOTICE: {nt}")
+
+# -------------------------------
+# TEACHER VIEW
+# -------------------------------
+if st.session_state.user_role == "teacher":
+    t_name_select = st.session_state.user_name
+    hd = get_local_csv('holidays.csv')
+    is_h = not hd[hd['Date'] == curr_date_str].empty if not hd.empty else False
+    
+    if is_h or now.strftime('%A') == 'Sunday': 
+        st.warning("🏖️ School is closed today.")
+    else:
+        at_tabs = st.tabs(["🍱 MDM Entry", "⏳ Routine", "📃 Leave Status", "📅 Holidays"])
+
+        with at_tabs[0]: 
+            ml = fetch_sheet_data('mdm_log')
+            already_sub = False
+            if not ml.empty and 'Date' in ml.columns and 'Teacher' in ml.columns:
+                if not ml[(ml['Date'].astype(str).str.strip() == curr_date_str) & (ml['Teacher'].astype(str).str.strip() == t_name_select)].empty:
+                    already_sub = True
+
+            if already_sub: 
+                st.success("✅ MDM Submitted for today.")
+                st.info("💡 **Note:** If any student was missed during this submission, please send them to Head Sir to complete their MDM Entry.")
             else:
-                st.success("🎉 All clear! There is no pending cash to receive from any assistant teachers.")
-        else:
-            st.info("System is waiting for 'Handover_Status' configuration or there is no data available.")
+                st.subheader("Student MDM Entry")
+                rout = get_local_csv('routine.csv')
+                mc = TEACHER_INITIALS.get(t_name_select, t_name_select)
+                tdy = now.strftime('%A')
+                tc, ts, is_sub, ab_t = None, None, False, ""
+
+                ll = fetch_sheet_data('teacher_leave')
+                if not ll.empty and 'Date' in columns:
+                    for _, r in ll[ll['Date'] == curr_date_str].iterrows():
+                        lg = str(r.get('Detailed_Sub_Log', ''))
+                        if f"11:15: {t_name_select}" in lg or f"11:15 AM: {t_name_select}" in lg:
+                            is_sub = True; ab_t = r['Teacher']
+                            ac = TEACHER_INITIALS.get(ab_t, "")
+                            ar = rout[(rout['Teacher'] == ac) & (rout['Day'] == tdy)].copy()
+                            ar['Start_Obj'] = ar['Start_Time'].apply(parse_time_safe)
+                            match = ar[ar['Start_Obj'] == time(11, 15)]
+                            if not match.empty: tc, ts = match.iloc[0]['Class'], match.iloc[0].get('Section', 'A')
+                            break
+                if not tc:
+                    ms = rout[(rout['Teacher'] == mc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()
+                    if not ms.empty:
+                        ms['Start_Obj'] = ms['Start_Time'].apply(parse_time_safe)
+                        tr = ms[ms['Start_Obj'] == time(11, 15)]
+                        if not tr.empty: tc, ts = tr.iloc[0]['Class'], tr.iloc[0].get('Section', 'A')
+
+                if tc:
+                    if is_sub: st.info(f"🔄 **SUB:** Covering for **{ab_t}** ({tc} - {ts})")
+                    else: st.info(f"📌 Assigned **11:15 AM** class: **{tc} - {ts}**")
+                    sm = fetch_sheet_data('students_master')
+
+                    if not sm.empty:
+                        if 'Section' not in sm.columns: sm['Section'] = 'A'
+                        if tc == 'CLASS PP': ros = sm[(sm['Class'].isin(['CLASS PP', 'CLASS LPP'])) & (sm['Section'] == ts)].copy()
+                        else: ros = sm[(sm['Class'] == tc) & (sm['Section'] == ts)].copy()
+                        
+                        if not ros.empty:
+                            if 'scanned_keys' not in st.session_state: st.session_state.scanned_keys = []
+                            
+                            st.write("📸 **Scan ID Cards (or tick manually below):**")
+                            qv = qrcode_scanner(key='at_qr')
+                            
+                            if st.session_state.scan_msg:
+                                st.success(st.session_state.scan_msg)
+                                st.session_state.scan_msg = None
+
+                            if qv:
+                                should_rerun = False
+                                try:
+                                    qd = {p.split(':')[0].strip(): p.split(':')[1].strip() for p in qv.split('|') if ':' in p}
+                                    sr, sn = str(qd.get('Roll', '')), str(qd.get('Name', ''))
+                                    if sr and sn:
+                                        match_df = ros[(ros['Roll'].astype(str).str.strip() == sr) & (ros['Name'].astype(str).str.strip() == sn)]
+                                        if not match_df.empty:
+                                            ar, an = match_df.iloc[0]['Roll'], match_df.iloc[0]['Name']
+                                            sk = f"{ar}_{an}"
+                                            if sk not in st.session_state.scanned_keys: 
+                                                st.session_state.scanned_keys.append(sk)
+                                                st.session_state[f"mdm_{ar}_{an}"] = True 
+                                                st.session_state.scan_msg = f"✅ Scanned Successfully: {an}"
+                                                should_rerun = True
+                                        else: st.error(f"❌ MISMATCH: {sn} is NOT in {tc} {ts}!")
+                                except Exception: st.warning("⚠️ Invalid ID Card.")
+                                if should_rerun: st.rerun()
+
+                            ros['Scan_Key'] = ros['Roll'].astype(str) + "_" + ros['Name'].astype(str)
+                            if 'Thumb_URL' not in ros.columns: ros['Thumb_URL'] = ""
+                            with st.spinner("Loading profiles..."):
+                                with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe: ros['Photo'] = list(exe.map(get_secure_photo_uri, ros['Thumb_URL'].tolist()))
+
+                            st.markdown("### Roster Selection")
+                            cp = st.empty()
+                            st.markdown('<div class="roster-container">', unsafe_allow_html=True)
+                            sel_mdm = []
+                            for _, r in ros.iterrows():
+                                c1, c2, c3 = st.columns([1, 4, 2])
+                                with c1: st.image(r['Photo'], width=85) 
+                                with c2: st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} | {r['Class']}</span></div>", unsafe_allow_html=True)
+                                with c3:
+                                    isc = r['Scan_Key'] in st.session_state.scanned_keys
+                                    if st.checkbox("Ate MDM", value=isc, key=f"mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                                st.divider()
+                            
+                            cp.markdown(f"<div class='floating-counter'>✅ Selected: {len(sel_mdm)}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<h3 style='text-align:center;'>✅ Total Selected: {len(sel_mdm)}</h3>", unsafe_allow_html=True)
+                            if st.button("Submit MDM Data"):
+                                if sel_mdm:
+                                    nr = [{'Date': curr_date_str, 'Teacher': t_name_select, 'Class': x['Class'], 'Section': ts, 'Roll': x['Roll'], 'Name': x['Name'], 'Time': now.strftime("%H:%M")} for x in sel_mdm]
+                                    append_sheet_df('mdm_log', pd.DataFrame(nr))
+                                    st.session_state.scanned_keys = []; st.success(f"Submitted {len(nr)} to Cloud DB!"); st.rerun()
+                                else: st.warning("No students selected.")
+                            st.markdown('</div>', unsafe_allow_html=True)
+                            
+                            att = fetch_sheet_data('student_attendance_master')
+                            if not att.empty and 'Date' in att.columns:
+                                ta = att[(att['Date'].astype(str) == curr_date_str) & (att['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else att['Class'] == tc) & (att['Section'] == ts) & (att['Status'] == True)]
+                                if not ta.empty: st.markdown(f"<div class='att-badge att-done'>✅ Attendance: {len(ta)}</div>", unsafe_allow_html=True)
+                                else: st.markdown("<div class='att-badge att-wait'>⏳ Attendance: Wait</div>", unsafe_allow_html=True)
+                        else: st.warning("No students found.")
+                else: st.warning("⚠️ No class at 11:15 AM. MDM Entry disabled.")
+
+        with at_tabs[1]:
+            st.subheader("Live Class Status")
+            ll = fetch_sheet_data('teacher_leave')
+            rout = get_local_csv('routine.csv')
+            ol, ld = False, None
+            if not ll.empty and 'Date' in ll.columns:
+                mtl = ll[(ll['Date'] == curr_date_str) & (ll['Teacher'] == t_name_select)]
+                if not mtl.empty: ol, ld = True, mtl.iloc[0]
+            
+            if ol:
+                st.warning(f"🏖️ You are marked **{ld['Type']}** today.")
+                rs = str(ld.get('Detailed_Sub_Log', ''))
+                if rs and rs != "None":
+                    st.markdown("### 🤝 Substitution Plan")
+                    for a in rs.split(" | "):
+                        p = a.split(": ")
+                        if len(p) == 2: st.markdown(f"<div class='sub-card'><b>{p[0].strip()}</b> covered by <b>{p[1].strip()}</b></div>", unsafe_allow_html=True)
+                else: st.info("No specific substitutes assigned yet.")
+            else:
+                mc = TEACHER_INITIALS.get(t_name_select, t_name_select)
+                tdy = now.strftime('%A')
+                ms = rout[(rout['Teacher'] == mc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()
+                if not ms.empty: ms['Is_Sub'] = False
+                sd = []
+                if not ll.empty:
+                    for _, r in ll[ll['Date'] == curr_date_str].iterrows():
+                        if t_name_select in str(r['Detailed_Sub_Log']):
+                            ac = TEACHER_INITIALS.get(r['Teacher'], "")
+                            for a in str(r['Detailed_Sub_Log']).split(" | "):
+                                if f": {t_name_select}" in a:
+                                    slt = a.split(": ")[0].strip()
+                                    oc = rout[(rout['Teacher'] == ac) & (rout['Day'] == tdy) & (rout['Start_Time'] == slt)]
+                                    if not oc.empty:
+                                        rx = oc.iloc[0]
+                                        sd.append({'Start_Time': rx['Start_Time'], 'End_Time': rx['End_Time'], 'Class': rx['Class'], 'Section': rx.get('Section', 'A'), 'Subject': f"🔄 Sub for {r['Teacher']}", 'Teacher': mc, 'Day': tdy, 'Is_Sub': True})
+                
+                if sd: ms = pd.concat([ms, pd.DataFrame(sd)], ignore_index=True)
+                if not ms.empty:
+                    ms['Start_Obj'] = ms['Start_Time'].apply(parse_time_safe)
+                    ms = ms.dropna(subset=['Start_Obj']).sort_values('Start_Obj')
+                    cc = None
+                    for _, r in ms.iterrows():
+                        st_time, et = r['Start_Obj'], parse_time_safe(r['End_Time'])
+                        if st_time and et and st_time <= curr_time <= et: cc = r; break
+                    if cc is not None:
+                        sty = "border-left: 5px solid #ffc107; background-color:#fff3cd;" if cc['Is_Sub'] else "border-left: 5px solid #28a745;"
+                        px = "🔄 SUB: " if cc['Is_Sub'] else "🔴 NOW: "
+                        st.markdown(f"""<div class="routine-card" style="{sty}"><h3 style="margin:0; color:#333;">{px}{cc['Class']} - {cc.get('Section','')}</h3><p>{cc['Subject']}</p><p style="color:gray;">Ends {cc['End_Time']}</p></div>""", unsafe_allow_html=True)
+                    else: st.info("☕ No class ongoing.")
+                    st.divider()
+                    def hls(row): return ['background-color: #fff3cd'] * len(row) if str(row['Subject']).startswith('🔄') else [''] * len(row)
+                    st.dataframe(ms[['Start_Time', 'End_Time', 'Class', 'Section', 'Subject']].style.apply(hls, axis=1), hide_index=True)
+                else: st.info("No classes today.")
+
+        with at_tabs[2]:
+            st.subheader("My Leave Record")
+            ll = fetch_sheet_data('teacher_leave')
+            if not ll.empty and 'Teacher' in ll.columns:
+                ml = ll[ll['Teacher'] == t_name_select]
+                c1, c2, c3 = st.columns(3)
+                c1.metric("CL Remaining", f"{14 - len(ml[ml['Type'] == 'CL'])}")
+                c2.metric("SL Taken", f"{len(ml[ml['Type'] == 'SL'])}")
+                c3.metric("Commuted", f"{len(ml[ml['Type'] == 'Commuted Leave'])}")
+                st.dataframe(ml[~ml['Type'].isin(['Half Day', 'On Duty'])][['Date', 'Type', 'Substitute']], hide_index=True)
+
+        with at_tabs[3]:
+            st.subheader("🗓️ School Holiday List")
+            hd = get_local_csv('holidays.csv')
+            if not hd.empty: st.table(hd)
+            else: st.info("No holiday data available.")
+
+# -------------------------------
+# ADMIN VIEW
+# -------------------------------
+elif st.session_state.user_role == "admin":
+    tabs = st.tabs(["📊 Summary", "🍱 MDM Entry", "📝 Attend", "⏳ Live", "👨‍🏫 Leave", "📢 Staff Notice", "📅 Hols"])
+    
+    with tabs[0]: 
+        st.subheader(f"MDM Status: {curr_date_str}")
+        ml = fetch_sheet_data('mdm_log')
+        al = fetch_sheet_data('student_attendance_master') 
+        c1, c2 = st.columns([2, 1])
+        vd = c1.date_input("Select Date", datetime.now()).strftime("%d-%m-%Y")
+        sa = c2.checkbox("Show All")
+        fm = ml if sa else ml[ml['Date'].astype(str) == vd].copy() if not ml.empty else pd.DataFrame()
+        fa = al[al['Status'] == True] if sa else al[(al['Date'].astype(str) == vd) & (al['Status'] == True)].copy() if not al.empty else pd.DataFrame()
+        cf = "All"
+        if not fm.empty or not fa.empty:
+            mc = fm.groupby(['Class', 'Section']).size().reset_index(name='MDM Entry') if not fm.empty else pd.DataFrame(columns=['Class', 'Section', 'MDM Entry'])
+            ac = fa.groupby(['Class', 'Section']).size().reset_index(name='Attendance') if not fa.empty else pd.DataFrame(columns=['Class', 'Section', 'Attendance'])
+            sd = pd.merge(ac, mc, on=['Class', 'Section'], how='outer').fillna(0).infer_objects(copy=False)
+            sd['Attendance'], sd['MDM Entry'] = sd['Attendance'].astype(int), sd['MDM Entry'].astype(int)
+            sd.sort_values(by=['Class', 'Section'], inplace=True)
+            if not sd.empty: sd = pd.concat([sd, pd.DataFrame([{'Class': 'TOTAL', 'Section': '', 'Attendance': sd['Attendance'].sum(), 'MDM Entry': sd['MDM Entry'].sum()}])], ignore_index=True)
+            st.markdown(f"##### 🏫 Breakdown for {vd if not sa else 'All Time'}")
+            st.dataframe(sd, hide_index=True, use_container_width=True)
+            st.markdown("##### 📄 Detailed List")
+            if not fm.empty:
+                fm['Class_Sec'] = fm['Class'].astype(str) + " " + fm['Section'].astype(str)
+                cf = st.selectbox("Filter Class", ["All"] + sorted(fm['Class_Sec'].unique()))
+                ddf = fm[fm['Class_Sec'] == cf] if cf != "All" else fm
+                st.dataframe(ddf[['Date', 'Class', 'Section', 'Roll', 'Name']], hide_index=True)
+        else: st.info("No data available for this date.")
+        st.divider()
+        if st.button(f"🗑️ Clear Data ({cf})"):
+            tm = fetch_sheet_data('mdm_log')
+            if not tm.empty:
+                if cf == "All": tm = tm[tm['Date'].astype(str) != curr_date_str]
+                else: tm = tm[~((tm['Date'].astype(str) == curr_date_str) & ((tm['Class'].astype(str) + " " + tm['Section'].astype(str)) == cf))]
+                overwrite_sheet_df('mdm_log', tm); st.success("Cleared!"); st.rerun()
+
+    with tabs[1]:
+        st.subheader("Admin MDM Entry (Late/Missed)")
+        sc_mdm = st.selectbox("Mark MDM for Class", ATTENDANCE_OPTIONS, key='adm_mdm_sel')
+        if sc_mdm != "Select Class...":
+            tc, ts = sc_mdm.rsplit(' ', 1)
+            sm = fetch_sheet_data('students_master')
+            ml = fetch_sheet_data('mdm_log')
+            if not sm.empty:
+                if 'Section' not in sm.columns: sm['Section'] = 'A'
+                if tc == 'CLASS PP': ros = sm[(sm['Class'].isin(['CLASS PP', 'CLASS LPP'])) & (sm['Section'] == ts)].copy()
+                else: ros = sm[(sm['Class'] == tc) & (sm['Section'] == ts)].copy()
+                
+                if not ros.empty:
+                    me = ml[(ml['Date'].astype(str) == curr_date_str) & (ml['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else ml['Class'] == tc) & (ml['Section'] == ts)]['Roll'].astype(str).tolist() if not ml.empty else []
+                    ros['MDM (Ate)'] = ros['Roll'].astype(str).isin(me)
+                    
+                    st.write("📸 **Scan Missed ID Cards (or tick manually below):**")
+                    qv = qrcode_scanner(key='adm_mdm_qr')
+                    
+                    if st.session_state.admin_scan_msg:
+                        st.success(st.session_state.admin_scan_msg)
+                        st.session_state.admin_scan_msg = None
+                        
+                    if qv:
+                        should_rerun = False
+                        try:
+                            qd = {p.split(':')[0].strip(): p.split(':')[1].strip() for p in qv.split('|') if ':' in p}
+                            sr, sn = str(qd.get('Roll', '')), str(qd.get('Name', ''))
+                            if sr and sn:
+                                match_df = ros[(ros['Roll'].astype(str).str.strip() == sr) & (ros['Name'].astype(str).str.strip() == sn)]
+                                if not match_df.empty:
+                                    ar, an = match_df.iloc[0]['Roll'], match_df.iloc[0]['Name']
+                                    if str(ar) in me:
+                                        st.warning(f"⚠️ {an} is already marked for MDM today!")
+                                    else:
+                                        sk = f"{ar}_{an}"
+                                        if sk not in st.session_state.admin_scanned_keys: 
+                                            st.session_state.admin_scanned_keys.append(sk)
+                                            st.session_state[f"adm_mdm_{ar}_{an}"] = True 
+                                            st.session_state.admin_scan_msg = f"✅ Scanned Successfully: {an}"
+                                            should_rerun = True
+                                else: st.error(f"❌ MISMATCH: {sn} is NOT in {tc} {ts}!")
+                        except Exception: st.warning("⚠️ Invalid ID Card.")
+                        if should_rerun: st.rerun()
+
+                    ros['Scan_Key'] = ros['Roll'].astype(str) + "_" + ros['Name'].astype(str)
+                    if 'Thumb_URL' not in ros.columns: ros['Thumb_URL'] = ""
+                    with st.spinner("Loading profiles..."):
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe: ros['Photo'] = list(exe.map(get_secure_photo_uri, ros['Thumb_URL'].tolist()))
+
+                    st.markdown("### Roster Selection")
+                    cp = st.empty()
+                    st.markdown('<div class="roster-container">', unsafe_allow_html=True)
+                    sel_mdm, alc = [], 0
+                    for _, r in ros.iterrows():
+                        c1, c2, c3 = st.columns([1, 4, 2])
+                        with c1: st.image(r['Photo'], width=85) 
+                        with c2: st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} | {r['Class']}</span></div>", unsafe_allow_html=True)
+                        with c3:
+                            if r['MDM (Ate)']:
+                                st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
+                                alc += 1
+                            else:
+                                isc = r['Scan_Key'] in st.session_state.admin_scanned_keys
+                                if st.checkbox("Ate MDM", value=isc, key=f"adm_mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                        st.divider()
+                    
+                    cp.markdown(f"<div class='floating-counter'>✅ Selected: {len(sel_mdm)} | Done: {alc}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<h3 style='text-align:center;'>✅ New Selected: {len(sel_mdm)}</h3>", unsafe_allow_html=True)
+                    if st.button("Submit Admin MDM Data"):
+                        if sel_mdm:
+                            nr = [{'Date': curr_date_str, 'Teacher': f"{st.session_state.user_name} (Admin)", 'Class': x['Class'], 'Section': ts, 'Roll': x['Roll'], 'Name': x['Name'], 'Time': now.strftime("%H:%M")} for x in sel_mdm]
+                            append_sheet_df('mdm_log', pd.DataFrame(nr))
+                            st.session_state.admin_scanned_keys = []; st.success(f"Added {len(nr)} late entries to Cloud DB!"); st.rerun()
+                        else: st.warning("No new students selected.")
+                    st.markdown('</div>', unsafe_allow_html=True)
+                else: st.warning("No students found.")
+
+    with tabs[2]:
+        st.subheader("Student Attendance")
+        sc = st.selectbox("Mark Attendance", ATTENDANCE_OPTIONS, key='ht_att')
+        if sc != "Select Class...":
+            tc, ts = sc.rsplit(' ', 1)
+            sm = fetch_sheet_data('students_master')
+            ml = fetch_sheet_data('mdm_log')
+            if not sm.empty:
+                if 'Section' not in sm.columns: sm['Section'] = 'A'
+                if tc == 'CLASS PP': ros = sm[(sm['Class'].isin(['CLASS PP', 'CLASS LPP'])) & (sm['Section'] == ts)].copy()
+                else: ros = sm[(sm['Class'] == tc) & (sm['Section'] == ts)].copy()
+                
+                if not ros.empty:
+                    me = ml[(ml['Date'].astype(str) == curr_date_str) & (ml['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else ml['Class'] == tc) & (ml['Section'] == ts)]['Roll'].astype(str).tolist() if not ml.empty else []
+                    ros['MDM (Ate)'] = ros['Roll'].astype(str).isin(me)
+                    if 'Thumb_URL' not in ros.columns: ros['Thumb_URL'] = ""
+                    with st.spinner("Loading profiles..."):
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe: ros['Photo'] = list(exe.map(get_secure_photo_uri, ros['Thumb_URL'].tolist()))
+                    st.markdown("### Class Roster")
+                    cp = st.empty()
+                    st.markdown('<div class="roster-container">', unsafe_allow_html=True)
+                    ad, pc = [], 0
+                    for _, r in ros.iterrows():
+                        c1, c2, c3 = st.columns([1, 4, 2.5])
+                        with c1: st.image(r['Photo'], width=85) 
+                        with c2: st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} | {r['Class']}</span></div>", unsafe_allow_html=True)
+                        with c3:
+                            ip = st.checkbox("Present", value=True, key=f"att_{r['Roll']}_{r['Name']}")
+                            if ip: pc += 1
+                            st.checkbox("MDM Entry", value=bool(r['MDM (Ate)']), disabled=True, key=f"mdm_ro_{r['Roll']}_{r['Name']}")
+                            ad.append({'Date': curr_date_str, 'Class': r['Class'], 'Section': ts, 'Roll': r['Roll'], 'Name': r['Name'], 'Status': ip})
+                        st.divider()
+                    cp.markdown(f"<div class='floating-counter'>✅ Present: {pc}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<h3 style='text-align:center;'>✅ Total Present: {pc}</h3>", unsafe_allow_html=True)
+                    if st.button(f"Save Attendance"):
+                        append_sheet_df('student_attendance_master', pd.DataFrame(ad)); st.success("Saved."); st.rerun()
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+                    ac = fetch_sheet_data('student_attendance_master')
+                    is_sub = not ac[(ac['Date'].astype(str) == curr_date_str) & (ac['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else ac['Class'] == tc) & (ac['Section'] == ts)].empty if not ac.empty else False
+                    if is_sub:
+                        st.info(f"🔒 Attendance is submitted.")
+                        if st.button("🗑️ Clear Today's Attendance"):
+                            ta = ac[~((ac['Date'].astype(str) == curr_date_str) & (ac['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else ac['Class'] == tc) & (ac['Section'] == ts))]
+                            overwrite_sheet_df('student_attendance_master', ta); st.rerun()
+
+        st.divider()
+        st.subheader("📊 Daily Report")
+        al = fetch_sheet_data('student_attendance_master')
+        avd = st.date_input("Report Date", datetime.now(), key="att_d").strftime("%d-%m-%Y")
+        if not al.empty:
+            ta = al[(al['Date'].astype(str) == avd) & (al['Status'] == True)]
+            if not ta.empty:
+                p = len(ta[ta['Class'].isin(['CLASS PP', 'CLASS LPP'])])
+                i4 = len(ta[ta['Class'].isin(['CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV'])])
+                v = len(ta[ta['Class'] == 'CLASS V'])
+                st.markdown(f"<table class='report-table'><tr><th>Class PP</th><th>I-IV</th><th>Class V</th><th>TOTAL</th></tr><tr><td>{p}</td><td>{i4}</td><td>{v}</td><td><b>{p+i4+v}</b></td></tr></table>", unsafe_allow_html=True)
+            else: st.info(f"No attendance for {avd}.")
+
+    with tabs[3]: 
+        st.subheader(f"🏫 Routine Status")
+        rout = get_local_csv('routine.csv')
+        tdy = now.strftime('%A')
+        if not rout.empty:
+            tr = rout[rout['Day'] == tdy].copy()
+            ll = fetch_sheet_data('teacher_leave')
+            if not ll.empty and 'Date' in ll.columns:
+                for _, r in ll[ll['Date'].astype(str) == curr_date_str].iterrows():
+                    ac = TEACHER_INITIALS.get(r['Teacher'], r['Teacher'])
+                    for a in str(r.get('Detailed_Sub_Log', '')).split(" | "):
+                        if ": " in a:
+                            slt, sub = a.split(": ")
+                            tr.loc[(tr['Teacher'] == ac) & (tr['Start_Time'].str.strip() == slt.strip()), 'Teacher'] = f"{TEACHER_INITIALS.get(sub.strip(), sub.strip())} (Sub)"
+            tr['Start_Obj'] = tr['Start_Time'].apply(parse_time_safe)
+            tr['End_Obj'] = tr['End_Time'].apply(parse_time_safe)
+            tr = tr.dropna(subset=['Start_Obj', 'End_Obj']).sort_values('Start_Obj')
+            lc = [r for _, r in tr.iterrows() if r['Start_Obj'] <= curr_time <= r['End_Obj']]
+            st.markdown("### 🔴 LIVE NOW")
+            if lc:
+                cls = st.columns(2)
+                for i, r in enumerate(lc):
+                    is_sub = "(Sub)" in r['Teacher']
+                    tn = f"🔄 {INV_TEACHER_INITIALS.get(r['Teacher'].replace(' (Sub)', ''), r['Teacher'])} (Sub)" if is_sub else f"👨‍🏫 {INV_TEACHER_INITIALS.get(r['Teacher'], r['Teacher'])}"
+                    cls[i%2].markdown(f"<div class='routine-card' style='border-left: 5px solid {'#ffc107' if is_sub else '#dc3545'};'><h4 style='margin:0;'>{r['Class']} {r.get('Section', '')}</h4><p style='margin:0; font-weight:bold;'>{tn}</p><p style='margin:0; font-size:12px; color:gray;'>{r['Subject']} | Ends: {r['End_Time']}</p></div>", unsafe_allow_html=True)
+            else: st.info("☕ No classes ongoing.")
+            st.dataframe(tr[['Start_Time', 'End_Time', 'Class', 'Subject', 'Teacher']], hide_index=True)
+
+    with tabs[4]: 
+        st.subheader("Substitution Manager")
+        abt = st.selectbox("Absent Teacher", ["Select..."] + TEACHER_LIST)
+        if abt != "Select...":
+            lt = st.selectbox("Leave Type", ["CL", "SL", "Commuted Leave", "Half Day", "On Duty"])
+            ism = st.checkbox("Mark for Multiple Days?", value=True) if lt == "Commuted Leave" else False
+            if ism:
+                c1, c2 = st.columns(2)
+                sd = c1.date_input("Start Date", datetime.now())
+                ed = c2.date_input("End Date", sd)
+                if st.button(f"Save {lt} (Multi-Day)"):
+                    if (ed - sd).days < 0: st.error("❌ End Date cannot be before Start Date!")
+                    else:
+                        ll = fetch_sheet_data('teacher_leave')
+                        nl = []
+                        for i in range((ed - sd).days + 1):
+                            ds = (sd + timedelta(days=i)).strftime("%d-%m-%Y")
+                            if ll.empty or ll[(ll['Date'].astype(str) == ds) & (ll['Teacher'] == abt)].empty:
+                                nl.append({"Date": ds, "Teacher": abt, "Type": lt, "Substitute": "None", "Detailed_Sub_Log": "None"})
+                        if nl: append_sheet_df('teacher_leave', pd.DataFrame(nl)); st.success("✅ Saved!"); st.rerun()
+                        else: st.warning("Already recorded.")
+            else:
+                sds = st.date_input("Date", datetime.now()).strftime("%d-%m-%Y")
+                tdy = datetime.strptime(sds, "%d-%m-%Y").strftime('%A')
+                rout = get_local_csv('routine.csv')
+                tc = TEACHER_INITIALS.get(abt, abt)
+                ms = rout[(rout['Teacher'] == tc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()
+                ll = fetch_sheet_data('teacher_leave')
+                el = ll[(ll['Date'].astype(str) == sds) & (ll['Teacher'] == abt)] if not ll.empty else pd.DataFrame()
+                if not el.empty:
+                    st.success(f"✅ Leave Submitted: **{abt}** on **{sds}**.")
+                    if st.button("🗑️ Undo"): overwrite_sheet_df('teacher_leave', ll.drop(el.index)); st.rerun()
+                else:
+                    bs = {}
+                    if not ll.empty:
+                        for _, r in ll[ll['Date'].astype(str) == sds].iterrows():
+                            for a in str(r.get('Detailed_Sub_Log', '')).split(" | "):
+                                if ": " in a: slot, sub = a.split(": "); bs.setdefault(slot, []).append(sub.strip())
+                    if not ms.empty:
+                        assigns = []
+                        for idx, r in ms.iterrows():
+                            slot = str(r['Start_Time']).strip()
+                            bc = rout[(rout['Day'] == tdy) & (rout['Start_Time'] == slot)]['Teacher'].tolist() if not rout.empty else []
+                            fo, bo = [], []
+                            for tn in TEACHER_LIST:
+                                if tn == abt: continue 
+                                tc2 = TEACHER_INITIALS.get(tn, "")
+                                if slot in bs and tn in bs[slot]: bo.append(f"⛔ {tn} (Already Subbing)")
+                                elif tc2 not in bc: fo.append(f"✅ {tn} (Free)")
+                                else: bo.append(f"⚠️ {tn} (Busy)")
+                            st.markdown(f"<div class='routine-card'><b>{slot}</b> | {r['Class']}</div>", unsafe_allow_html=True)
+                            ch = st.selectbox(f"Sub for {slot}", ["Select..."] + fo + bo, key=f"s_{idx}")
+                            if ch != "Select...": assigns.append(f"{slot}: {ch.split(' (')[0][2:]}")
+                        if st.button("Confirm"): append_sheet_df('teacher_leave', pd.DataFrame([{"Date": sds, "Teacher": abt, "Type": lt, "Substitute": "Multiple", "Detailed_Sub_Log": " | ".join(assigns)}])); st.rerun()
+                    else:
+                        st.info("No classes scheduled.")
+                        if st.button("Mark Leave"): append_sheet_df('teacher_leave', pd.DataFrame([{"Date": sds, "Teacher": abt, "Type": lt, "Substitute": "None", "Detailed_Sub_Log": "None"}])); st.rerun()
+
+    with tabs[5]: 
+        st.subheader("📢 Staff Notice")
+        n = st.text_area("Notice", get_notice())
+        if st.button("Publish to Cloud"): publish_notice(n); st.success("Published!")
+
+    with tabs[6]: 
+        st.subheader("🗓️ School Holiday List")
+        hd = get_local_csv('holidays.csv')
+        if not hd.empty: st.data_editor(hd, num_rows="dynamic", key="h_edit")
+        else: st.info("No data.")

@@ -81,24 +81,29 @@ else:
 with tab1:
     st.markdown("### Step 1: Transaction Details")
     
+    transaction_nature = st.radio("Nature of Transaction:", ["📥 Collect Funds (In)", "📤 Return Funds (Out)"], horizontal=True)
+    st.write("")
+    
     col_fee1, col_fee2, col_fee3 = st.columns(3)
     
     with col_fee1:
-        receipt_date = st.date_input("Receipt Date", value=datetime.now(IST).date())
+        receipt_date = st.date_input("Transaction Date", value=datetime.now(IST).date())
         amount = st.number_input("Amount (₹)", min_value=0, step=5)
         
     with col_fee2:
         collection_type = st.selectbox("Collection Type", ["Evaluation-II", "Britti", "Confiscated Money"], index=0)
         
     with col_fee3:
-        payer_type = st.radio("Received From:", ["Student", "Guardian", "Teacher"])
+        if transaction_nature == "📥 Collect Funds (In)":
+            payer_type = st.radio("Received From:", ["Student", "Guardian", "Teacher"])
+        else:
+            payer_type = st.radio("Returned To:", ["Student", "Guardian", "Teacher"])
         
     # --- ADMIN OVERRIDE FOR FORGOTTEN TEACHER LOGS ---
     actual_collector = st.session_state.user_name
     if st.session_state.user_role == "admin":
-        st.info("💡 **Admin Override:** If a teacher handed you cash but forgot to log it, select their name below to record it directly into their 'Handed Over' ledger.")
+        st.info("💡 **Admin Override:** If you are logging a transaction on behalf of an assistant teacher, select their name below.")
         
-        # Build a safe list of all teacher names
         teacher_names = []
         if not df_teachers.empty:
             for col in ['Name', 'Teacher Name', 'Teacher_Name', 'Full Name']:
@@ -113,7 +118,7 @@ with tab1:
             teacher_names.remove(st.session_state.user_name)
             
         teacher_list = [st.session_state.user_name] + sorted(teacher_names)
-        actual_collector = st.selectbox("Recorded on behalf of (Collected By):", teacher_list)
+        actual_collector = st.selectbox("Transaction Performed By:", teacher_list)
 
     st.divider()
     
@@ -187,7 +192,7 @@ with tab1:
 
     st.write("") 
 
-    # --- DUPLICATE CHECKER ---
+    # --- DUPLICATE & RETURN BALANCE CHECKER ---
     allow_submission = True
     
     if selected_display:
@@ -209,19 +214,22 @@ with tab1:
             
             if not past_payments.empty:
                 total_paid = pd.to_numeric(past_payments['Amount'], errors='coerce').fillna(0).sum()
-                if total_paid > 0:
-                    if has_type_col:
-                        st.warning(f"⚠️ **Duplicate Entry Warning:** {pure_name} already has a recorded total of **₹{total_paid}** specifically for **{collection_type}**.")
-                    else:
-                        st.warning(f"⚠️ **Duplicate Entry Warning:** {pure_name} has past records totaling **₹{total_paid}**. (Note: 'Collection Type' column is missing in your Google Sheet)")
-                    
-                    with st.expander("View their past records"):
-                        display_cols = [c for c in ['Date', 'Amount', 'Collection Type', 'Payer_Type', 'Teacher_Involved'] if c in past_payments.columns]
-                        st.dataframe(past_payments[display_cols], hide_index=True, use_container_width=True)
-                    
+                
+                # Check for duplicate collections
+                if total_paid > 0 and transaction_nature == "📥 Collect Funds (In)":
+                    st.warning(f"⚠️ **Duplicate Warning:** {pure_name} already has a recorded net balance of **₹{total_paid}** for **{collection_type}**.")
                     allow_due = st.checkbox(f"Unlock to record an additional entry for {pure_name}")
                     if not allow_due:
                         allow_submission = False
+                        
+                # Check for over-returning
+                elif total_paid <= 0 and transaction_nature == "📤 Return Funds (Out)":
+                    st.error(f"🚫 **Action Blocked:** {pure_name} has a net balance of ₹{total_paid} for {collection_type}. You cannot return funds that were not collected.")
+                    allow_submission = False
+
+                with st.expander("View their past records"):
+                    display_cols = [c for c in ['Date', 'Amount', 'Collection Type', 'Payer_Type', 'Teacher_Involved'] if c in past_payments.columns]
+                    st.dataframe(past_payments[display_cols], hide_index=True, use_container_width=True)
 
     # --- DATA SUBMISSION LOGIC ---
     submit_button = st.button("✅ Record Transaction", type="primary", use_container_width=True, disabled=not allow_submission)
@@ -234,6 +242,9 @@ with tab1:
         else:
             with st.spinner("Logging transaction to Google Sheets..."):
                 try:
+                    # Convert to negative if it's a return
+                    final_amount = amount if transaction_nature == "📥 Collect Funds (In)" else -amount
+                    
                     current_time = datetime.now(IST).time()
                     final_datetime_ist = datetime.combine(receipt_date, current_time).strftime("%Y-%m-%d %H:%M:%S")
                     final_section = str(student_info['Section'])
@@ -253,7 +264,7 @@ with tab1:
                         final_class, 
                         final_section, 
                         roll_no, 
-                        amount, 
+                        final_amount, # Uses the calculated positive/negative amount
                         payer_type, 
                         actual_collector,
                         collection_type,
@@ -266,7 +277,8 @@ with tab1:
                     
                     load_data.clear()
                     
-                    st.success(f"✅ Successfully recorded ₹{amount} for {pure_name} ({collection_type}) on {receipt_date.strftime('%d-%m-%Y')}!")
+                    action_word = "collected from" if final_amount > 0 else "returned to"
+                    st.success(f"✅ Successfully {action_word} {pure_name} (₹{abs(final_amount)} for {collection_type})!")
                     st.rerun() 
                 except Exception as e:
                     st.error(f"An error occurred while saving the data: {e}")
@@ -291,19 +303,20 @@ with tab2:
         if not dash_df.empty:
             dash_df = dash_df[dash_df['Teacher_Involved'].astype(str).str.strip() == st.session_state.user_name]
         
-        st.caption(f"Showing personal collections managed by: **{st.session_state.user_name}**")
+        st.caption(f"Showing personal transactions managed by: **{st.session_state.user_name}**")
         
         if not dash_df.empty and 'Amount' in dash_df.columns:
             dash_df['Amount'] = pd.to_numeric(dash_df['Amount'], errors='coerce').fillna(0)
             
-            total_coll = dash_df['Amount'].sum()
+            gross_coll = dash_df[dash_df['Amount'] > 0]['Amount'].sum()
+            total_ret = abs(dash_df[dash_df['Amount'] < 0]['Amount'].sum())
+            net_pending = dash_df[dash_df['Handover_Status'] == 'Pending']['Amount'].sum()
             handed_over = dash_df[dash_df['Handover_Status'] == 'Handed Over']['Amount'].sum()
-            pending = dash_df[dash_df['Handover_Status'] == 'Pending']['Amount'].sum()
             
             col_t1, col_t2, col_t3 = st.columns(3)
-            col_t1.metric("💰 Total Collection", f"₹ {total_coll:,.2f}")
-            col_t2.metric("🤝 Handed to Head Sir", f"₹ {handed_over:,.2f}")
-            col_t3.metric("💵 Remaining Cash in Hand", f"₹ {pending:,.2f}")
+            col_t1.metric("💰 Gross Collected", f"₹ {gross_coll:,.2f}", help="Total cash taken in before returns.")
+            col_t2.metric("🤝 Handed to Head Sir", f"₹ {handed_over:,.2f}", help="Total cash given to admin.")
+            col_t3.metric("💵 Net Cash in Hand", f"₹ {net_pending:,.2f}", delta=f"-₹{total_ret:,.0f} Returned", delta_color="normal")
             
             st.divider()
             
@@ -317,7 +330,7 @@ with tab2:
                     st.info("No funds handed over yet.")
             
             with c2:
-                st.markdown("##### ⏳ Cash in Hand (Pending)")
+                st.markdown("##### ⏳ Cash in Hand Ledger")
                 pend_df = dash_df[dash_df['Handover_Status'] == 'Pending']
                 if not pend_df.empty:
                     st.dataframe(pend_df[['Date', 'Name', 'Class', 'Amount', 'Collection Type']], hide_index=True)
@@ -330,7 +343,7 @@ with tab2:
     # HEAD TEACHER (ADMIN) DASHBOARD VIEW
     # ----------------------------------------------------
     else:
-        st.caption("Showing **All School Collections** (Head Teacher View)")
+        st.caption("Showing **All School Transactions** (Head Teacher View)")
             
         if not dash_df.empty and 'Amount' in dash_df.columns:
             dash_df['Amount'] = pd.to_numeric(dash_df['Amount'], errors='coerce').fillna(0)
@@ -340,9 +353,11 @@ with tab2:
             teachers_handed_over = dash_df[dash_df['Handover_Status'] == 'Handed Over']['Amount'].sum()
             admin_cash = admin_collected + teachers_handed_over
             total_pending = dash_df[dash_df['Handover_Status'] == 'Pending']['Amount'].sum()
+            total_school_net = dash_df['Amount'].sum()
+            total_returns = abs(dash_df[dash_df['Amount'] < 0]['Amount'].sum())
             
             col_dash1, col_dash2, col_dash3 = st.columns(3)
-            col_dash1.metric("💰 Total School Funds", f"₹ {dash_df['Amount'].sum():,.2f}")
+            col_dash1.metric("💰 Net School Funds", f"₹ {total_school_net:,.2f}", delta=f"-₹{total_returns:,.0f} Total Returned", delta_color="normal")
             col_dash2.metric("🏦 Admin Cash in Hand", f"₹ {admin_cash:,.2f}")
             col_dash3.metric("💵 Pending with Teachers", f"₹ {total_pending:,.2f}")
     
@@ -350,10 +365,11 @@ with tab2:
             
             st.markdown("##### 👨‍🏫 Teacher Handover Ledger")
             def calc_teacher_stats(group):
-                total = group['Amount'].sum()
+                gross = group[group['Amount'] > 0]['Amount'].sum()
+                ret = abs(group[group['Amount'] < 0]['Amount'].sum())
                 handed = group[group['Handover_Status'].isin(['Handed Over', 'Settled'])]['Amount'].sum()
                 pend = group[group['Handover_Status'] == 'Pending']['Amount'].sum()
-                return pd.Series({'Total Collected': total, 'Handed Over to HT': handed, 'Pending Cash': pend})
+                return pd.Series({'Gross Collected': gross, 'Total Returned': ret, 'Handed Over to HT': handed, 'Net Pending Cash': pend})
     
             teacher_summary = dash_df.groupby('Teacher_Involved').apply(calc_teacher_stats).reset_index()
             st.dataframe(teacher_summary, hide_index=True, use_container_width=True)
@@ -366,7 +382,7 @@ with tab2:
                 st.info("No cash has been handed over by teachers yet.")
                 
             st.divider()
-            st.markdown("##### 📈 Analysis by Class & Collection Type")
+            st.markdown("##### 📈 Net Funds by Class & Collection Type")
             if 'Collection Type' in dash_df.columns:
                 class_totals = dash_df.groupby(['Class', 'Collection Type'])['Amount'].sum().reset_index()
                 fig = px.bar(
@@ -378,7 +394,7 @@ with tab2:
                     barmode='group',
                     color_discrete_sequence=px.colors.qualitative.Set2
                 )
-                fig.update_layout(xaxis_title="Class", yaxis_title="Total Amount (₹)")
+                fig.update_layout(xaxis_title="Class", yaxis_title="Net Amount (₹)")
             else:
                 class_totals = dash_df.groupby('Class')['Amount'].sum().reset_index()
                 fig = px.bar(
@@ -389,7 +405,7 @@ with tab2:
                     color='Amount',
                     color_continuous_scale='Viridis'
                 )
-                fig.update_layout(xaxis_title="Class", yaxis_title="Total Amount (₹)", showlegend=False)
+                fig.update_layout(xaxis_title="Class", yaxis_title="Net Amount (₹)", showlegend=False)
                 
             st.plotly_chart(fig, use_container_width=True)
             
@@ -418,8 +434,8 @@ if st.session_state.user_role == "admin":
                 teacher_pending.insert(0, 'Receive', False)
                 
                 total_owed = teacher_pending['Amount'].sum()
-                st.markdown(f"### Pending Cash with {selected_teacher}: **₹ {total_owed:,.2f}**")
-                st.caption("Check the boxes next to the transactions you are receiving, then click Confirm.")
+                st.markdown(f"### Net Pending Cash with {selected_teacher}: **₹ {total_owed:,.2f}**")
+                st.caption("Check the boxes next to the transactions (both collections and returns) you are processing, then click Confirm.")
                 
                 edited_df = st.data_editor(
                     teacher_pending[['Receive', 'Date', 'Name', 'Class', 'Amount', 'Collection Type', '_Row_Num']],
@@ -432,7 +448,7 @@ if st.session_state.user_role == "admin":
                 
                 if not selected_rows.empty:
                     receiving_amount = selected_rows['Amount'].sum()
-                    st.success(f"Ready to receive **₹ {receiving_amount:,.2f}** ({len(selected_rows)} transactions).")
+                    st.success(f"Ready to reconcile **₹ {receiving_amount:,.2f}** ({len(selected_rows)} transactions).")
                     
                     if st.button("✅ Confirm Receipt of Cash", type="primary"):
                         with st.spinner(f"Verifying receipt of cash from {selected_teacher}..."):
@@ -444,11 +460,11 @@ if st.session_state.user_role == "admin":
                                     ws_fees_write.update_cell(r_num, handover_col_idx, 'Handed Over')
                                 
                                 load_data.clear()
-                                st.success("Cash securely received and recorded!")
+                                st.success("Cash securely reconciled and recorded!")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Failed to update Google Sheets: {e}")
             else:
                 st.success("🎉 All clear! There is no pending cash to receive from any assistant teachers.")
         else:
-            st.info("System is waiting for 'Handover_Status' configuration or there is no data available. Ensure 'Handover_Status' is exactly added as a column header in your Google Sheet.")
+            st.info("System is waiting for 'Handover_Status' configuration or there is no data available.")

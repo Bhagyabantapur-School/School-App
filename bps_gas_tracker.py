@@ -1,24 +1,61 @@
 import streamlit as st
 import pandas as pd
 from datetime import date
+import gspread
 
-# Set page configuration
-st.set_page_config(page_title="BPS Gas Tracker", page_icon="🔥", layout="centered")
+# 1. Set page configuration (Replaced 🔥 with 🛢️)
+st.set_page_config(page_title="BPS Gas Tracker", page_icon="🛢️", layout="centered")
 
-# --- INITIALIZE SESSION STATE (Mock Database) ---
+# --- GOOGLE SHEETS CONNECTION ---
+# This function connects to Google Sheets and caches it so it doesn't reconnect on every click
+@st.cache_resource
+def init_connection():
+    # Make sure your service account file is named 'credentials.json' and is in the same folder as this script
+    client = gspread.service_account(filename="credentials.json")
+    spreadsheet = client.open("BPS_Gas_Tracker")
+    return spreadsheet.worksheet("Sheet1")
+
+try:
+    sheet = init_connection()
+except Exception as e:
+    st.error("⚠️ Could not connect to Google Sheets. Please ensure 'credentials.json' is in your folder and you have shared the sheet with the service account email.")
+    st.stop()
+
+# --- LOAD DATA FROM SHEET ---
+def load_data():
+    # Fetch all data from the sheet
+    records = sheet.get_all_records()
+    if records:
+        return pd.DataFrame(records)
+    else:
+        # If sheet is empty, create an empty dataframe with correct headers
+        return pd.DataFrame(columns=[
+            "Date", "Cylinder", "Action", "Cylinder Cost (₹)", "Delivery Cost (₹)", "Total Cost (₹)", "Ref/Notes"
+        ])
+
+# Fetch data into session state
 if 'gas_log' not in st.session_state:
-    st.session_state.gas_log = pd.DataFrame(columns=[
-        "Date", "Cylinder", "Action", "Cylinder Cost (₹)", "Delivery Cost (₹)", "Total Cost (₹)", "Ref/Notes"
-    ])
+    st.session_state.gas_log = load_data()
 
-if 'cyl_1_status' not in st.session_state:
-    st.session_state.cyl_1_status = "In Use"
+# --- CALCULATE CURRENT CYLINDER STATUS ---
+# This looks at your past Google Sheet entries to figure out if a cylinder is currently empty, full, or in use.
+def get_latest_status(cylinder_name, default_status):
+    df = st.session_state.gas_log
+    if not df.empty:
+        cyl_history = df[df["Cylinder"] == cylinder_name]
+        if not cyl_history.empty:
+            latest_action = cyl_history.iloc[-1]["Action"]
+            if latest_action == "Booked": return "Booked"
+            elif latest_action == "Received (Full)": return "Full (Standby)"
+            elif latest_action == "Put in Use": return "In Use"
+            elif latest_action == "Emptied": return "Empty"
+    return default_status
 
-if 'cyl_2_status' not in st.session_state:
-    st.session_state.cyl_2_status = "Empty"
+st.session_state.cyl_1_status = get_latest_status("Cylinder 1", "In Use")
+st.session_state.cyl_2_status = get_latest_status("Cylinder 2", "Empty")
 
 # --- MAIN DASHBOARD ---
-st.title("🔥 Bhagyabantapur Primary School - Gas Tracker")
+st.title("🛢️ Bhagyabantapur Primary School - Gas Tracker")
 st.markdown("Track bookings, deliveries, and itemized costs for the school's cylinders.")
 
 st.divider()
@@ -71,43 +108,31 @@ with st.form("gas_action_form"):
         
     notes = st.text_input("Booking Ref No. / Notes")
     
-    submitted = st.form_submit_button("Save Record")
+    submitted = st.form_submit_button("Save Record to Google Sheets")
     
     if submitted:
-        # Update Status
-        new_status = ""
-        if action_type == "Booked":
-            new_status = "Booked"
-        elif action_type == "Received (Full)":
-            new_status = "Full (Standby)"
-        elif action_type == "Put in Use":
-            new_status = "In Use"
-        elif action_type == "Emptied":
-            new_status = "Empty"
-
-        if target_cylinder == "Cylinder 1":
-            st.session_state.cyl_1_status = new_status
-        else:
-            st.session_state.cyl_2_status = new_status
-
-        # Calculate total and append to Log DataFrame
+        # Calculate total
         total_cost = cylinder_cost + delivery_cost
+        date_str = action_date.strftime("%Y-%m-%d")
         
-        new_record = pd.DataFrame([{
-            "Date": action_date.strftime("%Y-%m-%d"),
-            "Cylinder": target_cylinder,
-            "Action": action_type,
-            "Cylinder Cost (₹)": cylinder_cost,
-            "Delivery Cost (₹)": delivery_cost,
-            "Total Cost (₹)": total_cost,
-            "Ref/Notes": notes
-        }])
+        # Prepare the row exactly matching your 7 columns
+        new_row = [
+            date_str, 
+            target_cylinder, 
+            action_type, 
+            cylinder_cost, 
+            delivery_cost, 
+            total_cost, 
+            notes
+        ]
         
-        st.session_state.gas_log = pd.concat([st.session_state.gas_log, new_record], ignore_index=True)
+        # APPEND TO GOOGLE SHEETS
+        sheet.append_row(new_row)
         
-        # NOTE FOR GOOGLE SHEETS API: Update your append_row logic to match the 7 variables above.
+        # Clear the cached session state so it pulls the fresh data on reload
+        del st.session_state.gas_log 
         
-        st.success(f"Successfully logged: {target_cylinder} marked as {action_type}. Total Cost: ₹{total_cost}")
+        st.success(f"Successfully saved to Google Sheets! {target_cylinder} marked as {action_type}.")
         st.rerun()
 
 st.divider()
@@ -118,14 +143,20 @@ st.subheader("📊 History & Expense Breakdown")
 if not st.session_state.gas_log.empty:
     st.dataframe(st.session_state.gas_log, use_container_width=True, hide_index=True)
     
+    # Clean the data in case Google Sheets brings in empty cells as strings
+    df_calc = st.session_state.gas_log.copy()
+    df_calc["Cylinder Cost (₹)"] = pd.to_numeric(df_calc["Cylinder Cost (₹)"], errors='coerce').fillna(0)
+    df_calc["Delivery Cost (₹)"] = pd.to_numeric(df_calc["Delivery Cost (₹)"], errors='coerce').fillna(0)
+    df_calc["Total Cost (₹)"] = pd.to_numeric(df_calc["Total Cost (₹)"], errors='coerce').fillna(0)
+    
     # Calculate Expense Breakdown
-    total_cyl = st.session_state.gas_log["Cylinder Cost (₹)"].sum()
-    total_del = st.session_state.gas_log["Delivery Cost (₹)"].sum()
-    grand_total = st.session_state.gas_log["Total Cost (₹)"].sum()
+    total_cyl = df_calc["Cylinder Cost (₹)"].sum()
+    total_del = df_calc["Delivery Cost (₹)"].sum()
+    grand_total = df_calc["Total Cost (₹)"].sum()
     
     col_met1, col_met2, col_met3 = st.columns(3)
     col_met1.metric(label="Total Cylinder Cost", value=f"₹ {total_cyl:,.2f}")
     col_met2.metric(label="Total Delivery Cost", value=f"₹ {total_del:,.2f}")
     col_met3.metric(label="Grand Total Expenses", value=f"₹ {grand_total:,.2f}")
 else:
-    st.info("No records found. Log an action above to start tracking.")
+    st.info("No records found in Google Sheets. Log an action above to start tracking.")

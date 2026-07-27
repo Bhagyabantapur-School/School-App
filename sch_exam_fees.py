@@ -115,7 +115,7 @@ with tab1:
         filtered_students['Roll_Numeric'] = pd.to_numeric(filtered_students['Roll'], errors='coerce').fillna(999)
         filtered_students = filtered_students.sort_values('Roll_Numeric')
         
-        # --- NEW: Check who was present in the last 10 days ---
+        # --- Check who was present in the last 10 days ---
         if not df_mdm.empty and 'Date' in df_mdm.columns:
             df_mdm['Parsed_Date'] = pd.to_datetime(df_mdm['Date'], errors='coerce', dayfirst=True).dt.date
             
@@ -177,21 +177,15 @@ with tab1:
                 (df_fees['Roll'].astype(str) == roll_no)
             ]
             
-            has_exam_col = 'Exam Type' in df_fees.columns
-            
             # Filter the duplicate warning specifically for the currently selected Exam Type
-            if has_exam_col:
-                # Use strict string stripping to avoid false mismatches
+            if 'Exam Type' in df_fees.columns:
                 past_payments = past_payments[past_payments['Exam Type'].astype(str).str.strip() == str(exam_type).strip()]
             
             if not past_payments.empty:
                 total_paid = pd.to_numeric(past_payments['Amount'], errors='coerce').fillna(0).sum()
                 
                 if total_paid > 0:
-                    if has_exam_col:
-                        st.warning(f"⚠️ **Duplicate Entry Warning:** {pure_name} has already paid a total of **₹{total_paid}** specifically for **{exam_type}**.")
-                    else:
-                        st.warning(f"⚠️ **Duplicate Entry Warning:** {pure_name} has past payments totaling **₹{total_paid}**. (Note: 'Exam Type' column is missing in your Google Sheet, so filtering by exam type isn't working yet.)")
+                    st.warning(f"⚠️ **Duplicate Entry Warning:** {pure_name} has already paid a total of **₹{total_paid}** specifically for **{exam_type}**.")
                     
                     with st.expander("View their past payments"):
                         display_cols = [c for c in ['Date', 'Amount', 'Exam Type', 'Payer_Type', 'Teacher_Involved'] if c in past_payments.columns]
@@ -216,10 +210,9 @@ with tab1:
                     final_datetime_ist = datetime.combine(receipt_date, current_time).strftime("%Y-%m-%d %H:%M:%S")
                     
                     final_section = str(student_info['Section'])
-                    
-                    # Log the collector automatically based on the authenticated session
                     final_teacher = st.session_state.user_name
                     
+                    # Exactly matches your column structure: Date, Name, Class, Section, Roll, Amount, Payer_Type, Teacher_Involved, Exam Type
                     new_row = [
                         final_datetime_ist, 
                         pure_name, 
@@ -229,7 +222,7 @@ with tab1:
                         amount, 
                         payer_type, 
                         final_teacher,
-                        exam_type # <--- Added new exam type to submission array
+                        exam_type 
                     ]
                     
                     fees_sheet = gc.open("SCH_Exam_Fees")
@@ -266,17 +259,33 @@ with tab2:
 
         st.divider()
         
-        st.markdown("##### Collection by Class")
-        class_totals = df_fees.groupby('Class')['Amount'].sum().reset_index()
-        fig = px.bar(
-            class_totals, 
-            x='Class', 
-            y='Amount', 
-            text_auto=True,
-            color='Amount',
-            color_continuous_scale='Viridis'
-        )
-        fig.update_layout(xaxis_title="Class", yaxis_title="Total Amount (₹)", showlegend=False)
+        st.markdown("##### Collection by Class & Exam Type")
+        
+        # Group by Class AND Exam Type for a stacked/grouped bar chart
+        if 'Exam Type' in df_fees.columns:
+            class_totals = df_fees.groupby(['Class', 'Exam Type'])['Amount'].sum().reset_index()
+            fig = px.bar(
+                class_totals, 
+                x='Class', 
+                y='Amount', 
+                color='Exam Type',
+                text_auto=True,
+                barmode='group',
+                color_discrete_sequence=px.colors.qualitative.Set2
+            )
+            fig.update_layout(xaxis_title="Class", yaxis_title="Total Amount (₹)")
+        else:
+            class_totals = df_fees.groupby('Class')['Amount'].sum().reset_index()
+            fig = px.bar(
+                class_totals, 
+                x='Class', 
+                y='Amount', 
+                text_auto=True,
+                color='Amount',
+                color_continuous_scale='Viridis'
+            )
+            fig.update_layout(xaxis_title="Class", yaxis_title="Total Amount (₹)", showlegend=False)
+            
         st.plotly_chart(fig, use_container_width=True)
         
         with st.expander("View Recent Transactions"):

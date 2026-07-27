@@ -58,7 +58,6 @@ def get_dropdown_options(column_index):
                 values.append(val)
     return sorted(list(set(values))) 
 
-# --- Powerful function to pull all default data for a selected app ---
 def get_last_app_data(app_name):
     if not app_name or app_name == "➕ Add New..." or not st.session_state.update_data:
         return {"lines": 0, "ai": "", "chat": "", "sheet": ""}
@@ -90,10 +89,9 @@ fk = st.session_state.form_reset_counter
 ist = pytz.timezone('Asia/Kolkata')
 current_ist = datetime.now(ist)
 
-# --- GLOBAL CSS FOR RED HIGHLIGHT & AUTO-FILL HIGHLIGHT ---
+# --- GLOBAL CSS ---
 st.markdown("""
     <style>
-    /* Tab 4: Red Expander Highlight */
     div[data-testid="stExpander"] details:has(summary:contains("🚨")) {
         background-color: #fff0f0; 
         border: 1px solid #ffcccc;
@@ -103,8 +101,6 @@ st.markdown("""
         background-color: #ffe6e6; 
         border-radius: 8px;
     }
-    
-    /* Tab 1: Auto-Fill Blue Highlight Logic */
     div[data-testid="stSelectbox"]:has(label:contains("✨")) div[data-baseweb="select"],
     div[data-testid="stNumberInput"]:has(label:contains("✨")) div[data-baseweb="input"],
     div[data-testid="stTextInput"]:has(label:contains("✨")) div[data-baseweb="input"] {
@@ -167,22 +163,18 @@ with tab1:
             date_input = st.date_input("Date", value=current_ist.date(), key=f"d_up_{fk}")
             time_input = st.time_input("Time", value=current_ist.time(), step=60, key=f"t_up_{fk}")
             
-            # --- THE FIX: Generating a dynamic 'app_key' to force Streamlit to refresh widgets on change ---
             if update_mode == "✅ Complete Pending Idea":
                 app_input = st.text_input("App Name", value=prefill_app, disabled=True, key=f"app_in_dis_{fk}_{target_sheet_row}")
-                app_key = f"pend_{target_sheet_row}" # Refreshes when a different pending idea is chosen
+                app_key = f"pend_{target_sheet_row}"
             else:
                 app_sel = st.selectbox("App Name", ["➕ Add New..."] + get_dropdown_options(2), key=f"app_sel_{fk}")
                 app_input = st.text_input("Type New App Name", key=f"app_in_new_{fk}_{app_sel}") if app_sel == "➕ Add New..." else app_sel
-                app_key = f"dir_{app_input}" # Refreshes when a different app is chosen
+                app_key = f"dir_{app_input}"
             
-            # Details now successfully refreshes because its key changes via app_key
             details_input = st.text_area("Details of Update", value=prefill_details, key=f"det_{fk}_{app_key}")
             
-            # FETCH LAST APP DATA FOR AUTO-FILL
             last_data = get_last_app_data(app_input)
             
-            # --- Auto-Fill Logic: AI Used ---
             ai_opts = ["➕ Add New..."] + get_dropdown_options(4)
             ai_def = last_data["ai"]
             ai_sel_lbl = "AI Used ✨ (Last updated)" if ai_def else "AI Used"
@@ -200,7 +192,6 @@ with tab1:
             short_sel = st.selectbox("Short Description", ["➕ Add New..."] + get_dropdown_options(6), key=f"sh_sel_{fk}_{app_key}")
             short_input = st.text_input("Type New Short Description", key=f"sh_in_new_{fk}_{app_key}") if short_sel == "➕ Add New..." else short_sel
             
-            # --- Auto-Fill Logic: Lines of Code ---
             lines_def = last_data["lines"]
             lines_lbl = "Lines of Code ✨ (Last updated)" if lines_def > 0 else "Lines of Code"
             lines_input = st.number_input(lines_lbl, min_value=0, step=1, value=lines_def, key=f"lines_{fk}_{app_key}")
@@ -208,7 +199,6 @@ with tab1:
             feat_sel = st.selectbox("Features Added", ["➕ Add New..."] + get_dropdown_options(8), key=f"feat_sel_{fk}_{app_key}")
             features_input = st.text_input("Type New Feature", key=f"feat_in_new_{fk}_{app_key}") if feat_sel == "➕ Add New..." else feat_sel
             
-            # --- Auto-Fill Logic: Chat Reference ---
             chat_opts = ["➕ Add New..."] + get_dropdown_options(10)
             chat_def = last_data["chat"]
             chat_sel_lbl = "Chat Reference / Link ✨ (Last updated)" if chat_def else "Chat Reference / Link"
@@ -220,7 +210,6 @@ with tab1:
             else:
                 chat_input = chat_sel
             
-            # --- Auto-Fill Logic: Google Sheet ---
             gs_opts = ["➕ Add New..."] + get_dropdown_options(11)
             gs_def = last_data["sheet"]
             gs_sel_lbl = "Google Sheet (Linked) ✨ (Last updated)" if gs_def else "Google Sheet (Linked)"
@@ -236,15 +225,30 @@ with tab1:
 
         st.divider()
         
-        is_already_main = False
+        # --- NEW: App Category Logic ---
+        existing_category = ""
         if app_input and app_input != "➕ Add New...":
-            is_already_main = any(len(r) > 14 and str(r[14]).strip().upper() == "TRUE" for r in st.session_state.update_data if str(r[2]).strip() == app_input)
+            # Search through the data to see if this app already has a category assigned (or "TRUE")
+            for r in st.session_state.update_data:
+                if str(r[2]).strip() == app_input and len(r) > 14 and str(r[14]).strip() != "":
+                    existing_category = str(r[14]).strip()
+                    break
         
-        if is_already_main:
-            add_to_main = st.checkbox("✅ This app is already added to the Main App", value=True, disabled=True, key=f"main_chk_dis_{fk}_{app_key}")
+        col15_value = ""
+        
+        if existing_category:
+            # If it has old "TRUE" data, display cleanly. Otherwise, display the actual category.
+            disp_cat = "Main App (Legacy Data)" if existing_category.upper() == "TRUE" else existing_category
+            st.checkbox(f"✅ Added to: **{disp_cat}**", value=True, disabled=True, key=f"main_chk_dis_{fk}_{app_key}")
+            col15_value = existing_category  # Maintain the existing category when updating
         else:
             add_to_main = st.checkbox("➕ Mark as 'Added to Main App' for this update?", key=f"main_chk_{fk}_{app_key}")
+            if add_to_main:
+                # Show category selection dropdown
+                selected_category = st.selectbox("App Category", ["Personal Hub", "BPS Digital System"], key=f"cat_sel_{fk}_{app_key}")
+                col15_value = selected_category
 
+        st.write("") # small spacing
         btn_col1, btn_col2 = st.columns([1, 5])
         
         with btn_col1:
@@ -255,8 +259,6 @@ with tab1:
             st.button("🔄 Clear Fields", on_click=clear_form_fields, help="Reset all fields on this tab")
         
         if submit_clicked:
-            col15_value = "TRUE" if add_to_main else ""
-            
             row_data_update = [
                 str(date_input), str(time_input.strftime("%H:%M:%S")), app_input, details_input,
                 ai_input, ai_answer, short_input, lines_input, features_input, selected_ai, chat_input, gs_input,
@@ -359,13 +361,19 @@ with tab4:
             app_groups[app_name].append(row)
                 
         for app_name, logs in sorted(app_groups.items()):
-            is_added_to_main = any(
-                len(r) > 14 and str(r[14]).strip().upper() == "TRUE" 
-                for r in st.session_state.update_data 
-                if str(r[2]).strip() == app_name
-            )
+            # Find the assigned category for this app (if any)
+            app_category = ""
+            for r in st.session_state.update_data:
+                if str(r[2]).strip() == app_name and len(r) > 14 and str(r[14]).strip() != "":
+                    app_category = str(r[14]).strip()
+                    break
             
-            title = f"✅ 📱 {app_name} ({len(logs)} updates)" if is_added_to_main else f"🚨 📱 {app_name} ({len(logs)} updates)"
+            # --- NEW: App Title features the dynamic Category! ---
+            if app_category:
+                disp_cat = "Main App" if app_category.upper() == "TRUE" else app_category
+                title = f"✅ 📱 {app_name} ({len(logs)} updates)  —  🗂️ {disp_cat}"
+            else:
+                title = f"🚨 📱 {app_name} ({len(logs)} updates)"
             
             logs.sort(key=lambda x: f"{str(x[0]).strip()} {str(x[1]).strip()}" if len(x) > 1 else "", reverse=True)
             
@@ -384,8 +392,10 @@ with tab4:
                     
                     st.markdown(f"**Date:** {date_val} &nbsp;|&nbsp; **Lines:** {lines_val}")
                     
+                    # --- NEW: Prominent Features Display ---
                     if features_added:
-                        st.markdown(f"**Features:** {features_added}")
+                        st.markdown(f"🚀 **Features:** {features_added}")
+                        
                     if short_desc:
                         st.caption(f"**Short:** {short_desc}")
                     

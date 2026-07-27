@@ -76,7 +76,7 @@ def get_last_app_data(app_name):
             }
     return {"lines": 0, "ai": "", "chat": "", "sheet": ""}
 
-# --- NEW: GITHUB-STYLE RELATIVE TIME LOGIC ---
+# --- GITHUB-STYLE RELATIVE TIME LOGIC ---
 def get_time_ago(date_str, time_str):
     if not date_str:
         return ""
@@ -84,7 +84,6 @@ def get_time_ago(date_str, time_str):
         ist = pytz.timezone('Asia/Kolkata')
         now = datetime.now(ist)
         
-        # Fallback to midnight if an older entry misses the time component
         if not time_str:
             time_str = "00:00:00"
             
@@ -118,7 +117,7 @@ def get_time_ago(date_str, time_str):
             years = int(seconds // 31536000)
             return f"{years} year{'s' if years != 1 else ''} ago"
     except Exception:
-        return "" # Gracefully fails to blank if older row is malformed
+        return "" 
 
 # --- FORM CLEARING LOGIC ---
 if "form_reset_counter" not in st.session_state:
@@ -136,6 +135,7 @@ current_ist = datetime.now(ist)
 # --- GLOBAL CSS ---
 st.markdown("""
     <style>
+    /* Tab 4: Red Expander Highlight (Unassigned / Alerts) */
     div[data-testid="stExpander"] details:has(summary:contains("🚨")) {
         background-color: #fff0f0; 
         border: 1px solid #ffcccc;
@@ -145,6 +145,30 @@ st.markdown("""
         background-color: #ffe6e6; 
         border-radius: 8px;
     }
+    
+    /* Tab 4: Blue Expander Highlight for [main.py] */
+    div[data-testid="stExpander"] details:has(summary:contains("[main.py]")) {
+        background-color: #f0f7ff; 
+        border: 1px solid #cce3ff;
+        border-radius: 8px;
+    }
+    div[data-testid="stExpander"] details:has(summary:contains("[main.py]")) summary {
+        background-color: #e0f0ff; 
+        border-radius: 8px;
+    }
+
+    /* Tab 4: Green Expander Highlight for [app.py] */
+    div[data-testid="stExpander"] details:has(summary:contains("[app.py]")) {
+        background-color: #f4fcfa; 
+        border: 1px solid #ccebe1;
+        border-radius: 8px;
+    }
+    div[data-testid="stExpander"] details:has(summary:contains("[app.py]")) summary {
+        background-color: #e0f5ee; 
+        border-radius: 8px;
+    }
+
+    /* Tab 1: Auto-Fill Blue Highlight Logic */
     div[data-testid="stSelectbox"]:has(label:contains("✨")) div[data-baseweb="select"],
     div[data-testid="stNumberInput"]:has(label:contains("✨")) div[data-baseweb="input"],
     div[data-testid="stTextInput"]:has(label:contains("✨")) div[data-baseweb="input"] {
@@ -271,6 +295,7 @@ with tab1:
 
         st.divider()
         
+        # --- App Category Logic & File Association Mapping ---
         existing_category = ""
         if app_input and app_input != "➕ Add New...":
             for r in st.session_state.update_data:
@@ -282,7 +307,15 @@ with tab1:
         
         if existing_category:
             disp_cat = "Main App (Legacy Data)" if existing_category.upper() == "TRUE" else existing_category
-            st.checkbox(f"✅ Added to: **{disp_cat}**", value=True, disabled=True, key=f"main_chk_dis_{fk}_{app_key}")
+            
+            # Map existing categories to their parent file for clear UI feedback
+            file_assoc = ""
+            if existing_category in ["Personal Hub", "BPS Digital System"] or existing_category.upper() == "TRUE":
+                file_assoc = " ⚙️ [main.py]"
+            elif existing_category == "App":
+                file_assoc = " 📱 [app.py]"
+                
+            st.checkbox(f"✅ Added to: **{disp_cat}**{file_assoc}", value=True, disabled=True, key=f"main_chk_dis_{fk}_{app_key}")
             col15_value = existing_category  
         else:
             add_to_main = st.checkbox("➕ Mark as 'Added to Main App' for this update?", key=f"main_chk_{fk}_{app_key}")
@@ -411,9 +444,17 @@ with tab4:
                     app_category = str(r[14]).strip()
                     break
             
+            # --- Dynamic file mapping and title generation ---
             if app_category:
                 disp_cat = "Main App" if app_category.upper() == "TRUE" else app_category
-                title = f"✅ 📱 {app_name} ({len(logs)} updates)  —  🗂️ {disp_cat}"
+                
+                file_badge = ""
+                if app_category in ["Personal Hub", "BPS Digital System"] or app_category.upper() == "TRUE":
+                    file_badge = " ⚙️ [main.py]"
+                elif app_category == "App":
+                    file_badge = " 📱 [app.py]"
+                    
+                title = f"✅ 📱 {app_name} ({len(logs)} updates)  —  🗂️ {disp_cat}{file_badge}"
             else:
                 title = f"🚨 📱 {app_name} ({len(logs)} updates)"
             
@@ -424,7 +465,6 @@ with tab4:
                     date_val = log[0] if len(log) > 0 else ""
                     time_val = log[1] if len(log) > 1 else ""
                     
-                    # --- Compute GitHub-style Relative Time ---
                     time_ago_str = get_time_ago(date_val, time_val)
                     date_display = f"{date_val} *({time_ago_str})*" if time_ago_str else date_val
                     
@@ -439,7 +479,6 @@ with tab4:
                     gs_val = log[11] if len(log) > 11 else ""
                     contain_code_val = log[15] if len(log) > 15 else ""
                     
-                    # Output updated with GitHub style date
                     st.markdown(f"**Date:** {date_display} &nbsp;|&nbsp; **Lines:** {lines_val}")
                     
                     if features_added:

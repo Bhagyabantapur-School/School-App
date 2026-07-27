@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 import plotly.express as px
+from google.oauth2.service_account import Credentials
 
 # --- GATEKEEPER SECURITY CHECK ---
 if 'authenticated' not in st.session_state or not st.session_state.authenticated:
@@ -27,9 +28,16 @@ def get_col_letter(n):
 # --- AUTHENTICATION & CONNECTION ---
 @st.cache_resource
 def get_gspread_client():
-    credentials_dict = dict(st.secrets["gcp_service_account"])
-    gc = gspread.service_account_from_dict(credentials_dict)
-    return gc
+    # Explicitly define scopes to prevent the AuthorizedSession error
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets", 
+        "https://www.googleapis.com/auth/drive"
+    ]
+    credentials = Credentials.from_service_account_info(
+        dict(st.secrets["gcp_service_account"]), 
+        scopes=scopes
+    )
+    return gspread.authorize(credentials)
 
 try:
     gc = get_gspread_client()

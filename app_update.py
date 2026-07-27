@@ -135,6 +135,17 @@ current_ist = datetime.now(ist)
 # --- GLOBAL CSS ---
 st.markdown("""
     <style>
+    /* Tab 4: Gold Expander Highlight for BASE FILES (main.py / app.py) */
+    div[data-testid="stExpander"] details:has(summary:contains("👑")) {
+        background-color: #fffbeb; 
+        border: 1px solid #fde68a;
+        border-radius: 8px;
+    }
+    div[data-testid="stExpander"] details:has(summary:contains("👑")) summary {
+        background-color: #fef3c7; 
+        border-radius: 8px;
+    }
+    
     /* Tab 4: Red Expander Highlight (Unassigned / Alerts) */
     div[data-testid="stExpander"] details:has(summary:contains("🚨")) {
         background-color: #fff0f0; 
@@ -308,7 +319,6 @@ with tab1:
         if existing_category:
             disp_cat = "Main App (Legacy Data)" if existing_category.upper() == "TRUE" else existing_category
             
-            # Map existing categories to their parent file for clear UI feedback
             file_assoc = ""
             if existing_category in ["Personal Hub", "BPS Digital System"] or existing_category.upper() == "TRUE":
                 file_assoc = " ⚙️ [main.py]"
@@ -436,16 +446,31 @@ with tab4:
             if app_name not in app_groups:
                 app_groups[app_name] = []
             app_groups[app_name].append(row)
+            
+        # --- NEW: Custom Sorting Logic ---
+        # Forces main.py (0) and app.py (1) to the top, alphabetizes everything else (2)
+        def custom_app_sort(item):
+            name = item[0].lower()
+            if name == "main.py":
+                return (0, name)
+            elif name == "app.py":
+                return (1, name)
+            return (2, name)
                 
-        for app_name, logs in sorted(app_groups.items()):
+        for app_name, logs in sorted(app_groups.items(), key=custom_app_sort):
+            
+            is_base_file = app_name.lower() in ["main.py", "app.py"]
+            
             app_category = ""
             for r in st.session_state.update_data:
                 if str(r[2]).strip() == app_name and len(r) > 14 and str(r[14]).strip() != "":
                     app_category = str(r[14]).strip()
                     break
             
-            # --- Dynamic file mapping and title generation ---
-            if app_category:
+            # --- NEW: Base File Title Override ---
+            if is_base_file:
+                title = f"👑 🏗️ BASE SYSTEM: {app_name} ({len(logs)} updates)"
+            elif app_category:
                 disp_cat = "Main App" if app_category.upper() == "TRUE" else app_category
                 
                 file_badge = ""

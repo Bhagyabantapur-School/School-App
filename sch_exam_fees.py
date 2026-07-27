@@ -66,7 +66,7 @@ with tab1:
     # --- STEP 1: BATCH SETTINGS ---
     st.markdown("### Step 1: Fee Details (Batch Setup)")
     
-    col_fee1, col_fee2, col_fee3 = st.columns(3)
+    col_fee1, col_fee2 = st.columns(2)
     
     with col_fee1:
         receipt_date = st.date_input("Receipt Date", value=datetime.now(IST).date())
@@ -74,11 +74,6 @@ with tab1:
         
     with col_fee2:
         payer_type = st.radio("Received From:", ["Student", "Guardian", "Teacher"])
-        
-    with col_fee3:
-        teacher_names = [t for t in df_teachers['Name'].unique() if str(t).strip()]
-        teacher_options = ["Not Applicable"] + sorted(teacher_names)
-        received_by_teacher = st.selectbox("Which Teacher? (If applicable)", options=teacher_options)
         
     st.divider()
     
@@ -208,7 +203,9 @@ with tab1:
                     final_datetime_ist = datetime.combine(receipt_date, current_time).strftime("%Y-%m-%d %H:%M:%S")
                     
                     final_section = str(student_info['Section'])
-                    final_teacher = received_by_teacher if payer_type == "Teacher" else "N/A"
+                    
+                    # Log the collector automatically based on the authenticated session
+                    final_teacher = st.session_state.user_name
                     
                     new_row = [
                         final_datetime_ist, 

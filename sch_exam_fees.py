@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 import plotly.express as px
+import re
 from google.oauth2.service_account import Credentials
 
 # --- GATEKEEPER SECURITY CHECK ---
@@ -15,6 +16,28 @@ IST = pytz.timezone('Asia/Kolkata')
 
 st.title("💰 Bhagyabantapur Primary School - Funds & Fees")
 st.markdown("Record and track examination fees and confiscated unauthorized cash.")
+
+# --- HELPER FUNCTIONS ---
+def get_direct_image_url(url):
+    """Converts standard Google Drive viewing links into direct image links for Streamlit."""
+    url = str(url).strip()
+    if not url.startswith('http'):
+        return None
+    
+    if 'drive.google.com' in url:
+        # Check for /file/d/ID/view format
+        match = re.search(r'/file/d/([a-zA-Z0-9_-]+)', url)
+        if match:
+            file_id = match.group(1)
+            return f"https://drive.google.com/uc?id={file_id}"
+        
+        # Check for ?id=ID format
+        match = re.search(r'id=([a-zA-Z0-9_-]+)', url)
+        if match:
+            file_id = match.group(1)
+            return f"https://drive.google.com/uc?id={file_id}"
+            
+    return url # Return as-is if it's already a direct link or from another host
 
 # --- AUTHENTICATION & CONNECTION ---
 def get_gspread_client():
@@ -201,18 +224,18 @@ with tab1:
         final_class = str(student_info['Class'])
         roll_no = str(student_info.get('Roll', 'N/A'))
         
-        # Safely extract the Thumb_URL
-        thumb_url = str(student_info.get('Thumb_URL', '')).strip()
+        raw_thumb_url = str(student_info.get('Thumb_URL', '')).strip()
+        direct_thumb_url = get_direct_image_url(raw_thumb_url)
 
         # Create a visual split for the picture and the transaction logic
         col_profile, col_action = st.columns([1, 4])
         
         with col_profile:
-            if thumb_url and thumb_url.lower() != 'nan' and thumb_url.startswith('http'):
+            if direct_thumb_url:
                 try:
-                    st.image(thumb_url, use_container_width=True)
+                    st.image(direct_thumb_url, use_container_width=True)
                 except Exception:
-                    st.info("📷 Image Error")
+                    st.info("📷 Image Error (Check GDrive permissions)")
             else:
                 st.info("📷 No Photo")
 
@@ -231,14 +254,12 @@ with tab1:
                 if not past_payments.empty:
                     total_paid = pd.to_numeric(past_payments['Amount'], errors='coerce').fillna(0).sum()
                     
-                    # Check for duplicate collections
                     if total_paid > 0 and transaction_nature == "📥 Collect Funds (In)":
                         st.warning(f"⚠️ **Duplicate Warning:** {pure_name} already has a recorded net balance of **₹{total_paid}** for **{collection_type}**.")
                         allow_due = st.checkbox(f"Unlock to record an additional entry for {pure_name}")
                         if not allow_due:
                             allow_submission = False
                             
-                    # Check for over-returning
                     elif total_paid <= 0 and transaction_nature == "📤 Return Funds (Out)":
                         st.error(f"🚫 **Action Blocked:** {pure_name} has a net balance of ₹{total_paid} for {collection_type}. You cannot return funds that were not collected.")
                         allow_submission = False
@@ -256,7 +277,6 @@ with tab1:
                         allow_submission = False
 
     # --- DATA SUBMISSION LOGIC ---
-    # Put the button outside the columns so it dynamically spans the full width
     st.write("")
     submit_button = st.button("✅ Record Transaction", type="primary", use_container_width=True, disabled=not allow_submission)
     
@@ -268,7 +288,6 @@ with tab1:
         else:
             with st.spinner("Logging transaction to Google Sheets..."):
                 try:
-                    # Convert to negative if it's a return
                     final_amount = amount if transaction_nature == "📥 Collect Funds (In)" else -amount
                     
                     current_time = datetime.now(IST).time()
@@ -283,14 +302,13 @@ with tab1:
                     else:
                         handover_status = "Pending"
                     
-                    # Target Order: Date, Name, Class, Section, Roll, Amount, Payer_Type, Teacher_Involved, Collection Type, Handover_Status
                     new_row = [
                         final_datetime_ist, 
                         pure_name, 
                         final_class, 
                         final_section, 
                         roll_no, 
-                        final_amount, # Uses the calculated positive/negative amount
+                        final_amount, 
                         payer_type, 
                         actual_collector,
                         collection_type,

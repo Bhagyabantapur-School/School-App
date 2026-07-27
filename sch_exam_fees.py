@@ -13,8 +13,8 @@ if 'authenticated' not in st.session_state or not st.session_state.authenticated
 
 IST = pytz.timezone('Asia/Kolkata')
 
-st.title("💰 Bhagyabantapur Primary School - Exam Fees")
-st.markdown("Record and track examination fee collections seamlessly.")
+st.title("💰 Bhagyabantapur Primary School - Funds & Fees")
+st.markdown("Record and track examination fees and confiscated unauthorized cash.")
 
 # --- AUTHENTICATION & CONNECTION ---
 def get_gspread_client():
@@ -71,24 +71,24 @@ except Exception as e:
 
 # --- APP LAYOUT (Tabs Dynamic Routing) ---
 if st.session_state.user_role == "admin":
-    tab1, tab2, tab3 = st.tabs(["📝 Collect Fees", "📊 Fee Dashboard", "🤝 Handover Manager"])
+    tab1, tab2, tab3 = st.tabs(["📝 Record Funds", "📊 Collection Dashboard", "🤝 Handover Manager"])
 else:
-    tab1, tab2 = st.tabs(["📝 Collect Fees", "📊 Fee Dashboard"])
+    tab1, tab2 = st.tabs(["📝 Record Funds", "📊 Collection Dashboard"])
 
 # ==========================================
-# TAB 1: FEE COLLECTION FORM (BATCH MODE)
+# TAB 1: FUND COLLECTION FORM (BATCH MODE)
 # ==========================================
 with tab1:
-    st.markdown("### Step 1: Fee Details (Batch Setup)")
+    st.markdown("### Step 1: Transaction Details")
     
     col_fee1, col_fee2, col_fee3 = st.columns(3)
     
     with col_fee1:
         receipt_date = st.date_input("Receipt Date", value=datetime.now(IST).date())
-        amount = st.number_input("Payment Amount (₹)", min_value=0, step=5)
+        amount = st.number_input("Amount (₹)", min_value=0, step=5)
         
     with col_fee2:
-        exam_type = st.selectbox("Exam Type", ["Evaluation-II", "Britti"], index=0)
+        collection_type = st.selectbox("Collection Type", ["Evaluation-II", "Britti", "Confiscated Money"], index=0)
         
     with col_fee3:
         payer_type = st.radio("Received From:", ["Student", "Guardian", "Teacher"])
@@ -203,28 +203,28 @@ with tab1:
                 (df_fees['Roll'].astype(str) == roll_no)
             ]
             
-            has_exam_col = 'Exam Type' in df_fees.columns
-            if has_exam_col:
-                past_payments = past_payments[past_payments['Exam Type'].astype(str).str.strip() == str(exam_type).strip()]
+            has_type_col = 'Collection Type' in df_fees.columns
+            if has_type_col:
+                past_payments = past_payments[past_payments['Collection Type'].astype(str).str.strip() == str(collection_type).strip()]
             
             if not past_payments.empty:
                 total_paid = pd.to_numeric(past_payments['Amount'], errors='coerce').fillna(0).sum()
                 if total_paid > 0:
-                    if has_exam_col:
-                        st.warning(f"⚠️ **Duplicate Entry Warning:** {pure_name} has already paid a total of **₹{total_paid}** specifically for **{exam_type}**.")
+                    if has_type_col:
+                        st.warning(f"⚠️ **Duplicate Entry Warning:** {pure_name} already has a recorded total of **₹{total_paid}** specifically for **{collection_type}**.")
                     else:
-                        st.warning(f"⚠️ **Duplicate Entry Warning:** {pure_name} has past payments totaling **₹{total_paid}**. (Note: 'Exam Type' column is missing in your Google Sheet)")
+                        st.warning(f"⚠️ **Duplicate Entry Warning:** {pure_name} has past records totaling **₹{total_paid}**. (Note: 'Collection Type' column is missing in your Google Sheet)")
                     
-                    with st.expander("View their past payments"):
-                        display_cols = [c for c in ['Date', 'Amount', 'Exam Type', 'Payer_Type', 'Teacher_Involved'] if c in past_payments.columns]
+                    with st.expander("View their past records"):
+                        display_cols = [c for c in ['Date', 'Amount', 'Collection Type', 'Payer_Type', 'Teacher_Involved'] if c in past_payments.columns]
                         st.dataframe(past_payments[display_cols], hide_index=True, use_container_width=True)
                     
-                    allow_due = st.checkbox(f"Unlock to record an additional/due payment for {pure_name}")
+                    allow_due = st.checkbox(f"Unlock to record an additional entry for {pure_name}")
                     if not allow_due:
                         allow_submission = False
 
     # --- DATA SUBMISSION LOGIC ---
-    submit_button = st.button("✅ Record Payment", type="primary", use_container_width=True, disabled=not allow_submission)
+    submit_button = st.button("✅ Record Transaction", type="primary", use_container_width=True, disabled=not allow_submission)
     
     if submit_button:
         if not selected_display:
@@ -238,9 +238,6 @@ with tab1:
                     final_datetime_ist = datetime.combine(receipt_date, current_time).strftime("%Y-%m-%d %H:%M:%S")
                     final_section = str(student_info['Section'])
                     
-                    # Core Logic: If Admin enters for themselves, it's Settled. 
-                    # If Admin enters for a Teacher, it immediately becomes "Handed Over" since Admin has the cash.
-                    # If Teacher enters it normally, it's "Pending".
                     if st.session_state.user_role == "admin":
                         if actual_collector == st.session_state.user_name:
                             handover_status = "Settled"
@@ -249,7 +246,7 @@ with tab1:
                     else:
                         handover_status = "Pending"
                     
-                    # Target Order: Date, Name, Class, Section, Roll, Amount, Payer_Type, Teacher_Involved, Exam Type, Handover_Status
+                    # Target Order: Date, Name, Class, Section, Roll, Amount, Payer_Type, Teacher_Involved, Collection Type, Handover_Status
                     new_row = [
                         final_datetime_ist, 
                         pure_name, 
@@ -259,7 +256,7 @@ with tab1:
                         amount, 
                         payer_type, 
                         actual_collector,
-                        exam_type,
+                        collection_type,
                         handover_status 
                     ]
                     
@@ -269,7 +266,7 @@ with tab1:
                     
                     load_data.clear()
                     
-                    st.success(f"✅ Successfully recorded ₹{amount} for {pure_name} ({exam_type}) on {receipt_date.strftime('%d-%m-%Y')}!")
+                    st.success(f"✅ Successfully recorded ₹{amount} for {pure_name} ({collection_type}) on {receipt_date.strftime('%d-%m-%Y')}!")
                     st.rerun() 
                 except Exception as e:
                     st.error(f"An error occurred while saving the data: {e}")
@@ -315,7 +312,7 @@ with tab2:
                 st.markdown("##### ✅ Handed Over to Head Sir")
                 handed_df = dash_df[dash_df['Handover_Status'] == 'Handed Over']
                 if not handed_df.empty:
-                    st.dataframe(handed_df[['Date', 'Name', 'Class', 'Amount', 'Exam Type']], hide_index=True)
+                    st.dataframe(handed_df[['Date', 'Name', 'Class', 'Amount', 'Collection Type']], hide_index=True)
                 else:
                     st.info("No funds handed over yet.")
             
@@ -323,11 +320,11 @@ with tab2:
                 st.markdown("##### ⏳ Cash in Hand (Pending)")
                 pend_df = dash_df[dash_df['Handover_Status'] == 'Pending']
                 if not pend_df.empty:
-                    st.dataframe(pend_df[['Date', 'Name', 'Class', 'Amount', 'Exam Type']], hide_index=True)
+                    st.dataframe(pend_df[['Date', 'Name', 'Class', 'Amount', 'Collection Type']], hide_index=True)
                 else:
                     st.success("All clear! No pending cash.")
         else:
-            st.info(f"No fee data collected by you ({st.session_state.user_name}) yet.")
+            st.info(f"No data collected by you ({st.session_state.user_name}) yet.")
 
     # ----------------------------------------------------
     # HEAD TEACHER (ADMIN) DASHBOARD VIEW
@@ -345,7 +342,7 @@ with tab2:
             total_pending = dash_df[dash_df['Handover_Status'] == 'Pending']['Amount'].sum()
             
             col_dash1, col_dash2, col_dash3 = st.columns(3)
-            col_dash1.metric("💰 Total School Collection", f"₹ {dash_df['Amount'].sum():,.2f}")
+            col_dash1.metric("💰 Total School Funds", f"₹ {dash_df['Amount'].sum():,.2f}")
             col_dash2.metric("🏦 Admin Cash in Hand", f"₹ {admin_cash:,.2f}")
             col_dash3.metric("💵 Pending with Teachers", f"₹ {total_pending:,.2f}")
     
@@ -361,22 +358,22 @@ with tab2:
             teacher_summary = dash_df.groupby('Teacher_Involved').apply(calc_teacher_stats).reset_index()
             st.dataframe(teacher_summary, hide_index=True, use_container_width=True)
             
-            st.markdown("##### 📜 Detailed Handover Log (Received Students)")
+            st.markdown("##### 📜 Detailed Handover Log")
             handed_over_df = dash_df[dash_df['Handover_Status'] == 'Handed Over']
             if not handed_over_df.empty:
-                st.dataframe(handed_over_df[['Date', 'Teacher_Involved', 'Name', 'Class', 'Amount', 'Exam Type']], hide_index=True)
+                st.dataframe(handed_over_df[['Date', 'Teacher_Involved', 'Name', 'Class', 'Amount', 'Collection Type']], hide_index=True)
             else:
                 st.info("No cash has been handed over by teachers yet.")
                 
             st.divider()
-            st.markdown("##### 📈 Collection by Class & Exam Type")
-            if 'Exam Type' in dash_df.columns:
-                class_totals = dash_df.groupby(['Class', 'Exam Type'])['Amount'].sum().reset_index()
+            st.markdown("##### 📈 Analysis by Class & Collection Type")
+            if 'Collection Type' in dash_df.columns:
+                class_totals = dash_df.groupby(['Class', 'Collection Type'])['Amount'].sum().reset_index()
                 fig = px.bar(
                     class_totals, 
                     x='Class', 
                     y='Amount', 
-                    color='Exam Type',
+                    color='Collection Type',
                     text_auto=True,
                     barmode='group',
                     color_discrete_sequence=px.colors.qualitative.Set2
@@ -397,7 +394,7 @@ with tab2:
             st.plotly_chart(fig, use_container_width=True)
             
         else:
-            st.info("No fee data available yet. Transactions will appear here once recorded.")
+            st.info("No data available yet. Transactions will appear here once recorded.")
 
 # ==========================================
 # TAB 3: ADMIN HANDOVER MANAGER (ADMIN ONLY)
@@ -405,7 +402,7 @@ with tab2:
 if st.session_state.user_role == "admin":
     with tab3:
         st.subheader("🤝 Cash Handover Manager")
-        st.markdown("Select an assistant teacher to securely receive and verify their pending cash collections.")
+        st.markdown("Select an assistant teacher to securely receive and verify their pending cash.")
         
         if not df_fees.empty and 'Handover_Status' in df_fees.columns:
             handover_col_idx = df_fees.columns.get_loc('Handover_Status') + 1
@@ -422,12 +419,12 @@ if st.session_state.user_role == "admin":
                 
                 total_owed = teacher_pending['Amount'].sum()
                 st.markdown(f"### Pending Cash with {selected_teacher}: **₹ {total_owed:,.2f}**")
-                st.caption("Check the boxes next to the students' fees you are receiving, then click Confirm.")
+                st.caption("Check the boxes next to the transactions you are receiving, then click Confirm.")
                 
                 edited_df = st.data_editor(
-                    teacher_pending[['Receive', 'Date', 'Name', 'Class', 'Amount', 'Exam Type', '_Row_Num']],
+                    teacher_pending[['Receive', 'Date', 'Name', 'Class', 'Amount', 'Collection Type', '_Row_Num']],
                     hide_index=True,
-                    disabled=['Date', 'Name', 'Class', 'Amount', 'Exam Type', '_Row_Num'],
+                    disabled=['Date', 'Name', 'Class', 'Amount', 'Collection Type', '_Row_Num'],
                     column_config={'_Row_Num': None}
                 )
                 
@@ -435,7 +432,7 @@ if st.session_state.user_role == "admin":
                 
                 if not selected_rows.empty:
                     receiving_amount = selected_rows['Amount'].sum()
-                    st.success(f"Ready to receive **₹ {receiving_amount:,.2f}** ({len(selected_rows)} student transactions).")
+                    st.success(f"Ready to receive **₹ {receiving_amount:,.2f}** ({len(selected_rows)} transactions).")
                     
                     if st.button("✅ Confirm Receipt of Cash", type="primary"):
                         with st.spinner(f"Verifying receipt of cash from {selected_teacher}..."):
@@ -454,4 +451,4 @@ if st.session_state.user_role == "admin":
             else:
                 st.success("🎉 All clear! There is no pending cash to receive from any assistant teachers.")
         else:
-            st.info("System is waiting for 'Handover_Status' configuration or there is no fee data available. Ensure 'Handover_Status' is exactly added as a column header in your Google Sheet.")
+            st.info("System is waiting for 'Handover_Status' configuration or there is no data available. Ensure 'Handover_Status' is exactly added as a column header in your Google Sheet.")

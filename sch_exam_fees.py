@@ -21,13 +21,14 @@ st.markdown("Record and track examination fees and confiscated unauthorized cash
 # --- HELPER FUNCTIONS ---
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_image_bytes(url):
-    """Fetches image bytes directly (like bps_digital.py) to bypass GDrive browser blocks."""
+    """Fetches image bytes robustly to bypass Google Drive HTML warning pages."""
     url = str(url).strip()
     if not url.startswith('http'):
         return None
     
     file_id = None
     if 'drive.google.com' in url:
+        # Extract File ID
         match = re.search(r'/file/d/([a-zA-Z0-9_-]+)', url)
         if match:
             file_id = match.group(1)
@@ -37,14 +38,37 @@ def fetch_image_bytes(url):
                 file_id = match.group(1)
         
         if file_id:
-            download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+            # Method 1: Google Drive Thumbnail API (Bypasses most warnings)
             try:
-                response = requests.get(download_url, timeout=5)
-                if response.status_code == 200:
+                thumb_url = f"https://drive.google.com/thumbnail?id={file_id}&sz=w400"
+                response = requests.get(thumb_url, timeout=5)
+                # Strictly verify it is an image, not an HTML page
+                if response.status_code == 200 and 'image' in response.headers.get('Content-Type', ''):
                     return response.content
             except Exception:
-                return None
-    return url # Return the URL as-is if it is not a Google Drive link
+                pass
+            
+            # Method 2: Standard Direct Download Fallback
+            try:
+                dl_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+                response2 = requests.get(dl_url, timeout=5)
+                if response2.status_code == 200 and 'image' in response2.headers.get('Content-Type', ''):
+                    return response2.content
+            except Exception:
+                pass
+                
+            return None # Fails safely if both methods get blocked
+            
+    else:
+        # Fetch for non-Google Drive direct image links
+        try:
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200 and 'image' in response.headers.get('Content-Type', ''):
+                return response.content
+        except Exception:
+            return None
+            
+    return None
 
 # --- AUTHENTICATION & CONNECTION ---
 def get_gspread_client():
@@ -233,19 +257,21 @@ with tab1:
         
         raw_thumb_url = str(student_info.get('Thumb_URL', '')).strip()
 
-        # Create a visual split for the picture and the transaction logic
         col_profile, col_action = st.columns([1, 4])
         
         with col_profile:
-            # MDM Entry technique: Fetch the raw image bytes in the background
-            img_data = fetch_image_bytes(raw_thumb_url)
-            if img_data:
-                try:
-                    st.image(img_data, use_container_width=True)
-                except Exception:
-                    st.info("📷 Format Error")
+            # MDM Entry technique: Fetch the raw image bytes robustly
+            if raw_thumb_url and raw_thumb_url.lower() != 'nan':
+                img_data = fetch_image_bytes(raw_thumb_url)
+                if img_data:
+                    try:
+                        st.image(img_data, use_container_width=True)
+                    except Exception:
+                        st.info("📷 Image Load Error")
+                else:
+                    st.info("🔒 GDrive Access Denied")
             else:
-                st.info("📷 No Photo")
+                st.info("📷 No Photo Available")
 
         with col_action:
             if not df_fees.empty and 'Amount' in df_fees.columns:

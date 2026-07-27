@@ -225,10 +225,9 @@ with tab1:
 
         st.divider()
         
-        # --- NEW: App Category Logic ---
+        # --- App Category Logic ---
         existing_category = ""
         if app_input and app_input != "➕ Add New...":
-            # Search through the data to see if this app already has a category assigned (or "TRUE")
             for r in st.session_state.update_data:
                 if str(r[2]).strip() == app_input and len(r) > 14 and str(r[14]).strip() != "":
                     existing_category = str(r[14]).strip()
@@ -237,18 +236,17 @@ with tab1:
         col15_value = ""
         
         if existing_category:
-            # If it has old "TRUE" data, display cleanly. Otherwise, display the actual category.
             disp_cat = "Main App (Legacy Data)" if existing_category.upper() == "TRUE" else existing_category
             st.checkbox(f"✅ Added to: **{disp_cat}**", value=True, disabled=True, key=f"main_chk_dis_{fk}_{app_key}")
-            col15_value = existing_category  # Maintain the existing category when updating
+            col15_value = existing_category  
         else:
             add_to_main = st.checkbox("➕ Mark as 'Added to Main App' for this update?", key=f"main_chk_{fk}_{app_key}")
             if add_to_main:
-                # Show category selection dropdown
-                selected_category = st.selectbox("App Category", ["Personal Hub", "BPS Digital System"], key=f"cat_sel_{fk}_{app_key}")
+                # --- UPDATED: Added "App" to the dropdown options ---
+                selected_category = st.selectbox("App Category", ["Personal Hub", "BPS Digital System", "App"], key=f"cat_sel_{fk}_{app_key}")
                 col15_value = selected_category
 
-        st.write("") # small spacing
+        st.write("") 
         btn_col1, btn_col2 = st.columns([1, 5])
         
         with btn_col1:
@@ -361,14 +359,12 @@ with tab4:
             app_groups[app_name].append(row)
                 
         for app_name, logs in sorted(app_groups.items()):
-            # Find the assigned category for this app (if any)
             app_category = ""
             for r in st.session_state.update_data:
                 if str(r[2]).strip() == app_name and len(r) > 14 and str(r[14]).strip() != "":
                     app_category = str(r[14]).strip()
                     break
             
-            # --- NEW: App Title features the dynamic Category! ---
             if app_category:
                 disp_cat = "Main App" if app_category.upper() == "TRUE" else app_category
                 title = f"✅ 📱 {app_name} ({len(logs)} updates)  —  🗂️ {disp_cat}"
@@ -392,7 +388,6 @@ with tab4:
                     
                     st.markdown(f"**Date:** {date_val} &nbsp;|&nbsp; **Lines:** {lines_val}")
                     
-                    # --- NEW: Prominent Features Display ---
                     if features_added:
                         st.markdown(f"🚀 **Features:** {features_added}")
                         

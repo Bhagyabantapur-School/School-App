@@ -177,15 +177,21 @@ with tab1:
                 (df_fees['Roll'].astype(str) == roll_no)
             ]
             
+            has_exam_col = 'Exam Type' in df_fees.columns
+            
             # Filter the duplicate warning specifically for the currently selected Exam Type
-            if 'Exam Type' in df_fees.columns:
-                past_payments = past_payments[past_payments['Exam Type'] == exam_type]
+            if has_exam_col:
+                # Use strict string stripping to avoid false mismatches
+                past_payments = past_payments[past_payments['Exam Type'].astype(str).str.strip() == str(exam_type).strip()]
             
             if not past_payments.empty:
                 total_paid = pd.to_numeric(past_payments['Amount'], errors='coerce').fillna(0).sum()
                 
                 if total_paid > 0:
-                    st.warning(f"⚠️ **Duplicate Entry Warning:** {pure_name} has already paid a total of **₹{total_paid}** for {exam_type}.")
+                    if has_exam_col:
+                        st.warning(f"⚠️ **Duplicate Entry Warning:** {pure_name} has already paid a total of **₹{total_paid}** specifically for **{exam_type}**.")
+                    else:
+                        st.warning(f"⚠️ **Duplicate Entry Warning:** {pure_name} has past payments totaling **₹{total_paid}**. (Note: 'Exam Type' column is missing in your Google Sheet, so filtering by exam type isn't working yet.)")
                     
                     with st.expander("View their past payments"):
                         display_cols = [c for c in ['Date', 'Amount', 'Exam Type', 'Payer_Type', 'Teacher_Involved'] if c in past_payments.columns]

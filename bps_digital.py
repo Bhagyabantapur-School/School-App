@@ -19,12 +19,12 @@ IST = pytz.timezone('Asia/Kolkata')
 st.title("💰 Bhagyabantapur Primary School - Funds & Fees")
 st.markdown("Record and track examination fees and confiscated unauthorized cash.")
 
-# --- AUTHENTICATION & SECURE IMAGE FETCHING (Matching bps_digital.py) ---
+# --- AUTHENTICATION & SECURE IMAGE FETCHING (Matching bps_digital.py exactly) ---
 @st.cache_resource
 def get_google_credentials(): 
     return Credentials.from_service_account_info(
         dict(st.secrets["gcp_service_account"]), 
-        scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive.readonly"]
     )
 
 def get_gspread_client():
@@ -228,7 +228,6 @@ with tab1:
         col_profile, col_action = st.columns([1, 4])
         
         with col_profile:
-            # Displays the image using the exact Base64 Data URI method from bps_digital.py
             secure_uri = get_secure_photo_uri(raw_thumb_url)
             st.image(secure_uri, use_container_width=True)
 

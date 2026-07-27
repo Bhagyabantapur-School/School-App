@@ -66,13 +66,16 @@ with tab1:
     # --- STEP 1: BATCH SETTINGS ---
     st.markdown("### Step 1: Fee Details (Batch Setup)")
     
-    col_fee1, col_fee2 = st.columns(2)
+    col_fee1, col_fee2, col_fee3 = st.columns(3)
     
     with col_fee1:
         receipt_date = st.date_input("Receipt Date", value=datetime.now(IST).date())
         amount = st.number_input("Payment Amount (₹)", min_value=0, step=5)
         
     with col_fee2:
+        exam_type = st.selectbox("Exam Type", ["Evaluation-II", "Britti"], index=0)
+        
+    with col_fee3:
         payer_type = st.radio("Received From:", ["Student", "Guardian", "Teacher"])
         
     st.divider()
@@ -174,14 +177,18 @@ with tab1:
                 (df_fees['Roll'].astype(str) == roll_no)
             ]
             
+            # Filter the duplicate warning specifically for the currently selected Exam Type
+            if 'Exam Type' in df_fees.columns:
+                past_payments = past_payments[past_payments['Exam Type'] == exam_type]
+            
             if not past_payments.empty:
                 total_paid = pd.to_numeric(past_payments['Amount'], errors='coerce').fillna(0).sum()
                 
                 if total_paid > 0:
-                    st.warning(f"⚠️ **Duplicate Entry Warning:** {pure_name} has already paid a total of **₹{total_paid}**.")
+                    st.warning(f"⚠️ **Duplicate Entry Warning:** {pure_name} has already paid a total of **₹{total_paid}** for {exam_type}.")
                     
                     with st.expander("View their past payments"):
-                        display_cols = [c for c in ['Date', 'Amount', 'Payer_Type', 'Teacher_Involved'] if c in past_payments.columns]
+                        display_cols = [c for c in ['Date', 'Amount', 'Exam Type', 'Payer_Type', 'Teacher_Involved'] if c in past_payments.columns]
                         st.dataframe(past_payments[display_cols], hide_index=True, use_container_width=True)
                     
                     allow_due = st.checkbox(f"Unlock to record an additional/due payment for {pure_name}")
@@ -215,7 +222,8 @@ with tab1:
                         roll_no, 
                         amount, 
                         payer_type, 
-                        final_teacher
+                        final_teacher,
+                        exam_type # <--- Added new exam type to submission array
                     ]
                     
                     fees_sheet = gc.open("SCH_Exam_Fees")
@@ -224,7 +232,7 @@ with tab1:
                     
                     load_data.clear()
                     
-                    st.success(f"✅ Successfully recorded ₹{amount} for {pure_name} on {receipt_date.strftime('%d-%m-%Y')}!")
+                    st.success(f"✅ Successfully recorded ₹{amount} for {pure_name} ({exam_type}) on {receipt_date.strftime('%d-%m-%Y')}!")
                     st.rerun() 
                 except Exception as e:
                     st.error(f"An error occurred while saving the data: {e}")

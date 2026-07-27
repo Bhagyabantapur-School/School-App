@@ -191,7 +191,6 @@ if st.session_state.user_role == "teacher":
 
         with at_tabs[0]: 
             take_other = st.checkbox("🔄 Take MDM for another class")
-            
             ml = fetch_sheet_data('mdm_log')
             already_sub = False
             
@@ -203,7 +202,6 @@ if st.session_state.user_role == "teacher":
 
             if already_sub: 
                 st.success("✅ MDM Submitted for today.")
-                st.info("💡 **Note:** If any student was missed during this submission, please send them to Head Sir to complete their MDM Entry.")
             else:
                 st.subheader("Student MDM Entry")
                 rout = get_local_csv('routine.csv')
@@ -225,9 +223,10 @@ if st.session_state.user_role == "teacher":
                                 is_sub = True; ab_t = r['Teacher']
                                 ac = TEACHER_INITIALS.get(ab_t, "")
                                 ar = rout[(rout['Teacher'] == ac) & (rout['Day'] == tdy)].copy()
-                                ar['Start_Obj'] = ar['Start_Time'].apply(parse_time_safe)
-                                match = ar[ar['Start_Obj'] == time(11, 15)]
-                                if not match.empty: tc, ts = match.iloc[0]['Class'], match.iloc[0].get('Section', 'A')
+                                if not ar.empty:
+                                    ar['Start_Obj'] = ar['Start_Time'].apply(parse_time_safe)
+                                    match = ar[ar['Start_Obj'] == time(11, 15)]
+                                    if not match.empty: tc, ts = match.iloc[0]['Class'], match.iloc[0].get('Section', 'A')
                                 break
                     if not tc:
                         ms = rout[(rout['Teacher'] == mc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()
@@ -236,11 +235,11 @@ if st.session_state.user_role == "teacher":
                             tr = ms[ms['Start_Obj'] == time(11, 15)]
                             if not tr.empty: tc, ts = tr.iloc[0]['Class'], tr.iloc[0].get('Section', 'A')
     
-                    if tc:
+                if tc:
+                    if not take_other:
                         if is_sub: st.info(f"🔄 **SUB:** Covering for **{ab_t}** ({tc} - {ts})")
                         else: st.info(f"📌 Assigned **11:15 AM** class: **{tc} - {ts}**")
 
-                if tc:
                     sm = fetch_sheet_data('students_master')
 
                     if not sm.empty:
@@ -249,7 +248,7 @@ if st.session_state.user_role == "teacher":
                         else: ros = sm[(sm['Class'] == tc) & (sm['Section'] == ts)].copy()
                         
                         if not ros.empty:
-                            # Protect against overriding duplicate entries 
+                            # Protect against overriding duplicate entries from anyone who submitted earlier
                             me = ml[(ml['Date'].astype(str) == curr_date_str) & (ml['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else ml['Class'] == tc) & (ml['Section'] == ts)]['Roll'].astype(str).tolist() if not ml.empty else []
                             ros['MDM (Ate)'] = ros['Roll'].astype(str).isin(me)
 

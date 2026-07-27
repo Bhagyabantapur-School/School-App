@@ -190,11 +190,16 @@ if st.session_state.user_role == "teacher":
         at_tabs = st.tabs(["🍱 MDM Entry", "⏳ Routine", "📃 Leave Status", "📅 Holidays"])
 
         with at_tabs[0]: 
+            take_other = st.checkbox("🔄 Take MDM for another class")
+            
             ml = fetch_sheet_data('mdm_log')
             already_sub = False
-            if not ml.empty and 'Date' in ml.columns and 'Teacher' in ml.columns:
-                if not ml[(ml['Date'].astype(str).str.strip() == curr_date_str) & (ml['Teacher'].astype(str).str.strip() == t_name_select)].empty:
-                    already_sub = True
+            
+            # Only block the standard MDM entry if they haven't chosen to override
+            if not take_other:
+                if not ml.empty and 'Date' in ml.columns and 'Teacher' in ml.columns:
+                    if not ml[(ml['Date'].astype(str).str.strip() == curr_date_str) & (ml['Teacher'].astype(str).str.strip() == t_name_select)].empty:
+                        already_sub = True
 
             if already_sub: 
                 st.success("✅ MDM Submitted for today.")
@@ -206,28 +211,36 @@ if st.session_state.user_role == "teacher":
                 tdy = now.strftime('%A')
                 tc, ts, is_sub, ab_t = None, None, False, ""
 
-                ll = fetch_sheet_data('teacher_leave')
-                if not ll.empty and 'Date' in columns:
-                    for _, r in ll[ll['Date'] == curr_date_str].iterrows():
-                        lg = str(r.get('Detailed_Sub_Log', ''))
-                        if f"11:15: {t_name_select}" in lg or f"11:15 AM: {t_name_select}" in lg:
-                            is_sub = True; ab_t = r['Teacher']
-                            ac = TEACHER_INITIALS.get(ab_t, "")
-                            ar = rout[(rout['Teacher'] == ac) & (rout['Day'] == tdy)].copy()
-                            ar['Start_Obj'] = ar['Start_Time'].apply(parse_time_safe)
-                            match = ar[ar['Start_Obj'] == time(11, 15)]
-                            if not match.empty: tc, ts = match.iloc[0]['Class'], match.iloc[0].get('Section', 'A')
-                            break
-                if not tc:
-                    ms = rout[(rout['Teacher'] == mc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()
-                    if not ms.empty:
-                        ms['Start_Obj'] = ms['Start_Time'].apply(parse_time_safe)
-                        tr = ms[ms['Start_Obj'] == time(11, 15)]
-                        if not tr.empty: tc, ts = tr.iloc[0]['Class'], tr.iloc[0].get('Section', 'A')
+                if take_other:
+                    sc_mdm = st.selectbox("Select Class to Manage", ATTENDANCE_OPTIONS, key='t_mdm_sel')
+                    if sc_mdm != "Select Class...":
+                        tc, ts = sc_mdm.rsplit(' ', 1)
+                        st.info(f"📌 Override Mode: Managing **{tc} - {ts}**")
+                else:
+                    ll = fetch_sheet_data('teacher_leave')
+                    if not ll.empty and 'Date' in ll.columns:
+                        for _, r in ll[ll['Date'] == curr_date_str].iterrows():
+                            lg = str(r.get('Detailed_Sub_Log', ''))
+                            if f"11:15: {t_name_select}" in lg or f"11:15 AM: {t_name_select}" in lg:
+                                is_sub = True; ab_t = r['Teacher']
+                                ac = TEACHER_INITIALS.get(ab_t, "")
+                                ar = rout[(rout['Teacher'] == ac) & (rout['Day'] == tdy)].copy()
+                                ar['Start_Obj'] = ar['Start_Time'].apply(parse_time_safe)
+                                match = ar[ar['Start_Obj'] == time(11, 15)]
+                                if not match.empty: tc, ts = match.iloc[0]['Class'], match.iloc[0].get('Section', 'A')
+                                break
+                    if not tc:
+                        ms = rout[(rout['Teacher'] == mc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()
+                        if not ms.empty:
+                            ms['Start_Obj'] = ms['Start_Time'].apply(parse_time_safe)
+                            tr = ms[ms['Start_Obj'] == time(11, 15)]
+                            if not tr.empty: tc, ts = tr.iloc[0]['Class'], tr.iloc[0].get('Section', 'A')
+    
+                    if tc:
+                        if is_sub: st.info(f"🔄 **SUB:** Covering for **{ab_t}** ({tc} - {ts})")
+                        else: st.info(f"📌 Assigned **11:15 AM** class: **{tc} - {ts}**")
 
                 if tc:
-                    if is_sub: st.info(f"🔄 **SUB:** Covering for **{ab_t}** ({tc} - {ts})")
-                    else: st.info(f"📌 Assigned **11:15 AM** class: **{tc} - {ts}**")
                     sm = fetch_sheet_data('students_master')
 
                     if not sm.empty:
@@ -236,6 +249,10 @@ if st.session_state.user_role == "teacher":
                         else: ros = sm[(sm['Class'] == tc) & (sm['Section'] == ts)].copy()
                         
                         if not ros.empty:
+                            # Protect against overriding duplicate entries 
+                            me = ml[(ml['Date'].astype(str) == curr_date_str) & (ml['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else ml['Class'] == tc) & (ml['Section'] == ts)]['Roll'].astype(str).tolist() if not ml.empty else []
+                            ros['MDM (Ate)'] = ros['Roll'].astype(str).isin(me)
+
                             if 'scanned_keys' not in st.session_state: st.session_state.scanned_keys = []
                             
                             st.write("📸 **Scan ID Cards (or tick manually below):**")
@@ -254,12 +271,15 @@ if st.session_state.user_role == "teacher":
                                         match_df = ros[(ros['Roll'].astype(str).str.strip() == sr) & (ros['Name'].astype(str).str.strip() == sn)]
                                         if not match_df.empty:
                                             ar, an = match_df.iloc[0]['Roll'], match_df.iloc[0]['Name']
-                                            sk = f"{ar}_{an}"
-                                            if sk not in st.session_state.scanned_keys: 
-                                                st.session_state.scanned_keys.append(sk)
-                                                st.session_state[f"mdm_{ar}_{an}"] = True 
-                                                st.session_state.scan_msg = f"✅ Scanned Successfully: {an}"
-                                                should_rerun = True
+                                            if str(ar) in me:
+                                                st.warning(f"⚠️ {an} is already marked for MDM today!")
+                                            else:
+                                                sk = f"{ar}_{an}"
+                                                if sk not in st.session_state.scanned_keys: 
+                                                    st.session_state.scanned_keys.append(sk)
+                                                    st.session_state[f"mdm_{ar}_{an}"] = True 
+                                                    st.session_state.scan_msg = f"✅ Scanned Successfully: {an}"
+                                                    should_rerun = True
                                         else: st.error(f"❌ MISMATCH: {sn} is NOT in {tc} {ts}!")
                                 except Exception: st.warning("⚠️ Invalid ID Card.")
                                 if should_rerun: st.rerun()
@@ -272,24 +292,28 @@ if st.session_state.user_role == "teacher":
                             st.markdown("### Roster Selection")
                             cp = st.empty()
                             st.markdown('<div class="roster-container">', unsafe_allow_html=True)
-                            sel_mdm = []
+                            sel_mdm, alc = [], 0
                             for _, r in ros.iterrows():
                                 c1, c2, c3 = st.columns([1, 4, 2])
                                 with c1: st.image(r['Photo'], width=85) 
                                 with c2: st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} | {r['Class']}</span></div>", unsafe_allow_html=True)
                                 with c3:
-                                    isc = r['Scan_Key'] in st.session_state.scanned_keys
-                                    if st.checkbox("Ate MDM", value=isc, key=f"mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                                    if r['MDM (Ate)']:
+                                        st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
+                                        alc += 1
+                                    else:
+                                        isc = r['Scan_Key'] in st.session_state.scanned_keys
+                                        if st.checkbox("Ate MDM", value=isc, key=f"mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
                                 st.divider()
                             
-                            cp.markdown(f"<div class='floating-counter'>✅ Selected: {len(sel_mdm)}</div>", unsafe_allow_html=True)
-                            st.markdown(f"<h3 style='text-align:center;'>✅ Total Selected: {len(sel_mdm)}</h3>", unsafe_allow_html=True)
+                            cp.markdown(f"<div class='floating-counter'>✅ Selected: {len(sel_mdm)} | Done: {alc}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<h3 style='text-align:center;'>✅ New Selected: {len(sel_mdm)}</h3>", unsafe_allow_html=True)
                             if st.button("Submit MDM Data"):
                                 if sel_mdm:
                                     nr = [{'Date': curr_date_str, 'Teacher': t_name_select, 'Class': x['Class'], 'Section': ts, 'Roll': x['Roll'], 'Name': x['Name'], 'Time': now.strftime("%H:%M")} for x in sel_mdm]
                                     append_sheet_df('mdm_log', pd.DataFrame(nr))
                                     st.session_state.scanned_keys = []; st.success(f"Submitted {len(nr)} to Cloud DB!"); st.rerun()
-                                else: st.warning("No students selected.")
+                                else: st.warning("No new students selected.")
                             st.markdown('</div>', unsafe_allow_html=True)
                             
                             att = fetch_sheet_data('student_attendance_master')
@@ -298,7 +322,8 @@ if st.session_state.user_role == "teacher":
                                 if not ta.empty: st.markdown(f"<div class='att-badge att-done'>✅ Attendance: {len(ta)}</div>", unsafe_allow_html=True)
                                 else: st.markdown("<div class='att-badge att-wait'>⏳ Attendance: Wait</div>", unsafe_allow_html=True)
                         else: st.warning("No students found.")
-                else: st.warning("⚠️ No class at 11:15 AM. MDM Entry disabled.")
+                else: 
+                    if not take_other: st.warning("⚠️ No class at 11:15 AM. MDM Entry disabled.")
 
         with at_tabs[1]:
             st.subheader("Live Class Status")

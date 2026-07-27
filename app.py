@@ -66,7 +66,11 @@ if st.sidebar.button("Log Out"):
     st.rerun()
 st.sidebar.markdown("---")
 
-# Define the visual interface for the home page (The Button)
+# Define pages for navigation (must be initialized before UI calls them)
+app_page = st.Page("bps_digital.py", title="BPS Digital App", icon="🏫")
+fees_page = st.Page("sch_exam_fees.py", title="Exam Fees", icon="💰")
+
+# Define the visual interface for the home page (The Buttons)
 def home_page_ui():
     st.markdown(f"<h2 style='text-align: center;'>Welcome to the Unified Hub, {st.session_state.user_name}!</h2>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center;'>Select an application from the sidebar or click below to launch your primary workspace.</p>", unsafe_allow_html=True)
@@ -78,11 +82,13 @@ def home_page_ui():
     with col2:
         if st.button("🚀 Enter BPS Digital App", type="primary", use_container_width=True):
             st.switch_page(app_page)
+            
+        st.write("") # Spacing between buttons
+        
+        if st.button("💰 Enter Funds & Fees", type="secondary", use_container_width=True):
+            st.switch_page(fees_page)
 
-# Define pages for navigation
 home_page = st.Page(home_page_ui, title="Home Portal", icon="🏠", default=True)
-app_page = st.Page("bps_digital.py", title="BPS Digital App", icon="🏫")
-fees_page = st.Page("sch_exam_fees.py", title="Exam Fees", icon="💰")
 
 # Execute Navigation Menu using grouped categories
 pg = st.navigation({

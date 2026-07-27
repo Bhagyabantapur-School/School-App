@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import pytz
 import plotly.express as px
 import re
+import requests
 from google.oauth2.service_account import Credentials
 
 # --- GATEKEEPER SECURITY CHECK ---
@@ -18,26 +19,32 @@ st.title("💰 Bhagyabantapur Primary School - Funds & Fees")
 st.markdown("Record and track examination fees and confiscated unauthorized cash.")
 
 # --- HELPER FUNCTIONS ---
-def get_direct_image_url(url):
-    """Converts standard Google Drive viewing links into direct image links for Streamlit."""
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_image_bytes(url):
+    """Fetches image bytes directly (like bps_digital.py) to bypass GDrive browser blocks."""
     url = str(url).strip()
     if not url.startswith('http'):
         return None
     
+    file_id = None
     if 'drive.google.com' in url:
-        # Check for /file/d/ID/view format
         match = re.search(r'/file/d/([a-zA-Z0-9_-]+)', url)
         if match:
             file_id = match.group(1)
-            return f"https://drive.google.com/uc?id={file_id}"
+        else:
+            match = re.search(r'id=([a-zA-Z0-9_-]+)', url)
+            if match:
+                file_id = match.group(1)
         
-        # Check for ?id=ID format
-        match = re.search(r'id=([a-zA-Z0-9_-]+)', url)
-        if match:
-            file_id = match.group(1)
-            return f"https://drive.google.com/uc?id={file_id}"
-            
-    return url # Return as-is if it's already a direct link or from another host
+        if file_id:
+            download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+            try:
+                response = requests.get(download_url, timeout=5)
+                if response.status_code == 200:
+                    return response.content
+            except Exception:
+                return None
+    return url # Return the URL as-is if it is not a Google Drive link
 
 # --- AUTHENTICATION & CONNECTION ---
 def get_gspread_client():
@@ -215,7 +222,7 @@ with tab1:
 
     st.write("") 
 
-    # --- DUPLICATE & RETURN BALANCE CHECKER WITH THUMBNAIL ---
+    # --- DUPLICATE & RETURN BALANCE CHECKER WITH SECURE THUMBNAIL ---
     allow_submission = True
     
     if selected_display:
@@ -225,17 +232,18 @@ with tab1:
         roll_no = str(student_info.get('Roll', 'N/A'))
         
         raw_thumb_url = str(student_info.get('Thumb_URL', '')).strip()
-        direct_thumb_url = get_direct_image_url(raw_thumb_url)
 
         # Create a visual split for the picture and the transaction logic
         col_profile, col_action = st.columns([1, 4])
         
         with col_profile:
-            if direct_thumb_url:
+            # MDM Entry technique: Fetch the raw image bytes in the background
+            img_data = fetch_image_bytes(raw_thumb_url)
+            if img_data:
                 try:
-                    st.image(direct_thumb_url, use_container_width=True)
+                    st.image(img_data, use_container_width=True)
                 except Exception:
-                    st.info("📷 Image Error (Check GDrive permissions)")
+                    st.info("📷 Format Error")
             else:
                 st.info("📷 No Photo")
 

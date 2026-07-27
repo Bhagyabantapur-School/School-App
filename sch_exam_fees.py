@@ -64,7 +64,7 @@ def load_data():
     bps_sheet = gc.open("BPS_Database")
     ws_students = bps_sheet.worksheet("students_master")
     ws_teachers = bps_sheet.worksheet("TEACHERS_DETAIL")
-    ws_mdm = bps_sheet.worksheet("mdm_log")
+    ws_mdm = worksheets = bps_sheet.worksheet("mdm_log")
     
     df_students = pd.DataFrame(ws_students.get_all_records())
     df_teachers = pd.DataFrame(ws_teachers.get_all_records())
@@ -229,7 +229,8 @@ with tab1:
         
         with col_profile:
             secure_uri = get_secure_photo_uri(raw_thumb_url)
-            st.image(secure_uri, use_container_width=True)
+            # Locked to stamp size (85px) instead of stretching
+            st.image(secure_uri, width=85)
 
         with col_action:
             if not df_fees.empty and 'Amount' in df_fees.columns:

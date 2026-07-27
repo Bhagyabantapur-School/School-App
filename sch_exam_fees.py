@@ -1,17 +1,15 @@
 import streamlit as st
-# --- BACK BUTTON ---
-if st.button("⬅️ Back to BPS Home", type="secondary"):
-    st.switch_page("bps_dashboard.py")
-st.write("---") 
-# -------------------
 import gspread
 import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 import plotly.express as px
 
-# --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="BPS Exam Fees", page_icon="💰", layout="wide")
+# --- GATEKEEPER SECURITY CHECK ---
+# If accessed directly without logging in via app.py, block execution
+if 'authenticated' not in st.session_state or not st.session_state.authenticated:
+    st.warning("🔒 Unauthorized Access. Please log in through the main portal.")
+    st.stop()
 
 IST = pytz.timezone('Asia/Kolkata')
 

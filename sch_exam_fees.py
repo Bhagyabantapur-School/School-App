@@ -15,6 +15,15 @@ IST = pytz.timezone('Asia/Kolkata')
 st.title("💰 Bhagyabantapur Primary School - Exam Fees")
 st.markdown("Record and track examination fee collections seamlessly.")
 
+# --- HELPER FUNCTION: COLUMN LETTER ---
+def get_col_letter(n):
+    """Converts a column index (1-based) to a Google Sheets column letter (e.g., 1 -> A, 10 -> J)"""
+    string = ""
+    while n > 0:
+        n, remainder = divmod(n - 1, 26)
+        string = chr(65 + remainder) + string
+    return string
+
 # --- AUTHENTICATION & CONNECTION ---
 @st.cache_resource
 def get_gspread_client():
@@ -373,6 +382,10 @@ if st.session_state.user_role == "admin":
         st.markdown("Select an assistant teacher to securely receive and verify their pending cash collections.")
         
         if not df_fees.empty and 'Handover_Status' in df_fees.columns:
+            # Dynamically find the column letter for Handover_Status so the update doesn't break
+            handover_col_idx = df_fees.columns.get_loc('Handover_Status') + 1
+            target_col_letter = get_col_letter(handover_col_idx)
+            
             df_fees['Amount'] = pd.to_numeric(df_fees['Amount'], errors='coerce').fillna(0)
             pending_df = df_fees[df_fees['Handover_Status'] == 'Pending'].copy()
             
@@ -404,11 +417,11 @@ if st.session_state.user_role == "admin":
                     if st.button("✅ Confirm Receipt of Cash", type="primary"):
                         with st.spinner(f"Verifying receipt of cash from {selected_teacher}..."):
                             try:
-                                # Batch Update Google Sheets (Column 10 is 'J' which handles Handover_Status)
+                                # Batch Update Google Sheets dynamically
                                 updates = []
                                 for r_num in selected_rows['_Row_Num']:
                                     updates.append({
-                                        'range': f'J{r_num}',
+                                        'range': f'{target_col_letter}{r_num}',
                                         'values': [['Handed Over']]
                                     })
                                 ws_fees.batch_update(updates)
@@ -421,4 +434,4 @@ if st.session_state.user_role == "admin":
             else:
                 st.success("🎉 All clear! There is no pending cash to receive from any assistant teachers.")
         else:
-            st.info("System is waiting for 'Handover_Status' configuration or there is no fee data available.")
+            st.info("System is waiting for 'Handover_Status' configuration or there is no fee data available. Ensure 'Handover_Status' is exactly added as a column header in your Google Sheet.")

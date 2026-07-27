@@ -246,24 +246,34 @@ with tab2:
         load_data.clear()
         st.rerun()
         
-    if not df_fees.empty and 'Amount' in df_fees.columns:
-        df_fees['Amount'] = pd.to_numeric(df_fees['Amount'], errors='coerce').fillna(0)
+    # --- FILTER DATA BASED ON USER ROLE ---
+    dash_df = df_fees.copy()
+    if not dash_df.empty:
+        # If user is a teacher, only show their collections. If admin, show all.
+        if st.session_state.user_role != "admin":
+            dash_df = dash_df[dash_df['Teacher_Involved'].astype(str).str.strip() == st.session_state.user_name]
+            st.caption(f"Showing collections managed by: **{st.session_state.user_name}**")
+        else:
+            st.caption("Showing **All School Collections** (Head Teacher View)")
+            
+    if not dash_df.empty and 'Amount' in dash_df.columns:
+        dash_df['Amount'] = pd.to_numeric(dash_df['Amount'], errors='coerce').fillna(0)
         
         col_dash1, col_dash2, col_dash3 = st.columns(3)
         with col_dash1:
-            st.metric(label="Total Fees Collected", value=f"₹ {df_fees['Amount'].sum():,.2f}")
+            st.metric(label="Total Fees Collected", value=f"₹ {dash_df['Amount'].sum():,.2f}")
         with col_dash2:
-            st.metric(label="Total Transactions", value=len(df_fees))
+            st.metric(label="Total Transactions", value=len(dash_df))
         with col_dash3:
-            st.metric(label="Latest Collection", value=str(df_fees['Date'].iloc[-1]) if not df_fees.empty else "N/A")
+            st.metric(label="Latest Collection", value=str(dash_df['Date'].iloc[-1]) if not dash_df.empty else "N/A")
 
         st.divider()
         
         st.markdown("##### Collection by Class & Exam Type")
         
         # Group by Class AND Exam Type for a stacked/grouped bar chart
-        if 'Exam Type' in df_fees.columns:
-            class_totals = df_fees.groupby(['Class', 'Exam Type'])['Amount'].sum().reset_index()
+        if 'Exam Type' in dash_df.columns:
+            class_totals = dash_df.groupby(['Class', 'Exam Type'])['Amount'].sum().reset_index()
             fig = px.bar(
                 class_totals, 
                 x='Class', 
@@ -275,7 +285,7 @@ with tab2:
             )
             fig.update_layout(xaxis_title="Class", yaxis_title="Total Amount (₹)")
         else:
-            class_totals = df_fees.groupby('Class')['Amount'].sum().reset_index()
+            class_totals = dash_df.groupby('Class')['Amount'].sum().reset_index()
             fig = px.bar(
                 class_totals, 
                 x='Class', 
@@ -289,7 +299,10 @@ with tab2:
         st.plotly_chart(fig, use_container_width=True)
         
         with st.expander("View Recent Transactions"):
-            st.dataframe(df_fees.tail(15).iloc[::-1], use_container_width=True)
+            st.dataframe(dash_df.tail(15).iloc[::-1], use_container_width=True)
             
     else:
-        st.info("No fee data available yet. Transactions will appear here once recorded.")
+        if df_fees.empty:
+            st.info("No fee data available yet. Transactions will appear here once recorded.")
+        else:
+            st.info(f"No fee data collected by you ({st.session_state.user_name}) yet.")

@@ -29,7 +29,8 @@ except Exception as e:
 
 
 # --- 2. SMART DATA CACHING & HELPER FUNCTIONS ---
-def pad_row(row, length=15):
+# UPDATED: Length increased to 16 to accommodate the new "Contain Code" column
+def pad_row(row, length=16):
     return row + [""] * (length - len(row))
 
 if "update_data" not in st.session_state:
@@ -188,6 +189,9 @@ with tab1:
             
             ai_answer = st.text_area("AI Answer", key=f"ai_ans_{fk}_{app_key}")
             
+            # --- NEW: Contain Code Checkbox ---
+            contain_code = st.checkbox("💻 Contain Code", key=f"contain_code_{fk}_{app_key}")
+            
         with col2:
             short_sel = st.selectbox("Short Description", ["➕ Add New..."] + get_dropdown_options(6), key=f"sh_sel_{fk}_{app_key}")
             short_input = st.text_input("Type New Short Description", key=f"sh_in_new_{fk}_{app_key}") if short_sel == "➕ Add New..." else short_sel
@@ -242,7 +246,6 @@ with tab1:
         else:
             add_to_main = st.checkbox("➕ Mark as 'Added to Main App' for this update?", key=f"main_chk_{fk}_{app_key}")
             if add_to_main:
-                # --- UPDATED: Added "App" to the dropdown options ---
                 selected_category = st.selectbox("App Category", ["Personal Hub", "BPS Digital System", "App"], key=f"cat_sel_{fk}_{app_key}")
                 col15_value = selected_category
 
@@ -257,15 +260,19 @@ with tab1:
             st.button("🔄 Clear Fields", on_click=clear_form_fields, help="Reset all fields on this tab")
         
         if submit_clicked:
+            # Add the True/False state for the 16th column
+            contain_code_str = "TRUE" if contain_code else ""
+            
             row_data_update = [
                 str(date_input), str(time_input.strftime("%H:%M:%S")), app_input, details_input,
                 ai_input, ai_answer, short_input, lines_input, features_input, selected_ai, chat_input, gs_input,
-                prefill_idea_date, prefill_idea_time, col15_value 
+                prefill_idea_date, prefill_idea_time, col15_value, contain_code_str 
             ]
             
             try:
                 if update_mode == "✅ Complete Pending Idea":
-                    worksheet_update.update(values=[row_data_update], range_name=f"A{target_sheet_row}:O{target_sheet_row}")
+                    # UPDATED: Extended range_name from A...O to A...P to fit 16 columns
+                    worksheet_update.update(values=[row_data_update], range_name=f"A{target_sheet_row}:P{target_sheet_row}")
                     st.session_state.update_data[target_sheet_row - 1] = row_data_update
                     st.success("Successfully completed and updated the pending idea!")
                 else:
@@ -286,9 +293,10 @@ with tab2:
     idea_details = st.text_area("Record your idea (Saved as 'Details of Update')")
     
     if st.button("Save Idea to Pending List", type="primary"):
+        # UPDATED: Added an extra empty string at the end to make it 16 columns long
         row_data_idea = [
             "", "", app_input_idea, idea_details, "", "", "", "", "", "", "", "", 
-            str(current_ist.date()), str(current_ist.strftime("%H:%M:%S")), ""
+            str(current_ist.date()), str(current_ist.strftime("%H:%M:%S")), "", ""
         ]
         try:
             worksheet_update.append_row(row_data_idea)
@@ -385,6 +393,8 @@ with tab4:
                     selected_ai_val = log[9] if len(log) > 9 else ""
                     chat_val = log[10] if len(log) > 10 else ""
                     gs_val = log[11] if len(log) > 11 else ""
+                    # --- NEW: Extracting the Contain Code value from column 16 ---
+                    contain_code_val = log[15] if len(log) > 15 else ""
                     
                     st.markdown(f"**Date:** {date_val} &nbsp;|&nbsp; **Lines:** {lines_val}")
                     
@@ -395,6 +405,10 @@ with tab4:
                         st.caption(f"**Short:** {short_desc}")
                     
                     meta_info = []
+                    # --- NEW: Inject Code Badge if it contains code ---
+                    if contain_code_val.upper() == "TRUE":
+                        meta_info.append("💻 **Contains Code**")
+                        
                     if ai_val: meta_info.append(f"**AI:** {ai_val}") 
                     if chat_val: meta_info.append(f"**Chat:** {chat_val}")
                     if gs_val: meta_info.append(f"**Google Sheet:** {gs_val}")

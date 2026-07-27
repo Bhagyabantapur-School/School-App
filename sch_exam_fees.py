@@ -5,8 +5,9 @@ from datetime import datetime, timedelta
 import pytz
 import plotly.express as px
 import re
-import requests
+import base64
 from google.oauth2.service_account import Credentials
+from google.auth.transport.requests import AuthorizedSession
 
 # --- GATEKEEPER SECURITY CHECK ---
 if 'authenticated' not in st.session_state or not st.session_state.authenticated:
@@ -18,69 +19,36 @@ IST = pytz.timezone('Asia/Kolkata')
 st.title("💰 Bhagyabantapur Primary School - Funds & Fees")
 st.markdown("Record and track examination fees and confiscated unauthorized cash.")
 
-# --- HELPER FUNCTIONS ---
-@st.cache_data(show_spinner=False, ttl=3600)
-def fetch_image_bytes(url):
-    """Fetches image bytes robustly to bypass Google Drive HTML warning pages."""
-    url = str(url).strip()
-    if not url.startswith('http'):
-        return None
-    
-    file_id = None
-    if 'drive.google.com' in url:
-        # Extract File ID
-        match = re.search(r'/file/d/([a-zA-Z0-9_-]+)', url)
-        if match:
-            file_id = match.group(1)
-        else:
-            match = re.search(r'id=([a-zA-Z0-9_-]+)', url)
-            if match:
-                file_id = match.group(1)
-        
-        if file_id:
-            # Method 1: Google Drive Thumbnail API (Bypasses most warnings)
-            try:
-                thumb_url = f"https://drive.google.com/thumbnail?id={file_id}&sz=w400"
-                response = requests.get(thumb_url, timeout=5)
-                # Strictly verify it is an image, not an HTML page
-                if response.status_code == 200 and 'image' in response.headers.get('Content-Type', ''):
-                    return response.content
-            except Exception:
-                pass
-            
-            # Method 2: Standard Direct Download Fallback
-            try:
-                dl_url = f"https://drive.google.com/uc?export=download&id={file_id}"
-                response2 = requests.get(dl_url, timeout=5)
-                if response2.status_code == 200 and 'image' in response2.headers.get('Content-Type', ''):
-                    return response2.content
-            except Exception:
-                pass
-                
-            return None # Fails safely if both methods get blocked
-            
-    else:
-        # Fetch for non-Google Drive direct image links
-        try:
-            response = requests.get(url, timeout=5)
-            if response.status_code == 200 and 'image' in response.headers.get('Content-Type', ''):
-                return response.content
-        except Exception:
-            return None
-            
-    return None
-
-# --- AUTHENTICATION & CONNECTION ---
-def get_gspread_client():
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets", 
-        "https://www.googleapis.com/auth/drive"
-    ]
-    credentials = Credentials.from_service_account_info(
+# --- AUTHENTICATION & SECURE IMAGE FETCHING (Matching bps_digital.py exactly) ---
+@st.cache_resource
+def get_google_credentials(): 
+    return Credentials.from_service_account_info(
         dict(st.secrets["gcp_service_account"]), 
-        scopes=scopes
+        scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive.readonly"]
     )
-    return gspread.authorize(credentials)
+
+def get_gspread_client():
+    return gspread.authorize(get_google_credentials())
+
+@st.cache_resource
+def get_drive_session(): 
+    return AuthorizedSession(get_google_credentials())
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_secure_image_bytes(file_id):
+    try:
+        r = get_drive_session().get(f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media")
+        return r.content if r.status_code == 200 else None
+    except: return None
+
+def get_secure_photo_uri(url):
+    fb = "https://www.w3schools.com/howto/img_avatar.png"
+    if pd.isna(url) or url == "" or not isinstance(url, str): return fb
+    match = re.search(r"(?:id=|/d/)([\w-]+)", url)
+    if match:
+        b = fetch_secure_image_bytes(match.group(1))
+        if b: return f"data:image/jpeg;base64,{base64.b64encode(b).decode()}"
+    return url if url.startswith("http") else fb
 
 try:
     _test_gc = get_gspread_client()
@@ -260,18 +228,8 @@ with tab1:
         col_profile, col_action = st.columns([1, 4])
         
         with col_profile:
-            # MDM Entry technique: Fetch the raw image bytes robustly
-            if raw_thumb_url and raw_thumb_url.lower() != 'nan':
-                img_data = fetch_image_bytes(raw_thumb_url)
-                if img_data:
-                    try:
-                        st.image(img_data, use_container_width=True)
-                    except Exception:
-                        st.info("📷 Image Load Error")
-                else:
-                    st.info("🔒 GDrive Access Denied")
-            else:
-                st.info("📷 No Photo Available")
+            secure_uri = get_secure_photo_uri(raw_thumb_url)
+            st.image(secure_uri, use_container_width=True)
 
         with col_action:
             if not df_fees.empty and 'Amount' in df_fees.columns:

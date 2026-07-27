@@ -6,12 +6,12 @@ from gspread.exceptions import WorksheetNotFound
 from google.oauth2.service_account import Credentials
 from google.auth.transport.requests import AuthorizedSession
 
-# If accessed directly without logging in via secure_main.py, block execution
+# If accessed directly without logging in via app.py, block execution
 if 'authenticated' not in st.session_state or not st.session_state.authenticated:
     st.warning("🔒 Unauthorized Access. Please log in through the main portal.")
     st.stop()
 
-# Re-initialize states strictly used by app.py
+# Re-initialize states strictly used by bps_digital.py
 if 'scan_msg' not in st.session_state: st.session_state.scan_msg = None
 if 'admin_scanned_keys' not in st.session_state: st.session_state.admin_scanned_keys = []
 if 'admin_scan_msg' not in st.session_state: st.session_state.admin_scan_msg = None
@@ -207,7 +207,7 @@ if st.session_state.user_role == "teacher":
                 tc, ts, is_sub, ab_t = None, None, False, ""
 
                 ll = fetch_sheet_data('teacher_leave')
-                if not ll.empty and 'Date' in ll.columns:
+                if not ll.empty and 'Date' in columns:
                     for _, r in ll[ll['Date'] == curr_date_str].iterrows():
                         lg = str(r.get('Detailed_Sub_Log', ''))
                         if f"11:15: {t_name_select}" in lg or f"11:15 AM: {t_name_select}" in lg:

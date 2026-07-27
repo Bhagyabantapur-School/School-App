@@ -192,7 +192,7 @@ with tab1:
 
     st.write("") 
 
-    # --- DUPLICATE & RETURN BALANCE CHECKER ---
+    # --- DUPLICATE & RETURN BALANCE CHECKER WITH THUMBNAIL ---
     allow_submission = True
     
     if selected_display:
@@ -201,37 +201,63 @@ with tab1:
         final_class = str(student_info['Class'])
         roll_no = str(student_info.get('Roll', 'N/A'))
         
-        if not df_fees.empty and 'Amount' in df_fees.columns:
-            past_payments = df_fees[
-                (df_fees['Name'].astype(str) == pure_name) & 
-                (df_fees['Class'].astype(str) == final_class) & 
-                (df_fees['Roll'].astype(str) == roll_no)
-            ]
-            
-            has_type_col = 'Collection Type' in df_fees.columns
-            if has_type_col:
-                past_payments = past_payments[past_payments['Collection Type'].astype(str).str.strip() == str(collection_type).strip()]
-            
-            if not past_payments.empty:
-                total_paid = pd.to_numeric(past_payments['Amount'], errors='coerce').fillna(0).sum()
-                
-                # Check for duplicate collections
-                if total_paid > 0 and transaction_nature == "📥 Collect Funds (In)":
-                    st.warning(f"⚠️ **Duplicate Warning:** {pure_name} already has a recorded net balance of **₹{total_paid}** for **{collection_type}**.")
-                    allow_due = st.checkbox(f"Unlock to record an additional entry for {pure_name}")
-                    if not allow_due:
-                        allow_submission = False
-                        
-                # Check for over-returning
-                elif total_paid <= 0 and transaction_nature == "📤 Return Funds (Out)":
-                    st.error(f"🚫 **Action Blocked:** {pure_name} has a net balance of ₹{total_paid} for {collection_type}. You cannot return funds that were not collected.")
-                    allow_submission = False
+        # Safely extract the Thumb_URL
+        thumb_url = str(student_info.get('Thumb_URL', '')).strip()
 
-                with st.expander("View their past records"):
-                    display_cols = [c for c in ['Date', 'Amount', 'Collection Type', 'Payer_Type', 'Teacher_Involved'] if c in past_payments.columns]
-                    st.dataframe(past_payments[display_cols], hide_index=True, use_container_width=True)
+        # Create a visual split for the picture and the transaction logic
+        col_profile, col_action = st.columns([1, 4])
+        
+        with col_profile:
+            if thumb_url and thumb_url.lower() != 'nan' and thumb_url.startswith('http'):
+                try:
+                    st.image(thumb_url, use_container_width=True)
+                except Exception:
+                    st.info("📷 Image Error")
+            else:
+                st.info("📷 No Photo")
+
+        with col_action:
+            if not df_fees.empty and 'Amount' in df_fees.columns:
+                past_payments = df_fees[
+                    (df_fees['Name'].astype(str) == pure_name) & 
+                    (df_fees['Class'].astype(str) == final_class) & 
+                    (df_fees['Roll'].astype(str) == roll_no)
+                ]
+                
+                has_type_col = 'Collection Type' in df_fees.columns
+                if has_type_col:
+                    past_payments = past_payments[past_payments['Collection Type'].astype(str).str.strip() == str(collection_type).strip()]
+                
+                if not past_payments.empty:
+                    total_paid = pd.to_numeric(past_payments['Amount'], errors='coerce').fillna(0).sum()
+                    
+                    # Check for duplicate collections
+                    if total_paid > 0 and transaction_nature == "📥 Collect Funds (In)":
+                        st.warning(f"⚠️ **Duplicate Warning:** {pure_name} already has a recorded net balance of **₹{total_paid}** for **{collection_type}**.")
+                        allow_due = st.checkbox(f"Unlock to record an additional entry for {pure_name}")
+                        if not allow_due:
+                            allow_submission = False
+                            
+                    # Check for over-returning
+                    elif total_paid <= 0 and transaction_nature == "📤 Return Funds (Out)":
+                        st.error(f"🚫 **Action Blocked:** {pure_name} has a net balance of ₹{total_paid} for {collection_type}. You cannot return funds that were not collected.")
+                        allow_submission = False
+                    else:
+                        st.success(f"✅ Ready to process transaction for {pure_name}.")
+    
+                    with st.expander("View their past records"):
+                        display_cols = [c for c in ['Date', 'Amount', 'Collection Type', 'Payer_Type', 'Teacher_Involved'] if c in past_payments.columns]
+                        st.dataframe(past_payments[display_cols], hide_index=True, use_container_width=True)
+                else:
+                    if transaction_nature == "📥 Collect Funds (In)":
+                        st.success(f"✅ No past records found. Ready to process collection for {pure_name}.")
+                    else:
+                        st.error(f"🚫 **Action Blocked:** No collection record found for {pure_name} under {collection_type}. You cannot process a return.")
+                        allow_submission = False
 
     # --- DATA SUBMISSION LOGIC ---
+    # Put the button outside the columns so it dynamically spans the full width
+    st.write("")
     submit_button = st.button("✅ Record Transaction", type="primary", use_container_width=True, disabled=not allow_submission)
     
     if submit_button:

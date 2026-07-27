@@ -25,25 +25,23 @@ def get_col_letter(n):
         string = chr(65 + remainder) + string
     return string
 
-# --- AUTHENTICATION & CONNECTION ---
+# --- AUTHENTICATION & CONNECTION (MIRRORED FROM BPS_DIGITAL.PY) ---
 @st.cache_resource
-def get_gspread_client():
-    # Explicitly define scopes to prevent the AuthorizedSession error
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets", 
-        "https://www.googleapis.com/auth/drive"
-    ]
-    credentials = Credentials.from_service_account_info(
+def get_google_credentials():
+    return Credentials.from_service_account_info(
         dict(st.secrets["gcp_service_account"]), 
-        scopes=scopes
+        scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     )
-    return gspread.authorize(credentials)
 
-try:
-    gc = get_gspread_client()
-except Exception as e:
-    st.error(f"Authentication failed. Please check your st.secrets. Details: {e}")
-    st.stop()
+@st.cache_resource
+def init_gsheets():
+    try: 
+        return gspread.authorize(get_google_credentials())
+    except Exception as e: 
+        st.error(f"⚠️ Google Sheets Connection Failed! Details: {e}")
+        st.stop()
+
+gc = init_gsheets()
 
 # --- DATA LOADING ---
 @st.cache_data(ttl=600)
@@ -248,7 +246,8 @@ with tab1:
                         handover_status 
                     ]
                     
-                    ws_fees.append_row(new_row)
+                    # Replaced append_row with append_rows for stability
+                    ws_fees.append_rows([new_row])
                     load_data.clear()
                     
                     st.success(f"✅ Successfully recorded ₹{amount} for {pure_name} ({exam_type}) on {receipt_date.strftime('%d-%m-%Y')}!")
@@ -390,7 +389,7 @@ if st.session_state.user_role == "admin":
         st.markdown("Select an assistant teacher to securely receive and verify their pending cash collections.")
         
         if not df_fees.empty and 'Handover_Status' in df_fees.columns:
-            # Dynamically find the column letter for Handover_Status so the update doesn't break
+            # Dynamically find the column letter for Handover_Status
             handover_col_idx = df_fees.columns.get_loc('Handover_Status') + 1
             target_col_letter = get_col_letter(handover_col_idx)
             
@@ -425,14 +424,9 @@ if st.session_state.user_role == "admin":
                     if st.button("✅ Confirm Receipt of Cash", type="primary"):
                         with st.spinner(f"Verifying receipt of cash from {selected_teacher}..."):
                             try:
-                                # Batch Update Google Sheets dynamically
-                                updates = []
+                                # Replaced batch_update with standard update looped logic for stability
                                 for r_num in selected_rows['_Row_Num']:
-                                    updates.append({
-                                        'range': f'{target_col_letter}{r_num}',
-                                        'values': [['Handed Over']]
-                                    })
-                                ws_fees.batch_update(updates)
+                                    ws_fees.update(values=[['Handed Over']], range_name=f'{target_col_letter}{r_num}')
                                 
                                 load_data.clear()
                                 st.success("Cash securely received and recorded!")

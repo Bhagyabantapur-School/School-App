@@ -29,7 +29,6 @@ except Exception as e:
 
 
 # --- 2. SMART DATA CACHING & HELPER FUNCTIONS ---
-# UPDATED: Length increased to 16 to accommodate the new "Contain Code" column
 def pad_row(row, length=16):
     return row + [""] * (length - len(row))
 
@@ -76,6 +75,50 @@ def get_last_app_data(app_name):
                 "sheet": str(row[11]).strip()
             }
     return {"lines": 0, "ai": "", "chat": "", "sheet": ""}
+
+# --- NEW: GITHUB-STYLE RELATIVE TIME LOGIC ---
+def get_time_ago(date_str, time_str):
+    if not date_str:
+        return ""
+    try:
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        
+        # Fallback to midnight if an older entry misses the time component
+        if not time_str:
+            time_str = "00:00:00"
+            
+        dt_str = f"{date_str.strip()} {time_str.strip()}"
+        past_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
+        past_dt = ist.localize(past_dt)
+        
+        diff = now - past_dt
+        seconds = diff.total_seconds()
+        
+        if seconds < 60:
+            return "just now"
+        elif seconds < 3600:
+            mins = int(seconds // 60)
+            return f"{mins} minute{'s' if mins != 1 else ''} ago"
+        elif seconds < 86400:
+            hrs = int(seconds // 3600)
+            return f"{hrs} hour{'s' if hrs != 1 else ''} ago"
+        elif seconds < 604800:
+            days = int(seconds // 86400)
+            return f"{days} day{'s' if days != 1 else ''} ago"
+        elif seconds < 2592000:
+            weeks = int(seconds // 604800)
+            return f"{weeks} week{'s' if weeks != 1 else ''} ago"
+        elif seconds < 31536000:
+            months = int(seconds // 2592000)
+            if months <= 1:
+                return "last month"
+            return f"{months} months ago"
+        else:
+            years = int(seconds // 31536000)
+            return f"{years} year{'s' if years != 1 else ''} ago"
+    except Exception:
+        return "" # Gracefully fails to blank if older row is malformed
 
 # --- FORM CLEARING LOGIC ---
 if "form_reset_counter" not in st.session_state:
@@ -189,7 +232,6 @@ with tab1:
             
             ai_answer = st.text_area("AI Answer", key=f"ai_ans_{fk}_{app_key}")
             
-            # --- NEW: Contain Code Checkbox ---
             contain_code = st.checkbox("💻 Contain Code", key=f"contain_code_{fk}_{app_key}")
             
         with col2:
@@ -229,7 +271,6 @@ with tab1:
 
         st.divider()
         
-        # --- App Category Logic ---
         existing_category = ""
         if app_input and app_input != "➕ Add New...":
             for r in st.session_state.update_data:
@@ -260,7 +301,6 @@ with tab1:
             st.button("🔄 Clear Fields", on_click=clear_form_fields, help="Reset all fields on this tab")
         
         if submit_clicked:
-            # Add the True/False state for the 16th column
             contain_code_str = "TRUE" if contain_code else ""
             
             row_data_update = [
@@ -271,7 +311,6 @@ with tab1:
             
             try:
                 if update_mode == "✅ Complete Pending Idea":
-                    # UPDATED: Extended range_name from A...O to A...P to fit 16 columns
                     worksheet_update.update(values=[row_data_update], range_name=f"A{target_sheet_row}:P{target_sheet_row}")
                     st.session_state.update_data[target_sheet_row - 1] = row_data_update
                     st.success("Successfully completed and updated the pending idea!")
@@ -293,7 +332,6 @@ with tab2:
     idea_details = st.text_area("Record your idea (Saved as 'Details of Update')")
     
     if st.button("Save Idea to Pending List", type="primary"):
-        # UPDATED: Added an extra empty string at the end to make it 16 columns long
         row_data_idea = [
             "", "", app_input_idea, idea_details, "", "", "", "", "", "", "", "", 
             str(current_ist.date()), str(current_ist.strftime("%H:%M:%S")), "", ""
@@ -384,6 +422,12 @@ with tab4:
             with st.expander(title):
                 for log in logs: 
                     date_val = log[0] if len(log) > 0 else ""
+                    time_val = log[1] if len(log) > 1 else ""
+                    
+                    # --- Compute GitHub-style Relative Time ---
+                    time_ago_str = get_time_ago(date_val, time_val)
+                    date_display = f"{date_val} *({time_ago_str})*" if time_ago_str else date_val
+                    
                     details_val = log[3] if len(log) > 3 else ""
                     ai_val = log[4] if len(log) > 4 else ""
                     ai_answer_val = log[5] if len(log) > 5 else ""
@@ -393,10 +437,10 @@ with tab4:
                     selected_ai_val = log[9] if len(log) > 9 else ""
                     chat_val = log[10] if len(log) > 10 else ""
                     gs_val = log[11] if len(log) > 11 else ""
-                    # --- NEW: Extracting the Contain Code value from column 16 ---
                     contain_code_val = log[15] if len(log) > 15 else ""
                     
-                    st.markdown(f"**Date:** {date_val} &nbsp;|&nbsp; **Lines:** {lines_val}")
+                    # Output updated with GitHub style date
+                    st.markdown(f"**Date:** {date_display} &nbsp;|&nbsp; **Lines:** {lines_val}")
                     
                     if features_added:
                         st.markdown(f"🚀 **Features:** {features_added}")
@@ -405,7 +449,6 @@ with tab4:
                         st.caption(f"**Short:** {short_desc}")
                     
                     meta_info = []
-                    # --- NEW: Inject Code Badge if it contains code ---
                     if contain_code_val.upper() == "TRUE":
                         meta_info.append("💻 **Contains Code**")
                         

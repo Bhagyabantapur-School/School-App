@@ -16,36 +16,32 @@ IST = pytz.timezone('Asia/Kolkata')
 st.title("💰 Bhagyabantapur Primary School - Exam Fees")
 st.markdown("Record and track examination fee collections seamlessly.")
 
-# --- HELPER FUNCTION: COLUMN LETTER ---
-def get_col_letter(n):
-    """Converts a column index (1-based) to a Google Sheets column letter (e.g., 1 -> A, 10 -> J)"""
-    string = ""
-    while n > 0:
-        n, remainder = divmod(n - 1, 26)
-        string = chr(65 + remainder) + string
-    return string
-
-# --- AUTHENTICATION & CONNECTION (MIRRORED FROM BPS_DIGITAL.PY) ---
-@st.cache_resource
-def get_google_credentials():
-    return Credentials.from_service_account_info(
+# --- AUTHENTICATION & CONNECTION ---
+# 🛠️ FIX: Removed @st.cache_resource so the session state is never mangled across reruns.
+def get_gspread_client():
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets", 
+        "https://www.googleapis.com/auth/drive"
+    ]
+    credentials = Credentials.from_service_account_info(
         dict(st.secrets["gcp_service_account"]), 
-        scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        scopes=scopes
     )
+    return gspread.authorize(credentials)
 
-@st.cache_resource
-def init_gsheets():
-    try: 
-        return gspread.authorize(get_google_credentials())
-    except Exception as e: 
-        st.error(f"⚠️ Google Sheets Connection Failed! Details: {e}")
-        st.stop()
-
-gc = init_gsheets()
+try:
+    # Initial connection test
+    _test_gc = get_gspread_client()
+except Exception as e:
+    st.error(f"Authentication failed. Please check your st.secrets. Details: {e}")
+    st.stop()
 
 # --- DATA LOADING ---
 @st.cache_data(ttl=600)
 def load_data():
+    # Generate a fresh client inside the data loader
+    gc = get_gspread_client()
+    
     bps_sheet = gc.open("BPS_Database")
     ws_students = bps_sheet.worksheet("students_master")
     ws_teachers = bps_sheet.worksheet("TEACHERS_DETAIL")
@@ -70,11 +66,11 @@ def load_data():
                 # The Head Teacher's self-collections do not need to be handed over
                 df_fees.loc[df_fees['Teacher_Involved'] == 'SUKHAMAY KISKU', 'Handover_Status'] = 'Settled'
     
-    return df_students, df_teachers, df_fees, df_mdm, ws_fees
+    return df_students, df_teachers, df_fees, df_mdm
 
 try:
     with st.spinner("Connecting to BPS Database..."):
-        df_students, df_teachers, df_fees, df_mdm, ws_fees = load_data()
+        df_students, df_teachers, df_fees, df_mdm = load_data()
 except Exception as e:
     st.error(f"Error loading data. Ensure the sheets are named correctly and the 'mdm_log' tab exists. Details: {e}")
     st.stop()
@@ -246,8 +242,11 @@ with tab1:
                         handover_status 
                     ]
                     
-                    # Replaced append_row with append_rows for stability
-                    ws_fees.append_rows([new_row])
+                    # Call fresh client for write operations
+                    gc_write = get_gspread_client()
+                    ws_fees_write = gc_write.open("SCH_Exam_Fees").worksheet("Sheet1")
+                    ws_fees_write.append_row(new_row)
+                    
                     load_data.clear()
                     
                     st.success(f"✅ Successfully recorded ₹{amount} for {pure_name} ({exam_type}) on {receipt_date.strftime('%d-%m-%Y')}!")
@@ -389,9 +388,8 @@ if st.session_state.user_role == "admin":
         st.markdown("Select an assistant teacher to securely receive and verify their pending cash collections.")
         
         if not df_fees.empty and 'Handover_Status' in df_fees.columns:
-            # Dynamically find the column letter for Handover_Status
+            # Locate the exact column index for Handover_Status
             handover_col_idx = df_fees.columns.get_loc('Handover_Status') + 1
-            target_col_letter = get_col_letter(handover_col_idx)
             
             df_fees['Amount'] = pd.to_numeric(df_fees['Amount'], errors='coerce').fillna(0)
             pending_df = df_fees[df_fees['Handover_Status'] == 'Pending'].copy()
@@ -424,9 +422,13 @@ if st.session_state.user_role == "admin":
                     if st.button("✅ Confirm Receipt of Cash", type="primary"):
                         with st.spinner(f"Verifying receipt of cash from {selected_teacher}..."):
                             try:
-                                # Replaced batch_update with standard update looped logic for stability
+                                # Fetch a fresh client for writing
+                                gc_write = get_gspread_client()
+                                ws_fees_write = gc_write.open("SCH_Exam_Fees").worksheet("Sheet1")
+                                
+                                # Highly stable singular cell update
                                 for r_num in selected_rows['_Row_Num']:
-                                    ws_fees.update(values=[['Handed Over']], range_name=f'{target_col_letter}{r_num}')
+                                    ws_fees_write.update_cell(r_num, handover_col_idx, 'Handed Over')
                                 
                                 load_data.clear()
                                 st.success("Cash securely received and recorded!")

@@ -93,9 +93,74 @@ except Exception as e:
 
 # --- APP LAYOUT (Tabs Dynamic Routing) ---
 if st.session_state.user_role == "admin":
-    tab1, tab2, tab3 = st.tabs(["📝 Record Funds", "📊 Collection Dashboard", "🤝 Handover Manager"])
+    tab_pending, tab1, tab2, tab3 = st.tabs(["⚠️ Pending Fees", "📝 Record Funds", "📊 Collection Dashboard", "🤝 Handover Manager"])
 else:
-    tab1, tab2 = st.tabs(["📝 Record Funds", "📊 Collection Dashboard"])
+    tab_pending, tab1, tab2 = st.tabs(["⚠️ Pending Fees", "📝 Record Funds", "📊 Collection Dashboard"])
+
+# ==========================================
+# TAB 0: TODAY's PENDING FEES
+# ==========================================
+with tab_pending:
+    st.subheader("⚠️ Today's Pending 'Evaluation-II' Fees")
+    
+    today_str = datetime.now(IST).strftime("%d-%m-%Y")
+    
+    if df_mdm.empty or 'Date' not in df_mdm.columns:
+        st.info("🌸 **Gentle Reminder:** No attendance (MDM) records found. Please complete attendance first.")
+    else:
+        # Filter MDM for today
+        today_mdm = df_mdm[df_mdm['Date'].astype(str).str.strip() == today_str].copy()
+        
+        # Check attendance dynamically based on role
+        if st.session_state.user_role == "teacher":
+            target_mdm = today_mdm[today_mdm['Teacher'].astype(str).str.strip() == st.session_state.user_name].copy()
+            reminder_msg = "🌸 **Gentle Reminder:** You haven't taken today's attendance (MDM Entry) yet. Please submit your class attendance in the BPS Digital App first to see the list of present students with pending fees."
+        else:
+            target_mdm = today_mdm.copy()
+            reminder_msg = "🌸 **Gentle Reminder:** It looks like today's attendance (MDM Entry) hasn't been completed by anyone yet. Please ensure attendance is taken to see the list of present students with pending fees."
+
+        if target_mdm.empty:
+            st.info(reminder_msg)
+        else:
+            # Find who has paid Evaluation-II
+            paid_keys = set()
+            if not df_fees.empty and 'Collection Type' in df_fees.columns and 'Amount' in df_fees.columns:
+                eval_fees = df_fees[df_fees['Collection Type'].astype(str).str.strip() == 'Evaluation-II'].copy()
+                eval_fees['Amount'] = pd.to_numeric(eval_fees['Amount'], errors='coerce').fillna(0)
+                
+                # Get net amount per student
+                paid_students = eval_fees.groupby(['Class', 'Roll', 'Name'])['Amount'].sum().reset_index()
+                paid_students = paid_students[paid_students['Amount'] > 0]
+                
+                paid_keys = set(zip(
+                    paid_students['Class'].astype(str).str.strip(), 
+                    paid_students['Roll'].astype(str).str.strip(), 
+                    paid_students['Name'].astype(str).str.strip()
+                ))
+            
+            # Check who is present but hasn't paid
+            def has_paid(row):
+                return (str(row['Class']).strip(), str(row['Roll']).strip(), str(row['Name']).strip()) in paid_keys
+                
+            target_mdm['Paid_Eval_II'] = target_mdm.apply(has_paid, axis=1)
+            pending_students = target_mdm[target_mdm['Paid_Eval_II'] == False]
+            
+            if pending_students.empty:
+                st.success("🎉 Fantastic! All students marked present today have paid their Evaluation-II fees.")
+            else:
+                st.markdown("The following students are **present today** but have **not yet paid** the Evaluation-II fees:")
+                
+                class_order = {"CLASS PP": 0, "CLASS I": 1, "CLASS II": 2, "CLASS III": 3, "CLASS IV": 4, "CLASS V": 5}
+                classes_present = [c for c in pending_students['Class'].unique() if str(c).strip()]
+                classes_present.sort(key=lambda x: class_order.get(x, 99))
+                
+                for cls in classes_present:
+                    cls_pending = pending_students[pending_students['Class'] == cls].copy()
+                    cls_pending['Roll_Num'] = pd.to_numeric(cls_pending['Roll'], errors='coerce').fillna(999)
+                    cls_pending = cls_pending.sort_values('Roll_Num')
+                    
+                    with st.expander(f"📖 {cls} - {len(cls_pending)} Student(s) Pending", expanded=True):
+                        st.dataframe(cls_pending[['Section', 'Roll', 'Name', 'Teacher']], hide_index=True, use_container_width=True)
 
 # ==========================================
 # TAB 1: FUND COLLECTION FORM (BATCH MODE)

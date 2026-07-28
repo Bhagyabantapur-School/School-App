@@ -19,7 +19,7 @@ IST = pytz.timezone('Asia/Kolkata')
 st.title("💰 Bhagyabantapur Primary School - Funds & Fees")
 st.markdown("Record and track examination fees and confiscated unauthorized cash.")
 
-# --- AUTHENTICATION & SECURE IMAGE FETCHING (Matching bps_digital.py exactly) ---
+# --- AUTHENTICATION & SECURE IMAGE FETCHING ---
 @st.cache_resource
 def get_google_credentials(): 
     return Credentials.from_service_account_info(
@@ -64,7 +64,7 @@ def load_data():
     bps_sheet = gc.open("BPS_Database")
     ws_students = bps_sheet.worksheet("students_master")
     ws_teachers = bps_sheet.worksheet("TEACHERS_DETAIL")
-    ws_mdm = worksheets = bps_sheet.worksheet("mdm_log")
+    ws_mdm = bps_sheet.worksheet("mdm_log")
     
     df_students = pd.DataFrame(ws_students.get_all_records())
     df_teachers = pd.DataFrame(ws_teachers.get_all_records())
@@ -121,7 +121,6 @@ with tab1:
         else:
             payer_type = st.radio("Returned To:", ["Student", "Guardian", "Teacher"])
         
-    # --- ADMIN OVERRIDE FOR FORGOTTEN TEACHER LOGS ---
     actual_collector = st.session_state.user_name
     if st.session_state.user_role == "admin":
         st.info("💡 **Admin Override:** If you are logging a transaction on behalf of an assistant teacher, select their name below.")
@@ -214,7 +213,6 @@ with tab1:
 
     st.write("") 
 
-    # --- DUPLICATE & RETURN BALANCE CHECKER WITH SECURE THUMBNAIL ---
     allow_submission = True
     
     if selected_display:
@@ -229,7 +227,6 @@ with tab1:
         
         with col_profile:
             secure_uri = get_secure_photo_uri(raw_thumb_url)
-            # Locked to stamp size (85px) instead of stretching
             st.image(secure_uri, width=85)
 
         with col_action:
@@ -269,7 +266,6 @@ with tab1:
                         st.error(f"🚫 **Action Blocked:** No collection record found for {pure_name} under {collection_type}. You cannot process a return.")
                         allow_submission = False
 
-    # --- DATA SUBMISSION LOGIC ---
     st.write("")
     submit_button = st.button("✅ Record Transaction", type="primary", use_container_width=True, disabled=not allow_submission)
     
@@ -399,7 +395,60 @@ with tab2:
             col_dash3.metric("💵 Pending with Teachers", f"₹ {total_pending:,.2f}")
     
             st.divider()
+
+            # --- EXPECTED FEE TARGET SUMMARY ---
+            st.markdown("##### 🏫 Expected Fee Target Summary")
+            st.info("""
+            **BHAGYABANTAPUR PRY. SCHOOL**  
+            Class PP (14) @₹7 = ₹98  
+            Class I (46) @₹6 = ₹276  
+            Class II (41) @₹6 = ₹246  
+            Class III (24) @₹7 = ₹168  
+            Class IV (44) @₹7 = ₹308  
+            Class V (17) @₹7 = ₹119  
+            **TOTAL (186) : ₹1,215**
+            """)
             
+            st.divider()
+            
+            # --- CLASS-WISE LIST & TOTALS ---
+            st.markdown("##### 📋 Class-wise Student List & Totals")
+            if 'Collection Type' in dash_df.columns:
+                ctypes = ["All"] + list(dash_df['Collection Type'].dropna().unique())
+                selected_type = st.selectbox("Filter by Collection Type:", ctypes)
+                filter_df = dash_df if selected_type == "All" else dash_df[dash_df['Collection Type'] == selected_type]
+            else:
+                filter_df = dash_df
+
+            if not filter_df.empty:
+                # Custom logic to force natural sorting of standard class names
+                class_order = {"CLASS PP": 0, "CLASS I": 1, "CLASS II": 2, "CLASS III": 3, "CLASS IV": 4, "CLASS V": 5}
+                found_classes = [c for c in filter_df['Class'].unique() if str(c).strip()]
+                found_classes.sort(key=lambda x: class_order.get(x, 99))
+                
+                for cls in found_classes:
+                    cls_df = filter_df[filter_df['Class'] == cls].copy()
+                    
+                    # Force Roll to numeric so it sorts naturally (1, 2, 3... instead of 1, 10, 2)
+                    cls_df['Roll_Num'] = pd.to_numeric(cls_df['Roll'], errors='coerce').fillna(999)
+                    cls_df = cls_df.sort_values('Roll_Num')
+                    
+                    cls_total = cls_df['Amount'].sum()
+                    unique_students = cls_df[cls_df['Amount'] > 0]['Name'].nunique() 
+                    
+                    with st.expander(f"📖 {cls} | Total Received: ₹ {cls_total:,.2f} | Paid By: {unique_students} Students"):
+                        display_cols = ['Date', 'Roll', 'Name', 'Amount']
+                        if selected_type == "All" and 'Collection Type' in cls_df.columns:
+                            display_cols.append('Collection Type')
+                        display_cols.append('Teacher_Involved')
+                        
+                        st.dataframe(cls_df[display_cols], hide_index=True, use_container_width=True)
+            else:
+                st.info("No collections found.")
+            
+            st.divider()
+            
+            # --- TEACHER HANDOVER LEDGER ---
             st.markdown("##### 👨‍🏫 Teacher Handover Ledger")
             def calc_teacher_stats(group):
                 gross = group[group['Amount'] > 0]['Amount'].sum()

@@ -101,28 +101,33 @@ else:
 # TAB 0: TODAY's PENDING FEES
 # ==========================================
 with tab_pending:
-    st.subheader("⚠️ Today's Pending 'Evaluation-II' Fees")
+    col_hdr, col_btn = st.columns([3, 1])
+    with col_hdr:
+        st.subheader("⚠️ Today's Pending 'Evaluation-II' Fees")
+    with col_btn:
+        if st.button("🔄 Refresh List", use_container_width=True):
+            load_data.clear()
+            st.rerun()
     
     today_str = datetime.now(IST).strftime("%d-%m-%Y")
     
     if df_mdm.empty or 'Date' not in df_mdm.columns:
         st.info("🌸 **Gentle Reminder:** No attendance (MDM) records found. Please complete attendance first.")
     else:
-        # Filter MDM for today
+        # Filter MDM for today (Show all classes that have MDM completed)
         today_mdm = df_mdm[df_mdm['Date'].astype(str).str.strip() == today_str].copy()
         
-        # Check attendance dynamically based on role
-        if st.session_state.user_role == "teacher":
-            target_mdm = today_mdm[today_mdm['Teacher'].astype(str).str.strip() == st.session_state.user_name].copy()
-            reminder_msg = "🌸 **Gentle Reminder:** You haven't taken today's attendance (MDM Entry) yet. Please submit your class attendance in the BPS Digital App first to see the list of present students with pending fees."
+        if today_mdm.empty:
+            st.info("🌸 **Gentle Reminder:** It looks like today's attendance (MDM Entry) hasn't been completed yet. Please submit class attendance in the BPS Digital App first to see the list of present students with pending fees.")
         else:
-            target_mdm = today_mdm.copy()
-            reminder_msg = "🌸 **Gentle Reminder:** It looks like today's attendance (MDM Entry) hasn't been completed by anyone yet. Please ensure attendance is taken to see the list of present students with pending fees."
+            # Safe key generation to prevent Float vs String mismatch (e.g. "1.0" vs "1")
+            def safe_key(cls, roll, name):
+                try:
+                    r = str(int(float(roll)))
+                except:
+                    r = str(roll).strip()
+                return f"{str(cls).strip().upper()}_{r}_{str(name).strip().upper()}"
 
-        if target_mdm.empty:
-            st.info(reminder_msg)
-        else:
-            # Find who has paid Evaluation-II
             paid_keys = set()
             if not df_fees.empty and 'Collection Type' in df_fees.columns and 'Amount' in df_fees.columns:
                 eval_fees = df_fees[df_fees['Collection Type'].astype(str).str.strip() == 'Evaluation-II'].copy()
@@ -132,18 +137,12 @@ with tab_pending:
                 paid_students = eval_fees.groupby(['Class', 'Roll', 'Name'])['Amount'].sum().reset_index()
                 paid_students = paid_students[paid_students['Amount'] > 0]
                 
-                paid_keys = set(zip(
-                    paid_students['Class'].astype(str).str.strip(), 
-                    paid_students['Roll'].astype(str).str.strip(), 
-                    paid_students['Name'].astype(str).str.strip()
-                ))
+                for _, row in paid_students.iterrows():
+                    paid_keys.add(safe_key(row['Class'], row['Roll'], row['Name']))
             
             # Check who is present but hasn't paid
-            def has_paid(row):
-                return (str(row['Class']).strip(), str(row['Roll']).strip(), str(row['Name']).strip()) in paid_keys
-                
-            target_mdm['Paid_Eval_II'] = target_mdm.apply(has_paid, axis=1)
-            pending_students = target_mdm[target_mdm['Paid_Eval_II'] == False]
+            today_mdm['Match_Key'] = today_mdm.apply(lambda r: safe_key(r.get('Class',''), r.get('Roll',''), r.get('Name','')), axis=1)
+            pending_students = today_mdm[~today_mdm['Match_Key'].isin(paid_keys)]
             
             if pending_students.empty:
                 st.success("🎉 Fantastic! All students marked present today have paid their Evaluation-II fees.")
@@ -388,7 +387,7 @@ with tab1:
 with tab2:
     st.subheader("Collection Overview")
     
-    if st.button("🔄 Refresh Data"):
+    if st.button("🔄 Refresh Dashboard Data"):
         load_data.clear()
         st.rerun()
         

@@ -172,6 +172,41 @@ def render_header():
 render_header()
 inject_security_css(st.session_state.user_name)
 
+# -------------------------------
+# SIDEBAR: AUTO-REFRESH MODULE
+# -------------------------------
+st.sidebar.markdown("### 🔄 Live Sync")
+if st.sidebar.button("🔄 Manual Refresh", use_container_width=True, key="bps_manual_refresh"):
+    clear_sheet_cache()
+    st.rerun()
+
+components.html("""
+    <div style="font-family: sans-serif; color: #0c5460; font-weight: 600; font-size: 13px; text-align: center; padding: 10px; background: #d1ecf1; border-radius: 8px; border: 1px solid #bee5eb; margin-top: 5px;">
+        ⏳ Auto-Refresh In: <br> <span id="time" style="font-weight: 900; font-size: 18px;">10:00</span>
+    </div>
+    <script>
+        let time = 600; // 10 minutes cache lifespan
+        const display = document.getElementById('time');
+        const timer = setInterval(function () {
+            time--;
+            let m = Math.floor(time / 60);
+            let s = time % 60;
+            display.textContent = m + ":" + (s < 10 ? "0" : "") + s;
+            if (time <= 0) {
+                clearInterval(timer);
+                display.textContent = "Syncing...";
+                // Find and click the Streamlit refresh button automatically
+                const buttons = window.parent.document.querySelectorAll('button');
+                buttons.forEach(btn => {
+                    if (btn.innerText.includes('Manual Refresh')) {
+                        btn.click();
+                    }
+                });
+            }
+        }, 1000);
+    </script>
+""", height=75)
+
 # Notice Header
 nt = get_notice()
 if nt.strip(): st.info(f"📢 NOTICE: {nt}")
@@ -301,7 +336,7 @@ if st.session_state.user_role == "teacher":
                                         st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                         alc += 1
                                     else:
-                                        isc = r['Scan_Key'] in st.session_state.scanned_keys
+                                        isc = r['Scan_Key'] in st.session_state.admin_scanned_keys
                                         if st.checkbox("Ate MDM", value=isc, key=f"mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
                                 st.divider()
                             

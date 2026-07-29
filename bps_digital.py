@@ -182,10 +182,10 @@ if st.sidebar.button("🔄 Manual Refresh", use_container_width=True, key="bps_m
 
 components.html("""
     <div style="font-family: sans-serif; color: #0c5460; font-weight: 600; font-size: 13px; text-align: center; padding: 10px; background: #d1ecf1; border-radius: 8px; border: 1px solid #bee5eb; margin-top: 5px;">
-        ⏳ Auto-Refresh In: <br> <span id="time" style="font-weight: 900; font-size: 18px;">05:00</span>
+        ⏳ Auto-Refresh In: <br> <span id="time" style="font-weight: 900; font-size: 18px;">02:00</span>
     </div>
     <script>
-        let time = 300; // 5 minutes cache lifespan
+        let time = 120; // 2 minutes cache lifespan
         const display = document.getElementById('time');
         const timer = setInterval(function () {
             time--;

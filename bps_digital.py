@@ -404,6 +404,65 @@ elif st.session_state.user_role == "admin":
     with tabs[0]: 
         st.subheader(f"MDM Status: {curr_date_str}")
         ml = fetch_sheet_data('mdm_log')
+        
+        # --- MISSING MDM ALERTS ---
+        tdy = now.strftime('%A')
+        hd = get_local_csv('holidays.csv')
+        is_h = not hd[hd['Date'] == curr_date_str].empty if not hd.empty else False
+        
+        if is_h or tdy == 'Sunday':
+            st.info("🏖️ School is closed today. No MDM expected.")
+        else:
+            rout = get_local_csv('routine.csv')
+            ll = fetch_sheet_data('teacher_leave')
+            pending_list = []
+            
+            if not rout.empty:
+                r_tdy = rout[rout['Day'] == tdy].copy()
+                r_tdy['Start_Obj'] = r_tdy['Start_Time'].apply(parse_time_safe)
+                r_1115 = r_tdy[r_tdy['Start_Obj'] == time(11, 15)]
+                
+                expected_mdm = {} 
+                for _, r in r_1115.iterrows():
+                    expected_mdm[(r['Class'], r.get('Section', 'A'))] = r['Teacher']
+                    
+                if not ll.empty and 'Date' in ll.columns:
+                    for _, r in ll[ll['Date'].astype(str) == curr_date_str].iterrows():
+                        absent_t = r['Teacher']
+                        abs_init = TEACHER_INITIALS.get(absent_t, absent_t)
+                        lg = str(r.get('Detailed_Sub_Log', ''))
+                        for a in lg.split(" | "):
+                            if a.strip().startswith("11:15"):
+                                parts = a.split(": ")
+                                if len(parts) >= 2:
+                                    sub_t = parts[1].strip()
+                                    sub_init = TEACHER_INITIALS.get(sub_t, sub_t)
+                                    for (c, s), t in list(expected_mdm.items()):
+                                        if t == abs_init: expected_mdm[(c, s)] = sub_init
+                
+                completed_classes = set()
+                today_ml = ml[ml['Date'].astype(str) == curr_date_str] if not ml.empty else pd.DataFrame()
+                if not today_ml.empty:
+                    for _, r in today_ml.iterrows():
+                        c = str(r['Class']).strip()
+                        if c == 'CLASS LPP': c = 'CLASS PP'
+                        s = str(r.get('Section', 'A')).strip()
+                        completed_classes.add((c, s))
+                        
+                for (c, s), t_init in expected_mdm.items():
+                    if (c, s) not in completed_classes:
+                        full_name = INV_TEACHER_INITIALS.get(t_init, t_init)
+                        pending_list.append({'Pending Class': f"{c} {s}".strip(), 'Assigned Teacher': full_name})
+                        
+                if pending_list:
+                    st.error(f"🚨 **Action Required:** {len(pending_list)} class(es) have NOT submitted MDM today!")
+                    st.dataframe(pd.DataFrame(pending_list), hide_index=True, use_container_width=True)
+                else:
+                    if not r_1115.empty: st.success("🎉 All expected MDM entries for today are completed!")
+        
+        st.divider()
+        # --- END MISSING MDM ALERTS ---
+
         al = fetch_sheet_data('student_attendance_master') 
         c1, c2 = st.columns([2, 1])
         vd = c1.date_input("Select Date", datetime.now()).strftime("%d-%m-%Y")

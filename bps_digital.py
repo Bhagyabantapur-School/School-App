@@ -405,7 +405,7 @@ elif st.session_state.user_role == "admin":
         st.subheader(f"MDM Status: {curr_date_str}")
         ml = fetch_sheet_data('mdm_log')
         
-        # --- MISSING MDM ALERTS ---
+        # --- MISSING MDM ALERTS & TRACKER ---
         tdy = now.strftime('%A')
         hd = get_local_csv('holidays.csv')
         is_h = not hd[hd['Date'] == curr_date_str].empty if not hd.empty else False
@@ -415,7 +415,6 @@ elif st.session_state.user_role == "admin":
         else:
             rout = get_local_csv('routine.csv')
             ll = fetch_sheet_data('teacher_leave')
-            pending_list = []
             
             if not rout.empty:
                 r_tdy = rout[rout['Day'] == tdy].copy()
@@ -440,28 +439,64 @@ elif st.session_state.user_role == "admin":
                                     for (c, s), t in list(expected_mdm.items()):
                                         if t == abs_init: expected_mdm[(c, s)] = sub_init
                 
-                completed_classes = set()
+                completed_mdm_actual = {}
                 today_ml = ml[ml['Date'].astype(str) == curr_date_str] if not ml.empty else pd.DataFrame()
                 if not today_ml.empty:
                     for _, r in today_ml.iterrows():
                         c = str(r['Class']).strip()
                         if c == 'CLASS LPP': c = 'CLASS PP'
                         s = str(r.get('Section', 'A')).strip()
-                        completed_classes.add((c, s))
+                        t_actual = str(r.get('Teacher', '')).strip()
+                        completed_mdm_actual[(c, s)] = t_actual
                         
+                status_data = []
                 for (c, s), t_init in expected_mdm.items():
-                    if (c, s) not in completed_classes:
-                        full_name = INV_TEACHER_INITIALS.get(t_init, t_init)
-                        pending_list.append({'Pending Class': f"{c} {s}".strip(), 'Assigned Teacher': full_name})
+                    assigned_full = INV_TEACHER_INITIALS.get(t_init, t_init)
+                    if (c, s) in completed_mdm_actual:
+                        status_data.append({
+                            'Class': f"{c} {s}".strip(),
+                            'Assigned Teacher': assigned_full,
+                            'Completed By': completed_mdm_actual[(c, s)],
+                            'Status': '✅ Done'
+                        })
+                    else:
+                        status_data.append({
+                            'Class': f"{c} {s}".strip(),
+                            'Assigned Teacher': assigned_full,
+                            'Completed By': '---',
+                            'Status': '❌ Pending'
+                        })
                         
-                if pending_list:
-                    st.error(f"🚨 **Action Required:** {len(pending_list)} class(es) have NOT submitted MDM today!")
-                    st.dataframe(pd.DataFrame(pending_list), hide_index=True, use_container_width=True)
-                else:
-                    if not r_1115.empty: st.success("🎉 All expected MDM entries for today are completed!")
+                # Add any overrides/unexpected entries
+                for (c, s), actual_full in completed_mdm_actual.items():
+                    if (c, s) not in expected_mdm:
+                        status_data.append({
+                            'Class': f"{c} {s}".strip(),
+                            'Assigned Teacher': '--- (Override)',
+                            'Completed By': actual_full,
+                            'Status': '✅ Done'
+                        })
+                
+                if status_data:
+                    st.markdown("##### 📝 Today's MDM Submission Tracker")
+                    status_df = pd.DataFrame(status_data)
+                    
+                    def highlight_status(row):
+                        if row['Status'] == '✅ Done':
+                            return ['background-color: #d4edda; color: #155724; font-weight: bold'] * len(row)
+                        else:
+                            return ['background-color: #f8d7da; color: #721c24'] * len(row)
+                            
+                    st.dataframe(status_df.style.apply(highlight_status, axis=1), hide_index=True, use_container_width=True)
+                    
+                    pending_count = len(status_df[status_df['Status'] == '❌ Pending'])
+                    if pending_count > 0:
+                        st.error(f"🚨 **Action Required:** {pending_count} class(es) have NOT submitted MDM today!")
+                    else:
+                        st.success("🎉 All expected MDM entries for today are completed!")
         
         st.divider()
-        # --- END MISSING MDM ALERTS ---
+        # --- END MISSING MDM ALERTS & TRACKER ---
 
         al = fetch_sheet_data('student_attendance_master') 
         c1, c2 = st.columns([2, 1])

@@ -145,7 +145,7 @@ if st.sidebar.button("Log Out", use_container_width=True):
 st.sidebar.markdown("---")
 
 # ==========================================
-# 7. LIVE ROUTINE TRACKER BANNER (WITH SUB SCANNING)
+# 7. LIVE ROUTINE TRACKER BANNER (HIDE IF ON LEAVE)
 # ==========================================
 def render_tracker():
     st.markdown("### ⏱️ My Live Class Tracker (Today's Schedule)")
@@ -158,42 +158,55 @@ def render_tracker():
     curr_date_str = now.strftime('%d-%m-%Y')
     
     rout = fetch_routine_data()
+    ll = fetch_leave_data()
     mc = TEACHER_INITIALS.get(st.session_state.user_name, st.session_state.user_name)
     
-    # 1. Get Default Regular Schedule
-    ms = rout[(rout['Teacher'] == mc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()
-    if not ms.empty:
-        ms['Is_Sub'] = False
-    
-    # 2. Check and Merge Today's Substitution Assignments from teacher_leave
-    ll = fetch_leave_data()
-    sd = []
-    if not ll.empty and 'Date' in ll.columns and not rout.empty:
-        for _, r in ll[ll['Date'].astype(str).str.strip() == curr_date_str].iterrows():
-            sub_log = str(r.get('Detailed_Sub_Log', ''))
-            if st.session_state.user_name in sub_log:
-                absent_teacher = str(r.get('Teacher', '')).strip()
-                absent_initials = TEACHER_INITIALS.get(absent_teacher, absent_teacher)
-                
-                for item in sub_log.split(" | "):
-                    if f": {st.session_state.user_name}" in item:
-                        slot = item.split(": ")[0].strip()
-                        oc = rout[(rout['Teacher'] == absent_initials) & (rout['Day'] == tdy) & (rout['Start_Time'].astype(str).str.strip() == slot)]
-                        if not oc.empty:
-                            rx = oc.iloc[0]
-                            sd.append({
-                                'Start_Time': rx['Start_Time'],
-                                'End_Time': rx['End_Time'],
-                                'Class': rx['Class'],
-                                'Section': rx.get('Section', 'A'),
-                                'Subject': f"🔄 {rx['Subject']} (Sub for {absent_teacher})",
-                                'Teacher': mc,
-                                'Day': tdy,
-                                'Is_Sub': True
-                            })
-    
-    if sd:
-        ms = pd.concat([ms, pd.DataFrame(sd)], ignore_index=True)
+    # 1. Check if logged-in user is ON LEAVE today
+    is_on_leave = False
+    leave_type = ""
+    if not ll.empty and 'Date' in ll.columns and 'Teacher' in ll.columns:
+        user_leave = ll[(ll['Date'].astype(str).str.strip() == curr_date_str) & (ll['Teacher'].astype(str).str.strip() == st.session_state.user_name)]
+        if not user_leave.empty:
+            is_on_leave = True
+            leave_type = str(user_leave.iloc[0].get('Type', 'Leave'))
+            
+    if is_on_leave:
+        st.warning(f"🏖️ You are marked on leave today ({leave_type}). Regular classes are hidden.")
+        ms = pd.DataFrame()  # Wipe out classes if on leave
+    else:
+        # 2. Get Default Regular Schedule
+        ms = rout[(rout['Teacher'] == mc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()
+        if not ms.empty:
+            ms['Is_Sub'] = False
+        
+        # 3. Check and Merge Today's Substitution Assignments from teacher_leave
+        sd = []
+        if not ll.empty and 'Date' in ll.columns and not rout.empty:
+            for _, r in ll[ll['Date'].astype(str).str.strip() == curr_date_str].iterrows():
+                sub_log = str(r.get('Detailed_Sub_Log', ''))
+                if st.session_state.user_name in sub_log:
+                    absent_teacher = str(r.get('Teacher', '')).strip()
+                    absent_initials = TEACHER_INITIALS.get(absent_teacher, absent_teacher)
+                    
+                    for item in sub_log.split(" | "):
+                        if f": {st.session_state.user_name}" in item:
+                            slot = item.split(": ")[0].strip()
+                            oc = rout[(rout['Teacher'] == absent_initials) & (rout['Day'] == tdy) & (rout['Start_Time'].astype(str).str.strip() == slot)]
+                            if not oc.empty:
+                                rx = oc.iloc[0]
+                                sd.append({
+                                    'Start_Time': rx['Start_Time'],
+                                    'End_Time': rx['End_Time'],
+                                    'Class': rx['Class'],
+                                    'Section': rx.get('Section', 'A'),
+                                    'Subject': f"🔄 {rx['Subject']} (Sub for {absent_teacher})",
+                                    'Teacher': mc,
+                                    'Day': tdy,
+                                    'Is_Sub': True
+                                })
+        
+        if sd:
+            ms = pd.concat([ms, pd.DataFrame(sd)], ignore_index=True)
     
     prev_row, curr_row, next_row = None, None, None
     

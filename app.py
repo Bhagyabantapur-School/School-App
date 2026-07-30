@@ -114,7 +114,6 @@ if not st.session_state.authenticated:
 # ==========================================
 st.sidebar.success(f"👋 Welcome, {st.session_state.user_name}")
 
-# Hidden/Manual Sync Button used by the 2-minute JavaScript timer
 if st.sidebar.button("🔄 Sync Schedule", use_container_width=True, key="sync_routine_btn"):
     fetch_routine_data.clear()
     st.rerun()
@@ -125,9 +124,9 @@ if st.sidebar.button("Log Out", use_container_width=True):
 st.sidebar.markdown("---")
 
 # ==========================================
-# 7. TEACHER LIVE ROUTINE TRACKER BANNER
+# 7. LIVE ROUTINE TRACKER BANNER (ADMIN & TEACHER)
 # ==========================================
-def render_teacher_tracker():
+def render_tracker():
     st.markdown("### ⏱️ My Live Class Tracker (Today's Schedule)")
     st.caption("Automatically syncs every 2 minutes with the `bps_routine` Google Sheet.")
     
@@ -183,7 +182,7 @@ def render_teacher_tracker():
         format_tracker_row("➡️ Next", next_row)
     ])
     
-    # Highlight the Current Class row in light green
+    # Highlight Current Class row in light green
     def highlight_current_row(row):
         if "Current" in str(row["Status"]):
             return ["background-color: #d4edda; color: #155724; font-weight: bold"] * len(row)
@@ -196,7 +195,7 @@ def render_teacher_tracker():
         use_container_width=True
     )
     
-    # 2-Minute (120,000 ms) Auto-Refresh script that clicks the "Sync Schedule" button
+    # 2-Minute (120,000 ms) Auto-Refresh script
     components.html("""
         <script>
             setTimeout(function() {
@@ -215,16 +214,15 @@ def render_teacher_tracker():
 # ==========================================
 # 8. HOME PORTAL & NAVIGATION LOGIC
 # ==========================================
-# Define pages for navigation
 app_page = st.Page("bps_digital.py", title="BPS Digital App", icon="🏫")
 fees_page = st.Page("sch_exam_fees.py", title="Exam Fees", icon="💰")
 udise_page = st.Page("UDISE+.py", title="UDISE+ Progression", icon="🎓")
 gas_page = st.Page("bps_gas_tracker.py", title="Gas Tracker", icon="🛢️")
 
 def home_page_ui():
-    # If logged in as a teacher, display the live schedule banner on top
-    if st.session_state.user_role == "teacher":
-        render_teacher_tracker()
+    # Show banner for BOTH Teacher and Admin logins
+    if st.session_state.user_role in ["teacher", "admin"]:
+        render_tracker()
         
     st.markdown(f"<h2 style='text-align: center;'>Welcome to the Unified Hub, {st.session_state.user_name}!</h2>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center;'>Select an application from the sidebar or click below to launch your primary workspace.</p>", unsafe_allow_html=True)
@@ -242,7 +240,6 @@ def home_page_ui():
         if st.button("💰 Enter Funds & Fees", type="secondary", use_container_width=True):
             st.switch_page(fees_page)
             
-        # Admin-only Home Portal Buttons
         if st.session_state.user_role == "admin":
             st.write("")
             if st.button("🎓 Enter UDISE+ Progression", type="secondary", use_container_width=True):
@@ -253,13 +250,11 @@ def home_page_ui():
 
 home_page = st.Page(home_page_ui, title="Home Portal", icon="🏠", default=True)
 
-# Build Navigation Menu dynamically based on User Role
 nav_pages = {
     "Portal": [home_page],
     "Applications": [app_page, fees_page]
 }
 
-# Only append UDISE+ and Gas Tracker if logged in as admin
 if st.session_state.user_role == "admin":
     nav_pages["Applications"].append(udise_page)
     nav_pages["Applications"].append(gas_page)

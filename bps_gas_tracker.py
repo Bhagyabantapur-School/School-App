@@ -4,10 +4,42 @@ from datetime import date
 import gspread
 from google.oauth2.service_account import Credentials
 
-# 1. Set page configuration
-st.set_page_config(page_title="BPS Gas Tracker", page_icon="🛢️", layout="centered")
+# ==========================================
+# 1. AUTHENTICATION & ADMIN GUARD
+# ==========================================
+if 'authenticated' not in st.session_state or not st.session_state.authenticated:
+    st.warning("🔒 Unauthorized Access. Please log in through the main portal.")
+    st.stop()
 
-# --- GOOGLE SHEETS CONNECTION (USING STREAMLIT SECRETS) ---
+if st.session_state.get('user_role') != "admin":
+    st.error("⛔ Access Denied: This application is restricted to Admin users only.")
+    st.stop()
+
+# ==========================================
+# 2. PAGE STYLING & CONFIDENTIAL WATERMARK
+# ==========================================
+def inject_security_css(user_name):
+    wm = f"{user_name} - CONFIDENTIAL"
+    st.markdown(f"""<style>
+        body {{ user-select: none; -webkit-user-select: none; }}
+        .watermark {{
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            pointer-events: none; z-index: 9999;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"><text x="50" y="150" fill="rgba(200, 200, 200, 0.25)" font-size="20" transform="rotate(-45 150 150)" font-family="Arial, sans-serif">{wm}</text></svg>');
+            background-repeat: repeat;
+        }}
+        .block-container {{ padding-top: 1rem; max-width: 800px; overflow-x: hidden; }}
+        .stButton>button {{
+            width: 100%; border-radius: 10px; height: 3.2em;
+            background-color: #007bff; color: white; font-weight: bold; border: none;
+        }}
+    </style><div class="watermark"></div>""", unsafe_allow_html=True)
+
+inject_security_css(st.session_state.get('user_name', 'Admin'))
+
+# ==========================================
+# 3. GOOGLE SHEETS CONNECTION
+# ==========================================
 @st.cache_resource
 def get_google_credentials():
     return Credentials.from_service_account_info(
@@ -30,7 +62,9 @@ except Exception as e:
     st.error("⚠️ Could not connect to Google Sheets. Please check your Streamlit Secrets configuration and ensure you have shared 'BPS_Gas_Tracker' with your service account email as an Editor.")
     st.stop()
 
-# --- LOAD DATA FROM SHEET ---
+# ==========================================
+# 4. LOAD DATA FROM SHEET
+# ==========================================
 def load_data():
     records = sheet.get_all_records()
     if records:
@@ -44,7 +78,9 @@ def load_data():
 if 'gas_log' not in st.session_state:
     st.session_state.gas_log = load_data()
 
-# --- CALCULATE CURRENT CYLINDER STATUS ---
+# ==========================================
+# 5. CALCULATE CURRENT CYLINDER STATUS
+# ==========================================
 def get_latest_status(cylinder_name, default_status):
     df = st.session_state.gas_log
     if not df.empty:
@@ -60,7 +96,9 @@ def get_latest_status(cylinder_name, default_status):
 st.session_state.cyl_1_status = get_latest_status("Cylinder 1", "In Use")
 st.session_state.cyl_2_status = get_latest_status("Cylinder 2", "Empty")
 
-# --- MAIN DASHBOARD ---
+# ==========================================
+# 6. MAIN DASHBOARD
+# ==========================================
 st.title("🛢️ Bhagyabantapur Primary School - Gas Tracker")
 st.markdown("Track bookings, deliveries, and itemized costs for the school's cylinders.")
 
@@ -93,7 +131,9 @@ with col2:
 
 st.divider()
 
-# --- ACTION FORM ---
+# ==========================================
+# 7. ACTION FORM
+# ==========================================
 st.subheader("📝 Log an Action")
 
 with st.form("gas_action_form"):
@@ -143,7 +183,9 @@ with st.form("gas_action_form"):
 
 st.divider()
 
-# --- HISTORY & EXPENSES ---
+# ==========================================
+# 8. HISTORY & EXPENSES
+# ==========================================
 st.subheader("📊 History & Expense Breakdown")
 
 if not st.session_state.gas_log.empty:

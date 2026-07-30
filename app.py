@@ -43,7 +43,7 @@ TEACHER_INITIALS = {
 }
 
 # ==========================================
-# 3. GOOGLE SHEETS ROUTINE CONNECTOR
+# 3. GOOGLE SHEETS CONNECTORS
 # ==========================================
 @st.cache_resource
 def get_google_credentials():
@@ -59,12 +59,32 @@ def init_routine_gsheet():
     except Exception:
         return None
 
+@st.cache_resource
+def init_database_gsheet():
+    try:
+        return gspread.authorize(get_google_credentials()).open("BPS_Database")
+    except Exception:
+        return None
+
 @st.cache_data(ttl=120)
 def fetch_routine_data():
     try:
         r_sh = init_routine_gsheet()
         if r_sh:
             df = pd.DataFrame(r_sh.sheet1.get_all_records()).replace({'TRUE': True, 'FALSE': False, 'True': True, 'False': False}).infer_objects(copy=False)
+            df.columns = [str(c).strip() for c in df.columns]
+            return df
+    except Exception:
+        pass
+    return pd.DataFrame()
+
+@st.cache_data(ttl=120)
+def fetch_leave_data():
+    try:
+        db_sh = init_database_gsheet()
+        if db_sh:
+            ws = db_sh.worksheet("teacher_leave")
+            df = pd.DataFrame(ws.get_all_records()).replace({'TRUE': True, 'FALSE': False, 'True': True, 'False': False}).infer_objects(copy=False)
             df.columns = [str(c).strip() for c in df.columns]
             return df
     except Exception:
@@ -116,6 +136,7 @@ st.sidebar.success(f"👋 Welcome, {st.session_state.user_name}")
 
 if st.sidebar.button("🔄 Sync Schedule", use_container_width=True, key="sync_routine_btn"):
     fetch_routine_data.clear()
+    fetch_leave_data.clear()
     st.rerun()
 
 if st.sidebar.button("Log Out", use_container_width=True): 
@@ -124,21 +145,55 @@ if st.sidebar.button("Log Out", use_container_width=True):
 st.sidebar.markdown("---")
 
 # ==========================================
-# 7. LIVE ROUTINE TRACKER BANNER (ADMIN & TEACHER)
+# 7. LIVE ROUTINE TRACKER BANNER (WITH SUB SCANNING)
 # ==========================================
 def render_tracker():
     st.markdown("### ⏱️ My Live Class Tracker (Today's Schedule)")
-    st.caption("Automatically syncs every 2 minutes with the `bps_routine` Google Sheet.")
+    st.caption("Automatically syncs every 2 minutes with `bps_routine` and substitution plans in `BPS_Database`.")
     
     utc_now = datetime.now(timezone.utc)
     now = utc_now + timedelta(hours=5, minutes=30)
     curr_time = now.time()
     tdy = now.strftime('%A')
+    curr_date_str = now.strftime('%d-%m-%Y')
     
     rout = fetch_routine_data()
     mc = TEACHER_INITIALS.get(st.session_state.user_name, st.session_state.user_name)
     
+    # 1. Get Default Regular Schedule
     ms = rout[(rout['Teacher'] == mc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()
+    if not ms.empty:
+        ms['Is_Sub'] = False
+    
+    # 2. Check and Merge Today's Substitution Assignments from teacher_leave
+    ll = fetch_leave_data()
+    sd = []
+    if not ll.empty and 'Date' in ll.columns and not rout.empty:
+        for _, r in ll[ll['Date'].astype(str).str.strip() == curr_date_str].iterrows():
+            sub_log = str(r.get('Detailed_Sub_Log', ''))
+            if st.session_state.user_name in sub_log:
+                absent_teacher = str(r.get('Teacher', '')).strip()
+                absent_initials = TEACHER_INITIALS.get(absent_teacher, absent_teacher)
+                
+                for item in sub_log.split(" | "):
+                    if f": {st.session_state.user_name}" in item:
+                        slot = item.split(": ")[0].strip()
+                        oc = rout[(rout['Teacher'] == absent_initials) & (rout['Day'] == tdy) & (rout['Start_Time'].astype(str).str.strip() == slot)]
+                        if not oc.empty:
+                            rx = oc.iloc[0]
+                            sd.append({
+                                'Start_Time': rx['Start_Time'],
+                                'End_Time': rx['End_Time'],
+                                'Class': rx['Class'],
+                                'Section': rx.get('Section', 'A'),
+                                'Subject': f"🔄 {rx['Subject']} (Sub for {absent_teacher})",
+                                'Teacher': mc,
+                                'Day': tdy,
+                                'Is_Sub': True
+                            })
+    
+    if sd:
+        ms = pd.concat([ms, pd.DataFrame(sd)], ignore_index=True)
     
     prev_row, curr_row, next_row = None, None, None
     

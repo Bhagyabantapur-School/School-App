@@ -82,6 +82,11 @@ def init_gsheets():
     except: st.error("⚠️ Google Sheets Connection Failed!"); st.stop()
 
 @st.cache_resource
+def init_routine_gsheet():
+    try: return gspread.authorize(get_google_credentials()).open("bps_routine")
+    except: return None
+
+@st.cache_resource
 def get_drive_session(): return AuthorizedSession(get_google_credentials())
 
 sh = init_gsheets()
@@ -91,7 +96,21 @@ def fetch_sheet_data(sheet_name):
     try: return pd.DataFrame(sh.worksheet(sheet_name).get_all_records()).replace({'TRUE': True, 'FALSE': False, 'True': True, 'False': False}).infer_objects(copy=False)
     except: return pd.DataFrame()
 
-def clear_sheet_cache(): fetch_sheet_data.clear(); get_notice.clear()
+@st.cache_data(ttl=600)
+def fetch_routine_data():
+    try:
+        r_sh = init_routine_gsheet()
+        if r_sh:
+            df = pd.DataFrame(r_sh.sheet1.get_all_records()).replace({'TRUE': True, 'FALSE': False, 'True': True, 'False': False}).infer_objects(copy=False)
+            df.columns = [str(c).strip() for c in df.columns]
+            return df
+    except: pass
+    return pd.DataFrame()
+
+def clear_sheet_cache():
+    fetch_sheet_data.clear()
+    get_notice.clear()
+    fetch_routine_data.clear()
 
 def append_sheet_df(sheet_name, df):
     if df.empty: return
@@ -239,7 +258,7 @@ if st.session_state.user_role == "teacher":
                 st.success("✅ MDM Submitted for today.")
             else:
                 st.subheader("Student MDM Entry")
-                rout = get_local_csv('routine.csv')
+                rout = fetch_routine_data()
                 mc = TEACHER_INITIALS.get(t_name_select, t_name_select)
                 tdy = now.strftime('%A')
                 tc, ts, is_sub, ab_t = None, None, False, ""
@@ -362,7 +381,7 @@ if st.session_state.user_role == "teacher":
         with at_tabs[1]:
             st.subheader("Live Class Status")
             ll = fetch_sheet_data('teacher_leave')
-            rout = get_local_csv('routine.csv')
+            rout = fetch_routine_data()
             ol, ld = False, None
             if not ll.empty and 'Date' in ll.columns:
                 mtl = ll[(ll['Date'] == curr_date_str) & (ll['Teacher'] == t_name_select)]
@@ -448,7 +467,7 @@ elif st.session_state.user_role == "admin":
         if is_h or tdy == 'Sunday':
             st.info("🏖️ School is closed today. No MDM expected.")
         else:
-            rout = get_local_csv('routine.csv')
+            rout = fetch_routine_data()
             ll = fetch_sheet_data('teacher_leave')
             
             if not rout.empty:
@@ -703,7 +722,7 @@ elif st.session_state.user_role == "admin":
 
     with tabs[3]: 
         st.subheader(f"🏫 Routine Status")
-        rout = get_local_csv('routine.csv')
+        rout = fetch_routine_data()
         tdy = now.strftime('%A')
         if not rout.empty:
             tr = rout[rout['Day'] == tdy].copy()
@@ -753,7 +772,7 @@ elif st.session_state.user_role == "admin":
             else:
                 sds = st.date_input("Date", datetime.now()).strftime("%d-%m-%Y")
                 tdy = datetime.strptime(sds, "%d-%m-%Y").strftime('%A')
-                rout = get_local_csv('routine.csv')
+                rout = fetch_routine_data()
                 tc = TEACHER_INITIALS.get(abt, abt)
                 ms = rout[(rout['Teacher'] == tc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()
                 ll = fetch_sheet_data('teacher_leave')

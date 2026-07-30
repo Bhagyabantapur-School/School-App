@@ -1,4 +1,9 @@
 import streamlit as st
+import streamlit.components.v1 as components
+import pandas as pd
+from datetime import datetime, timedelta, timezone
+import gspread
+from google.oauth2.service_account import Credentials
 
 # ==========================================
 # 1. GLOBAL PAGE CONFIGURATION
@@ -11,7 +16,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# 2. USER AUTHENTICATION DICTIONARY
+# 2. USER AUTHENTICATION & INITIALS DICTIONARY
 # ==========================================
 USERS = {
     "admin": {"name": "SUKHAMAY KISKU", "role": "admin", "password": "bpsAPP@2026"}, 
@@ -25,18 +30,66 @@ USERS = {
     "mk": {"name": "MANJUMA KHATUN", "role": "teacher", "password": "mk26"}
 }
 
+TEACHER_INITIALS = {
+    "SUKHAMAY KISKU": "SK", 
+    "TAPASI RANA": "TR", 
+    "SUJATA BISWAS ROTHA": "SBR", 
+    "ROHINI SINGH": "RS", 
+    "UDAY NARAYAN JANA": "UNJ", 
+    "BIMAL KUMAR PATRA": "BKP", 
+    "SUSMITA PAUL": "SP", 
+    "TAPAN KUMAR MANDAL": "TKM", 
+    "MANJUMA KHATUN": "MK"
+}
+
 # ==========================================
-# 3. SESSION STATE INITIALIZATION
+# 3. GOOGLE SHEETS ROUTINE CONNECTOR
+# ==========================================
+@st.cache_resource
+def get_google_credentials():
+    return Credentials.from_service_account_info(
+        dict(st.secrets["gcp_service_account"]),
+        scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive.readonly"]
+    )
+
+@st.cache_resource
+def init_routine_gsheet():
+    try:
+        return gspread.authorize(get_google_credentials()).open("bps_routine")
+    except Exception:
+        return None
+
+@st.cache_data(ttl=120)
+def fetch_routine_data():
+    try:
+        r_sh = init_routine_gsheet()
+        if r_sh:
+            df = pd.DataFrame(r_sh.sheet1.get_all_records()).replace({'TRUE': True, 'FALSE': False, 'True': True, 'False': False}).infer_objects(copy=False)
+            df.columns = [str(c).strip() for c in df.columns]
+            return df
+    except Exception:
+        pass
+    return pd.DataFrame()
+
+def parse_time_safe(t_str):
+    for fmt in ('%H:%M', '%I:%M %p', '%H:%M:%S'):
+        try:
+            return datetime.strptime(str(t_str).strip(), fmt).time()
+        except Exception:
+            continue
+    return None
+
+# ==========================================
+# 4. SESSION STATE INITIALIZATION
 # ==========================================
 if 'authenticated' not in st.session_state: st.session_state.authenticated = False
 if 'user_role' not in st.session_state: st.session_state.user_role = None
 if 'user_name' not in st.session_state: st.session_state.user_name = None
 
 # ==========================================
-# 4. LOGIN SCREEN (GATEKEEPER)
+# 5. LOGIN SCREEN (GATEKEEPER)
 # ==========================================
 if not st.session_state.authenticated:
-    # Hide the sidebar completely on the login screen
     st.markdown("<style>[data-testid='stSidebar'] {display: none;}</style>", unsafe_allow_html=True)
     
     st.markdown("<div class='login-box'><h3>🔐 System Login</h3><p>Please enter your Username & Password.</p></div>", unsafe_allow_html=True)
@@ -54,30 +107,129 @@ if not st.session_state.authenticated:
             else: 
                 st.error("❌ Incorrect Credentials")
     
-    st.stop() # Halts all further script execution until logged in
+    st.stop()
 
 # ==========================================
-# 5. HOME PORTAL & NAVIGATION LOGIC
+# 6. SIDEBAR CONTROLS & AUTO-SYNC
 # ==========================================
-# Sidebar Logout & Welcome
 st.sidebar.success(f"👋 Welcome, {st.session_state.user_name}")
-if st.sidebar.button("Log Out"): 
+
+# Hidden/Manual Sync Button used by the 2-minute JavaScript timer
+if st.sidebar.button("🔄 Sync Schedule", use_container_width=True, key="sync_routine_btn"):
+    fetch_routine_data.clear()
+    st.rerun()
+
+if st.sidebar.button("Log Out", use_container_width=True): 
     st.session_state.authenticated = False 
     st.rerun()
 st.sidebar.markdown("---")
 
+# ==========================================
+# 7. TEACHER LIVE ROUTINE TRACKER BANNER
+# ==========================================
+def render_teacher_tracker():
+    st.markdown("### ⏱️ My Live Class Tracker (Today's Schedule)")
+    st.caption("Automatically syncs every 2 minutes with the `bps_routine` Google Sheet.")
+    
+    utc_now = datetime.now(timezone.utc)
+    now = utc_now + timedelta(hours=5, minutes=30)
+    curr_time = now.time()
+    tdy = now.strftime('%A')
+    
+    rout = fetch_routine_data()
+    mc = TEACHER_INITIALS.get(st.session_state.user_name, st.session_state.user_name)
+    
+    ms = rout[(rout['Teacher'] == mc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()
+    
+    prev_row, curr_row, next_row = None, None, None
+    
+    if not ms.empty:
+        ms['Start_Obj'] = ms['Start_Time'].apply(parse_time_safe)
+        ms['End_Obj'] = ms['End_Time'].apply(parse_time_safe)
+        ms = ms.dropna(subset=['Start_Obj', 'End_Obj']).sort_values('Start_Obj')
+        
+        for _, r in ms.iterrows():
+            st_obj = r['Start_Obj']
+            et_obj = r['End_Obj']
+            if et_obj < curr_time:
+                prev_row = r  # Most recently completed class
+            elif st_obj <= curr_time <= et_obj:
+                curr_row = r  # Ongoing active class
+            elif st_obj > curr_time:
+                if next_row is None:
+                    next_row = r  # First upcoming class
+                    
+    def format_tracker_row(label, row_data):
+        if row_data is not None:
+            return {
+                "Status": label,
+                "Start_Time": str(row_data.get('Start_Time', '')),
+                "Class": str(row_data.get('Class', '')),
+                "Section": str(row_data.get('Section', 'A')),
+                "Subject": str(row_data.get('Subject', ''))
+            }
+        else:
+            return {
+                "Status": label,
+                "Start_Time": "---",
+                "Class": "---",
+                "Section": "---",
+                "Subject": "---"
+            }
+
+    tracker_df = pd.DataFrame([
+        format_tracker_row("⬅️ Previous", prev_row),
+        format_tracker_row("🟢 Current", curr_row),
+        format_tracker_row("➡️ Next", next_row)
+    ])
+    
+    # Highlight the Current Class row in light green
+    def highlight_current_row(row):
+        if "Current" in str(row["Status"]):
+            return ["background-color: #d4edda; color: #155724; font-weight: bold"] * len(row)
+        else:
+            return [""] * len(row)
+            
+    st.dataframe(
+        tracker_df.style.apply(highlight_current_row, axis=1),
+        hide_index=True,
+        use_container_width=True
+    )
+    
+    # 2-Minute (120,000 ms) Auto-Refresh script that clicks the "Sync Schedule" button
+    components.html("""
+        <script>
+            setTimeout(function() {
+                const buttons = window.parent.document.querySelectorAll('button');
+                buttons.forEach(btn => {
+                    if (btn.innerText.includes('Sync Schedule')) {
+                        btn.click();
+                    }
+                });
+            }, 120000);
+        </script>
+    """, height=0, width=0)
+    
+    st.divider()
+
+# ==========================================
+# 8. HOME PORTAL & NAVIGATION LOGIC
+# ==========================================
 # Define pages for navigation
 app_page = st.Page("bps_digital.py", title="BPS Digital App", icon="🏫")
 fees_page = st.Page("sch_exam_fees.py", title="Exam Fees", icon="💰")
 udise_page = st.Page("UDISE+.py", title="UDISE+ Progression", icon="🎓")
 gas_page = st.Page("bps_gas_tracker.py", title="Gas Tracker", icon="🛢️")
 
-# Define the visual interface for the home page (The Buttons)
 def home_page_ui():
+    # If logged in as a teacher, display the live schedule banner on top
+    if st.session_state.user_role == "teacher":
+        render_teacher_tracker()
+        
     st.markdown(f"<h2 style='text-align: center;'>Welcome to the Unified Hub, {st.session_state.user_name}!</h2>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center;'>Select an application from the sidebar or click below to launch your primary workspace.</p>", unsafe_allow_html=True)
     
-    st.write("") # Spacing
+    st.write("")
     st.write("")
     
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -85,7 +237,7 @@ def home_page_ui():
         if st.button("🚀 Enter BPS Digital App", type="primary", use_container_width=True):
             st.switch_page(app_page)
             
-        st.write("") # Spacing between buttons
+        st.write("")
         
         if st.button("💰 Enter Funds & Fees", type="secondary", use_container_width=True):
             st.switch_page(fees_page)

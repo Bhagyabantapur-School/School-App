@@ -145,11 +145,10 @@ if st.sidebar.button("Log Out", use_container_width=True):
 st.sidebar.markdown("---")
 
 # ==========================================
-# 7. LIVE ROUTINE TRACKER BANNER (HIDE IF ON LEAVE)
+# 7. LIVE ROUTINE TRACKER BANNER
 # ==========================================
 def render_tracker():
-    st.markdown("### ⏱️ My Live Class Tracker (Today's Schedule)")
-    st.caption("Automatically syncs every 2 minutes with `bps_routine` and substitution plans in `BPS_Database`.")
+    st.markdown("#### ⏱️ My Live Class")
     
     utc_now = datetime.now(timezone.utc)
     now = utc_now + timedelta(hours=5, minutes=30)
@@ -276,8 +275,6 @@ def render_tracker():
             }, 120000);
         </script>
     """, height=0, width=0)
-    
-    st.divider()
 
 # ==========================================
 # 8. HOME PORTAL & NAVIGATION LOGIC
@@ -288,32 +285,31 @@ udise_page = st.Page("UDISE+.py", title="UDISE+ Progression", icon="🎓")
 gas_page = st.Page("bps_gas_tracker.py", title="Gas Tracker", icon="🛢️")
 
 def home_page_ui():
-    # Show banner for BOTH Teacher and Admin logins
+    # 1. Compact Welcome Header on Top
+    st.markdown(f"<h3 style='margin-bottom: 5px;'>👋 Welcome, {st.session_state.user_name}</h3>", unsafe_allow_html=True)
+    
+    # 2. Live Class Tracker
     if st.session_state.user_role in ["teacher", "admin"]:
         render_tracker()
         
-    st.markdown(f"<h2 style='text-align: center;'>Welcome to the Unified Hub, {st.session_state.user_name}!</h2>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center;'>Select an application from the sidebar or click below to launch your primary workspace.</p>", unsafe_allow_html=True)
+    # 3. Compact Application Selection Section
+    st.markdown("#### 🚀 Select Application")
     
-    st.write("")
-    st.write("")
-    
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        if st.button("🚀 Enter BPS Digital App", type="primary", use_container_width=True):
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🏫 BPS Digital App", type="primary", use_container_width=True):
             st.switch_page(app_page)
-            
-        st.write("")
-        
-        if st.button("💰 Enter Funds & Fees", type="secondary", use_container_width=True):
+    with col2:
+        if st.button("💰 Funds & Fees", type="secondary", use_container_width=True):
             st.switch_page(fees_page)
             
-        if st.session_state.user_role == "admin":
-            st.write("")
-            if st.button("🎓 Enter UDISE+ Progression", type="secondary", use_container_width=True):
+    if st.session_state.user_role == "admin":
+        col3, col4 = st.columns(2)
+        with col3:
+            if st.button("🎓 UDISE+ Progression", type="secondary", use_container_width=True):
                 st.switch_page(udise_page)
-            st.write("")
-            if st.button("🛢️ Enter Gas Tracker", type="secondary", use_container_width=True):
+        with col4:
+            if st.button("🛢️ Gas Tracker", type="secondary", use_container_width=True):
                 st.switch_page(gas_page)
 
 home_page = st.Page(home_page_ui, title="Home Portal", icon="🏠", default=True)

@@ -66,9 +66,10 @@ if st.sidebar.button("Log Out"):
     st.rerun()
 st.sidebar.markdown("---")
 
-# Define pages for navigation (must be initialized before UI calls them)
+# Define pages for navigation
 app_page = st.Page("bps_digital.py", title="BPS Digital App", icon="🏫")
 fees_page = st.Page("sch_exam_fees.py", title="Exam Fees", icon="💰")
+udise_page = st.Page("UDISE+.py", title="UDISE+ Progression", icon="🎓")
 
 # Define the visual interface for the home page (The Buttons)
 def home_page_ui():
@@ -87,12 +88,24 @@ def home_page_ui():
         
         if st.button("💰 Enter Funds & Fees", type="secondary", use_container_width=True):
             st.switch_page(fees_page)
+            
+        # Admin-only Home Portal Button
+        if st.session_state.user_role == "admin":
+            st.write("")
+            if st.button("🎓 Enter UDISE+ Progression", type="secondary", use_container_width=True):
+                st.switch_page(udise_page)
 
 home_page = st.Page(home_page_ui, title="Home Portal", icon="🏠", default=True)
 
-# Execute Navigation Menu using grouped categories
-pg = st.navigation({
+# Build Navigation Menu dynamically based on User Role
+nav_pages = {
     "Portal": [home_page],
     "Applications": [app_page, fees_page]
-})
+}
+
+# Only append UDISE+ if logged in as admin
+if st.session_state.user_role == "admin":
+    nav_pages["Applications"].append(udise_page)
+
+pg = st.navigation(nav_pages)
 pg.run()

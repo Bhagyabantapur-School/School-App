@@ -3,7 +3,7 @@ import pandas as pd
 import os
 import base64
 import re
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, time
 import gspread
 from gspread.exceptions import WorksheetNotFound
 from google.oauth2.service_account import Credentials
@@ -29,12 +29,17 @@ def inject_security_css(user_name):
             background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"><text x="50" y="150" fill="rgba(200, 200, 200, 0.25)" font-size="20" transform="rotate(-45 150 150)" font-family="Arial, sans-serif">{wm}</text></svg>');
             background-repeat: repeat;
         }}
-        .block-container {{ padding-top: 1rem; max-width: 850px; overflow-x: hidden; }}
+        .block-container {{ padding-top: 1rem; max-width: 900px; overflow-x: hidden; }}
         .stButton>button {{
             width: 100%; border-radius: 10px; height: 3.2em;
             background-color: #007bff; color: white; font-weight: bold; border: none;
         }}
         .header-school-name {{ font-size: 24px; font-weight: 900; color: #007bff; margin: 0; }}
+        .speed-card {{
+            background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+            border-left: 5px solid #1976d2;
+            padding: 15px; border-radius: 10px; margin-bottom: 15px;
+        }}
     </style><div class="watermark"></div>""", unsafe_allow_html=True)
 
 inject_security_css(st.session_state.get('user_name', 'Teacher'))
@@ -124,6 +129,22 @@ def save_progression_record(record_dict):
     
     clear_sheet_cache()
 
+def save_speed_log(log_dict):
+    sheet_name = "udise_speed_log"
+    headers = [
+        "Date", "Session_Label", "Start_Time", "End_Time",
+        "Total_Minutes", "Students_Entered", "Avg_Seconds_Per_Student",
+        "Entries_Per_Hour", "Logged_By"
+    ]
+    try:
+        ws = sh.worksheet(sheet_name)
+    except WorksheetNotFound:
+        ws = sh.add_worksheet(title=sheet_name, rows=500, cols=10)
+        ws.append_row(headers)
+        
+    ws.append_row([str(log_dict.get(h, "")) for h in headers])
+    clear_sheet_cache()
+
 # ---------------------------------------------------------
 # HEADER
 # ---------------------------------------------------------
@@ -173,28 +194,37 @@ if st.sidebar.button("🔄 Manual Refresh Data", use_container_width=True):
     clear_sheet_cache()
     st.rerun()
 
-st.sidebar.info("💡 **Note:** Standard classes pull from `students_master`. Use the **Outgoing Class V** mode to record students who transitioned to Class VI.")
+st.sidebar.info("💡 **Note:** Outgoing Class V students are loaded directly from the **`Class VI`** sheet in `BPS_Database`.")
 
 # ---------------------------------------------------------
 # FETCH CORE DATA
 # ---------------------------------------------------------
 sm_df = fetch_sheet_data("students_master")
+c6_df = fetch_sheet_data("Class VI")
 prog_df = fetch_sheet_data("udise_progression_2026_27")
+speed_df = fetch_sheet_data("udise_speed_log")
 
 if sm_df.empty:
     st.error("❌ No student data found in `students_master`. Please check your BPS_Database Google Sheet.")
     st.stop()
 
-if "Section" not in sm_df.columns:
-    sm_df["Section"] = "A"
-if "Thumb_URL" not in sm_df.columns:
-    sm_df["Thumb_URL"] = ""
-
+# Prepare students_master
+if "Section" not in sm_df.columns: sm_df["Section"] = "A"
+if "Thumb_URL" not in sm_df.columns: sm_df["Thumb_URL"] = ""
 sm_df["Roll"] = sm_df["Roll"].astype(str).str.strip()
 sm_df["Name"] = sm_df["Name"].astype(str).str.strip()
 sm_df["Class"] = sm_df["Class"].astype(str).str.strip()
 sm_df["Section"] = sm_df["Section"].astype(str).str.strip()
 sm_df["Student_Key"] = sm_df["Class"] + "_" + sm_df["Section"] + "_" + sm_df["Roll"] + "_" + sm_df["Name"]
+
+# Prepare Class VI outgoing students sheet
+if not c6_df.empty:
+    if "Section" not in c6_df.columns: c6_df["Section"] = "A"
+    if "Thumb_URL" not in c6_df.columns: c6_df["Thumb_URL"] = ""
+    c6_df["Roll"] = c6_df["Roll"].astype(str).str.strip()
+    c6_df["Name"] = c6_df["Name"].astype(str).str.strip()
+    c6_df["Section"] = c6_df["Section"].astype(str).str.strip()
+    c6_df["Student_Key"] = "OUTGOING_V_" + c6_df["Section"] + "_" + c6_df["Roll"] + "_" + c6_df["Name"]
 
 completed_keys = set()
 if not prog_df.empty and "Student_Key" in prog_df.columns:
@@ -203,105 +233,128 @@ if not prog_df.empty and "Student_Key" in prog_df.columns:
 # ---------------------------------------------------------
 # MAIN UI TABS
 # ---------------------------------------------------------
-tab1, tab2, tab3 = st.tabs(["🎓 Progression Entry", "📊 Class Status Roster", "📥 Master UDISE+ Report"])
+tab1, tab2, tab3, tab4 = st.tabs([
+    "🎓 Progression Entry", 
+    "📊 Class Status Roster", 
+    "⏱️ Speed & Performance Monitor", 
+    "📥 Master UDISE+ Report"
+])
 
 with tab1:
     st.markdown("### Student Progression Selection")
     
     col_cls, col_sec = st.columns(2)
-    classes_list = ["Select Class..."] + sorted([c for c in sm_df["Class"].unique() if c]) + [OUTGOING_LABEL]
+    classes_list = ["Select Class..."] + sorted([c for c in sm_df["Class"].unique() if c])
+    if not c6_df.empty:
+        classes_list.append(OUTGOING_LABEL)
+        
     selected_class = col_cls.selectbox("Select Class Group", classes_list, key="prog_cls")
     
     # =========================================================
-    # SPECIAL MODE: OUTGOING CLASS V (NOW CLASS VI) FROM PORTAL
+    # SPECIAL MODE: OUTGOING CLASS V (LOADED FROM "Class VI" TAB)
     # =========================================================
     if selected_class == OUTGOING_LABEL:
-        st.info("ℹ️ **Outgoing Class V Mode:** Since these students left for Class VI and are not in `students_master`, enter their Name and Roll Number from your UDISE+ portal below.")
-        
-        col_in1, col_in2, col_in3 = st.columns([3, 1, 1])
-        out_name = col_in1.text_input("Student Name (from UDISE+ Portal)", placeholder="e.g. SUBORNO KISKU").strip().upper()
-        out_roll = col_in2.text_input("2025-26 Roll No.", placeholder="e.g. 1").strip()
-        out_sec = col_in3.selectbox("2025-26 Section", ["A", "B", "C"], index=0)
-        
-        if out_name and out_roll:
-            out_key = f"OUTGOING_V_{out_sec}_{out_roll}_{out_name}"
+        if c6_df.empty:
+            st.error("❌ The 'Class VI' tab in BPS_Database is empty or missing.")
+        else:
+            sec_list = sorted(c6_df["Section"].unique())
+            selected_section = col_sec.selectbox("Select Section", sec_list if sec_list else ["A"], key="prog_sec")
             
-            st.divider()
-            fallback_avatar = "https://www.w3schools.com/howto/img_avatar.png"
-            st.markdown(f"""
-            <div style="display: flex; align-items: center; gap: 15px; background-color: #f8f9fa; border-left: 5px solid #28a745; padding: 12px; border-radius: 10px; border-right: 1px solid #ddd; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; margin-bottom: 20px;">
-                <img src="{fallback_avatar}" style="width: 85px; height: 105px; object-fit: cover; border-radius: 8px; border: 2px solid #28a745; box-shadow: 0px 2px 6px rgba(0,0,0,0.15);">
-                <div>
-                    <h3 style="margin: 0; color: #28a745; font-weight: 800;">🧑‍🎓 {out_name}</h3>
-                    <p style="margin: 4px 0 0 0; font-size: 15px; color: #333;">Roll: <b>{out_roll}</b> | Previous Class (2025-26): <b>CLASS V ({out_sec})</b></p>
-                    <p style="margin: 4px 0 0 0; font-size: 14px; color: #007bff; font-weight: bold;">📌 Status: Transitioning to Upper Primary (Class VI in 2026-27)</p>
+            filtered_students = c6_df[c6_df["Section"] == selected_section].sort_values("Roll", ascending=True)
+            
+            student_options = ["Select Student..."] + [
+                f"Roll {r['Roll']} - {r['Name']} {'(✅ Done)' if r['Student_Key'] in completed_keys else '(❌ Pending)'}"
+                for _, r in filtered_students.iterrows()
+            ]
+            selected_student_str = st.selectbox("Select Outgoing Student", student_options, key="prog_student_sel")
+            
+            if selected_student_str != "Select Student...":
+                roll_match = re.search(r"Roll\s+(\S+)\s+-\s+([^(]+)", selected_student_str)
+                selected_roll = roll_match.group(1).strip() if roll_match else ""
+                
+                stu_record = filtered_students[filtered_students["Roll"] == selected_roll].iloc[0]
+                stu_key = stu_record["Student_Key"]
+                
+                thumb_url = stu_record.get("Thumb_URL", "")
+                with st.spinner("Loading student thumbnail..."):
+                    photo_uri = get_secure_photo_uri(thumb_url)
+                
+                st.divider()
+                st.markdown(f"""
+                <div style="display: flex; align-items: center; gap: 15px; background-color: #f8f9fa; border-left: 5px solid #28a745; padding: 12px; border-radius: 10px; border-right: 1px solid #ddd; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; margin-bottom: 20px;">
+                    <img src="{photo_uri}" style="width: 85px; height: 105px; object-fit: cover; border-radius: 8px; border: 2px solid #28a745; box-shadow: 0px 2px 6px rgba(0,0,0,0.15);">
+                    <div>
+                        <h3 style="margin: 0; color: #28a745; font-weight: 800;">🧑‍🎓 {stu_record['Name']}</h3>
+                        <p style="margin: 4px 0 0 0; font-size: 15px; color: #333;">Roll: <b>{stu_record['Roll']}</b> | Evaluated For Previous Class (2025-26): <b>CLASS V ({stu_record['Section']})</b></p>
+                        <p style="margin: 4px 0 0 0; font-size: 14px; color: #007bff; font-weight: bold;">📌 Status: Promoted to Upper Primary (Class VI in 2026-27)</p>
+                    </div>
                 </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            existing = prog_df[prog_df["Student_Key"].astype(str) == out_key] if not prog_df.empty and "Student_Key" in prog_df.columns else pd.DataFrame()
-            
-            def_status = existing.iloc[0]["Progression_Status"] if not existing.empty else "Promoted / Passed"
-            def_marks = str(existing.iloc[0]["Marks_Percent"]) if not existing.empty else ""
-            def_days = str(existing.iloc[0]["Days_Attended"]) if not existing.empty else ""
-            def_schooling = existing.iloc[0]["Schooling_Status_2026_27"] if not existing.empty else "Left School with TC"
-            def_promoted = existing.iloc[0]["Promoted_Class_2026_27"] if not existing.empty else "CLASS VI (Upper Primary / Transitioned)"
-            def_promoted_sec = existing.iloc[0]["Promoted_Section_2026_27"] if not existing.empty else "A"
-            
-            st.markdown("#### 📝 Fill UDISE+ Progression Details")
-            
-            c1, c2, c3 = st.columns(3)
-            prog_status = c1.selectbox(
-                "1. Progression Status (for 2025-26)",
-                ["Promoted / Passed", "Not Passed (Repeater)", "Promoted Without Exam", "Discontinued Before Exam", "Repeater by Choice"],
-                index=["Promoted / Passed", "Not Passed (Repeater)", "Promoted Without Exam", "Discontinued Before Exam", "Repeater by Choice"].index(def_status) if def_status in ["Promoted / Passed", "Not Passed (Repeater)", "Promoted Without Exam", "Discontinued Before Exam", "Repeater by Choice"] else 0,
-                key="out_st"
-            )
-            marks_pct = c2.text_input("2. Marks (%) in 2025-26", value=def_marks, placeholder="e.g. 85%", key="out_mk")
-            days_att = c3.text_input("3. No. of Days Attended (2025-26)", value=def_days, placeholder="e.g. 210", key="out_dy")
-            
-            c4, c5, c6 = st.columns(3)
-            schooling_status = c4.selectbox(
-                "4. 2026-27 Schooling Status",
-                ["Left School with TC", "Left School without TC", "Studying in Same School"],
-                index=["Left School with TC", "Left School without TC", "Studying in Same School"].index(def_schooling) if def_schooling in ["Left School with TC", "Left School without TC", "Studying in Same School"] else 0,
-                key="out_sc"
-            )
-            promoted_class_list = ["CLASS VI (Upper Primary / Transitioned)", "CLASS V", "Left School / Other"]
-            promoted_cls = c5.selectbox(
-                "5. Promoted Class (2026-27)",
-                promoted_class_list,
-                index=promoted_class_list.index(def_promoted) if def_promoted in promoted_class_list else 0,
-                key="out_pc"
-            )
-            promoted_sec = c6.selectbox("6. Promoted Section", ["A", "B", "C"], index=0, key="out_ps")
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-            
-            if st.button("✅ Submit Outgoing Class V Progression"):
-                utc_now = datetime.now(timezone.utc)
-                ist_now = utc_now + timedelta(hours=5, minutes=30)
+                """, unsafe_allow_html=True)
                 
-                record_payload = {
-                    "Student_Key": out_key,
-                    "Roll": out_roll,
-                    "Name": out_name,
-                    "Previous_Class_2025_26": "CLASS V",
-                    "Previous_Section_2025_26": out_sec,
-                    "Progression_Status": prog_status,
-                    "Marks_Percent": marks_pct,
-                    "Days_Attended": days_att,
-                    "Schooling_Status_2026_27": schooling_status,
-                    "Promoted_Class_2026_27": promoted_cls,
-                    "Promoted_Section_2026_27": promoted_sec,
-                    "Updated_By": st.session_state.get("user_name", "Admin"),
-                    "Updated_At": ist_now.strftime("%d-%m-%Y %I:%M %p")
-                }
+                existing = prog_df[prog_df["Student_Key"].astype(str) == stu_key] if not prog_df.empty and "Student_Key" in prog_df.columns else pd.DataFrame()
                 
-                with st.spinner("Saving outgoing student progression to BPS_Database..."):
-                    save_progression_record(record_payload)
-                st.success(f"🎉 Progression successfully recorded for outgoing Class V student: **{out_name}**!")
-                st.rerun()
+                def_status = existing.iloc[0]["Progression_Status"] if not existing.empty else "Promoted / Passed"
+                def_marks = str(existing.iloc[0]["Marks_Percent"]) if not existing.empty else ""
+                def_days = str(existing.iloc[0]["Days_Attended"]) if not existing.empty else ""
+                def_schooling = existing.iloc[0]["Schooling_Status_2026_27"] if not existing.empty else "Left School with TC"
+                def_promoted = existing.iloc[0]["Promoted_Class_2026_27"] if not existing.empty else "CLASS VI (Upper Primary / Transitioned)"
+                def_promoted_sec = existing.iloc[0]["Promoted_Section_2026_27"] if not existing.empty else selected_section
+                
+                st.markdown("#### 📝 Fill UDISE+ Progression Details")
+                
+                c1, c2, c3 = st.columns(3)
+                prog_status = c1.selectbox(
+                    "1. Progression Status (for 2025-26)",
+                    ["Promoted / Passed", "Not Passed (Repeater)", "Promoted Without Exam", "Discontinued Before Exam", "Repeater by Choice"],
+                    index=["Promoted / Passed", "Not Passed (Repeater)", "Promoted Without Exam", "Discontinued Before Exam", "Repeater by Choice"].index(def_status) if def_status in ["Promoted / Passed", "Not Passed (Repeater)", "Promoted Without Exam", "Discontinued Before Exam", "Repeater by Choice"] else 0,
+                    key="out_st"
+                )
+                marks_pct = c2.text_input("2. Marks (%) in 2025-26", value=def_marks, placeholder="e.g. 85%", key="out_mk")
+                days_att = c3.text_input("3. No. of Days Attended (2025-26)", value=def_days, placeholder="e.g. 210", key="out_dy")
+                
+                c4, c5, c6 = st.columns(3)
+                schooling_status = c4.selectbox(
+                    "4. 2026-27 Schooling Status",
+                    ["Left School with TC", "Left School without TC", "Studying in Same School"],
+                    index=["Left School with TC", "Left School without TC", "Studying in Same School"].index(def_schooling) if def_schooling in ["Left School with TC", "Left School without TC", "Studying in Same School"] else 0,
+                    key="out_sc"
+                )
+                promoted_class_list = ["CLASS VI (Upper Primary / Transitioned)", "CLASS V", "Left School / Other"]
+                promoted_cls = c5.selectbox(
+                    "5. Promoted Class (2026-27)",
+                    promoted_class_list,
+                    index=promoted_class_list.index(def_promoted) if def_promoted in promoted_class_list else 0,
+                    key="out_pc"
+                )
+                sec_options = ["A", "B", "C"]
+                promoted_sec = c6.selectbox("6. Promoted Section", sec_options, index=sec_options.index(def_promoted_sec) if def_promoted_sec in sec_options else 0, key="out_ps")
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                if st.button("✅ Submit Outgoing Class V Progression"):
+                    utc_now = datetime.now(timezone.utc)
+                    ist_now = utc_now + timedelta(hours=5, minutes=30)
+                    
+                    record_payload = {
+                        "Student_Key": stu_key,
+                        "Roll": stu_record["Roll"],
+                        "Name": stu_record["Name"],
+                        "Previous_Class_2025_26": "CLASS V",
+                        "Previous_Section_2025_26": stu_record["Section"],
+                        "Progression_Status": prog_status,
+                        "Marks_Percent": marks_pct,
+                        "Days_Attended": days_att,
+                        "Schooling_Status_2026_27": schooling_status,
+                        "Promoted_Class_2026_27": promoted_cls,
+                        "Promoted_Section_2026_27": promoted_sec,
+                        "Updated_By": st.session_state.get("user_name", "Admin"),
+                        "Updated_At": ist_now.strftime("%d-%m-%Y %I:%M %p")
+                    }
+                    
+                    with st.spinner("Saving outgoing student progression to BPS_Database..."):
+                        save_progression_record(record_payload)
+                    st.success(f"🎉 Progression successfully recorded for outgoing Class V student: **{stu_record['Name']}**!")
+                    st.rerun()
 
     # =========================================================
     # STANDARD MODE: ACTIVE CLASSES IN STUDENTS_MASTER
@@ -338,7 +391,6 @@ with tab1:
                 prev_class_2025_26 = PREV_CLASS_MAP.get(selected_class, "Unknown / Previous Class")
                 
                 st.divider()
-                
                 st.markdown(f"""
                 <div style="display: flex; align-items: center; gap: 15px; background-color: #f8f9fa; border-left: 5px solid #007bff; padding: 12px; border-radius: 10px; border-right: 1px solid #ddd; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; margin-bottom: 20px;">
                     <img src="{photo_uri}" style="width: 85px; height: 105px; object-fit: cover; border-radius: 8px; border: 2px solid #007bff; box-shadow: 0px 2px 6px rgba(0,0,0,0.15);">
@@ -385,11 +437,7 @@ with tab1:
                 )
                 
                 sec_options = ["A", "B", "C"]
-                promoted_sec = c6.selectbox(
-                    "6. Promoted Section", 
-                    sec_options, 
-                    index=sec_options.index(def_promoted_sec) if def_promoted_sec in sec_options else 0
-                )
+                promoted_sec = c6.selectbox("6. Promoted Section", sec_options, index=sec_options.index(def_promoted_sec) if def_promoted_sec in sec_options else 0)
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 
@@ -421,7 +469,11 @@ with tab1:
 with tab2:
     st.markdown("### 📊 Class Progression Status Table")
     col_f1, col_f2 = st.columns(2)
-    flt_class = col_f1.selectbox("Filter Class Group", ["All"] + sorted([c for c in sm_df["Class"].unique() if c]) + ["CLASS V (2025-26 Outgoing)"], key="flt_cls")
+    flt_options = ["All"] + sorted([c for c in sm_df["Class"].unique() if c])
+    if not c6_df.empty:
+        flt_options.append("CLASS V (2025-26 Outgoing)")
+        
+    flt_class = col_f1.selectbox("Filter Class Group", flt_options, key="flt_cls")
     flt_sec = col_f2.selectbox("Filter Section", ["All", "A", "B"], key="flt_sec")
     
     prog_lookup = {}
@@ -470,24 +522,40 @@ with tab2:
                     "Schooling Status": "---"
                 })
                 
-    # 2. Outgoing Class V Roster from Saved Database
-    if flt_class in ["All", "CLASS V (2025-26 Outgoing)"] and not prog_df.empty and "Previous_Class_2025_26" in prog_df.columns:
-        out_df = prog_df[prog_df["Previous_Class_2025_26"] == "CLASS V"]
+    # 2. Outgoing Class V Roster from "Class VI" Tab
+    if flt_class in ["All", "CLASS V (2025-26 Outgoing)"] and not c6_df.empty:
+        view_c6 = c6_df.copy()
         if flt_sec != "All":
-            out_df = out_df[out_df["Previous_Section_2025_26"] == flt_sec]
+            view_c6 = view_c6[view_c6["Section"] == flt_sec]
             
-        for _, r in out_df.iterrows():
-            roster_rows.append({
-                "Roll": r["Roll"],
-                "Name": r["Name"],
-                "Prev Class (2025-26)": f"CLASS V - {r.get('Previous_Section_2025_26', 'A')}",
-                "Current Class (2026-27)": str(r.get("Promoted_Class_2026_27", "CLASS VI (Upper Primary)")),
-                "Status": "✅ Done",
-                "Progression": r["Progression_Status"],
-                "Marks (%)": r["Marks_Percent"],
-                "Days Att.": r["Days_Attended"],
-                "Schooling Status": r.get("Schooling_Status_2026_27", "Left School with TC")
-            })
+        view_c6 = view_c6.sort_values(by="Roll", ascending=True)
+        for _, r in view_c6.iterrows():
+            s_key = r["Student_Key"]
+            if s_key in prog_lookup:
+                p_data = prog_lookup[s_key]
+                roster_rows.append({
+                    "Roll": r["Roll"],
+                    "Name": r["Name"],
+                    "Prev Class (2025-26)": f"CLASS V - {r.get('Section', 'A')}",
+                    "Current Class (2026-27)": str(p_data.get("Promoted_Class_2026_27", "CLASS VI (Upper Primary)")),
+                    "Status": "✅ Done",
+                    "Progression": p_data["Progression_Status"],
+                    "Marks (%)": p_data["Marks_Percent"],
+                    "Days Att.": p_data["Days_Attended"],
+                    "Schooling Status": p_data.get("Schooling_Status_2026_27", "Left School with TC")
+                })
+            else:
+                roster_rows.append({
+                    "Roll": r["Roll"],
+                    "Name": r["Name"],
+                    "Prev Class (2025-26)": f"CLASS V - {r.get('Section', 'A')}",
+                    "Current Class (2026-27)": "CLASS VI (Upper Primary)",
+                    "Status": "❌ Pending",
+                    "Progression": "---",
+                    "Marks (%)": "---",
+                    "Days Att.": "---",
+                    "Schooling Status": "---"
+                })
             
     roster_display = pd.DataFrame(roster_rows)
     
@@ -514,6 +582,91 @@ with tab2:
         st.info("No records to display for this filter.")
 
 with tab3:
+    st.markdown("### ⏱️ Data Entry Speed & Performance Monitor")
+    st.markdown("Log your session start and end times to monitor whether your entry speed is increasing or decreasing over time.")
+    
+    with st.expander("➕ Log a New Data Entry Session", expanded=True):
+        c_sp1, c_sp2 = st.columns(2)
+        log_date = c_sp1.date_input("Session Date", datetime.now())
+        session_label = c_sp2.text_input("Class / Batch Label", placeholder="e.g. Class I - Section A")
+        
+        c_sp3, c_sp4, c_sp5 = st.columns(3)
+        start_t = c_sp3.time_input("Start Time", value=time(10, 0))
+        end_t = c_sp4.time_input("End Time", value=time(10, 20))
+        entries_cnt = c_sp5.number_input("Students Entered", min_value=1, value=10, step=1)
+        
+        # Calculate session speed
+        t_start = datetime.combine(log_date, start_t)
+        t_end = datetime.combine(log_date, end_t)
+        total_seconds = (t_end - t_start).total_seconds()
+        
+        if total_seconds > 0 and entries_cnt > 0:
+            total_minutes = round(total_seconds / 60.0, 2)
+            avg_sec_per_student = round(total_seconds / entries_cnt, 1)
+            entries_per_hour = round((entries_cnt / total_seconds) * 3600.0, 1)
+            
+            st.markdown(f"""
+            <div class="speed-card">
+                <div style="display: flex; justify-content: space-around; text-align: center;">
+                    <div><span style="font-size: 13px; color: #555;">TOTAL DURATION</span><br><b>{total_minutes} mins</b></div>
+                    <div><span style="font-size: 13px; color: #555;">AVG TIME / STUDENT</span><br><b style="color: #1976d2; font-size: 18px;">{avg_sec_per_student} sec</b></div>
+                    <div><span style="font-size: 13px; color: #555;">ENTRY SPEED</span><br><b>{entries_per_hour} / hour</b></div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if st.button("💾 Save Session to Speed Log"):
+                log_payload = {
+                    "Date": log_date.strftime("%d-%m-%Y"),
+                    "Session_Label": session_label or "General Batch",
+                    "Start_Time": start_t.strftime("%I:%M %p"),
+                    "End_Time": end_t.strftime("%I:%M %p"),
+                    "Total_Minutes": total_minutes,
+                    "Students_Entered": entries_cnt,
+                    "Avg_Seconds_Per_Student": avg_sec_per_student,
+                    "Entries_Per_Hour": entries_per_hour,
+                    "Logged_By": st.session_state.get("user_name", "Admin")
+                }
+                save_speed_log(log_payload)
+                st.success("✅ Speed performance session saved!")
+                st.rerun()
+        else:
+            st.warning("⚠️ End Time must be later than Start Time.")
+            
+    st.divider()
+    st.markdown("#### 📈 Entry Speed Trend Analysis")
+    
+    if speed_df.empty:
+        st.info("No speed sessions logged yet. Log your first session above to generate performance charts.")
+    else:
+        # Convert numeric columns safely
+        speed_df["Avg_Seconds_Per_Student"] = pd.to_numeric(speed_df["Avg_Seconds_Per_Student"], errors="coerce")
+        speed_df["Entries_Per_Hour"] = pd.to_numeric(speed_df["Entries_Per_Hour"], errors="coerce")
+        speed_df["Students_Entered"] = pd.to_numeric(speed_df["Students_Entered"], errors="coerce")
+        
+        kpi1, kpi2, kpi3 = st.columns(3)
+        overall_avg_sec = round(speed_df["Avg_Seconds_Per_Student"].mean(), 1)
+        fastest_sec = round(speed_df["Avg_Seconds_Per_Student"].min(), 1)
+        total_students_logged = int(speed_df["Students_Entered"].sum())
+        
+        kpi1.metric("⚡ Overall Avg Time / Student", f"{overall_avg_sec} sec")
+        kpi2.metric("🏆 Fastest Batch Avg", f"{fastest_sec} sec")
+        kpi3.metric("🧑‍🎓 Total Students Logged", total_students_logged)
+        
+        st.markdown("##### 📉 Average Entry Time per Student (Seconds) Over Time")
+        st.caption("A downward slope indicates **increasing speed** (less seconds required per student).")
+        
+        chart_data = speed_df[["Session_Label", "Avg_Seconds_Per_Student"]].set_index("Session_Label")
+        st.line_chart(chart_data, color="#1976d2", use_container_width=True)
+        
+        st.markdown("##### 📋 Logged Session History")
+        st.dataframe(
+            speed_df[["Date", "Session_Label", "Start_Time", "End_Time", "Students_Entered", "Avg_Seconds_Per_Student", "Entries_Per_Hour"]],
+            hide_index=True,
+            use_container_width=True
+        )
+
+with tab4:
     st.markdown("### 📥 Master UDISE+ Cloud Database")
     if prog_df.empty:
         st.info("No progression entries have been recorded yet.")

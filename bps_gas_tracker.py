@@ -2,33 +2,40 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 import gspread
+from google.oauth2.service_account import Credentials
 
-# 1. Set page configuration (Replaced 🔥 with 🛢️)
+# 1. Set page configuration
 st.set_page_config(page_title="BPS Gas Tracker", page_icon="🛢️", layout="centered")
 
-# --- GOOGLE SHEETS CONNECTION ---
-# This function connects to Google Sheets and caches it so it doesn't reconnect on every click
+# --- GOOGLE SHEETS CONNECTION (USING STREAMLIT SECRETS) ---
+@st.cache_resource
+def get_google_credentials():
+    return Credentials.from_service_account_info(
+        dict(st.secrets["gcp_service_account"]),
+        scopes=[
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive.readonly"
+        ]
+    )
+
 @st.cache_resource
 def init_connection():
-    # Make sure your service account file is named 'credentials.json' and is in the same folder as this script
-    client = gspread.service_account(filename="credentials.json")
+    client = gspread.authorize(get_google_credentials())
     spreadsheet = client.open("BPS_Gas_Tracker")
     return spreadsheet.worksheet("Sheet1")
 
 try:
     sheet = init_connection()
 except Exception as e:
-    st.error("⚠️ Could not connect to Google Sheets. Please ensure 'credentials.json' is in your folder and you have shared the sheet with the service account email.")
+    st.error("⚠️ Could not connect to Google Sheets. Please check your Streamlit Secrets configuration and ensure you have shared 'BPS_Gas_Tracker' with your service account email as an Editor.")
     st.stop()
 
 # --- LOAD DATA FROM SHEET ---
 def load_data():
-    # Fetch all data from the sheet
     records = sheet.get_all_records()
     if records:
         return pd.DataFrame(records)
     else:
-        # If sheet is empty, create an empty dataframe with correct headers
         return pd.DataFrame(columns=[
             "Date", "Cylinder", "Action", "Cylinder Cost (₹)", "Delivery Cost (₹)", "Total Cost (₹)", "Ref/Notes"
         ])
@@ -38,7 +45,6 @@ if 'gas_log' not in st.session_state:
     st.session_state.gas_log = load_data()
 
 # --- CALCULATE CURRENT CYLINDER STATUS ---
-# This looks at your past Google Sheet entries to figure out if a cylinder is currently empty, full, or in use.
 def get_latest_status(cylinder_name, default_status):
     df = st.session_state.gas_log
     if not df.empty:
@@ -115,7 +121,7 @@ with st.form("gas_action_form"):
         total_cost = cylinder_cost + delivery_cost
         date_str = action_date.strftime("%Y-%m-%d")
         
-        # Prepare the row exactly matching your 7 columns
+        # Prepare row matching the 7 columns in your sheet
         new_row = [
             date_str, 
             target_cylinder, 
@@ -126,10 +132,10 @@ with st.form("gas_action_form"):
             notes
         ]
         
-        # APPEND TO GOOGLE SHEETS
+        # Append to Google Sheets
         sheet.append_row(new_row)
         
-        # Clear the cached session state so it pulls the fresh data on reload
+        # Clear the cached session state so it pulls fresh data on reload
         del st.session_state.gas_log 
         
         st.success(f"Successfully saved to Google Sheets! {target_cylinder} marked as {action_type}.")
@@ -143,7 +149,7 @@ st.subheader("📊 History & Expense Breakdown")
 if not st.session_state.gas_log.empty:
     st.dataframe(st.session_state.gas_log, use_container_width=True, hide_index=True)
     
-    # Clean the data in case Google Sheets brings in empty cells as strings
+    # Clean numeric columns in case Google Sheets brings in empty cells as strings
     df_calc = st.session_state.gas_log.copy()
     df_calc["Cylinder Cost (₹)"] = pd.to_numeric(df_calc["Cylinder Cost (₹)"], errors='coerce').fillna(0)
     df_calc["Delivery Cost (₹)"] = pd.to_numeric(df_calc["Delivery Cost (₹)"], errors='coerce').fillna(0)

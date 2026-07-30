@@ -70,6 +70,7 @@ st.sidebar.markdown("---")
 app_page = st.Page("bps_digital.py", title="BPS Digital App", icon="🏫")
 fees_page = st.Page("sch_exam_fees.py", title="Exam Fees", icon="💰")
 udise_page = st.Page("UDISE+.py", title="UDISE+ Progression", icon="🎓")
+gas_page = st.Page("bps_gas_tracker.py", title="Gas Tracker", icon="🛢️")
 
 # Define the visual interface for the home page (The Buttons)
 def home_page_ui():
@@ -89,11 +90,14 @@ def home_page_ui():
         if st.button("💰 Enter Funds & Fees", type="secondary", use_container_width=True):
             st.switch_page(fees_page)
             
-        # Admin-only Home Portal Button
+        # Admin-only Home Portal Buttons
         if st.session_state.user_role == "admin":
             st.write("")
             if st.button("🎓 Enter UDISE+ Progression", type="secondary", use_container_width=True):
                 st.switch_page(udise_page)
+            st.write("")
+            if st.button("🛢️ Enter Gas Tracker", type="secondary", use_container_width=True):
+                st.switch_page(gas_page)
 
 home_page = st.Page(home_page_ui, title="Home Portal", icon="🏠", default=True)
 
@@ -103,9 +107,10 @@ nav_pages = {
     "Applications": [app_page, fees_page]
 }
 
-# Only append UDISE+ if logged in as admin
+# Only append UDISE+ and Gas Tracker if logged in as admin
 if st.session_state.user_role == "admin":
     nav_pages["Applications"].append(udise_page)
+    nav_pages["Applications"].append(gas_page)
 
 pg = st.navigation(nav_pages)
 pg.run()

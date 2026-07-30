@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 import gspread
 from gspread.exceptions import WorksheetNotFound
 from google.oauth2.service_account import Credentials
+from google.auth.transport.requests import AuthorizedSession
 
 # ---------------------------------------------------------
 # AUTHENTICATION GUARD
@@ -33,18 +34,13 @@ def inject_security_css(user_name):
             width: 100%; border-radius: 10px; height: 3.2em;
             background-color: #007bff; color: white; font-weight: bold; border: none;
         }}
-        .prog-card {{
-            background-color: #f8f9fa; border-left: 5px solid #007bff;
-            padding: 15px; border-radius: 8px; margin-bottom: 15px;
-            border-right: 1px solid #ddd; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd;
-        }}
         .header-school-name {{ font-size: 24px; font-weight: 900; color: #007bff; margin: 0; }}
     </style><div class="watermark"></div>""", unsafe_allow_html=True)
 
 inject_security_css(st.session_state.get('user_name', 'Teacher'))
 
 # ---------------------------------------------------------
-# GOOGLE SHEETS CONNECTOR
+# GOOGLE SHEETS & DRIVE CONNECTORS
 # ---------------------------------------------------------
 @st.cache_resource
 def get_google_credentials():
@@ -61,7 +57,30 @@ def init_gsheets():
         st.error("⚠️ Failed to connect to BPS_Database Google Sheet.")
         st.stop()
 
+@st.cache_resource
+def get_drive_session():
+    return AuthorizedSession(get_google_credentials())
+
 sh = init_gsheets()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_secure_image_bytes(file_id):
+    try:
+        r = get_drive_session().get(f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media")
+        return r.content if r.status_code == 200 else None
+    except Exception:
+        return None
+
+def get_secure_photo_uri(url):
+    fallback_avatar = "https://www.w3schools.com/howto/img_avatar.png"
+    if pd.isna(url) or url == "" or not isinstance(url, str):
+        return fallback_avatar
+    match = re.search(r"(?:id=|/d/)([\w-]+)", url)
+    if match:
+        img_bytes = fetch_secure_image_bytes(match.group(1))
+        if img_bytes:
+            return f"data:image/jpeg;base64,{base64.b64encode(img_bytes).decode()}"
+    return url if url.startswith("http") else fallback_avatar
 
 @st.cache_data(ttl=300)
 def fetch_sheet_data(sheet_name):
@@ -152,7 +171,7 @@ if st.sidebar.button("🔄 Manual Refresh Data", use_container_width=True):
     clear_sheet_cache()
     st.rerun()
 
-st.sidebar.info("💡 **Note:** `students_master` reflects current **2026-27** classes. This app automatically maps their **2025-26** previous class for UDISE+ progression reporting.")
+st.sidebar.info("💡 **Note:** `students_master` reflects current **2026-27** classes. Photos are pulled directly from `Thumb_URL` (Column U).")
 
 # ---------------------------------------------------------
 # FETCH CORE DATA
@@ -166,6 +185,8 @@ if sm_df.empty:
 
 if "Section" not in sm_df.columns:
     sm_df["Section"] = "A"
+if "Thumb_URL" not in sm_df.columns:
+    sm_df["Thumb_URL"] = ""
 
 sm_df["Roll"] = sm_df["Roll"].astype(str).str.strip()
 sm_df["Name"] = sm_df["Name"].astype(str).str.strip()
@@ -214,14 +235,27 @@ with tab1:
                 stu_record = filtered_students[filtered_students["Roll"] == selected_roll].iloc[0]
                 stu_key = stu_record["Student_Key"]
                 
+                # Fetch Student Postal Thumbnail
+                thumb_url = stu_record.get("Thumb_URL", "")
+                with st.spinner("Loading student thumbnail..."):
+                    photo_uri = get_secure_photo_uri(thumb_url)
+                
                 # Derive 2025-26 Class from Current 2026-27 Class
                 prev_class_2025_26 = PREV_CLASS_MAP.get(selected_class, "Unknown / Previous Class")
                 
                 st.divider()
-                st.markdown(f"<div class='prog-card'><h4>🧑‍🎓 {stu_record['Name']}</h4>"
-                            f"<p style='margin:0;'>Roll: <b>{stu_record['Roll']}</b> | Current Class (2026-27): <b>{stu_record['Class']} ({stu_record['Section']})</b><br>"
-                            f"<span style='color:#007bff; font-weight:bold;'>📌 Evaluated For Previous Class (2025-26): {prev_class_2025_26}</span></p></div>", 
-                            unsafe_allow_html=True)
+                
+                # Flexbox Student Card with Postal Thumbnail Image
+                st.markdown(f"""
+                <div style="display: flex; align-items: center; gap: 15px; background-color: #f8f9fa; border-left: 5px solid #007bff; padding: 12px; border-radius: 10px; border-right: 1px solid #ddd; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; margin-bottom: 20px;">
+                    <img src="{photo_uri}" style="width: 85px; height: 105px; object-fit: cover; border-radius: 8px; border: 2px solid #007bff; box-shadow: 0px 2px 6px rgba(0,0,0,0.15);">
+                    <div>
+                        <h3 style="margin: 0; color: #007bff; font-weight: 800;">🧑‍🎓 {stu_record['Name']}</h3>
+                        <p style="margin: 4px 0 0 0; font-size: 15px; color: #333;">Roll: <b>{stu_record['Roll']}</b> | Current Class (2026-27): <b>{stu_record['Class']} ({stu_record['Section']})</b></p>
+                        <p style="margin: 4px 0 0 0; font-size: 14px; color: #28a745; font-weight: bold;">📌 Evaluated For Previous Class (2025-26): {prev_class_2025_26}</p>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
                 
                 # Default Progression Values (Check if already saved in cloud DB)
                 existing = prog_df[prog_df["Student_Key"].astype(str) == stu_key] if not prog_df.empty and "Student_Key" in prog_df.columns else pd.DataFrame()
@@ -230,8 +264,6 @@ with tab1:
                 def_marks = str(existing.iloc[0]["Marks_Percent"]) if not existing.empty else ""
                 def_days = str(existing.iloc[0]["Days_Attended"]) if not existing.empty else ""
                 def_schooling = existing.iloc[0]["Schooling_Status_2026_27"] if not existing.empty else "Studying in Same School"
-                
-                # Since students_master is already updated to 2026-27, their current class IS their Promoted Class
                 def_promoted = existing.iloc[0]["Promoted_Class_2026_27"] if not existing.empty else selected_class
                 def_promoted_sec = existing.iloc[0]["Promoted_Section_2026_27"] if not existing.empty else selected_section
                 

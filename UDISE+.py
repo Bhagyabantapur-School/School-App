@@ -28,7 +28,7 @@ def inject_security_css(user_name):
             background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"><text x="50" y="150" fill="rgba(200, 200, 200, 0.25)" font-size="20" transform="rotate(-45 150 150)" font-family="Arial, sans-serif">{wm}</text></svg>');
             background-repeat: repeat;
         }}
-        .block-container {{ padding-top: 1rem; max-width: 800px; overflow-x: hidden; }}
+        .block-container {{ padding-top: 1rem; max-width: 850px; overflow-x: hidden; }}
         .stButton>button {{
             width: 100%; border-radius: 10px; height: 3.2em;
             background-color: #007bff; color: white; font-weight: bold; border: none;
@@ -57,7 +57,7 @@ def get_google_credentials():
 def init_gsheets():
     try:
         return gspread.authorize(get_google_credentials()).open("BPS_Database")
-    except Exception as e:
+    except Exception:
         st.error("⚠️ Failed to connect to BPS_Database Google Sheet.")
         st.stop()
 
@@ -80,9 +80,9 @@ def clear_sheet_cache():
 def save_progression_record(record_dict):
     sheet_name = "udise_progression_2026_27"
     headers = [
-        "Student_Key", "Roll", "Name", "Previous_Class", "Previous_Section",
+        "Student_Key", "Roll", "Name", "Previous_Class_2025_26", "Previous_Section_2025_26",
         "Progression_Status", "Marks_Percent", "Days_Attended",
-        "Schooling_Status_2026_27", "Promoted_Class", "Promoted_Section",
+        "Schooling_Status_2026_27", "Promoted_Class_2026_27", "Promoted_Section_2026_27",
         "Updated_By", "Updated_At"
     ]
     try:
@@ -132,16 +132,16 @@ def render_header():
 render_header()
 
 # ---------------------------------------------------------
-# NEXT CLASS MAPPING LOGIC
+# REVERSE MAPPING LOGIC (Current 2026-27 Class -> Previous 2025-26 Class)
 # ---------------------------------------------------------
-NEXT_CLASS_MAP = {
-    "CLASS PP": "CLASS I",
-    "CLASS LPP": "CLASS I",
-    "CLASS I": "CLASS II",
-    "CLASS II": "CLASS III",
-    "CLASS III": "CLASS IV",
-    "CLASS IV": "CLASS V",
-    "CLASS V": "Left School / Transitioned"
+PREV_CLASS_MAP = {
+    "CLASS PP": "New Admission / Anganwadi",
+    "CLASS LPP": "New Admission / Anganwadi",
+    "CLASS I": "CLASS PP",
+    "CLASS II": "CLASS I",
+    "CLASS III": "CLASS II",
+    "CLASS IV": "CLASS III",
+    "CLASS V": "CLASS IV"
 }
 
 # ---------------------------------------------------------
@@ -152,7 +152,7 @@ if st.sidebar.button("🔄 Manual Refresh Data", use_container_width=True):
     clear_sheet_cache()
     st.rerun()
 
-st.sidebar.info("💡 **Tip:** Progression updates are saved automatically to the `udise_progression_2026_27` tab in your cloud spreadsheet.")
+st.sidebar.info("💡 **Note:** `students_master` reflects current **2026-27** classes. This app automatically maps their **2025-26** previous class for UDISE+ progression reporting.")
 
 # ---------------------------------------------------------
 # FETCH CORE DATA
@@ -183,11 +183,11 @@ if not prog_df.empty and "Student_Key" in prog_df.columns:
 tab1, tab2, tab3 = st.tabs(["🎓 Progression Entry", "📊 Class Status Roster", "📥 Master UDISE+ Report"])
 
 with tab1:
-    st.markdown("### Student Progression Selection")
+    st.markdown("### Student Progression Selection (Current Year 2026-27)")
     
     col_cls, col_sec = st.columns(2)
     classes_list = ["Select Class..."] + sorted([c for c in sm_df["Class"].unique() if c])
-    selected_class = col_cls.selectbox("Select Class (2025-26)", classes_list, key="prog_cls")
+    selected_class = col_cls.selectbox("Select Current Class (2026-27)", classes_list, key="prog_cls")
     
     if selected_class != "Select Class...":
         sec_list = sorted(sm_df[sm_df["Class"] == selected_class]["Section"].unique())
@@ -214,30 +214,37 @@ with tab1:
                 stu_record = filtered_students[filtered_students["Roll"] == selected_roll].iloc[0]
                 stu_key = stu_record["Student_Key"]
                 
+                # Derive 2025-26 Class from Current 2026-27 Class
+                prev_class_2025_26 = PREV_CLASS_MAP.get(selected_class, "Unknown / Previous Class")
+                
                 st.divider()
                 st.markdown(f"<div class='prog-card'><h4>🧑‍🎓 {stu_record['Name']}</h4>"
-                            f"<p style='margin:0;'>Roll: <b>{stu_record['Roll']}</b> | Current Class: <b>{stu_record['Class']} ({stu_record['Section']})</b></p></div>", 
+                            f"<p style='margin:0;'>Roll: <b>{stu_record['Roll']}</b> | Current Class (2026-27): <b>{stu_record['Class']} ({stu_record['Section']})</b><br>"
+                            f"<span style='color:#007bff; font-weight:bold;'>📌 Evaluated For Previous Class (2025-26): {prev_class_2025_26}</span></p></div>", 
                             unsafe_allow_html=True)
                 
-                # Default Progression Values (Check if already saved)
+                # Default Progression Values (Check if already saved in cloud DB)
                 existing = prog_df[prog_df["Student_Key"].astype(str) == stu_key] if not prog_df.empty and "Student_Key" in prog_df.columns else pd.DataFrame()
                 
                 def_status = existing.iloc[0]["Progression_Status"] if not existing.empty else "Promoted / Passed"
                 def_marks = str(existing.iloc[0]["Marks_Percent"]) if not existing.empty else ""
                 def_days = str(existing.iloc[0]["Days_Attended"]) if not existing.empty else ""
                 def_schooling = existing.iloc[0]["Schooling_Status_2026_27"] if not existing.empty else "Studying in Same School"
-                def_promoted = existing.iloc[0]["Promoted_Class"] if not existing.empty else NEXT_CLASS_MAP.get(selected_class, "CLASS I")
                 
-                st.markdown("#### 📝 Fill UDISE+ Progression Details (2026-27)")
+                # Since students_master is already updated to 2026-27, their current class IS their Promoted Class
+                def_promoted = existing.iloc[0]["Promoted_Class_2026_27"] if not existing.empty else selected_class
+                def_promoted_sec = existing.iloc[0]["Promoted_Section_2026_27"] if not existing.empty else selected_section
+                
+                st.markdown("#### 📝 Fill UDISE+ Progression Details")
                 
                 c1, c2, c3 = st.columns(3)
                 prog_status = c1.selectbox(
-                    "1. Progression Status",
+                    "1. Progression Status (for 2025-26)",
                     ["Promoted / Passed", "Not Passed (Repeater)", "Promoted Without Exam", "Discontinued Before Exam", "Repeater by Choice"],
                     index=["Promoted / Passed", "Not Passed (Repeater)", "Promoted Without Exam", "Discontinued Before Exam", "Repeater by Choice"].index(def_status) if def_status in ["Promoted / Passed", "Not Passed (Repeater)", "Promoted Without Exam", "Discontinued Before Exam", "Repeater by Choice"] else 0
                 )
                 marks_pct = c2.text_input("2. Marks (%) in 2025-26", value=def_marks, placeholder="e.g. 82%")
-                days_att = c3.text_input("3. No. of Days Attended", value=def_days, placeholder="e.g. 195")
+                days_att = c3.text_input("3. No. of Days Attended (2025-26)", value=def_days, placeholder="e.g. 195")
                 
                 c4, c5, c6 = st.columns(3)
                 schooling_status = c4.selectbox(
@@ -246,13 +253,19 @@ with tab1:
                     index=["Studying in Same School", "Left School with TC", "Left School without TC"].index(def_schooling) if def_schooling in ["Studying in Same School", "Left School with TC", "Left School without TC"] else 0
                 )
                 
-                promoted_class_list = ["CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V", "Left School / Transitioned"]
+                promoted_class_list = ["CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V", "Left School / Outgoing Class V"]
                 promoted_cls = c5.selectbox(
                     "5. Promoted Class (2026-27)",
                     promoted_class_list,
                     index=promoted_class_list.index(def_promoted) if def_promoted in promoted_class_list else 0
                 )
-                promoted_sec = c6.selectbox("6. Promoted Section", ["A", "B", "C"], index=0)
+                
+                sec_options = ["A", "B", "C"]
+                promoted_sec = c6.selectbox(
+                    "6. Promoted Section", 
+                    sec_options, 
+                    index=sec_options.index(def_promoted_sec) if def_promoted_sec in sec_options else 0
+                )
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 
@@ -264,27 +277,27 @@ with tab1:
                         "Student_Key": stu_key,
                         "Roll": stu_record["Roll"],
                         "Name": stu_record["Name"],
-                        "Previous_Class": selected_class,
-                        "Previous_Section": selected_section,
+                        "Previous_Class_2025_26": prev_class_2025_26,
+                        "Previous_Section_2025_26": selected_section,
                         "Progression_Status": prog_status,
                         "Marks_Percent": marks_pct,
                         "Days_Attended": days_att,
                         "Schooling_Status_2026_27": schooling_status,
-                        "Promoted_Class": promoted_cls,
-                        "Promoted_Section": promoted_sec,
+                        "Promoted_Class_2026_27": promoted_cls,
+                        "Promoted_Section_2026_27": promoted_sec,
                         "Updated_By": st.session_state.get("user_name", "Admin"),
                         "Updated_At": ist_now.strftime("%d-%m-%Y %I:%M %p")
                     }
                     
                     with st.spinner("Saving UDISE+ progression to BPS_Database..."):
                         save_progression_record(record_payload)
-                    st.success(f"🎉 Progression successfully updated for **{stu_record['Name']}**!")
+                    st.success(f"🎉 Progression successfully updated for **{stu_record['Name']}** (Mapped from 2025-26: **{prev_class_2025_26}**)!")
                     st.rerun()
 
 with tab2:
     st.markdown("### 📊 Class Progression Status Table")
     col_f1, col_f2 = st.columns(2)
-    flt_class = col_f1.selectbox("Filter Class", ["All"] + sorted([c for c in sm_df["Class"].unique() if c]), key="flt_cls")
+    flt_class = col_f1.selectbox("Filter Current Class (2026-27)", ["All"] + sorted([c for c in sm_df["Class"].unique() if c]), key="flt_cls")
     flt_sec = col_f2.selectbox("Filter Section", ["All", "A", "B"], key="flt_sec")
     
     view_df = sm_df.copy()
@@ -303,28 +316,31 @@ with tab2:
     roster_rows = []
     for _, stu in view_df.iterrows():
         s_key = stu["Student_Key"]
+        prev_class_str = PREV_CLASS_MAP.get(stu["Class"], "Unknown")
         if s_key in prog_lookup:
             p_data = prog_lookup[s_key]
             roster_rows.append({
                 "Roll": stu["Roll"],
                 "Name": stu["Name"],
-                "Class (2025-26)": f"{stu['Class']} - {stu['Section']}",
+                "Prev Class (2025-26)": f"{p_data.get('Previous_Class_2025_26', prev_class_str)}",
+                "Current Class (2026-27)": f"{stu['Class']} - {stu['Section']}",
                 "Status": "✅ Done",
                 "Progression": p_data["Progression_Status"],
                 "Marks (%)": p_data["Marks_Percent"],
                 "Days Att.": p_data["Days_Attended"],
-                "Promoted To": f"{p_data['Promoted_Class']} - {p_data.get('Promoted_Section', 'A')}"
+                "Schooling Status": p_data.get("Schooling_Status_2026_27", "Same School")
             })
         else:
             roster_rows.append({
                 "Roll": stu["Roll"],
                 "Name": stu["Name"],
-                "Class (2025-26)": f"{stu['Class']} - {stu['Section']}",
+                "Prev Class (2025-26)": prev_class_str,
+                "Current Class (2026-27)": f"{stu['Class']} - {stu['Section']}",
                 "Status": "❌ Pending",
                 "Progression": "---",
                 "Marks (%)": "---",
                 "Days Att.": "---",
-                "Promoted To": "---"
+                "Schooling Status": "---"
             })
             
     roster_display = pd.DataFrame(roster_rows)

@@ -172,6 +172,14 @@ OUTGOING_LABEL = "CLASS V (2025-26 Outgoing -> Now Class VI)"
 UNLISTED_LABEL = "➕ Add Student (Not in DB)"
 
 # ---------------------------------------------------------
+# HELPER: EXTRACT FATHER & MOTHER NAME Robustly
+# ---------------------------------------------------------
+def get_parent_names(rec):
+    father = str(rec.get("Father_Name", rec.get("Father", rec.get("Father's Name", rec.get("Fathers_Name", "---"))))).strip()
+    mother = str(rec.get("Mother_Name", rec.get("Mother", rec.get("Mother's Name", rec.get("Mothers_Name", "---"))))).strip()
+    return father or "---", mother or "---"
+
+# ---------------------------------------------------------
 # SIDEBAR REFRESH & INFO
 # ---------------------------------------------------------
 st.sidebar.markdown("### 🔄 Live Sync")
@@ -218,11 +226,6 @@ if not prog_df.empty and "Student_Key" in prog_df.columns:
 # HELPER: AUTOMATIC DATA ENTRY SESSION CLUSTERING
 # ---------------------------------------------------------
 def analyze_automatic_speed_sessions(df):
-    """
-    Parses timestamps from udise_progression_2026_27.
-    Groups entries into sessions if the gap between consecutive entries is <= 5 minutes (300 sec).
-    Returns a DataFrame of automatically detected sessions.
-    """
     if df.empty or "Updated_At" not in df.columns:
         return pd.DataFrame()
         
@@ -326,18 +329,24 @@ with tab1:
             
             filtered_students = c6_df[c6_df["Section"] == selected_section].sort_values("Roll", ascending=True)
             
+            def format_student_option(r):
+                f_name, m_name = get_parent_names(r)
+                parent_info = f" | F: {f_name}, M: {m_name}" if f_name != "---" or m_name != "---" else ""
+                status_badge = "(✅ Done)" if r["Student_Key"] in completed_keys else "(❌ Pending)"
+                return f"Roll {r['Roll']} - {r['Name']}{parent_info} {status_badge}"
+                
             student_options = ["Select Student..."] + [
-                f"Roll {r['Roll']} - {r['Name']} {'(✅ Done)' if r['Student_Key'] in completed_keys else '(❌ Pending)'}"
-                for _, r in filtered_students.iterrows()
+                format_student_option(r) for _, r in filtered_students.iterrows()
             ]
             selected_student_str = st.selectbox("Select Outgoing Student", student_options, key="prog_student_sel")
             
             if selected_student_str != "Select Student...":
-                roll_match = re.search(r"Roll\s+(\S+)\s+-\s+([^(]+)", selected_student_str)
+                roll_match = re.search(r"^Roll\s+(\S+)\s+-", selected_student_str)
                 selected_roll = roll_match.group(1).strip() if roll_match else ""
                 
                 stu_record = filtered_students[filtered_students["Roll"] == selected_roll].iloc[0]
                 stu_key = stu_record["Student_Key"]
+                father_name, mother_name = get_parent_names(stu_record)
                 
                 thumb_url = stu_record.get("Thumb_URL", "")
                 with st.spinner("Loading student thumbnail..."):
@@ -350,6 +359,7 @@ with tab1:
                     <div>
                         <h3 style="margin: 0; color: #28a745; font-weight: 800;">🧑‍🎓 {stu_record['Name']}</h3>
                         <p style="margin: 4px 0 0 0; font-size: 15px; color: #333;">Roll: <b>{stu_record['Roll']}</b> | Evaluated For Previous Class (2025-26): <b>CLASS V ({stu_record['Section']})</b></p>
+                        <p style="margin: 4px 0 0 0; font-size: 14px; color: #555;">👨‍👩‍👦 Father: <b>{father_name}</b> | Mother: <b>{mother_name}</b></p>
                         <p style="margin: 4px 0 0 0; font-size: 14px; color: #007bff; font-weight: bold;">📌 Status: Promoted to Upper Primary (Class VI in 2026-27)</p>
                     </div>
                 </div>
@@ -432,9 +442,14 @@ with tab1:
             (sm_df["Section"] == selected_section)
         ].sort_values("Roll", ascending=True)
         
+        def format_student_option(r):
+            f_name, m_name = get_parent_names(r)
+            parent_info = f" | F: {f_name}, M: {m_name}" if f_name != "---" or m_name != "---" else ""
+            status_badge = "(✅ Done)" if r["Student_Key"] in completed_keys else "(❌ Pending)"
+            return f"Roll {r['Roll']} - {r['Name']}{parent_info} {status_badge}"
+            
         student_options = ["Select Student..."] + [
-            f"Roll {r['Roll']} - {r['Name']} {'(✅ Done)' if r['Student_Key'] in completed_keys else '(❌ Pending)'}"
-            for _, r in filtered_students.iterrows()
+            format_student_option(r) for _, r in filtered_students.iterrows()
         ] + [UNLISTED_LABEL]
         
         selected_student_str = st.selectbox("Select Student", student_options, key="prog_student_sel")
@@ -471,7 +486,7 @@ with tab1:
             st.markdown("#### 📝 Progression & Promotion Details")
             c1, c2, c3 = st.columns(3)
             prog_status = c1.selectbox(
-                "5. Progression Status (2025-26)",
+                "5. Progression Status (for 2025-26)",
                 ["Promoted / Passed", "New Admission (Direct)", "Not Passed (Repeater)", "Promoted Without Exam", "Discontinued Before Exam", "Repeater by Choice"],
                 key="un_st"
             )
@@ -536,11 +551,12 @@ with tab1:
         # STANDARD STUDENT PROGRESSION FORM
         # =========================================================
         elif selected_student_str != "Select Student...":
-            roll_match = re.search(r"Roll\s+(\S+)\s+-\s+([^(]+)", selected_student_str)
+            roll_match = re.search(r"^Roll\s+(\S+)\s+-", selected_student_str)
             selected_roll = roll_match.group(1).strip() if roll_match else ""
             
             stu_record = filtered_students[filtered_students["Roll"] == selected_roll].iloc[0]
             stu_key = stu_record["Student_Key"]
+            father_name, mother_name = get_parent_names(stu_record)
             
             thumb_url = stu_record.get("Thumb_URL", "")
             with st.spinner("Loading student thumbnail..."):
@@ -555,6 +571,7 @@ with tab1:
                 <div>
                     <h3 style="margin: 0; color: #007bff; font-weight: 800;">🧑‍🎓 {stu_record['Name']}</h3>
                     <p style="margin: 4px 0 0 0; font-size: 15px; color: #333;">Roll: <b>{stu_record['Roll']}</b> | Current Class (2026-27): <b>{stu_record['Class']} ({stu_record['Section']})</b></p>
+                    <p style="margin: 4px 0 0 0; font-size: 14px; color: #555;">👨‍👩‍👦 Father: <b>{father_name}</b> | Mother: <b>{mother_name}</b></p>
                     <p style="margin: 4px 0 0 0; font-size: 14px; color: #28a745; font-weight: bold;">📌 Evaluated For Previous Class (2025-26): {prev_class_2025_26}</p>
                 </div>
             </div>

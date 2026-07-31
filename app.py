@@ -66,7 +66,7 @@ def init_database_gsheet():
     except Exception:
         return None
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=300)
 def fetch_routine_data():
     try:
         r_sh = init_routine_gsheet()
@@ -78,7 +78,7 @@ def fetch_routine_data():
         pass
     return pd.DataFrame()
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=300)
 def fetch_leave_data():
     try:
         db_sh = init_database_gsheet()
@@ -130,7 +130,7 @@ if not st.session_state.authenticated:
     st.stop()
 
 # ==========================================
-# 6. SIDEBAR CONTROLS & AUTO-SYNC
+# 6. SIDEBAR CONTROLS & MANUAL SYNC
 # ==========================================
 st.sidebar.success(f"👋 Welcome, {st.session_state.user_name}")
 
@@ -171,7 +171,7 @@ def render_tracker():
             
     if is_on_leave:
         st.warning(f"🏖️ You are marked on leave today ({leave_type}). Regular classes are hidden.")
-        ms = pd.DataFrame()  # Wipe out classes if on leave
+        ms = pd.DataFrame()
     else:
         # 2. Get Default Regular Schedule
         ms = rout[(rout['Teacher'] == mc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()
@@ -249,7 +249,6 @@ def render_tracker():
         format_tracker_row("➡️ Next", next_row)
     ])
     
-    # Highlight Current Class row in light green
     def highlight_current_row(row):
         if "Current" in str(row["Status"]):
             return ["background-color: #d4edda; color: #155724; font-weight: bold"] * len(row)
@@ -261,20 +260,6 @@ def render_tracker():
         hide_index=True,
         use_container_width=True
     )
-    
-    # 2-Minute (120,000 ms) Auto-Refresh script
-    components.html("""
-        <script>
-            setTimeout(function() {
-                const buttons = window.parent.document.querySelectorAll('button');
-                buttons.forEach(btn => {
-                    if (btn.innerText.includes('Sync Schedule')) {
-                        btn.click();
-                    }
-                });
-            }, 120000);
-        </script>
-    """, height=0, width=0)
 
 # ==========================================
 # 8. HOME PORTAL & NAVIGATION LOGIC
@@ -285,14 +270,11 @@ udise_page = st.Page("UDISE+.py", title="UDISE+ Progression", icon="🎓")
 gas_page = st.Page("bps_gas_tracker.py", title="Gas Tracker", icon="🛢️")
 
 def home_page_ui():
-    # 1. Compact Welcome Header on Top
     st.markdown(f"<h3 style='margin-bottom: 5px;'>👋 Welcome, {st.session_state.user_name}</h3>", unsafe_allow_html=True)
     
-    # 2. Live Class Tracker
     if st.session_state.user_role in ["teacher", "admin"]:
         render_tracker()
         
-    # 3. Compact Application Selection Section
     st.markdown("#### 🚀 Select Application")
     
     col1, col2 = st.columns(2)

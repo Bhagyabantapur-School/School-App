@@ -129,22 +129,6 @@ def save_progression_record(record_dict):
     
     clear_sheet_cache()
 
-def save_speed_log(log_dict):
-    sheet_name = "udise_speed_log"
-    headers = [
-        "Date", "Session_Label", "Start_Time", "End_Time",
-        "Total_Minutes", "Students_Entered", "Avg_Seconds_Per_Student",
-        "Entries_Per_Hour", "Logged_By"
-    ]
-    try:
-        ws = sh.worksheet(sheet_name)
-    except WorksheetNotFound:
-        ws = sh.add_worksheet(title=sheet_name, rows=500, cols=10)
-        ws.append_row(headers)
-        
-    ws.append_row([str(log_dict.get(h, "")) for h in headers])
-    clear_sheet_cache()
-
 # ---------------------------------------------------------
 # HEADER
 # ---------------------------------------------------------
@@ -202,7 +186,6 @@ st.sidebar.info("💡 **Note:** Outgoing Class V students are loaded directly fr
 sm_df = fetch_sheet_data("students_master")
 c6_df = fetch_sheet_data("Class VI")
 prog_df = fetch_sheet_data("udise_progression_2026_27")
-speed_df = fetch_sheet_data("udise_speed_log")
 
 if sm_df.empty:
     st.error("❌ No student data found in `students_master`. Please check your BPS_Database Google Sheet.")
@@ -229,6 +212,88 @@ if not c6_df.empty:
 completed_keys = set()
 if not prog_df.empty and "Student_Key" in prog_df.columns:
     completed_keys = set(prog_df["Student_Key"].astype(str).unique())
+
+# ---------------------------------------------------------
+# HELPER: AUTOMATIC DATA ENTRY SESSION CLUSTERING
+# ---------------------------------------------------------
+def analyze_automatic_speed_sessions(df):
+    """
+    Parses timestamps from udise_progression_2026_27.
+    Groups entries into sessions if the gap between consecutive entries is <= 5 minutes (300 sec).
+    Returns a DataFrame of automatically detected sessions.
+    """
+    if df.empty or "Updated_At" not in df.columns:
+        return pd.DataFrame()
+        
+    records = []
+    for _, row in df.iterrows():
+        ts_str = str(row.get("Updated_At", "")).strip()
+        parsed_ts = None
+        for fmt in ("%d-%m-%Y %I:%M %p", "%d-%m-%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+            try:
+                parsed_ts = datetime.strptime(ts_str, fmt)
+                break
+            except Exception:
+                continue
+        if parsed_ts:
+            records.append({
+                "Timestamp": parsed_ts,
+                "Class": str(row.get("Previous_Class_2025_26", "")),
+                "Section": str(row.get("Previous_Section_2025_26", "A")),
+                "Updated_By": str(row.get("Updated_By", "Teacher"))
+            })
+            
+    if not records:
+        return pd.DataFrame()
+        
+    records.sort(key=lambda x: x["Timestamp"])
+    
+    sessions = []
+    current_cluster = [records[0]]
+    
+    for rec in records[1:]:
+        gap_seconds = (rec["Timestamp"] - current_cluster[-1]["Timestamp"]).total_seconds()
+        if gap_seconds <= 300.0:  # 5 minutes threshold
+            current_cluster.append(rec)
+        else:
+            sessions.append(current_cluster)
+            current_cluster = [rec]
+            
+    if current_cluster:
+        sessions.append(current_cluster)
+        
+    summary_rows = []
+    for idx, cluster in enumerate(sessions, 1):
+        start_t = cluster[0]["Timestamp"]
+        end_t = cluster[-1]["Timestamp"]
+        cnt = len(cluster)
+        
+        # If single entry or identical minute, assign a baseline 30s so speed can be computed
+        duration_sec = max((end_t - start_t).total_seconds(), 30.0 * cnt)
+        duration_min = round(duration_sec / 60.0, 2)
+        avg_sec = round(duration_sec / cnt, 1)
+        speed_hr = round((cnt / duration_sec) * 3600.0, 1)
+        
+        # Determine dominant class label for session
+        classes_in_session = [r["Class"] for r in cluster if r["Class"]]
+        dom_class = max(set(classes_in_session), key=classes_in_session.count) if classes_in_session else "General"
+        
+        summary_rows.append({
+            "Session_ID": f"Session #{idx}",
+            "Date": start_t.strftime("%d-%m-%Y"),
+            "Class_Group": dom_class,
+            "Start_Time": start_t.strftime("%I:%M %p"),
+            "End_Time": end_t.strftime("%I:%M %p"),
+            "Start_TS": start_t,
+            "End_TS": end_t,
+            "Students_Entered": cnt,
+            "Duration_Minutes": duration_min,
+            "Avg_Seconds_Per_Student": avg_sec,
+            "Entries_Per_Hour": speed_hr,
+            "Operator": cluster[0]["Updated_By"]
+        })
+        
+    return pd.DataFrame(summary_rows)
 
 # ---------------------------------------------------------
 # MAIN UI TABS
@@ -582,86 +647,62 @@ with tab2:
         st.info("No records to display for this filter.")
 
 with tab3:
-    st.markdown("### ⏱️ Data Entry Speed & Performance Monitor")
-    st.markdown("Log your session start and end times to monitor whether your entry speed is increasing or decreasing over time.")
+    st.markdown("### ⏱️ Automatic Speed & Performance Monitor")
+    st.caption("⚡ **Fully Auto-Detected:** Sessions start on your first UDISE+ entry and close automatically after **5 minutes of inactivity**.")
     
-    with st.expander("➕ Log a New Data Entry Session", expanded=True):
-        c_sp1, c_sp2 = st.columns(2)
-        log_date = c_sp1.date_input("Session Date", datetime.now())
-        session_label = c_sp2.text_input("Class / Batch Label", placeholder="e.g. Class I - Section A")
-        
-        c_sp3, c_sp4, c_sp5 = st.columns(3)
-        start_t = c_sp3.time_input("Start Time", value=time(10, 0))
-        end_t = c_sp4.time_input("End Time", value=time(10, 20))
-        entries_cnt = c_sp5.number_input("Students Entered", min_value=1, value=10, step=1)
-        
-        # Calculate session speed
-        t_start = datetime.combine(log_date, start_t)
-        t_end = datetime.combine(log_date, end_t)
-        total_seconds = (t_end - t_start).total_seconds()
-        
-        if total_seconds > 0 and entries_cnt > 0:
-            total_minutes = round(total_seconds / 60.0, 2)
-            avg_sec_per_student = round(total_seconds / entries_cnt, 1)
-            entries_per_hour = round((entries_cnt / total_seconds) * 3600.0, 1)
-            
-            st.markdown(f"""
-            <div class="speed-card">
-                <div style="display: flex; justify-content: space-around; text-align: center;">
-                    <div><span style="font-size: 13px; color: #555;">TOTAL DURATION</span><br><b>{total_minutes} mins</b></div>
-                    <div><span style="font-size: 13px; color: #555;">AVG TIME / STUDENT</span><br><b style="color: #1976d2; font-size: 18px;">{avg_sec_per_student} sec</b></div>
-                    <div><span style="font-size: 13px; color: #555;">ENTRY SPEED</span><br><b>{entries_per_hour} / hour</b></div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            if st.button("💾 Save Session to Speed Log"):
-                log_payload = {
-                    "Date": log_date.strftime("%d-%m-%Y"),
-                    "Session_Label": session_label or "General Batch",
-                    "Start_Time": start_t.strftime("%I:%M %p"),
-                    "End_Time": end_t.strftime("%I:%M %p"),
-                    "Total_Minutes": total_minutes,
-                    "Students_Entered": entries_cnt,
-                    "Avg_Seconds_Per_Student": avg_sec_per_student,
-                    "Entries_Per_Hour": entries_per_hour,
-                    "Logged_By": st.session_state.get("user_name", "Admin")
-                }
-                save_speed_log(log_payload)
-                st.success("✅ Speed performance session saved!")
-                st.rerun()
-        else:
-            st.warning("⚠️ End Time must be later than Start Time.")
-            
-    st.divider()
-    st.markdown("#### 📈 Entry Speed Trend Analysis")
+    auto_sessions_df = analyze_automatic_speed_sessions(prog_df)
     
-    if speed_df.empty:
-        st.info("No speed sessions logged yet. Log your first session above to generate performance charts.")
+    if auto_sessions_df.empty:
+        st.info("💡 No UDISE+ progression entries detected yet. Start saving student progressions in **Tab 1** to automatically trigger live session tracking!")
     else:
-        # Convert numeric columns safely
-        speed_df["Avg_Seconds_Per_Student"] = pd.to_numeric(speed_df["Avg_Seconds_Per_Student"], errors="coerce")
-        speed_df["Entries_Per_Hour"] = pd.to_numeric(speed_df["Entries_Per_Hour"], errors="coerce")
-        speed_df["Students_Entered"] = pd.to_numeric(speed_df["Students_Entered"], errors="coerce")
+        latest_session = auto_sessions_df.iloc[-1]
+        
+        # Check if the latest session is still ongoing (within 5 minutes of current IST time)
+        utc_now = datetime.now(timezone.utc)
+        ist_now = utc_now + timedelta(hours=5, minutes=30)
+        time_since_last_entry = (ist_now.replace(tzinfo=None) - latest_session["End_TS"]).total_seconds()
+        
+        is_active_now = time_since_last_entry <= 300.0  # Within 5 min window
+        
+        status_badge = "<span style='color: #28a745; font-weight: 800;'>🟢 ONGOING ACTIVE SESSION</span>" if is_active_now else "<span style='color: #6c757d; font-weight: bold;'>✅ COMPLETED SESSION (5-min idle gap reached)</span>"
+        
+        st.markdown(f"""
+        <div class="speed-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <span style="font-size: 16px; font-weight: 900; color: #0d47a1;">{latest_session['Session_ID']} ({latest_session['Class_Group']})</span>
+                {status_badge}
+            </div>
+            <div style="display: flex; justify-content: space-around; text-align: center;">
+                <div><span style="font-size: 12px; color: #555;">START TIME</span><br><b>{latest_session['Start_Time']}</b></div>
+                <div><span style="font-size: 12px; color: #555;">END TIME</span><br><b>{latest_session['End_Time']}</b></div>
+                <div><span style="font-size: 12px; color: #555;">STUDENTS ENTERED</span><br><b style="color: #1976d2; font-size: 18px;">{latest_session['Students_Entered']}</b></div>
+                <div><span style="font-size: 12px; color: #555;">AVG TIME / STUDENT</span><br><b style="color: #28a745; font-size: 18px;">{latest_session['Avg_Seconds_Per_Student']} sec</b></div>
+                <div><span style="font-size: 12px; color: #555;">ENTRY SPEED</span><br><b>{latest_session['Entries_Per_Hour']} / hr</b></div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.divider()
+        st.markdown("#### 📈 Automatic Speed Trend Analysis")
         
         kpi1, kpi2, kpi3 = st.columns(3)
-        overall_avg_sec = round(speed_df["Avg_Seconds_Per_Student"].mean(), 1)
-        fastest_sec = round(speed_df["Avg_Seconds_Per_Student"].min(), 1)
-        total_students_logged = int(speed_df["Students_Entered"].sum())
+        overall_avg_sec = round(auto_sessions_df["Avg_Seconds_Per_Student"].mean(), 1)
+        fastest_sec = round(auto_sessions_df["Avg_Seconds_Per_Student"].min(), 1)
+        total_students_logged = int(auto_sessions_df["Students_Entered"].sum())
         
         kpi1.metric("⚡ Overall Avg Time / Student", f"{overall_avg_sec} sec")
-        kpi2.metric("🏆 Fastest Batch Avg", f"{fastest_sec} sec")
-        kpi3.metric("🧑‍🎓 Total Students Logged", total_students_logged)
+        kpi2.metric("🏆 Fastest Session Avg", f"{fastest_sec} sec")
+        kpi3.metric("🧑‍🎓 Total Students Entered", total_students_logged)
         
         st.markdown("##### 📉 Average Entry Time per Student (Seconds) Over Time")
-        st.caption("A downward slope indicates **increasing speed** (less seconds required per student).")
+        st.caption("A downward slope indicates **increasing speed** (fewer seconds required per student).")
         
-        chart_data = speed_df[["Session_Label", "Avg_Seconds_Per_Student"]].set_index("Session_Label")
+        chart_data = auto_sessions_df[["Session_ID", "Avg_Seconds_Per_Student"]].set_index("Session_ID")
         st.line_chart(chart_data, color="#1976d2", use_container_width=True)
         
-        st.markdown("##### 📋 Logged Session History")
+        st.markdown("##### 📋 Automatically Detected Session History")
         st.dataframe(
-            speed_df[["Date", "Session_Label", "Start_Time", "End_Time", "Students_Entered", "Avg_Seconds_Per_Student", "Entries_Per_Hour"]],
+            auto_sessions_df[["Session_ID", "Date", "Class_Group", "Start_Time", "End_Time", "Students_Entered", "Avg_Seconds_Per_Student", "Entries_Per_Hour", "Operator"]],
             hide_index=True,
             use_container_width=True
         )

@@ -169,6 +169,7 @@ PREV_CLASS_MAP = {
 }
 
 OUTGOING_LABEL = "CLASS V (2025-26 Outgoing -> Now Class VI)"
+UNLISTED_LABEL = "➕ Add Student (Not in DB)"
 
 # ---------------------------------------------------------
 # SIDEBAR REFRESH & INFO
@@ -178,7 +179,7 @@ if st.sidebar.button("🔄 Manual Refresh Data", use_container_width=True):
     clear_sheet_cache()
     st.rerun()
 
-st.sidebar.info("💡 **Note:** Outgoing Class V students are loaded directly from the **`Class VI`** sheet in `BPS_Database`.")
+st.sidebar.info("💡 **Note:** Use `'➕ Add Student (Not in DB)'` to log students missing from your master sheet. They will be saved with an **`UNLISTED_`** ID prefix for easy identification.")
 
 # ---------------------------------------------------------
 # FETCH CORE DATA
@@ -268,13 +269,11 @@ def analyze_automatic_speed_sessions(df):
         end_t = cluster[-1]["Timestamp"]
         cnt = len(cluster)
         
-        # If single entry or identical minute, assign a baseline 30s so speed can be computed
         duration_sec = max((end_t - start_t).total_seconds(), 30.0 * cnt)
         duration_min = round(duration_sec / 60.0, 2)
         avg_sec = round(duration_sec / cnt, 1)
         speed_hr = round((cnt / duration_sec) * 3600.0, 1)
         
-        # Determine dominant class label for session
         classes_in_session = [r["Class"] for r in cluster if r["Class"]]
         dom_class = max(set(classes_in_session), key=classes_in_session.count) if classes_in_session else "General"
         
@@ -312,13 +311,91 @@ with tab1:
     classes_list = ["Select Class..."] + sorted([c for c in sm_df["Class"].unique() if c])
     if not c6_df.empty:
         classes_list.append(OUTGOING_LABEL)
+    classes_list.append(UNLISTED_LABEL)
         
     selected_class = col_cls.selectbox("Select Class Group", classes_list, key="prog_cls")
     
     # =========================================================
-    # SPECIAL MODE: OUTGOING CLASS V (LOADED FROM "Class VI" TAB)
+    # SPECIAL MODE 1: UNLISTED STUDENT (NOT IN BPS_DATABASE)
     # =========================================================
-    if selected_class == OUTGOING_LABEL:
+    if selected_class == UNLISTED_LABEL:
+        st.divider()
+        st.markdown("""
+        <div style="background-color: #fff3cd; border-left: 5px solid #ffc107; padding: 12px; border-radius: 8px; margin-bottom: 20px;">
+            <h4 style="margin: 0; color: #856404;">➕ Adding Unlisted / New Student (Not in Master DB)</h4>
+            <p style="margin: 4px 0 0 0; font-size: 14px; color: #856404;">
+                This record will be saved to your Google Sheet with an <b><code>UNLISTED_</code></b> ID prefix so it can be easily identified and separated from regular roster students.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        c_in1, c_in2 = st.columns(2)
+        un_name = c_in1.text_input("1. Student Full Name *", placeholder="e.g. SUBORNO KISKU")
+        un_roll = c_in2.text_input("2. Roll Number *", placeholder="e.g. 15")
+        
+        c_in3, c_in4 = st.columns(2)
+        prev_classes = ["New Admission / Anganwadi", "CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V", "Other School"]
+        un_prev_cls = c_in3.selectbox("3. Previous Class (2025-26)", prev_classes)
+        un_prev_sec = c_in4.selectbox("4. Previous Section (2025-26)", ["A", "B", "C", "N/A"])
+        
+        st.markdown("#### 📝 Progression & Promotion Details")
+        c1, c2, c3 = st.columns(3)
+        prog_status = c1.selectbox(
+            "5. Progression Status (2025-26)",
+            ["Promoted / Passed", "New Admission (Direct)", "Not Passed (Repeater)", "Promoted Without Exam", "Discontinued Before Exam", "Repeater by Choice"],
+            key="un_st"
+        )
+        marks_pct = c2.text_input("6. Marks (%) in 2025-26", placeholder="e.g. 80%", key="un_mk")
+        days_att = c3.text_input("7. No. of Days Attended (2025-26)", placeholder="e.g. 200", key="un_dy")
+        
+        c4, c5, c6 = st.columns(3)
+        schooling_status = c4.selectbox(
+            "8. 2026-27 Schooling Status",
+            ["Studying in Same School", "Left School with TC", "Left School without TC"],
+            key="un_sc"
+        )
+        promoted_class_list = ["CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V", "CLASS VI (Upper Primary)", "Left School / Other"]
+        promoted_cls = c5.selectbox("9. Promoted Class (2026-27)", promoted_class_list, key="un_pc")
+        promoted_sec = c6.selectbox("10. Promoted Section", ["A", "B", "C"], key="un_ps")
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        if st.button("✅ Save Unlisted Student Progression"):
+            if not un_name.strip() or not un_roll.strip():
+                st.error("❌ Please enter both Student Name and Roll Number.")
+            else:
+                utc_now = datetime.now(timezone.utc)
+                ist_now = utc_now + timedelta(hours=5, minutes=30)
+                
+                clean_name = un_name.strip().upper().replace(" ", "_")
+                clean_roll = un_roll.strip()
+                un_key = f"UNLISTED_{promoted_cls.replace(' ', '_')}_{promoted_sec}_{clean_roll}_{clean_name}"
+                
+                record_payload = {
+                    "Student_Key": un_key,
+                    "Roll": clean_roll,
+                    "Name": un_name.strip().upper(),
+                    "Previous_Class_2025_26": f"{un_prev_cls} (Unlisted)",
+                    "Previous_Section_2025_26": un_prev_sec,
+                    "Progression_Status": prog_status,
+                    "Marks_Percent": marks_pct,
+                    "Days_Attended": days_att,
+                    "Schooling_Status_2026_27": schooling_status,
+                    "Promoted_Class_2026_27": promoted_cls,
+                    "Promoted_Section_2026_27": promoted_sec,
+                    "Updated_By": st.session_state.get("user_name", "Admin"),
+                    "Updated_At": ist_now.strftime("%d-%m-%Y %I:%M %p")
+                }
+                
+                with st.spinner("Saving unlisted student progression to BPS_Database..."):
+                    save_progression_record(record_payload)
+                st.success(f"🎉 Successfully saved **{un_name.strip().upper()}** with ID: **`{un_key}`**!")
+                st.rerun()
+
+    # =========================================================
+    # SPECIAL MODE 2: OUTGOING CLASS V (LOADED FROM "Class VI" TAB)
+    # =========================================================
+    elif selected_class == OUTGOING_LABEL:
         if c6_df.empty:
             st.error("❌ The 'Class VI' tab in BPS_Database is empty or missing.")
         else:
@@ -537,9 +614,10 @@ with tab2:
     flt_options = ["All"] + sorted([c for c in sm_df["Class"].unique() if c])
     if not c6_df.empty:
         flt_options.append("CLASS V (2025-26 Outgoing)")
+    flt_options.append("➕ Unlisted / New Entries (Not in DB)")
         
     flt_class = col_f1.selectbox("Filter Class Group", flt_options, key="flt_cls")
-    flt_sec = col_f2.selectbox("Filter Section", ["All", "A", "B"], key="flt_sec")
+    flt_sec = col_f2.selectbox("Filter Section", ["All", "A", "B", "C"], key="flt_sec")
     
     prog_lookup = {}
     if not prog_df.empty and "Student_Key" in prog_df.columns:
@@ -549,7 +627,7 @@ with tab2:
     roster_rows = []
     
     # 1. Standard Roster from students_master
-    if flt_class != "CLASS V (2025-26 Outgoing)":
+    if flt_class not in ["CLASS V (2025-26 Outgoing)", "➕ Unlisted / New Entries (Not in DB)"]:
         view_df = sm_df.copy()
         if flt_class != "All":
             view_df = view_df[view_df["Class"] == flt_class]
@@ -621,12 +699,31 @@ with tab2:
                     "Days Att.": "---",
                     "Schooling Status": "---"
                 })
+                
+    # 3. Unlisted / Manually Added Students from progression sheet
+    if flt_class in ["All", "➕ Unlisted / New Entries (Not in DB)"] and not prog_df.empty and "Student_Key" in prog_df.columns:
+        for _, r in prog_df.iterrows():
+            if str(r["Student_Key"]).startswith("UNLISTED_"):
+                if flt_sec == "All" or str(r.get("Promoted_Section_2026_27", "")) == flt_sec:
+                    roster_rows.append({
+                        "Roll": r["Roll"],
+                        "Name": f"{r['Name']} (⭐ Unlisted)",
+                        "Prev Class (2025-26)": str(r.get("Previous_Class_2025_26", "")),
+                        "Current Class (2026-27)": f"{r.get('Promoted_Class_2026_27', '')} - {r.get('Promoted_Section_2026_27', 'A')}",
+                        "Status": "⭐ Unlisted Entry",
+                        "Progression": r["Progression_Status"],
+                        "Marks (%)": r["Marks_Percent"],
+                        "Days Att.": r["Days_Attended"],
+                        "Schooling Status": r.get("Schooling_Status_2026_27", "Same School")
+                    })
             
     roster_display = pd.DataFrame(roster_rows)
     
     def highlight_progression(row):
         if row["Status"] == "✅ Done":
             return ["background-color: #d4edda; color: #155724; font-weight: bold"] * len(row)
+        elif row["Status"] == "⭐ Unlisted Entry":
+            return ["background-color: #fff3cd; color: #856404; font-weight: bold"] * len(row)
         else:
             return ["background-color: #f8d7da; color: #721c24"] * len(row)
             
@@ -637,12 +734,14 @@ with tab2:
             use_container_width=True
         )
         completed_cnt = len(roster_display[roster_display["Status"] == "✅ Done"])
+        unlisted_cnt = len(roster_display[roster_display["Status"] == "⭐ Unlisted Entry"])
         pending_cnt = len(roster_display[roster_display["Status"] == "❌ Pending"])
         
-        c_sum1, c_sum2, c_sum3 = st.columns(3)
+        c_sum1, c_sum2, c_sum3, c_sum4 = st.columns(4)
         c_sum1.metric("Total Roster", len(roster_display))
         c_sum2.metric("✅ Completed", completed_cnt)
-        c_sum3.metric("❌ Pending", pending_cnt)
+        c_sum3.metric("⭐ Unlisted / New", unlisted_cnt)
+        c_sum4.metric("❌ Pending", pending_cnt)
     else:
         st.info("No records to display for this filter.")
 
@@ -657,12 +756,11 @@ with tab3:
     else:
         latest_session = auto_sessions_df.iloc[-1]
         
-        # Check if the latest session is still ongoing (within 5 minutes of current IST time)
         utc_now = datetime.now(timezone.utc)
         ist_now = utc_now + timedelta(hours=5, minutes=30)
         time_since_last_entry = (ist_now.replace(tzinfo=None) - latest_session["End_TS"]).total_seconds()
         
-        is_active_now = time_since_last_entry <= 300.0  # Within 5 min window
+        is_active_now = time_since_last_entry <= 300.0
         
         status_badge = "<span style='color: #28a745; font-weight: 800;'>🟢 ONGOING ACTIVE SESSION</span>" if is_active_now else "<span style='color: #6c757d; font-weight: bold;'>✅ COMPLETED SESSION (5-min idle gap reached)</span>"
         

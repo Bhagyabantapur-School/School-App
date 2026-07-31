@@ -179,7 +179,7 @@ if st.sidebar.button("🔄 Manual Refresh Data", use_container_width=True):
     clear_sheet_cache()
     st.rerun()
 
-st.sidebar.info("💡 **Note:** Use `'➕ Add Student (Not in DB)'` to log students missing from your master sheet. They will be saved with an **`UNLISTED_`** ID prefix for easy identification.")
+st.sidebar.info("💡 **Note:** Select a class group, then choose **`'➕ Add Student (Not in DB)'`** from the student dropdown if a student is missing from the master sheet.")
 
 # ---------------------------------------------------------
 # FETCH CORE DATA
@@ -311,91 +311,13 @@ with tab1:
     classes_list = ["Select Class..."] + sorted([c for c in sm_df["Class"].unique() if c])
     if not c6_df.empty:
         classes_list.append(OUTGOING_LABEL)
-    classes_list.append(UNLISTED_LABEL)
         
     selected_class = col_cls.selectbox("Select Class Group", classes_list, key="prog_cls")
     
     # =========================================================
-    # SPECIAL MODE 1: UNLISTED STUDENT (NOT IN BPS_DATABASE)
+    # SPECIAL MODE: OUTGOING CLASS V (LOADED FROM "Class VI" TAB)
     # =========================================================
-    if selected_class == UNLISTED_LABEL:
-        st.divider()
-        st.markdown("""
-        <div style="background-color: #fff3cd; border-left: 5px solid #ffc107; padding: 12px; border-radius: 8px; margin-bottom: 20px;">
-            <h4 style="margin: 0; color: #856404;">➕ Adding Unlisted / New Student (Not in Master DB)</h4>
-            <p style="margin: 4px 0 0 0; font-size: 14px; color: #856404;">
-                This record will be saved to your Google Sheet with an <b><code>UNLISTED_</code></b> ID prefix so it can be easily identified and separated from regular roster students.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        c_in1, c_in2 = st.columns(2)
-        un_name = c_in1.text_input("1. Student Full Name *", placeholder="e.g. SUBORNO KISKU")
-        un_roll = c_in2.text_input("2. Roll Number *", placeholder="e.g. 15")
-        
-        c_in3, c_in4 = st.columns(2)
-        prev_classes = ["New Admission / Anganwadi", "CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V", "Other School"]
-        un_prev_cls = c_in3.selectbox("3. Previous Class (2025-26)", prev_classes)
-        un_prev_sec = c_in4.selectbox("4. Previous Section (2025-26)", ["A", "B", "C", "N/A"])
-        
-        st.markdown("#### 📝 Progression & Promotion Details")
-        c1, c2, c3 = st.columns(3)
-        prog_status = c1.selectbox(
-            "5. Progression Status (2025-26)",
-            ["Promoted / Passed", "New Admission (Direct)", "Not Passed (Repeater)", "Promoted Without Exam", "Discontinued Before Exam", "Repeater by Choice"],
-            key="un_st"
-        )
-        marks_pct = c2.text_input("6. Marks (%) in 2025-26", placeholder="e.g. 80%", key="un_mk")
-        days_att = c3.text_input("7. No. of Days Attended (2025-26)", placeholder="e.g. 200", key="un_dy")
-        
-        c4, c5, c6 = st.columns(3)
-        schooling_status = c4.selectbox(
-            "8. 2026-27 Schooling Status",
-            ["Studying in Same School", "Left School with TC", "Left School without TC"],
-            key="un_sc"
-        )
-        promoted_class_list = ["CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V", "CLASS VI (Upper Primary)", "Left School / Other"]
-        promoted_cls = c5.selectbox("9. Promoted Class (2026-27)", promoted_class_list, key="un_pc")
-        promoted_sec = c6.selectbox("10. Promoted Section", ["A", "B", "C"], key="un_ps")
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        if st.button("✅ Save Unlisted Student Progression"):
-            if not un_name.strip() or not un_roll.strip():
-                st.error("❌ Please enter both Student Name and Roll Number.")
-            else:
-                utc_now = datetime.now(timezone.utc)
-                ist_now = utc_now + timedelta(hours=5, minutes=30)
-                
-                clean_name = un_name.strip().upper().replace(" ", "_")
-                clean_roll = un_roll.strip()
-                un_key = f"UNLISTED_{promoted_cls.replace(' ', '_')}_{promoted_sec}_{clean_roll}_{clean_name}"
-                
-                record_payload = {
-                    "Student_Key": un_key,
-                    "Roll": clean_roll,
-                    "Name": un_name.strip().upper(),
-                    "Previous_Class_2025_26": f"{un_prev_cls} (Unlisted)",
-                    "Previous_Section_2025_26": un_prev_sec,
-                    "Progression_Status": prog_status,
-                    "Marks_Percent": marks_pct,
-                    "Days_Attended": days_att,
-                    "Schooling_Status_2026_27": schooling_status,
-                    "Promoted_Class_2026_27": promoted_cls,
-                    "Promoted_Section_2026_27": promoted_sec,
-                    "Updated_By": st.session_state.get("user_name", "Admin"),
-                    "Updated_At": ist_now.strftime("%d-%m-%Y %I:%M %p")
-                }
-                
-                with st.spinner("Saving unlisted student progression to BPS_Database..."):
-                    save_progression_record(record_payload)
-                st.success(f"🎉 Successfully saved **{un_name.strip().upper()}** with ID: **`{un_key}`**!")
-                st.rerun()
-
-    # =========================================================
-    # SPECIAL MODE 2: OUTGOING CLASS V (LOADED FROM "Class VI" TAB)
-    # =========================================================
-    elif selected_class == OUTGOING_LABEL:
+    if selected_class == OUTGOING_LABEL:
         if c6_df.empty:
             st.error("❌ The 'Class VI' tab in BPS_Database is empty or missing.")
         else:
@@ -510,89 +432,91 @@ with tab1:
             (sm_df["Section"] == selected_section)
         ].sort_values("Roll", ascending=True)
         
-        if filtered_students.empty:
-            st.warning("⚠️ No students found in this Class & Section.")
-        else:
-            student_options = ["Select Student..."] + [
-                f"Roll {r['Roll']} - {r['Name']} {'(✅ Done)' if r['Student_Key'] in completed_keys else '(❌ Pending)'}"
-                for _, r in filtered_students.iterrows()
-            ]
-            selected_student_str = st.selectbox("Select Student", student_options, key="prog_student_sel")
+        student_options = ["Select Student..."] + [
+            f"Roll {r['Roll']} - {r['Name']} {'(✅ Done)' if r['Student_Key'] in completed_keys else '(❌ Pending)'}"
+            for _, r in filtered_students.iterrows()
+        ] + [UNLISTED_LABEL]
+        
+        selected_student_str = st.selectbox("Select Student", student_options, key="prog_student_sel")
+        
+        # =========================================================
+        # SUB-MODE: ADD UNLISTED STUDENT WITHIN CLASS
+        # =========================================================
+        if selected_student_str == UNLISTED_LABEL:
+            st.divider()
+            st.markdown(f"""
+            <div style="background-color: #fff3cd; border-left: 5px solid #ffc107; padding: 12px; border-radius: 8px; margin-bottom: 20px;">
+                <h4 style="margin: 0; color: #856404;">➕ Adding Unlisted / New Student to {selected_class} ({selected_section})</h4>
+                <p style="margin: 4px 0 0 0; font-size: 14px; color: #856404;">
+                    This record will be saved to your Google Sheet with an <b><code>UNLISTED_</code></b> ID prefix so it can be easily identified and separated from regular roster students.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
             
-            if selected_student_str != "Select Student...":
-                roll_match = re.search(r"Roll\s+(\S+)\s+-\s+([^(]+)", selected_student_str)
-                selected_roll = roll_match.group(1).strip() if roll_match else ""
+            c_in1, c_in2 = st.columns(2)
+            un_name = c_in1.text_input("1. Student Full Name *", placeholder="e.g. SUBORNO KISKU")
+            un_roll = c_in2.text_input("2. Roll Number *", placeholder="e.g. 15")
+            
+            c_in3, c_in4 = st.columns(2)
+            prev_classes = ["New Admission / Anganwadi", "CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V", "Other School"]
+            default_prev = PREV_CLASS_MAP.get(selected_class, "New Admission / Anganwadi")
+            try:
+                def_prev_idx = prev_classes.index(default_prev)
+            except ValueError:
+                def_prev_idx = 0
                 
-                stu_record = filtered_students[filtered_students["Roll"] == selected_roll].iloc[0]
-                stu_key = stu_record["Student_Key"]
-                
-                thumb_url = stu_record.get("Thumb_URL", "")
-                with st.spinner("Loading student thumbnail..."):
-                    photo_uri = get_secure_photo_uri(thumb_url)
-                
-                prev_class_2025_26 = PREV_CLASS_MAP.get(selected_class, "Unknown / Previous Class")
-                
-                st.divider()
-                st.markdown(f"""
-                <div style="display: flex; align-items: center; gap: 15px; background-color: #f8f9fa; border-left: 5px solid #007bff; padding: 12px; border-radius: 10px; border-right: 1px solid #ddd; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; margin-bottom: 20px;">
-                    <img src="{photo_uri}" style="width: 85px; height: 105px; object-fit: cover; border-radius: 8px; border: 2px solid #007bff; box-shadow: 0px 2px 6px rgba(0,0,0,0.15);">
-                    <div>
-                        <h3 style="margin: 0; color: #007bff; font-weight: 800;">🧑‍🎓 {stu_record['Name']}</h3>
-                        <p style="margin: 4px 0 0 0; font-size: 15px; color: #333;">Roll: <b>{stu_record['Roll']}</b> | Current Class (2026-27): <b>{stu_record['Class']} ({stu_record['Section']})</b></p>
-                        <p style="margin: 4px 0 0 0; font-size: 14px; color: #28a745; font-weight: bold;">📌 Evaluated For Previous Class (2025-26): {prev_class_2025_26}</p>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                existing = prog_df[prog_df["Student_Key"].astype(str) == stu_key] if not prog_df.empty and "Student_Key" in prog_df.columns else pd.DataFrame()
-                
-                def_status = existing.iloc[0]["Progression_Status"] if not existing.empty else "Promoted / Passed"
-                def_marks = str(existing.iloc[0]["Marks_Percent"]) if not existing.empty else ""
-                def_days = str(existing.iloc[0]["Days_Attended"]) if not existing.empty else ""
-                def_schooling = existing.iloc[0]["Schooling_Status_2026_27"] if not existing.empty else "Studying in Same School"
-                def_promoted = existing.iloc[0]["Promoted_Class_2026_27"] if not existing.empty else selected_class
-                def_promoted_sec = existing.iloc[0]["Promoted_Section_2026_27"] if not existing.empty else selected_section
-                
-                st.markdown("#### 📝 Fill UDISE+ Progression Details")
-                
-                c1, c2, c3 = st.columns(3)
-                prog_status = c1.selectbox(
-                    "1. Progression Status (for 2025-26)",
-                    ["Promoted / Passed", "Not Passed (Repeater)", "Promoted Without Exam", "Discontinued Before Exam", "Repeater by Choice"],
-                    index=["Promoted / Passed", "Not Passed (Repeater)", "Promoted Without Exam", "Discontinued Before Exam", "Repeater by Choice"].index(def_status) if def_status in ["Promoted / Passed", "Not Passed (Repeater)", "Promoted Without Exam", "Discontinued Before Exam", "Repeater by Choice"] else 0
-                )
-                marks_pct = c2.text_input("2. Marks (%) in 2025-26", value=def_marks, placeholder="e.g. 82%")
-                days_att = c3.text_input("3. No. of Days Attended (2025-26)", value=def_days, placeholder="e.g. 195")
-                
-                c4, c5, c6 = st.columns(3)
-                schooling_status = c4.selectbox(
-                    "4. 2026-27 Schooling Status",
-                    ["Studying in Same School", "Left School with TC", "Left School without TC"],
-                    index=["Studying in Same School", "Left School with TC", "Left School without TC"].index(def_schooling) if def_schooling in ["Studying in Same School", "Left School with TC", "Left School without TC"] else 0
-                )
-                
-                promoted_class_list = ["CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V", "Left School / Outgoing Class V"]
-                promoted_cls = c5.selectbox(
-                    "5. Promoted Class (2026-27)",
-                    promoted_class_list,
-                    index=promoted_class_list.index(def_promoted) if def_promoted in promoted_class_list else 0
-                )
-                
-                sec_options = ["A", "B", "C"]
-                promoted_sec = c6.selectbox("6. Promoted Section", sec_options, index=sec_options.index(def_promoted_sec) if def_promoted_sec in sec_options else 0)
-                
-                st.markdown("<br>", unsafe_allow_html=True)
-                
-                if st.button("✅ Submit Student Progression"):
+            un_prev_cls = c_in3.selectbox("3. Previous Class (2025-26)", prev_classes, index=def_prev_idx)
+            un_prev_sec = c_in4.selectbox("4. Previous Section (2025-26)", ["A", "B", "C", "N/A"], index=["A", "B", "C", "N/A"].index(selected_section) if selected_section in ["A", "B", "C"] else 0)
+            
+            st.markdown("#### 📝 Progression & Promotion Details")
+            c1, c2, c3 = st.columns(3)
+            prog_status = c1.selectbox(
+                "5. Progression Status (2025-26)",
+                ["Promoted / Passed", "New Admission (Direct)", "Not Passed (Repeater)", "Promoted Without Exam", "Discontinued Before Exam", "Repeater by Choice"],
+                key="un_st"
+            )
+            marks_pct = c2.text_input("6. Marks (%) in 2025-26", placeholder="e.g. 80%", key="un_mk")
+            days_att = c3.text_input("7. No. of Days Attended (2025-26)", placeholder="e.g. 200", key="un_dy")
+            
+            c4, c5, c6 = st.columns(3)
+            schooling_status = c4.selectbox(
+                "8. 2026-27 Schooling Status",
+                ["Studying in Same School", "Left School with TC", "Left School without TC"],
+                key="un_sc"
+            )
+            promoted_class_list = ["CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V", "CLASS VI (Upper Primary)", "Left School / Other"]
+            try:
+                def_prom_idx = promoted_class_list.index(selected_class)
+            except ValueError:
+                def_prom_idx = 0
+            promoted_cls = c5.selectbox("9. Promoted Class (2026-27)", promoted_class_list, index=def_prom_idx, key="un_pc")
+            
+            sec_options = ["A", "B", "C"]
+            try:
+                def_sec_idx = sec_options.index(selected_section)
+            except ValueError:
+                def_sec_idx = 0
+            promoted_sec = c6.selectbox("10. Promoted Section", sec_options, index=def_sec_idx, key="un_ps")
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            if st.button("✅ Save Unlisted Student Progression"):
+                if not un_name.strip() or not un_roll.strip():
+                    st.error("❌ Please enter both Student Name and Roll Number.")
+                else:
                     utc_now = datetime.now(timezone.utc)
                     ist_now = utc_now + timedelta(hours=5, minutes=30)
                     
+                    clean_name = un_name.strip().upper().replace(" ", "_")
+                    clean_roll = un_roll.strip()
+                    un_key = f"UNLISTED_{promoted_cls.replace(' ', '_')}_{promoted_sec}_{clean_roll}_{clean_name}"
+                    
                     record_payload = {
-                        "Student_Key": stu_key,
-                        "Roll": stu_record["Roll"],
-                        "Name": stu_record["Name"],
-                        "Previous_Class_2025_26": prev_class_2025_26,
-                        "Previous_Section_2025_26": selected_section,
+                        "Student_Key": un_key,
+                        "Roll": clean_roll,
+                        "Name": un_name.strip().upper(),
+                        "Previous_Class_2025_26": f"{un_prev_cls} (Unlisted)",
+                        "Previous_Section_2025_26": un_prev_sec,
                         "Progression_Status": prog_status,
                         "Marks_Percent": marks_pct,
                         "Days_Attended": days_att,
@@ -603,10 +527,102 @@ with tab1:
                         "Updated_At": ist_now.strftime("%d-%m-%Y %I:%M %p")
                     }
                     
-                    with st.spinner("Saving UDISE+ progression to BPS_Database..."):
+                    with st.spinner("Saving unlisted student progression to BPS_Database..."):
                         save_progression_record(record_payload)
-                    st.success(f"🎉 Progression successfully updated for **{stu_record['Name']}** (Mapped from 2025-26: **{prev_class_2025_26}**)!")
+                    st.success(f"🎉 Successfully saved **{un_name.strip().upper()}** with ID: **`{un_key}`**!")
                     st.rerun()
+
+        # =========================================================
+        # STANDARD STUDENT PROGRESSION FORM
+        # =========================================================
+        elif selected_student_str != "Select Student...":
+            roll_match = re.search(r"Roll\s+(\S+)\s+-\s+([^(]+)", selected_student_str)
+            selected_roll = roll_match.group(1).strip() if roll_match else ""
+            
+            stu_record = filtered_students[filtered_students["Roll"] == selected_roll].iloc[0]
+            stu_key = stu_record["Student_Key"]
+            
+            thumb_url = stu_record.get("Thumb_URL", "")
+            with st.spinner("Loading student thumbnail..."):
+                photo_uri = get_secure_photo_uri(thumb_url)
+            
+            prev_class_2025_26 = PREV_CLASS_MAP.get(selected_class, "Unknown / Previous Class")
+            
+            st.divider()
+            st.markdown(f"""
+            <div style="display: flex; align-items: center; gap: 15px; background-color: #f8f9fa; border-left: 5px solid #007bff; padding: 12px; border-radius: 10px; border-right: 1px solid #ddd; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; margin-bottom: 20px;">
+                <img src="{photo_uri}" style="width: 85px; height: 105px; object-fit: cover; border-radius: 8px; border: 2px solid #007bff; box-shadow: 0px 2px 6px rgba(0,0,0,0.15);">
+                <div>
+                    <h3 style="margin: 0; color: #007bff; font-weight: 800;">🧑‍🎓 {stu_record['Name']}</h3>
+                    <p style="margin: 4px 0 0 0; font-size: 15px; color: #333;">Roll: <b>{stu_record['Roll']}</b> | Current Class (2026-27): <b>{stu_record['Class']} ({stu_record['Section']})</b></p>
+                    <p style="margin: 4px 0 0 0; font-size: 14px; color: #28a745; font-weight: bold;">📌 Evaluated For Previous Class (2025-26): {prev_class_2025_26}</p>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            existing = prog_df[prog_df["Student_Key"].astype(str) == stu_key] if not prog_df.empty and "Student_Key" in prog_df.columns else pd.DataFrame()
+            
+            def_status = existing.iloc[0]["Progression_Status"] if not existing.empty else "Promoted / Passed"
+            def_marks = str(existing.iloc[0]["Marks_Percent"]) if not existing.empty else ""
+            def_days = str(existing.iloc[0]["Days_Attended"]) if not existing.empty else ""
+            def_schooling = existing.iloc[0]["Schooling_Status_2026_27"] if not existing.empty else "Studying in Same School"
+            def_promoted = existing.iloc[0]["Promoted_Class_2026_27"] if not existing.empty else selected_class
+            def_promoted_sec = existing.iloc[0]["Promoted_Section_2026_27"] if not existing.empty else selected_section
+            
+            st.markdown("#### 📝 Fill UDISE+ Progression Details")
+            
+            c1, c2, c3 = st.columns(3)
+            prog_status = c1.selectbox(
+                "1. Progression Status (for 2025-26)",
+                ["Promoted / Passed", "Not Passed (Repeater)", "Promoted Without Exam", "Discontinued Before Exam", "Repeater by Choice"],
+                index=["Promoted / Passed", "Not Passed (Repeater)", "Promoted Without Exam", "Discontinued Before Exam", "Repeater by Choice"].index(def_status) if def_status in ["Promoted / Passed", "Not Passed (Repeater)", "Promoted Without Exam", "Discontinued Before Exam", "Repeater by Choice"] else 0
+            )
+            marks_pct = c2.text_input("2. Marks (%) in 2025-26", value=def_marks, placeholder="e.g. 82%")
+            days_att = c3.text_input("3. No. of Days Attended (2025-26)", value=def_days, placeholder="e.g. 195")
+            
+            c4, c5, c6 = st.columns(3)
+            schooling_status = c4.selectbox(
+                "4. 2026-27 Schooling Status",
+                ["Studying in Same School", "Left School with TC", "Left School without TC"],
+                index=["Studying in Same School", "Left School with TC", "Left School without TC"].index(def_schooling) if def_schooling in ["Studying in Same School", "Left School with TC", "Left School without TC"] else 0
+            )
+            
+            promoted_class_list = ["CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V", "Left School / Outgoing Class V"]
+            promoted_cls = c5.selectbox(
+                "5. Promoted Class (2026-27)",
+                promoted_class_list,
+                index=promoted_class_list.index(def_promoted) if def_promoted in promoted_class_list else 0
+            )
+            
+            sec_options = ["A", "B", "C"]
+            promoted_sec = c6.selectbox("6. Promoted Section", sec_options, index=sec_options.index(def_promoted_sec) if def_promoted_sec in sec_options else 0)
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            if st.button("✅ Submit Student Progression"):
+                utc_now = datetime.now(timezone.utc)
+                ist_now = utc_now + timedelta(hours=5, minutes=30)
+                
+                record_payload = {
+                    "Student_Key": stu_key,
+                    "Roll": stu_record["Roll"],
+                    "Name": stu_record["Name"],
+                    "Previous_Class_2025_26": prev_class_2025_26,
+                    "Previous_Section_2025_26": selected_section,
+                    "Progression_Status": prog_status,
+                    "Marks_Percent": marks_pct,
+                    "Days_Attended": days_att,
+                    "Schooling_Status_2026_27": schooling_status,
+                    "Promoted_Class_2026_27": promoted_cls,
+                    "Promoted_Section_2026_27": promoted_sec,
+                    "Updated_By": st.session_state.get("user_name", "Admin"),
+                    "Updated_At": ist_now.strftime("%d-%m-%Y %I:%M %p")
+                }
+                
+                with st.spinner("Saving UDISE+ progression to BPS_Database..."):
+                    save_progression_record(record_payload)
+                st.success(f"🎉 Progression successfully updated for **{stu_record['Name']}** (Mapped from 2025-26: **{prev_class_2025_26}**)!")
+                st.rerun()
 
 with tab2:
     st.markdown("### 📊 Class Progression Status Table")

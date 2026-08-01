@@ -54,7 +54,7 @@ def inject_security_css(user_name):
         .block-container {{ padding-top: 1rem; max-width: 650px; overflow-x: hidden; }}
         .summary-card {{ background-color: #fff; border: 2px solid #007bff; border-radius: 15px; padding: 20px; margin-bottom: 20px; box-shadow: 0px 4px 10px rgba(0,0,0,0.05); }}
         .stButton>button {{ width: 100%; border-radius: 12px; height: 3.5em; background-color: #007bff; color: white; font-weight: bold; border: none; }}
-        .routine-card {{ background-color: #f8f9fa; padding: 15px; border-radius: 10px; border-left: 5px solid #007bff; margin-bottom: 15px; border-right: 1px solid #ddd; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; }}
+        .routine-card {{ background-color: #f8f9fa; padding: 15px; border-radius: 10px; border-left: 5px solid #007bff; margin-bottom: 15px; border-right: 1px solid #ddd; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; display: flex; flex-direction: column; gap: 4px;}}
         .report-table {{ width: 100%; border-collapse: collapse; }} .report-table td, .report-table th {{ border: 1px solid #ddd; padding: 8px; text-align: center; }} .report-table th {{ background-color: #007bff; color: white; }}
         .att-badge {{ padding: 8px 12px; border-radius: 8px; font-weight: bold; font-size: 15px; display: block; text-align: center; margin-top: 5px; margin-bottom: 5px;}}
         .att-wait {{ background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }} .att-done {{ background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }}
@@ -221,7 +221,7 @@ if st.session_state.user_role == "teacher":
             ml = fetch_sheet_data('mdm_log')
             already_sub = False
             
-            # Only block the standard MDM entry if they haven't chosen to override
+            # Block the standard MDM entry if they haven't chosen to override
             if not take_other:
                 if not ml.empty and 'Date' in ml.columns and 'Teacher' in ml.columns:
                     if not ml[(ml['Date'].astype(str).str.strip() == curr_date_str) & (ml['Teacher'].astype(str).str.strip() == t_name_select)].empty:
@@ -235,34 +235,61 @@ if st.session_state.user_role == "teacher":
                 mc = TEACHER_INITIALS.get(t_name_select, t_name_select)
                 tdy = now.strftime('%A')
                 tc, ts, is_sub, ab_t = None, None, False, ""
+                
+                assigned_mdm_classes = []
 
                 if take_other:
                     sc_mdm = st.selectbox("Select Class to Manage", ATTENDANCE_OPTIONS, key='t_mdm_sel')
                     if sc_mdm != "Select Class...":
-                        tc, ts = sc_mdm.rsplit(' ', 1)
-                        st.info(f"📌 Override Mode: Managing **{tc} - {ts}**")
+                        c_name, s_name = sc_mdm.rsplit(' ', 1)
+                        assigned_mdm_classes.append({'class': c_name, 'sec': s_name, 'is_sub': False, 'ab_t': ""})
+                        st.info(f"📌 Override Mode: Managing **{c_name} - {s_name}**")
                 else:
+                    # Check Subbed Classes first
                     ll = fetch_sheet_data('teacher_leave')
                     if not ll.empty and 'Date' in ll.columns:
                         for _, r in ll[ll['Date'] == curr_date_str].iterrows():
                             lg = str(r.get('Detailed_Sub_Log', ''))
-                            if f"11:15: {t_name_select}" in lg or f"11:15 AM: {t_name_select}" in lg:
-                                is_sub = True; ab_t = r['Teacher']
-                                ac = TEACHER_INITIALS.get(ab_t, "")
-                                ar = rout[(rout['Teacher'] == ac) & (rout['Day'] == tdy)].copy()
-                                if not ar.empty:
-                                    ar['Start_Obj'] = ar['Start_Time'].apply(parse_time_safe)
-                                    match = ar[ar['Start_Obj'] == time(11, 15)]
-                                    if not match.empty: tc, ts = match.iloc[0]['Class'], match.iloc[0].get('Section', 'A')
-                                break
-                    if not tc:
-                        ms = rout[(rout['Teacher'] == mc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()
-                        if not ms.empty:
-                            ms['Start_Obj'] = ms['Start_Time'].apply(parse_time_safe)
-                            tr = ms[ms['Start_Obj'] == time(11, 15)]
-                            if not tr.empty: tc, ts = tr.iloc[0]['Class'], tr.iloc[0].get('Section', 'A')
-    
-                if tc:
+                            for a in lg.split(" | "):
+                                if ": " in a:
+                                    slt, sub_n = a.rsplit(": ", 1)
+                                    if sub_n.strip() == t_name_select and (slt.strip() == "11:15" or slt.strip() == "11:15 AM"):
+                                        absent_t = r['Teacher']
+                                        ac = TEACHER_INITIALS.get(absent_t, "")
+                                        ar = rout[(rout['Teacher'] == ac) & (rout['Day'] == tdy)].copy()
+                                        if not ar.empty:
+                                            ar['Start_Obj'] = ar['Start_Time'].apply(parse_time_safe)
+                                            match = ar[ar['Start_Obj'] == time(11, 15)]
+                                            if not match.empty:
+                                                assigned_mdm_classes.append({
+                                                    'class': match.iloc[0]['Class'], 
+                                                    'sec': match.iloc[0].get('Section', 'A'),
+                                                    'is_sub': True, 
+                                                    'ab_t': absent_t
+                                                })
+                    
+                    # Check Regular Class
+                    ms = rout[(rout['Teacher'] == mc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()
+                    if not ms.empty:
+                        ms['Start_Obj'] = ms['Start_Time'].apply(parse_time_safe)
+                        tr = ms[ms['Start_Obj'] == time(11, 15)]
+                        if not tr.empty:
+                            assigned_mdm_classes.append({
+                                'class': tr.iloc[0]['Class'], 
+                                'sec': tr.iloc[0].get('Section', 'A'),
+                                'is_sub': False, 
+                                'ab_t': ""
+                            })
+                            
+                if assigned_mdm_classes:
+                    # Pick the first one in the list for current display
+                    primary = assigned_mdm_classes[0]
+                    tc, ts = primary['class'], primary['sec']
+                    is_sub, ab_t = primary['is_sub'], primary['ab_t']
+                    
+                    if len(assigned_mdm_classes) > 1 and not take_other:
+                        st.warning("⚠️ **You are assigned to MULTIPLE classes for MDM today (Clubbed Classes).** Once you submit this class, please check 'Take MDM for another class' above to submit for the remaining group.")
+                    
                     if not take_other:
                         if is_sub: st.info(f"🔄 **SUB:** Covering for **{ab_t}** ({tc} - {ts})")
                         else: st.info(f"📌 Assigned **11:15 AM** class: **{tc} - {ts}**")
@@ -275,7 +302,6 @@ if st.session_state.user_role == "teacher":
                         else: ros = sm[(sm['Class'] == tc) & (sm['Section'] == ts)].copy()
                         
                         if not ros.empty:
-                            # Protect against overriding duplicate entries from anyone who submitted earlier
                             me = ml[(ml['Date'].astype(str) == curr_date_str) & (ml['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else ml['Class'] == tc) & (ml['Section'] == ts)]['Roll'].astype(str).tolist() if not ml.empty else []
                             ros['MDM (Ate)'] = ros['Roll'].astype(str).isin(me)
 
@@ -366,8 +392,9 @@ if st.session_state.user_role == "teacher":
                 if rs and rs != "None":
                     st.markdown("### 🤝 Substitution Plan")
                     for a in rs.split(" | "):
-                        p = a.split(": ")
-                        if len(p) == 2: st.markdown(f"<div class='sub-card'><b>{p[0].strip()}</b> covered by <b>{p[1].strip()}</b></div>", unsafe_allow_html=True)
+                        if ": " in a:
+                            p = a.split(": ", 1)
+                            st.markdown(f"<div class='sub-card'><b>{p[0].strip()}</b> covered by <b>{p[1].strip()}</b></div>", unsafe_allow_html=True)
                 else: st.info("No specific substitutes assigned yet.")
             else:
                 mc = TEACHER_INITIALS.get(t_name_select, t_name_select)
@@ -380,26 +407,33 @@ if st.session_state.user_role == "teacher":
                         if t_name_select in str(r['Detailed_Sub_Log']):
                             ac = TEACHER_INITIALS.get(r['Teacher'], "")
                             for a in str(r['Detailed_Sub_Log']).split(" | "):
-                                if f": {t_name_select}" in a:
-                                    slt = a.split(": ")[0].strip()
-                                    oc = rout[(rout['Teacher'] == ac) & (rout['Day'] == tdy) & (rout['Start_Time'] == slt)]
-                                    if not oc.empty:
-                                        rx = oc.iloc[0]
-                                        sd.append({'Start_Time': rx['Start_Time'], 'End_Time': rx['End_Time'], 'Class': rx['Class'], 'Section': rx.get('Section', 'A'), 'Subject': f"🔄 Sub for {r['Teacher']}", 'Teacher': mc, 'Day': tdy, 'Is_Sub': True})
+                                if ": " in a:
+                                    slt, sub_n = a.rsplit(": ", 1)
+                                    if sub_n.strip() == t_name_select:
+                                        oc = rout[(rout['Teacher'] == ac) & (rout['Day'] == tdy) & (rout['Start_Time'].astype(str).str.strip() == slt.strip())]
+                                        if not oc.empty:
+                                            rx = oc.iloc[0]
+                                            sd.append({'Start_Time': rx['Start_Time'], 'End_Time': rx['End_Time'], 'Class': rx['Class'], 'Section': rx.get('Section', 'A'), 'Subject': f"🔄 Sub for {r['Teacher']}", 'Teacher': mc, 'Day': tdy, 'Is_Sub': True})
                 
                 if sd: ms = pd.concat([ms, pd.DataFrame(sd)], ignore_index=True)
                 if not ms.empty:
                     ms['Start_Obj'] = ms['Start_Time'].apply(parse_time_safe)
                     ms = ms.dropna(subset=['Start_Obj']).sort_values('Start_Obj')
-                    cc = None
+                    
+                    active_classes = []
                     for _, r in ms.iterrows():
                         st_time, et = r['Start_Obj'], parse_time_safe(r['End_Time'])
-                        if st_time and et and st_time <= curr_time <= et: cc = r; break
-                    if cc is not None:
-                        sty = "border-left: 5px solid #ffc107; background-color:#fff3cd;" if cc['Is_Sub'] else "border-left: 5px solid #28a745;"
-                        px = "🔄 SUB: " if cc['Is_Sub'] else "🔴 NOW: "
-                        st.markdown(f"""<div class="routine-card" style="{sty}"><h3 style="margin:0; color:#333;">{px}{cc['Class']} - {cc.get('Section','')}</h3><p>{cc['Subject']}</p><p style="color:gray;">Ends {cc['End_Time']}</p></div>""", unsafe_allow_html=True)
-                    else: st.info("☕ No class ongoing.")
+                        if st_time and et and st_time <= curr_time <= et: 
+                            active_classes.append(r)
+                            
+                    if active_classes:
+                        for cc in active_classes:
+                            sty = "border-left: 5px solid #ffc107; background-color:#fff3cd;" if cc['Is_Sub'] else "border-left: 5px solid #28a745;"
+                            px = "🔄 SUB: " if cc['Is_Sub'] else "🔴 NOW: "
+                            st.markdown(f"""<div class="routine-card" style="{sty}"><h3 style="margin:0; color:#333;">{px}{cc['Class']} - {cc.get('Section','')}</h3><p style="margin:2px 0;">{cc['Subject']}</p><p style="color:gray; font-size:13px; margin:0;">Ends {cc['End_Time']}</p></div>""", unsafe_allow_html=True)
+                    else: 
+                        st.info("☕ No class ongoing.")
+                        
                     st.divider()
                     def hls(row): return ['background-color: #fff3cd'] * len(row) if str(row['Subject']).startswith('🔄') else [''] * len(row)
                     st.dataframe(ms[['Start_Time', 'End_Time', 'Class', 'Section', 'Subject']].style.apply(hls, axis=1), hide_index=True)
@@ -414,7 +448,6 @@ if st.session_state.user_role == "teacher":
                 c1.metric("CL Remaining", f"{14 - len(ml[ml['Type'] == 'CL'])}")
                 c2.metric("SL Taken", f"{len(ml[ml['Type'] == 'SL'])}")
                 c3.metric("Commuted", f"{len(ml[ml['Type'] == 'Commuted Leave'])}")
-                # Ignored Census 2027 and School Work so they don't affect casual/sick leave tables for the teacher
                 st.dataframe(ml[~ml['Type'].isin(['Half Day', 'On Duty', 'School Work', 'Census 2027'])][['Date', 'Type', 'Substitute']], hide_index=True)
 
         with at_tabs[3]:
@@ -459,13 +492,11 @@ elif st.session_state.user_role == "admin":
                         abs_init = TEACHER_INITIALS.get(absent_t, absent_t)
                         lg = str(r.get('Detailed_Sub_Log', ''))
                         for a in lg.split(" | "):
-                            if a.strip().startswith("11:15"):
-                                parts = a.split(": ")
-                                if len(parts) >= 2:
-                                    sub_t = parts[1].strip()
-                                    sub_init = TEACHER_INITIALS.get(sub_t, sub_t)
-                                    for (c, s), t in list(expected_mdm.items()):
-                                        if t == abs_init: expected_mdm[(c, s)] = sub_init
+                            if a.strip().startswith("11:15") and ": " in a:
+                                slt, sub_t = a.rsplit(": ", 1)
+                                sub_init = TEACHER_INITIALS.get(sub_t.strip(), sub_t.strip())
+                                for (c, s), t in list(expected_mdm.items()):
+                                    if t == abs_init: expected_mdm[(c, s)] = sub_init
                 
                 completed_mdm_actual = {}
                 today_ml = ml[ml['Date'].astype(str) == curr_date_str] if not ml.empty else pd.DataFrame()
@@ -706,12 +737,17 @@ elif st.session_state.user_role == "admin":
                     ac = TEACHER_INITIALS.get(r['Teacher'], r['Teacher'])
                     for a in str(r.get('Detailed_Sub_Log', '')).split(" | "):
                         if ": " in a:
-                            slt, sub = a.split(": ")
+                            slt, sub = a.rsplit(": ", 1)
                             tr.loc[(tr['Teacher'] == ac) & (tr['Start_Time'].str.strip() == slt.strip()), 'Teacher'] = f"{TEACHER_INITIALS.get(sub.strip(), sub.strip())} (Sub)"
             tr['Start_Obj'] = tr['Start_Time'].apply(parse_time_safe)
             tr['End_Obj'] = tr['End_Time'].apply(parse_time_safe)
             tr = tr.dropna(subset=['Start_Obj', 'End_Obj']).sort_values('Start_Obj')
-            lc = [r for _, r in tr.iterrows() if r['Start_Obj'] <= curr_time <= r['End_Obj']]
+            
+            lc = []
+            for _, r in tr.iterrows():
+                if r['Start_Obj'] <= curr_time <= r['End_Obj']:
+                    lc.append(r)
+                    
             st.markdown("### 🔴 LIVE NOW")
             if lc:
                 cls = st.columns(2)
@@ -719,16 +755,16 @@ elif st.session_state.user_role == "admin":
                     is_sub = "(Sub)" in r['Teacher']
                     tn = f"🔄 {INV_TEACHER_INITIALS.get(r['Teacher'].replace(' (Sub)', ''), r['Teacher'])} (Sub)" if is_sub else f"👨‍🏫 {INV_TEACHER_INITIALS.get(r['Teacher'], r['Teacher'])}"
                     cls[i%2].markdown(f"<div class='routine-card' style='border-left: 5px solid {'#ffc107' if is_sub else '#dc3545'};'><h4 style='margin:0;'>{r['Class']} {r.get('Section', '')}</h4><p style='margin:0; font-weight:bold;'>{tn}</p><p style='margin:0; font-size:12px; color:gray;'>{r['Subject']} | Ends: {r['End_Time']}</p></div>", unsafe_allow_html=True)
-            else: st.info("☕ No classes ongoing.")
+            else: 
+                st.info("☕ No classes ongoing.")
+                
             st.dataframe(tr[['Start_Time', 'End_Time', 'Class', 'Subject', 'Teacher']], hide_index=True)
 
     with tabs[4]: 
         st.subheader("Substitution Manager")
         abt = st.selectbox("Absent Teacher", ["Select..."] + TEACHER_LIST)
         if abt != "Select...":
-            # Added "Census 2027" to the leave types
             lt = st.selectbox("Leave Type", ["CL", "SL", "Commuted Leave", "Half Day", "On Duty", "School Work", "Census 2027"])
-            # Allow multi-day selection for Census duty as well
             ism = st.checkbox("Mark for Multiple Days?", value=True) if lt in ["Commuted Leave", "Census 2027"] else False
             
             if ism:
@@ -754,6 +790,7 @@ elif st.session_state.user_role == "admin":
                 ms = rout[(rout['Teacher'] == tc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()
                 ll = fetch_sheet_data('teacher_leave')
                 el = ll[(ll['Date'].astype(str) == sds) & (ll['Teacher'] == abt)] if not ll.empty else pd.DataFrame()
+                
                 if not el.empty:
                     st.success(f"✅ Leave Submitted: **{abt}** on **{sds}**.")
                     if st.button("🗑️ Undo"): overwrite_sheet_df('teacher_leave', ll.drop(el.index)); st.rerun()
@@ -762,9 +799,11 @@ elif st.session_state.user_role == "admin":
                     if not ll.empty:
                         for _, r in ll[ll['Date'].astype(str) == sds].iterrows():
                             for a in str(r.get('Detailed_Sub_Log', '')).split(" | "):
-                                if ": " in a: slot, sub = a.split(": "); bs.setdefault(slot, []).append(sub.strip())
+                                if ": " in a: 
+                                    slot, sub = a.rsplit(": ", 1)
+                                    bs.setdefault(slot.strip(), []).append(sub.strip())
+                                    
                     if not ms.empty:
-                        # Fetch mdm_log to display MDM student counts (Today or Previous Day)
                         ml = fetch_sheet_data('mdm_log')
                         if not ml.empty and 'Date' in ml.columns:
                             ml['DateObj'] = pd.to_datetime(ml['Date'], format='%d-%m-%Y', errors='coerce')
@@ -785,7 +824,6 @@ elif st.session_state.user_role == "admin":
                                 elif tc2 not in bc: 
                                     fo.append(f"✅ {tn} (Free)")
                                 else: 
-                                    # Teacher is busy, identify class and count MDM students
                                     busy_r = slot_rout[slot_rout['Teacher'] == tc2]
                                     if not busy_r.empty:
                                         b_cls = busy_r.iloc[0]['Class']
@@ -794,7 +832,6 @@ elif st.session_state.user_role == "admin":
                                         m_label = "MDM"
                                         
                                         if not ml.empty and 'DateObj' in ml.columns:
-                                            # Filter by class and section
                                             if b_cls == 'CLASS PP':
                                                 c_ml = ml[(ml['Class'].isin(['CLASS PP', 'CLASS LPP'])) & (ml['Section'] == b_sec)]
                                             else:
@@ -818,9 +855,13 @@ elif st.session_state.user_role == "admin":
                                         
                             st.markdown(f"<div class='routine-card'><b>{slot}</b> | {r['Class']}</div>", unsafe_allow_html=True)
                             ch = st.selectbox(f"Sub for {slot}", ["Select..."] + fo + bo, key=f"s_{idx}")
-                            # By leaving a dropdown as "Select...", no substitute is assigned, meaning the original teacher still handles that class.
-                            if ch != "Select...": assigns.append(f"{slot}: {ch.split(' (')[0][2:]}")
                             
+                            if ch != "Select...": 
+                                # Safely extract the name by stripping off any status emojis before saving
+                                raw_name = ch.split(' (')[0]
+                                clean_name = raw_name.replace('✅', '').replace('⚠️', '').replace('⛔', '').strip()
+                                assigns.append(f"{slot}: {clean_name}")
+                                
                         if st.button("Confirm"): append_sheet_df('teacher_leave', pd.DataFrame([{"Date": sds, "Teacher": abt, "Type": lt, "Substitute": "Multiple", "Detailed_Sub_Log": " | ".join(assigns)}])); st.rerun()
                     else:
                         st.info("No classes scheduled.")

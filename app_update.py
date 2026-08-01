@@ -58,23 +58,39 @@ def get_dropdown_options(column_index):
                 values.append(val)
     return sorted(list(set(values))) 
 
+# --- UPGRADED: Smart Memory Function ---
+# This now looks backward to find the *last known non-empty value* for each specific field.
 def get_last_app_data(app_name):
+    data = {"lines": 0, "ai": "", "chat": "", "sheet": ""}
     if not app_name or app_name == "➕ Add New..." or not st.session_state.update_data:
-        return {"lines": 0, "ai": "", "chat": "", "sheet": ""}
+        return data
+        
+    found_lines, found_ai, found_chat, found_sheet = False, False, False, False
     
     for row in reversed(st.session_state.update_data):
-        if len(row) > 11 and str(row[2]).strip() == app_name and str(row[0]).strip() != "":
-            try:
-                lines = int(row[7]) if str(row[7]).strip() else 0
-            except:
-                lines = 0
-            return {
-                "lines": lines,
-                "ai": str(row[4]).strip(),
-                "chat": str(row[10]).strip(),
-                "sheet": str(row[11]).strip()
-            }
-    return {"lines": 0, "ai": "", "chat": "", "sheet": ""}
+        if len(row) > 11 and str(row[2]).strip() == app_name:
+            if not found_chat and str(row[10]).strip():
+                data["chat"] = str(row[10]).strip()
+                found_chat = True
+            if not found_ai and str(row[4]).strip():
+                data["ai"] = str(row[4]).strip()
+                found_ai = True
+            if not found_sheet and str(row[11]).strip():
+                data["sheet"] = str(row[11]).strip()
+                found_sheet = True
+            if not found_lines and str(row[7]).strip():
+                try:
+                    data["lines"] = int(row[7])
+                    if data["lines"] > 0:
+                        found_lines = True
+                except:
+                    pass
+            
+            # Stop searching if we found everything
+            if found_chat and found_ai and found_sheet and found_lines:
+                break
+                
+    return data
 
 # --- GITHUB-STYLE RELATIVE TIME LOGIC ---
 def get_time_ago(date_str, time_str):
@@ -385,30 +401,29 @@ with tab1:
 with tab2:
     st.subheader("💡 Log a New Idea")
     
-    app_sel_idea = st.selectbox("App Name", ["➕ Add New..."] + get_dropdown_options(2), key="app_idea")
-    app_input_idea = st.text_input("Type New App Name", key="app_idea_new") if app_sel_idea == "➕ Add New..." else app_sel_idea
-    idea_details = st.text_area("Record your idea (Saved as 'Details of Update')")
+    app_sel_idea = st.selectbox("App Name", ["➕ Add New..."] + get_dropdown_options(2), key=f"app_idea_{fk}")
+    app_input_idea = st.text_input("Type New App Name", key=f"app_idea_new_{fk}_{app_sel_idea}") if app_sel_idea == "➕ Add New..." else app_sel_idea
+    idea_details = st.text_area("Record your idea (Saved as 'Details of Update')", key=f"idea_det_{fk}_{app_input_idea}")
     
-    # --- NEW: Fetch last chat default dynamically based on app selection ---
-    last_idea_data = get_last_app_data(app_sel_idea)
+    # --- UPDATED: Dynamic keys based on app_input_idea force UI refresh ---
+    last_idea_data = get_last_app_data(app_input_idea)
     default_chat_val = last_idea_data["chat"]
     
     chat_opts_idea = ["No Chat Yet", "➕ Add New..."] + get_dropdown_options(10)
     
-    # If app is selected and has a previous chat, figure out its position in the list
     default_chat_idx = 0 
-    if app_sel_idea != "➕ Add New..." and default_chat_val and default_chat_val in chat_opts_idea:
+    if app_input_idea != "➕ Add New..." and default_chat_val and default_chat_val in chat_opts_idea:
         default_chat_idx = chat_opts_idea.index(default_chat_val)
         
     chat_sel_idea = st.selectbox(
         "Chat Reference / Link (Select to unlock advanced fields)", 
         chat_opts_idea, 
         index=default_chat_idx, 
-        key="chat_sel_idea"
+        key=f"chat_sel_idea_{fk}_{app_input_idea}" # DYNAMIC KEY
     )
     
     if chat_sel_idea == "➕ Add New...":
-        chat_input_idea = st.text_input("Type New Chat Reference", key="chat_in_new_idea")
+        chat_input_idea = st.text_input("Type New Chat Reference", key=f"chat_in_new_idea_{fk}_{app_input_idea}")
     elif chat_sel_idea == "No Chat Yet":
         chat_input_idea = ""
     else:
@@ -422,48 +437,46 @@ with tab2:
         st.info("💡 Chat detected! You can optionally fill the remaining details below before saving to pending.")
         col1_i, col2_i = st.columns(2)
         
-        last_data_idea = get_last_app_data(app_input_idea)
-        
         with col1_i:
             ai_opts_i = ["➕ Add New..."] + get_dropdown_options(4)
-            ai_def_i = last_data_idea["ai"]
+            ai_def_i = last_idea_data["ai"]
             ai_sel_lbl_i = "AI Used ✨ (Last updated)" if ai_def_i else "AI Used"
             
-            ai_sel_i = st.selectbox(ai_sel_lbl_i, ai_opts_i, index=0, key="ai_sel_idea_adv")
+            ai_sel_i = st.selectbox(ai_sel_lbl_i, ai_opts_i, index=0, key=f"ai_sel_idea_adv_{fk}_{app_input_idea}")
             if ai_sel_i == "➕ Add New...":
                 t_lbl = "Type New AI ✨" if ai_def_i else "Type New AI"
-                ai_input_idea = st.text_input(t_lbl, value=ai_def_i, key="ai_in_new_idea_adv")
+                ai_input_idea = st.text_input(t_lbl, value=ai_def_i, key=f"ai_in_new_idea_adv_{fk}_{app_input_idea}")
             else:
                 ai_input_idea = ai_sel_i
             
-            ai_answer_idea = st.text_area("AI Answer", key="ai_ans_idea_adv")
-            contain_code_idea = st.checkbox("💻 Contain Code", key="contain_code_idea_adv")
+            ai_answer_idea = st.text_area("AI Answer", key=f"ai_ans_idea_adv_{fk}_{app_input_idea}")
+            contain_code_idea = st.checkbox("💻 Contain Code", key=f"contain_code_idea_adv_{fk}_{app_input_idea}")
             
         with col2_i:
-            short_sel_i = st.selectbox("Short Description", ["➕ Add New..."] + get_dropdown_options(6), key="sh_sel_idea_adv")
-            short_input_idea = st.text_input("Type New Short Description", key="sh_in_new_idea_adv") if short_sel_i == "➕ Add New..." else short_sel_i
+            short_sel_i = st.selectbox("Short Description", ["➕ Add New..."] + get_dropdown_options(6), key=f"sh_sel_idea_adv_{fk}_{app_input_idea}")
+            short_input_idea = st.text_input("Type New Short Description", key=f"sh_in_new_idea_adv_{fk}_{app_input_idea}") if short_sel_i == "➕ Add New..." else short_sel_i
             
-            lines_def_i = last_data_idea["lines"]
+            lines_def_i = last_idea_data["lines"]
             lines_lbl_i = "Lines of Code ✨ (Last updated)" if lines_def_i > 0 else "Lines of Code"
-            lines_input_idea = st.number_input(lines_lbl_i, min_value=0, step=1, value=lines_def_i, key="lines_idea_adv")
+            lines_input_idea = st.number_input(lines_lbl_i, min_value=0, step=1, value=lines_def_i, key=f"lines_idea_adv_{fk}_{app_input_idea}")
             
-            feat_sel_i = st.selectbox("Features Added", ["➕ Add New..."] + get_dropdown_options(8), key="feat_sel_idea_adv")
-            features_input_idea = st.text_input("Type New Feature", key="feat_in_new_idea_adv") if feat_sel_i == "➕ Add New..." else feat_sel_i
+            feat_sel_i = st.selectbox("Features Added", ["➕ Add New..."] + get_dropdown_options(8), key=f"feat_sel_idea_adv_{fk}_{app_input_idea}")
+            features_input_idea = st.text_input("Type New Feature", key=f"feat_in_new_idea_adv_{fk}_{app_input_idea}") if feat_sel_i == "➕ Add New..." else feat_sel_i
             
             gs_opts_i = ["➕ Add New..."] + get_dropdown_options(11)
-            gs_def_i = last_data_idea["sheet"]
+            gs_def_i = last_idea_data["sheet"]
             gs_sel_lbl_i = "Google Sheet (Linked) ✨ (Last updated)" if gs_def_i else "Google Sheet (Linked)"
             
-            gs_sel_i = st.selectbox(gs_sel_lbl_i, gs_opts_i, index=0, key="gs_sel_idea_adv")
+            gs_sel_i = st.selectbox(gs_sel_lbl_i, gs_opts_i, index=0, key=f"gs_sel_idea_adv_{fk}_{app_input_idea}")
             if gs_sel_i == "➕ Add New...":
                 t_lbl = "Type New Google Sheet Name ✨" if gs_def_i else "Type New Google Sheet Name"
-                gs_input_idea = st.text_input(t_lbl, value=gs_def_i, key="gs_in_new_idea_adv")
+                gs_input_idea = st.text_input(t_lbl, value=gs_def_i, key=f"gs_in_new_idea_adv_{fk}_{app_input_idea}")
             else:
                 gs_input_idea = gs_sel_i
             
-            selected_ai_idea = st.text_area("Selected AI Content (Paste the line here)", key="sel_ai_idea_adv")
+            selected_ai_idea = st.text_area("Selected AI Content (Paste the line here)", key=f"sel_ai_idea_adv_{fk}_{app_input_idea}")
 
-    if st.button("Save Idea to Pending List", type="primary"):
+    if st.button("Save Idea to Pending List", type="primary", key=f"btn_idea_{fk}_{app_input_idea}"):
         contain_code_str_idea = "TRUE" if contain_code_idea else ""
         row_data_idea = [
             "", "", app_input_idea, idea_details, ai_input_idea, ai_answer_idea, short_input_idea, 
@@ -474,6 +487,7 @@ with tab2:
             worksheet_update.append_row(row_data_idea)
             st.session_state.update_data.append(row_data_idea)
             st.success("Idea successfully added to the Pending List!")
+            clear_form_fields()
             st.rerun()
         except Exception as e:
             st.error(f"Failed to log idea: {e}")

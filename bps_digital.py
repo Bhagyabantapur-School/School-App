@@ -414,7 +414,8 @@ if st.session_state.user_role == "teacher":
                 c1.metric("CL Remaining", f"{14 - len(ml[ml['Type'] == 'CL'])}")
                 c2.metric("SL Taken", f"{len(ml[ml['Type'] == 'SL'])}")
                 c3.metric("Commuted", f"{len(ml[ml['Type'] == 'Commuted Leave'])}")
-                st.dataframe(ml[~ml['Type'].isin(['Half Day', 'On Duty', 'School Work'])][['Date', 'Type', 'Substitute']], hide_index=True)
+                # Ignored Census 2027 and School Work so they don't affect casual/sick leave tables for the teacher
+                st.dataframe(ml[~ml['Type'].isin(['Half Day', 'On Duty', 'School Work', 'Census 2027'])][['Date', 'Type', 'Substitute']], hide_index=True)
 
         with at_tabs[3]:
             st.subheader("🗓️ School Holiday List")
@@ -725,8 +726,11 @@ elif st.session_state.user_role == "admin":
         st.subheader("Substitution Manager")
         abt = st.selectbox("Absent Teacher", ["Select..."] + TEACHER_LIST)
         if abt != "Select...":
-            lt = st.selectbox("Leave Type", ["CL", "SL", "Commuted Leave", "Half Day", "On Duty", "School Work"])
-            ism = st.checkbox("Mark for Multiple Days?", value=True) if lt == "Commuted Leave" else False
+            # Added "Census 2027" to the leave types
+            lt = st.selectbox("Leave Type", ["CL", "SL", "Commuted Leave", "Half Day", "On Duty", "School Work", "Census 2027"])
+            # Allow multi-day selection for Census duty as well
+            ism = st.checkbox("Mark for Multiple Days?", value=True) if lt in ["Commuted Leave", "Census 2027"] else False
+            
             if ism:
                 c1, c2 = st.columns(2)
                 sd = c1.date_input("Start Date", datetime.now())
@@ -814,7 +818,9 @@ elif st.session_state.user_role == "admin":
                                         
                             st.markdown(f"<div class='routine-card'><b>{slot}</b> | {r['Class']}</div>", unsafe_allow_html=True)
                             ch = st.selectbox(f"Sub for {slot}", ["Select..."] + fo + bo, key=f"s_{idx}")
+                            # By leaving a dropdown as "Select...", no substitute is assigned, meaning the original teacher still handles that class.
                             if ch != "Select...": assigns.append(f"{slot}: {ch.split(' (')[0][2:]}")
+                            
                         if st.button("Confirm"): append_sheet_df('teacher_leave', pd.DataFrame([{"Date": sds, "Teacher": abt, "Type": lt, "Substitute": "Multiple", "Detailed_Sub_Log": " | ".join(assigns)}])); st.rerun()
                     else:
                         st.info("No classes scheduled.")

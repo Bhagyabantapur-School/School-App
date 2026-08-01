@@ -840,24 +840,39 @@ elif st.session_state.user_role == "admin":
                             ml['DateObj'] = pd.to_datetime(ml['Date'], format='%d-%m-%Y', errors='coerce')
                         target_date_obj = datetime.strptime(sds, "%d-%m-%Y")
                         
+                        # --- ⚡ QUICK BULK ASSIGN UI ---
+                        st.markdown("##### ⚡ Quick Bulk Assign All Slots")
+                        b_col1, b_col2 = st.columns([2, 1])
+                        bulk_t = b_col1.selectbox("Select Teacher to cover ALL classes:", ["Select..."] + TEACHER_LIST)
+                        
+                        # To align the button nicely, we add a little bit of top margin
+                        st.markdown("""<style>div[data-testid="column"]:nth-of-type(2) { display: flex; align-items: flex-end; padding-bottom: 2px; }</style>""", unsafe_allow_html=True)
+                        if b_col2.button("Confirm Bulk Assign"):
+                            if bulk_t != "Select...":
+                                bulk_assigns = [f"{str(r['Start_Time']).strip()}: {bulk_t}" for _, r in ms.iterrows()]
+                                append_sheet_df('teacher_leave', pd.DataFrame([{"Date": sds, "Teacher": abt, "Type": lt, "Substitute": "Multiple", "Detailed_Sub_Log": " | ".join(bulk_assigns)}]))
+                                st.rerun()
+                            else:
+                                st.warning("Please select a teacher first.")
+                        
+                        st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
+                        st.markdown("##### 📝 Or Assign Slot-by-Slot")
+                        # --- END QUICK BULK ASSIGN UI ---
+
                         assigns = []
                         for idx, r in ms.iterrows():
                             slot = str(r['Start_Time']).strip()
                             slot_rout = rout[(rout['Day'] == tdy) & (rout['Start_Time'] == slot)] if not rout.empty else pd.DataFrame()
                             bc = slot_rout['Teacher'].tolist() if not slot_rout.empty else []
                             
-                            fo, bo = [], []
-                            
-                            # Updated label to avoid confusion when giving classes to another teacher
-                            fo.append("🚫 Leave Empty / No Sub")
-                            
+                            t_opts = []
                             for tn in TEACHER_LIST:
                                 if tn == abt: continue 
                                 tc2 = TEACHER_INITIALS.get(tn, "")
                                 if slot in bs and tn in bs[slot]: 
-                                    bo.append(f"⛔ {tn} (Already Subbing)")
+                                    t_opts.append(f"⛔ {tn} (Already Subbing)")
                                 elif tc2 not in bc: 
-                                    fo.append(f"✅ {tn} (Free)")
+                                    t_opts.append(f"✅ {tn} (Free)")
                                 else: 
                                     busy_r = slot_rout[slot_rout['Teacher'] == tc2]
                                     if not busy_r.empty:
@@ -884,19 +899,25 @@ elif st.session_state.user_role == "admin":
                                                         m_count = len(p_ml[p_ml['DateObj'] == max_d])
                                                         m_label = "MDM Prev"
                                         
-                                        bo.append(f"⚠️ {tn} ({b_cls}-{b_sec} | {m_count} {m_label})")
+                                        t_opts.append(f"⚠️ {tn} ({b_cls}-{b_sec} | {m_count} {m_label})")
                                     else:
-                                        bo.append(f"⚠️ {tn} (Busy)")
+                                        t_opts.append(f"⚠️ {tn} (Busy)")
+                                        
+                            # 🔤 Sort teacher list strictly alphabetically to stop names jumping around
+                            t_opts.sort(key=lambda x: x.split(' ', 1)[1])
+                            combined_options = ["Select...", "🚫 Leave Empty / No Sub"] + t_opts
                                         
                             st.markdown(f"<div class='routine-card'><b>{slot}</b> | {r['Class']} - {r.get('Section', 'A')}</div>", unsafe_allow_html=True)
-                            ch = st.selectbox(f"Sub for {slot}", ["Select..."] + fo + bo, key=f"s_{idx}")
+                            ch = st.selectbox(f"Sub for {slot}", combined_options, key=f"s_{idx}")
                             
                             if ch != "Select...": 
                                 raw_name = ch.split(' (')[0]
                                 clean_name = raw_name.replace('✅', '').replace('⚠️', '').replace('⛔', '').replace('🚫', '').strip()
                                 assigns.append(f"{slot}: {clean_name}")
                                 
-                        if st.button("Confirm"): append_sheet_df('teacher_leave', pd.DataFrame([{"Date": sds, "Teacher": abt, "Type": lt, "Substitute": "Multiple", "Detailed_Sub_Log": " | ".join(assigns)}])); st.rerun()
+                        if st.button("Confirm Slot-by-Slot Assignment"): 
+                            append_sheet_df('teacher_leave', pd.DataFrame([{"Date": sds, "Teacher": abt, "Type": lt, "Substitute": "Multiple", "Detailed_Sub_Log": " | ".join(assigns)}]))
+                            st.rerun()
                     else:
                         st.info("No classes scheduled.")
                         if st.button("Mark Leave"): append_sheet_df('teacher_leave', pd.DataFrame([{"Date": sds, "Teacher": abt, "Type": lt, "Substitute": "None", "Detailed_Sub_Log": "None"}])); st.rerun()

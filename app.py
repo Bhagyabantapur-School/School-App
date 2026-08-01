@@ -145,7 +145,7 @@ if st.sidebar.button("Log Out", use_container_width=True):
 st.sidebar.markdown("---")
 
 # ==========================================
-# 7. LIVE ROUTINE TRACKER BANNER (CLUBBED SUPPORT)
+# 7. LIVE ROUTINE TRACKER BANNER
 # ==========================================
 def render_tracker():
     st.markdown("#### ⏱️ My Live Class")
@@ -160,23 +160,31 @@ def render_tracker():
     ll = fetch_leave_data()
     mc = TEACHER_INITIALS.get(st.session_state.user_name, st.session_state.user_name)
     
-    # 1. Check if logged-in user is ON LEAVE today
-    is_on_leave = False
+    # 1. Check if logged-in user is ON LEAVE or PARTIAL SHIFT today
+    is_fully_on_leave = False
+    given_away_slots = []
     leave_type = ""
+    
     if not ll.empty and 'Date' in ll.columns and 'Teacher' in ll.columns:
         user_leave = ll[(ll['Date'].astype(str).str.strip() == curr_date_str) & (ll['Teacher'].astype(str).str.strip() == st.session_state.user_name)]
         if not user_leave.empty:
-            is_on_leave = True
             leave_type = str(user_leave.iloc[0].get('Type', 'Leave'))
+            # If they are shifted, find out exactly which slots they abandoned
+            if leave_type in ['Class Shift / Internal Duty', 'Half Day']:
+                given_away_slots = [a.split(": ")[0].strip() for a in str(user_leave.iloc[0].get('Detailed_Sub_Log', '')).split(" | ") if ": " in a and "None" not in a]
+            else:
+                is_fully_on_leave = True
             
-    if is_on_leave:
+    if is_fully_on_leave:
         st.warning(f"🏖️ You are marked on leave today ({leave_type}). Regular classes are hidden.")
         ms = pd.DataFrame()
     else:
-        # 2. Get Default Regular Schedule
+        # 2. Get Default Regular Schedule and strip out abandoned shift classes
         ms = rout[(rout['Teacher'] == mc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()
         if not ms.empty:
             ms['Is_Sub'] = False
+            if given_away_slots:
+                ms = ms[~ms['Start_Time'].astype(str).str.strip().isin(given_away_slots)]
         
         # 3. Check and Merge Today's Substitution Assignments (Supports Emojis Stripping)
         sd = []
@@ -189,8 +197,7 @@ def render_tracker():
                 for item in sub_log.split(" | "):
                     if ": " in item:
                         slot, sub_n = item.rsplit(": ", 1)
-                        # Remove emojis that might have been saved in the log previously
-                        clean_sub_n = sub_n.replace('✅', '').replace('⚠️', '').replace('⛔', '').strip()
+                        clean_sub_n = sub_n.replace('✅', '').replace('⚠️', '').replace('⛔', '').replace('🚫', '').strip()
                         if clean_sub_n == st.session_state.user_name:
                             oc = rout[(rout['Teacher'] == absent_initials) & (rout['Day'] == tdy) & (rout['Start_Time'].astype(str).str.strip() == slot.strip())]
                             if not oc.empty:
@@ -216,7 +223,6 @@ def render_tracker():
         ms['End_Obj'] = ms['End_Time'].apply(parse_time_safe)
         ms = ms.dropna(subset=['Start_Obj', 'End_Obj']).sort_values('Start_Obj')
         
-        # Find exact time thresholds for Prev and Next
         past_slots = ms[ms['End_Obj'] < curr_time]['Start_Obj']
         latest_past_slot = past_slots.max() if not past_slots.empty else None
         
@@ -227,7 +233,6 @@ def render_tracker():
             st_obj = r['Start_Obj']
             et_obj = r['End_Obj']
             
-            # Allow multiple rows to fall into the exact same bucket if they are clubbed
             if st_obj <= curr_time <= et_obj:
                 curr_rows.append(r)
             elif latest_past_slot and st_obj == latest_past_slot and et_obj < curr_time:
@@ -287,6 +292,7 @@ app_page = st.Page("bps_digital.py", title="BPS Digital App", icon="🏫")
 fees_page = st.Page("sch_exam_fees.py", title="Exam Fees", icon="💰")
 udise_page = st.Page("UDISE+.py", title="UDISE+ Progression", icon="🎓")
 gas_page = st.Page("bps_gas_tracker.py", title="Gas Tracker", icon="🛢️")
+exam_page = st.Page("bps_exam.py", title="BPS Exams", icon="📝")
 
 def home_page_ui():
     st.markdown(f"<h3 style='margin-bottom: 5px;'>👋 Welcome, {st.session_state.user_name}</h3>", unsafe_allow_html=True)
@@ -296,20 +302,29 @@ def home_page_ui():
         
     st.markdown("#### 🚀 Select Application")
     
+    # Primary Applications
     col1, col2 = st.columns(2)
     with col1:
         if st.button("🏫 BPS Digital App", type="primary", use_container_width=True):
             st.switch_page(app_page)
     with col2:
+        if st.button("📝 BPS Exams", type="primary", use_container_width=True):
+            st.switch_page(exam_page)
+            
+    # Secondary Applications
+    col3, col4 = st.columns(2)
+    with col3:
         if st.button("💰 Funds & Fees", type="secondary", use_container_width=True):
             st.switch_page(fees_page)
             
+    # Admin-only Applications
     if st.session_state.user_role == "admin":
-        col3, col4 = st.columns(2)
-        with col3:
+        with col4:
             if st.button("🎓 UDISE+ Progression", type="secondary", use_container_width=True):
                 st.switch_page(udise_page)
-        with col4:
+                
+        col5, col6 = st.columns(2)
+        with col5:
             if st.button("🛢️ Gas Tracker", type="secondary", use_container_width=True):
                 st.switch_page(gas_page)
 
@@ -317,7 +332,7 @@ home_page = st.Page(home_page_ui, title="Home Portal", icon="🏠", default=True
 
 nav_pages = {
     "Portal": [home_page],
-    "Applications": [app_page, fees_page]
+    "Applications": [app_page, exam_page, fees_page]
 }
 
 if st.session_state.user_role == "admin":

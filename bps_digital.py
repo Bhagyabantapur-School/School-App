@@ -888,7 +888,7 @@ elif st.session_state.user_role == "admin":
                                     else:
                                         bo.append(f"⚠️ {tn} (Busy)")
                                         
-                            st.markdown(f"<div class='routine-card'><b>{slot}</b> | {r['Class']}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div class='routine-card'><b>{slot}</b> | {r['Class']} - {r.get('Section', 'A')}</div>", unsafe_allow_html=True)
                             ch = st.selectbox(f"Sub for {slot}", ["Select..."] + fo + bo, key=f"s_{idx}")
                             
                             if ch != "Select...": 

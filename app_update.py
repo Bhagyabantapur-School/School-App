@@ -227,7 +227,6 @@ with tab1:
             sheet_row_index, idea_row_data = opt_dict[selected_opt]
             target_sheet_row = sheet_row_index + 1 
             
-            # --- FULL INHERITANCE: Extract EVERYTHING saved in the pending row ---
             prefill_app = idea_row_data[2]
             prefill_details = idea_row_data[3]
             prefill_ai = idea_row_data[4]
@@ -264,7 +263,6 @@ with tab1:
             
             last_data = get_last_app_data(app_input)
             
-            # --- AI Logic (Inherit Pending OR Auto-fill) ---
             ai_opts = ["➕ Add New..."] + get_dropdown_options(4)
             ai_def = prefill_ai if (is_completing and prefill_ai) else last_data["ai"]
             ai_sel_lbl = "AI Used ✨ (Pending Data)" if (is_completing and prefill_ai) else ("AI Used ✨ (Last updated)" if ai_def else "AI Used")
@@ -276,12 +274,10 @@ with tab1:
             else:
                 ai_input = ai_sel
             
-            # --- AI Answer & Code (Inherit Pending) ---
             ai_answer = st.text_area("AI Answer", value=prefill_ai_ans if is_completing else "", key=f"ai_ans_{fk}_{app_key}")
             contain_code = st.checkbox("💻 Contain Code", value=prefill_code if is_completing else False, key=f"contain_code_{fk}_{app_key}")
             
         with col2:
-            # --- Short Description (Inherit Pending) ---
             short_opts = ["➕ Add New..."] + get_dropdown_options(6)
             short_sel = st.selectbox("Short Description", short_opts, index=0, key=f"sh_sel_{fk}_{app_key}")
             if short_sel == "➕ Add New...":
@@ -289,12 +285,10 @@ with tab1:
             else:
                 short_input = short_sel
             
-            # --- Lines of Code (Inherit Pending OR Auto-fill) ---
             lines_def = prefill_lines if (is_completing and prefill_lines > 0) else last_data["lines"]
             lines_lbl = "Lines of Code ✨ (Pending Data)" if (is_completing and prefill_lines > 0) else ("Lines of Code ✨ (Last updated)" if lines_def > 0 else "Lines of Code")
             lines_input = st.number_input(lines_lbl, min_value=0, step=1, value=lines_def, key=f"lines_{fk}_{app_key}")
             
-            # --- Features (Inherit Pending) ---
             feat_opts = ["➕ Add New..."] + get_dropdown_options(8)
             feat_sel = st.selectbox("Features Added", feat_opts, index=0, key=f"feat_sel_{fk}_{app_key}")
             if feat_sel == "➕ Add New...":
@@ -302,7 +296,6 @@ with tab1:
             else:
                 features_input = feat_sel
             
-            # --- Chat Reference (Inherit Pending OR Auto-fill) ---
             chat_opts = ["➕ Add New..."] + get_dropdown_options(10)
             chat_def = prefill_chat if (is_completing and prefill_chat) else last_data["chat"]
             chat_sel_lbl = "Chat Reference / Link ✨ (Pending Data)" if (is_completing and prefill_chat) else ("Chat Reference / Link ✨ (Last updated)" if chat_def else "Chat Reference / Link")
@@ -314,7 +307,6 @@ with tab1:
             else:
                 chat_input = chat_sel
             
-            # --- Google Sheet (Inherit Pending OR Auto-fill) ---
             gs_opts = ["➕ Add New..."] + get_dropdown_options(11)
             gs_def = prefill_gs if (is_completing and prefill_gs) else last_data["sheet"]
             gs_sel_lbl = "Google Sheet (Linked) ✨ (Pending Data)" if (is_completing and prefill_gs) else ("Google Sheet (Linked) ✨ (Last updated)" if gs_def else "Google Sheet (Linked)")
@@ -326,7 +318,6 @@ with tab1:
             else:
                 gs_input = gs_sel
             
-            # --- Selected AI (Inherit Pending) ---
             selected_ai = st.text_area("Selected AI Content (Paste the line here)", value=prefill_sel_ai if is_completing else "", key=f"sel_ai_{fk}_{app_key}")
 
         st.divider()
@@ -398,9 +389,23 @@ with tab2:
     app_input_idea = st.text_input("Type New App Name", key="app_idea_new") if app_sel_idea == "➕ Add New..." else app_sel_idea
     idea_details = st.text_area("Record your idea (Saved as 'Details of Update')")
     
-    # --- NEW: Dynamic Chat Selection unlocks advanced fields ---
+    # --- NEW: Fetch last chat default dynamically based on app selection ---
+    last_idea_data = get_last_app_data(app_sel_idea)
+    default_chat_val = last_idea_data["chat"]
+    
     chat_opts_idea = ["No Chat Yet", "➕ Add New..."] + get_dropdown_options(10)
-    chat_sel_idea = st.selectbox("Chat Reference / Link (Select to unlock advanced fields)", chat_opts_idea, index=0, key="chat_sel_idea")
+    
+    # If app is selected and has a previous chat, figure out its position in the list
+    default_chat_idx = 0 
+    if app_sel_idea != "➕ Add New..." and default_chat_val and default_chat_val in chat_opts_idea:
+        default_chat_idx = chat_opts_idea.index(default_chat_val)
+        
+    chat_sel_idea = st.selectbox(
+        "Chat Reference / Link (Select to unlock advanced fields)", 
+        chat_opts_idea, 
+        index=default_chat_idx, 
+        key="chat_sel_idea"
+    )
     
     if chat_sel_idea == "➕ Add New...":
         chat_input_idea = st.text_input("Type New Chat Reference", key="chat_in_new_idea")

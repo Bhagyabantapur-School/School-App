@@ -414,7 +414,7 @@ if st.session_state.user_role == "teacher":
                 c1.metric("CL Remaining", f"{14 - len(ml[ml['Type'] == 'CL'])}")
                 c2.metric("SL Taken", f"{len(ml[ml['Type'] == 'SL'])}")
                 c3.metric("Commuted", f"{len(ml[ml['Type'] == 'Commuted Leave'])}")
-                st.dataframe(ml[~ml['Type'].isin(['Half Day', 'On Duty'])][['Date', 'Type', 'Substitute']], hide_index=True)
+                st.dataframe(ml[~ml['Type'].isin(['Half Day', 'On Duty', 'School Work'])][['Date', 'Type', 'Substitute']], hide_index=True)
 
         with at_tabs[3]:
             st.subheader("🗓️ School Holiday List")
@@ -725,7 +725,8 @@ elif st.session_state.user_role == "admin":
         st.subheader("Substitution Manager")
         abt = st.selectbox("Absent Teacher", ["Select..."] + TEACHER_LIST)
         if abt != "Select...":
-            lt = st.selectbox("Leave Type", ["CL", "SL", "Commuted Leave", "Half Day", "On Duty"])
+            # Added "School Work" as a new Leave Type
+            lt = st.selectbox("Leave Type", ["CL", "SL", "Commuted Leave", "Half Day", "On Duty", "School Work"])
             ism = st.checkbox("Mark for Multiple Days?", value=True) if lt == "Commuted Leave" else False
             if ism:
                 c1, c2 = st.columns(2)
@@ -760,17 +761,41 @@ elif st.session_state.user_role == "admin":
                             for a in str(r.get('Detailed_Sub_Log', '')).split(" | "):
                                 if ": " in a: slot, sub = a.split(": "); bs.setdefault(slot, []).append(sub.strip())
                     if not ms.empty:
+                        # Fetch today's attendance to display present student counts
+                        al = fetch_sheet_data('student_attendance_master')
+                        todays_att = al[(al['Date'].astype(str) == sds) & (al['Status'] == True)] if not al.empty else pd.DataFrame()
+                        
                         assigns = []
                         for idx, r in ms.iterrows():
                             slot = str(r['Start_Time']).strip()
-                            bc = rout[(rout['Day'] == tdy) & (rout['Start_Time'] == slot)]['Teacher'].tolist() if not rout.empty else []
+                            slot_rout = rout[(rout['Day'] == tdy) & (rout['Start_Time'] == slot)] if not rout.empty else pd.DataFrame()
+                            bc = slot_rout['Teacher'].tolist() if not slot_rout.empty else []
+                            
                             fo, bo = [], []
                             for tn in TEACHER_LIST:
                                 if tn == abt: continue 
                                 tc2 = TEACHER_INITIALS.get(tn, "")
-                                if slot in bs and tn in bs[slot]: bo.append(f"⛔ {tn} (Already Subbing)")
-                                elif tc2 not in bc: fo.append(f"✅ {tn} (Free)")
-                                else: bo.append(f"⚠️ {tn} (Busy)")
+                                if slot in bs and tn in bs[slot]: 
+                                    bo.append(f"⛔ {tn} (Already Subbing)")
+                                elif tc2 not in bc: 
+                                    fo.append(f"✅ {tn} (Free)")
+                                else: 
+                                    # Teacher is busy, identify class and count present students
+                                    busy_r = slot_rout[slot_rout['Teacher'] == tc2]
+                                    if not busy_r.empty:
+                                        b_cls = busy_r.iloc[0]['Class']
+                                        b_sec = busy_r.iloc[0].get('Section', 'A')
+                                        p_count = 0
+                                        if not todays_att.empty:
+                                            if b_cls == 'CLASS PP':
+                                                p_count = len(todays_att[(todays_att['Class'].isin(['CLASS PP', 'CLASS LPP'])) & (todays_att['Section'] == b_sec)])
+                                            else:
+                                                p_count = len(todays_att[(todays_att['Class'] == b_cls) & (todays_att['Section'] == b_sec)])
+                                        
+                                        bo.append(f"⚠️ {tn} ({b_cls}-{b_sec} | {p_count} Present)")
+                                    else:
+                                        bo.append(f"⚠️ {tn} (Busy)")
+                                        
                             st.markdown(f"<div class='routine-card'><b>{slot}</b> | {r['Class']}</div>", unsafe_allow_html=True)
                             ch = st.selectbox(f"Sub for {slot}", ["Select..."] + fo + bo, key=f"s_{idx}")
                             if ch != "Select...": assigns.append(f"{slot}: {ch.split(' (')[0][2:]}")

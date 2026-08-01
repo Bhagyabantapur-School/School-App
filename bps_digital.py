@@ -725,7 +725,6 @@ elif st.session_state.user_role == "admin":
         st.subheader("Substitution Manager")
         abt = st.selectbox("Absent Teacher", ["Select..."] + TEACHER_LIST)
         if abt != "Select...":
-            # Added "School Work" as a new Leave Type
             lt = st.selectbox("Leave Type", ["CL", "SL", "Commuted Leave", "Half Day", "On Duty", "School Work"])
             ism = st.checkbox("Mark for Multiple Days?", value=True) if lt == "Commuted Leave" else False
             if ism:
@@ -761,9 +760,11 @@ elif st.session_state.user_role == "admin":
                             for a in str(r.get('Detailed_Sub_Log', '')).split(" | "):
                                 if ": " in a: slot, sub = a.split(": "); bs.setdefault(slot, []).append(sub.strip())
                     if not ms.empty:
-                        # Fetch today's attendance to display present student counts
-                        al = fetch_sheet_data('student_attendance_master')
-                        todays_att = al[(al['Date'].astype(str) == sds) & (al['Status'] == True)] if not al.empty else pd.DataFrame()
+                        # Fetch mdm_log to display MDM student counts (Today or Previous Day)
+                        ml = fetch_sheet_data('mdm_log')
+                        if not ml.empty and 'Date' in ml.columns:
+                            ml['DateObj'] = pd.to_datetime(ml['Date'], format='%d-%m-%Y', errors='coerce')
+                        target_date_obj = datetime.strptime(sds, "%d-%m-%Y")
                         
                         assigns = []
                         for idx, r in ms.iterrows():
@@ -780,19 +781,34 @@ elif st.session_state.user_role == "admin":
                                 elif tc2 not in bc: 
                                     fo.append(f"✅ {tn} (Free)")
                                 else: 
-                                    # Teacher is busy, identify class and count present students
+                                    # Teacher is busy, identify class and count MDM students
                                     busy_r = slot_rout[slot_rout['Teacher'] == tc2]
                                     if not busy_r.empty:
                                         b_cls = busy_r.iloc[0]['Class']
                                         b_sec = busy_r.iloc[0].get('Section', 'A')
-                                        p_count = 0
-                                        if not todays_att.empty:
-                                            if b_cls == 'CLASS PP':
-                                                p_count = len(todays_att[(todays_att['Class'].isin(['CLASS PP', 'CLASS LPP'])) & (todays_att['Section'] == b_sec)])
-                                            else:
-                                                p_count = len(todays_att[(todays_att['Class'] == b_cls) & (todays_att['Section'] == b_sec)])
+                                        m_count = 0
+                                        m_label = "MDM"
                                         
-                                        bo.append(f"⚠️ {tn} ({b_cls}-{b_sec} | {p_count} Present)")
+                                        if not ml.empty and 'DateObj' in ml.columns:
+                                            # Filter by class and section
+                                            if b_cls == 'CLASS PP':
+                                                c_ml = ml[(ml['Class'].isin(['CLASS PP', 'CLASS LPP'])) & (ml['Section'] == b_sec)]
+                                            else:
+                                                c_ml = ml[(ml['Class'] == b_cls) & (ml['Section'] == b_sec)]
+                                                
+                                            if not c_ml.empty:
+                                                t_ml = c_ml[c_ml['Date'].astype(str) == sds]
+                                                if not t_ml.empty:
+                                                    m_count = len(t_ml)
+                                                    m_label = "MDM Today"
+                                                else:
+                                                    p_ml = c_ml[c_ml['DateObj'] < target_date_obj]
+                                                    if not p_ml.empty:
+                                                        max_d = p_ml['DateObj'].max()
+                                                        m_count = len(p_ml[p_ml['DateObj'] == max_d])
+                                                        m_label = "MDM Prev"
+                                        
+                                        bo.append(f"⚠️ {tn} ({b_cls}-{b_sec} | {m_count} {m_label})")
                                     else:
                                         bo.append(f"⚠️ {tn} (Busy)")
                                         

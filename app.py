@@ -145,7 +145,7 @@ if st.sidebar.button("Log Out", use_container_width=True):
 st.sidebar.markdown("---")
 
 # ==========================================
-# 7. LIVE ROUTINE TRACKER BANNER
+# 7. LIVE ROUTINE TRACKER BANNER (CLUBBED SUPPORT)
 # ==========================================
 def render_tracker():
     st.markdown("#### ⏱️ My Live Class")
@@ -178,19 +178,21 @@ def render_tracker():
         if not ms.empty:
             ms['Is_Sub'] = False
         
-        # 3. Check and Merge Today's Substitution Assignments from teacher_leave
+        # 3. Check and Merge Today's Substitution Assignments (Supports Emojis Stripping)
         sd = []
         if not ll.empty and 'Date' in ll.columns and not rout.empty:
             for _, r in ll[ll['Date'].astype(str).str.strip() == curr_date_str].iterrows():
                 sub_log = str(r.get('Detailed_Sub_Log', ''))
-                if st.session_state.user_name in sub_log:
-                    absent_teacher = str(r.get('Teacher', '')).strip()
-                    absent_initials = TEACHER_INITIALS.get(absent_teacher, absent_teacher)
-                    
-                    for item in sub_log.split(" | "):
-                        if f": {st.session_state.user_name}" in item:
-                            slot = item.split(": ")[0].strip()
-                            oc = rout[(rout['Teacher'] == absent_initials) & (rout['Day'] == tdy) & (rout['Start_Time'].astype(str).str.strip() == slot)]
+                absent_teacher = str(r.get('Teacher', '')).strip()
+                absent_initials = TEACHER_INITIALS.get(absent_teacher, absent_teacher)
+                
+                for item in sub_log.split(" | "):
+                    if ": " in item:
+                        slot, sub_n = item.rsplit(": ", 1)
+                        # Remove emojis that might have been saved in the log previously
+                        clean_sub_n = sub_n.replace('✅', '').replace('⚠️', '').replace('⛔', '').strip()
+                        if clean_sub_n == st.session_state.user_name:
+                            oc = rout[(rout['Teacher'] == absent_initials) & (rout['Day'] == tdy) & (rout['Start_Time'].astype(str).str.strip() == slot.strip())]
                             if not oc.empty:
                                 rx = oc.iloc[0]
                                 sd.append({
@@ -198,7 +200,7 @@ def render_tracker():
                                     'End_Time': rx['End_Time'],
                                     'Class': rx['Class'],
                                     'Section': rx.get('Section', 'A'),
-                                    'Subject': f"🔄 {rx['Subject']} (Sub for {absent_teacher})",
+                                    'Subject': f"🔄 {rx['Subject']} (Sub for {absent_initials})",
                                     'Teacher': mc,
                                     'Day': tdy,
                                     'Is_Sub': True
@@ -207,51 +209,68 @@ def render_tracker():
         if sd:
             ms = pd.concat([ms, pd.DataFrame(sd)], ignore_index=True)
     
-    prev_row, curr_row, next_row = None, None, None
+    prev_rows, curr_rows, next_rows = [], [], []
     
     if not ms.empty:
         ms['Start_Obj'] = ms['Start_Time'].apply(parse_time_safe)
         ms['End_Obj'] = ms['End_Time'].apply(parse_time_safe)
         ms = ms.dropna(subset=['Start_Obj', 'End_Obj']).sort_values('Start_Obj')
         
+        # Find exact time thresholds for Prev and Next
+        past_slots = ms[ms['End_Obj'] < curr_time]['Start_Obj']
+        latest_past_slot = past_slots.max() if not past_slots.empty else None
+        
+        future_slots = ms[ms['Start_Obj'] > curr_time]['Start_Obj']
+        earliest_future_slot = future_slots.min() if not future_slots.empty else None
+        
         for _, r in ms.iterrows():
             st_obj = r['Start_Obj']
             et_obj = r['End_Obj']
-            if et_obj < curr_time:
-                prev_row = r  # Most recently completed class
-            elif st_obj <= curr_time <= et_obj:
-                curr_row = r  # Ongoing active class
-            elif st_obj > curr_time:
-                if next_row is None:
-                    next_row = r  # First upcoming class
-                    
-    def format_tracker_row(label, row_data):
-        if row_data is not None:
-            return {
-                "Status": label,
-                "Start_Time": str(row_data.get('Start_Time', '')),
-                "Class": str(row_data.get('Class', '')),
-                "Section": str(row_data.get('Section', 'A')),
-                "Subject": str(row_data.get('Subject', ''))
-            }
-        else:
-            return {
+            
+            # Allow multiple rows to fall into the exact same bucket if they are clubbed
+            if st_obj <= curr_time <= et_obj:
+                curr_rows.append(r)
+            elif latest_past_slot and st_obj == latest_past_slot and et_obj < curr_time:
+                prev_rows.append(r)
+            elif earliest_future_slot and st_obj == earliest_future_slot:
+                next_rows.append(r)
+                
+    def format_tracker_rows(label, rows_list):
+        if not rows_list:
+            return [{
                 "Status": label,
                 "Start_Time": "---",
                 "Class": "---",
                 "Section": "---",
                 "Subject": "---"
-            }
+            }]
+        out = []
+        for r in rows_list:
+            display_label = label
+            if r.get('Is_Sub', False):
+                display_label += " (SUB)"
+            out.append({
+                "Status": display_label,
+                "Start_Time": str(r.get('Start_Time', '')),
+                "Class": str(r.get('Class', '')),
+                "Section": str(r.get('Section', 'A')),
+                "Subject": str(r.get('Subject', ''))
+            })
+        return out
 
-    tracker_df = pd.DataFrame([
-        format_tracker_row("⬅️ Previous", prev_row),
-        format_tracker_row("🟢 Current", curr_row),
-        format_tracker_row("➡️ Next", next_row)
-    ])
+    tracker_data = []
+    tracker_data.extend(format_tracker_rows("⬅️ Previous", prev_rows))
+    tracker_data.extend(format_tracker_rows("🟢 Current", curr_rows))
+    tracker_data.extend(format_tracker_rows("➡️ Next", next_rows))
+    
+    tracker_df = pd.DataFrame(tracker_data)
     
     def highlight_current_row(row):
         if "Current" in str(row["Status"]):
-            return ["background-color: #d4edda; color: #155724; font-weight: bold"] * len(row)
+            if "(SUB)" in str(row["Status"]):
+                return ["background-color: #fff3cd; color: #856404; font-weight: bold"] * len(row)
+            else:
+                return ["background-color: #d4edda; color: #155724; font-weight: bold"] * len(row)
         else:
             return [""] * len(row)
             

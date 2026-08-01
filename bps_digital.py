@@ -848,8 +848,8 @@ elif st.session_state.user_role == "admin":
                             
                             fo, bo = [], []
                             
-                            # Add an option to dissolve/club the class
-                            fo.append("🚫 Class Dissolved / Clubbed")
+                            # Updated label to avoid confusion when giving classes to another teacher
+                            fo.append("🚫 Leave Empty / No Sub")
                             
                             for tn in TEACHER_LIST:
                                 if tn == abt: continue 

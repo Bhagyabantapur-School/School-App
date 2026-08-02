@@ -6,7 +6,9 @@ import threading
 import pytz
 from streamlit.runtime.scriptrunner import add_script_run_ctx
 
+# ==========================================
 # 1. GLOBAL PAGE CONFIGURATION
+# ==========================================
 st.set_page_config(
     page_title="My Unified Hub",
     page_icon="🌐",
@@ -14,7 +16,54 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 2. APP DICTIONARIES
+# ==========================================
+# 2. USER AUTHENTICATION DICTIONARY
+# ==========================================
+USERS = {
+    "admin": {"name": "SUKHAMAY KISKU", "role": "admin", "password": "bpsAPP@2026"}, 
+    "tr": {"name": "TAPASI RANA", "role": "teacher", "password": "tr26"}, 
+    "sbr": {"name": "SUJATA BISWAS ROTHA", "role": "teacher", "password": "sbr26"}, 
+    "rs": {"name": "ROHINI SINGH", "role": "teacher", "password": "rs26"}, 
+    "unj": {"name": "UDAY NARAYAN JANA", "role": "teacher", "password": "unj26"}, 
+    "bkp": {"name": "BIMAL KUMAR PATRA", "role": "teacher", "password": "bkp26"}, 
+    "sp": {"name": "SUSMITA PAUL", "role": "teacher", "password": "sp26"}, 
+    "tkm": {"name": "TAPAN KUMAR MANDAL", "role": "teacher", "password": "tkm26"}, 
+    "mk": {"name": "MANJUMA KHATUN", "role": "teacher", "password": "mk26"}
+}
+
+# ==========================================
+# 3. SESSION STATE & GATEKEEPER
+# ==========================================
+if 'authenticated' not in st.session_state: st.session_state.authenticated = False
+if 'user_role' not in st.session_state: st.session_state.user_role = None
+if 'user_name' not in st.session_state: st.session_state.user_name = None
+
+# THE LOGIN WALL
+if not st.session_state.authenticated:
+    st.markdown("<style>[data-testid='stSidebar'] {display: none;}</style>", unsafe_allow_html=True)
+    st.markdown("<div class='login-box'><h3>🔐 System Login</h3><p>Please enter your Username & Password.</p></div>", unsafe_allow_html=True)
+    
+    with st.form("login_form"):
+        ui = st.text_input("Username").lower().strip() 
+        pi = st.text_input("Password", type="password")
+        
+        if st.form_submit_button("Login"):
+            if ui in USERS and pi == USERS[ui]["password"]:
+                st.session_state.authenticated = True
+                st.session_state.user_role = USERS[ui]["role"]
+                st.session_state.user_name = USERS[ui]["name"]
+                st.rerun() 
+            else: 
+                st.error("❌ Incorrect Credentials")
+    
+    st.stop() # Halts the script here until a valid login occurs
+
+# ==========================================
+# --- SECURE SYSTEM STARTS HERE ---
+# ==========================================
+role = st.session_state.user_role
+
+# 4. APP DICTIONARIES
 personal_apps = [
     "Live Routine Hub", "Money App", "Location App", "Money Utilities", "Strong Tracker", 
     "Project App", "Election Duty", "Monthly Tracker", "Money Tracker", 
@@ -23,36 +72,43 @@ personal_apps = [
     "Sleep & Water", "Packing Tracker", "App Updater", "Visual Dashboard"
 ]
 
-bps_apps = [
+bps_admin_apps = [
     "Main Dashboard", "Admission Hub", "Student Profiles", "ID Card Generator",
     "School Data", "Exam & Fees", "Library Manager", "Leave Management",
     "Distributions", "Returns", "Form Manager", "Staff Portal", "Grocery Manager"
 ]
 
-all_apps = personal_apps + bps_apps
+bps_teacher_apps = [
+    "Staff Portal", "Student Profiles", "Library Manager", 
+    "Leave Management", "Distributions", "Returns", "Form Manager"
+]
+
+all_apps = personal_apps + bps_admin_apps + bps_teacher_apps
 
 # ==========================================
-# 3. GLOBAL SHEET CONNECTION
+# 5. DYNAMIC SHEET CONNECTION (Role-Based)
 # ==========================================
 @st.cache_resource
-def get_tracker_sheet():
-    """Creates a SINGLE connection to Google Sheets that stays open globally."""
+def get_tracker_sheet(user_role):
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
     client = gspread.authorize(creds)
-    return client.open("Personal_Dashboard_Data").worksheet("Tracker")
+    # Admin logs go to Personal Tracker, Teachers go to BPS Database
+    if user_role == "admin":
+        return client.open("Personal_Dashboard_Data").worksheet("Tracker")
+    else:
+        return client.open("BPS_Database").worksheet("Teacher_Tracker")
 
 # ==========================================
-# 4. ASYNCHRONOUS TRACKER & PERSISTENCE
+# 6. ASYNCHRONOUS TRACKER & PERSISTENCE
 # ==========================================
 @st.cache_data(ttl=300, show_spinner=False)
-def get_last_opened_app():
-    """Fetches the most recently opened app to resume your session."""
+def get_last_opened_app(user_role):
     try:
-        sheet = get_tracker_sheet()
+        sheet = get_tracker_sheet(user_role)
         records = sheet.get_all_records()
         
-        latest_app = "Live Routine Hub"
+        latest_app = "Live Routine Hub" if user_role == "admin" else "Staff Portal"
         latest_time = None
         
         for row in records:
@@ -67,21 +123,18 @@ def get_last_opened_app():
                 except: pass
         return latest_app
     except:
-        return "Live Routine Hub"
+        return "Live Routine Hub" if user_role == "admin" else "Staff Portal"
 
-def log_app_change_bg(app_name):
-    """Safely logs page changes using an immortal background thread with Smart Append."""
-    sheet = get_tracker_sheet()
+def log_app_change_bg(app_name, user_role):
+    sheet = get_tracker_sheet(user_role)
     
     def _log():
         try:
             ist = pytz.timezone('Asia/Kolkata')
             now_str = datetime.now(ist).strftime("%Y-%m-%d %H:%M:%S")
-            
             all_rows = sheet.get_all_values()
             found_row = None
             
-            # Ignores upper/lowercase and invisible trailing spaces in the Google Sheet
             clean_target = str(app_name).strip().upper()
             for idx, row in enumerate(all_rows):
                 if row and str(row[0]).strip().upper() == clean_target:
@@ -100,42 +153,55 @@ def log_app_change_bg(app_name):
         except Exception as e:
             print(f"Background Logging Failed: {e}")
             
-    # Create the thread
     thread = threading.Thread(target=_log)
-    # Give the thread the Streamlit Badge so it survives page switches!
     add_script_run_ctx(thread)
-    # Start the immortal thread
     thread.start()
 
 # ==========================================
-# 5. STATE MANAGEMENT & ROUTING
+# 7. STATE MANAGEMENT & SIDEBAR CONTROLS
 # ==========================================
 if 'last_opened_app' not in st.session_state:
-    st.session_state.last_opened_app = get_last_opened_app()
+    st.session_state.last_opened_app = get_last_opened_app(role)
 
 if 'current_tracked_app' not in st.session_state:
     st.session_state.current_tracked_app = st.session_state.last_opened_app
 
-if 'active_system' not in st.session_state:
-    if st.session_state.last_opened_app in bps_apps:
-        st.session_state.active_system = 'BPS Digital System'
-    else:
-        st.session_state.active_system = 'Personal Hub'
+# Admin gets the Workspace Switcher; Teachers default to BPS System
+if role == "admin":
+    if 'active_system' not in st.session_state:
+        if st.session_state.last_opened_app in bps_admin_apps:
+            st.session_state.active_system = 'BPS Digital System'
+        else:
+            st.session_state.active_system = 'Personal Hub'
 
-st.sidebar.markdown("### ⚙️ Workspace Switcher")
-system_choice = st.sidebar.radio(
-    "Select your environment:",
-    ['Personal Hub', 'BPS Digital System'],
-    index=0 if st.session_state.active_system == 'Personal Hub' else 1
-)
-st.session_state.active_system = system_choice
+    st.sidebar.markdown("### ⚙️ Workspace Switcher")
+    system_choice = st.sidebar.radio(
+        "Select your environment:",
+        ['Personal Hub', 'BPS Digital System'],
+        index=0 if st.session_state.active_system == 'Personal Hub' else 1
+    )
+    st.session_state.active_system = system_choice
+else:
+    system_choice = 'BPS Digital System'
+    st.session_state.active_system = system_choice
+
+# Toggle / Logout Controls directly under Workspace Switcher
+st.sidebar.markdown("---")
+st.sidebar.success(f"👋 Welcome, {st.session_state.user_name}")
+if st.sidebar.button("Log Out", use_container_width=True): 
+    st.session_state.authenticated = False 
+    st.rerun()
 st.sidebar.markdown("---")
 
 def is_default(app_name, system_category):
     last_app = st.session_state.last_opened_app
+    if role == "teacher":
+        if last_app not in bps_teacher_apps: last_app = "Staff Portal"
+        return last_app == app_name
+
     if system_choice == system_category and last_app == app_name:
         return True
-    if system_choice == system_category and last_app not in (personal_apps if system_choice == 'Personal Hub' else bps_apps):
+    if system_choice == system_category and last_app not in (personal_apps if system_choice == 'Personal Hub' else bps_admin_apps):
         if system_category == 'Personal Hub' and app_name == "Live Routine Hub": 
             return True
         if system_category == 'BPS Digital System' and app_name == "Main Dashboard": 
@@ -143,7 +209,7 @@ def is_default(app_name, system_category):
     return False
 
 # ==========================================
-# 6. DEFINE ALL PAGES
+# 8. DEFINE ALL PAGES
 # ==========================================
 # --- Personal Pages ---
 routine_hub = st.Page("routine_app.py", title="Live Routine Hub", icon="⏱️", default=is_default("Live Routine Hub", "Personal Hub"))
@@ -184,41 +250,50 @@ staff_portal = st.Page("bps_digital_sk.py", title="Staff Portal", icon="🔐", d
 grocery_app = st.Page("bps_grocery_ad.py", title="Grocery Manager", icon="🥦", default=is_default("Grocery Manager", "BPS Digital System"))
 
 # ==========================================
-# 7. NAVIGATION
+# 9. NAVIGATION EXECUTION
 # ==========================================
-if system_choice == 'Personal Hub':
-    # Updated Sidebar Grouping to match the Routine Hub Launchpad
-    pg = st.navigation({
-        "MONEY": [money_app, money_utilities, money_tracker, product_inventory],
-        "LOCATION": [location_app, packing_tracker],
-        "ROUTINE": [routine_hub, routine_audit, routine_editor, project],
-        "HEALTH": [health, sleep_water],
-        "SCH WORK": [mdm_return, ytfb_videos],
-        "HOME": [trace_app, monthly],
-        "HARDWARE": [backup],
-        "BALANCE": [strong],
-        "ONES": [election, app_updater],
-        "DASHBOARD": [visual_dashboard]
-    })
-    st.sidebar.caption("🔒 Personal Workspace Active")
+if role == "admin":
+    if system_choice == 'Personal Hub':
+        pg = st.navigation({
+            "MONEY": [money_app, money_utilities, money_tracker, product_inventory],
+            "LOCATION": [location_app, packing_tracker],
+            "ROUTINE": [routine_hub, routine_audit, routine_editor, project],
+            "HEALTH": [health, sleep_water],
+            "SCH WORK": [mdm_return, ytfb_videos],
+            "HOME": [trace_app, monthly],
+            "HARDWARE": [backup],
+            "BALANCE": [strong],
+            "ONES": [election, app_updater],
+            "DASHBOARD": [visual_dashboard]
+        })
+        st.sidebar.caption("🔒 Personal Workspace Active")
+    else:
+        pg = st.navigation({
+            "System Home": [bps_dashboard],
+            "Staff & Admin": [staff_portal],
+            "Student Management": [admission, student_profile, id_card],
+            "Academics & Finance": [school_data, exam_fees, library_app],
+            "Operations": [leave, distribution, returns, form_manager, grocery_app]
+        })
+        st.sidebar.markdown("#### Bhagyabantapur Primary School")
+        st.sidebar.caption("Head Teacher Dashboard Active")
 else:
+    # Restricted Navigation for Teachers
     pg = st.navigation({
-        "System Home": [bps_dashboard],
-        "Staff & Admin": [staff_portal],
-        "Student Management": [admission, student_profile, id_card],
-        "Academics & Finance": [school_data, exam_fees, library_app],
-        "Operations": [leave, distribution, returns, form_manager, grocery_app]
+        "Dashboard": [staff_portal],
+        "Academics": [student_profile, library_app],
+        "Operations": [leave, distribution, returns, form_manager]
     })
     st.sidebar.markdown("#### Bhagyabantapur Primary School")
-    st.sidebar.caption("Head Teacher Dashboard Active")
+    st.sidebar.caption("Assistant Teacher Portal Active")
 
 # ==========================================
-# 8. MASTER LOGGING TRIGGER
+# 10. MASTER LOGGING TRIGGER
 # ==========================================
 if pg.title != st.session_state.current_tracked_app and pg.title in all_apps:
     st.session_state.current_tracked_app = pg.title
     st.session_state.last_opened_app = pg.title
-    log_app_change_bg(pg.title)
+    log_app_change_bg(pg.title, role)
 
 # RUN NAVIGATION
 pg.run()

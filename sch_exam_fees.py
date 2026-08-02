@@ -8,6 +8,7 @@ import re
 import base64
 from google.oauth2.service_account import Credentials
 from google.auth.transport.requests import AuthorizedSession
+from gspread.exceptions import WorksheetNotFound
 
 # --- GATEKEEPER SECURITY CHECK ---
 if 'authenticated' not in st.session_state or not st.session_state.authenticated:
@@ -18,6 +19,22 @@ IST = pytz.timezone('Asia/Kolkata')
 
 st.title("💰 Bhagyabantapur Primary School - Funds & Fees")
 st.markdown("Record and track examination fees and confiscated unauthorized cash.")
+
+# --- HELPER FUNCTIONS ---
+def safe_key(cls, roll, name):
+    try:
+        r = str(int(float(roll)))
+    except:
+        r = str(roll).strip()
+    return f"{str(cls).strip().upper()}_{r}_{str(name).strip().upper()}"
+
+def ensure_worksheet(sh, title, headers):
+    try:
+        ws = sh.worksheet(title)
+    except WorksheetNotFound:
+        ws = sh.add_worksheet(title=title, rows=1000, cols=10)
+        ws.append_row(headers)
+    return ws
 
 # --- AUTHENTICATION & SECURE IMAGE FETCHING ---
 @st.cache_resource
@@ -71,108 +88,134 @@ def load_data():
     df_mdm = pd.DataFrame(ws_mdm.get_all_records())
     
     fees_sheet = gc.open("SCH_Exam_Fees")
-    ws_fees = fees_sheet.worksheet("Sheet1") 
+    ws_fees = ensure_worksheet(fees_sheet, "Sheet1", ["Date", "Name", "Class", "Section", "Roll", "Amount", "Payer_Type", "Teacher_Involved", "Collection Type", "Handover_Status"])
     df_fees = pd.DataFrame(ws_fees.get_all_records())
+    
+    # Load Britti Eligibility List
+    ws_britti = ensure_worksheet(fees_sheet, "Britti_List", ["Class", "Section", "Roll", "Name"])
+    df_britti = pd.DataFrame(ws_britti.get_all_records())
     
     if not df_fees.empty:
         df_fees['_Row_Num'] = range(2, len(df_fees) + 2)
-        
         if 'Handover_Status' not in df_fees.columns:
             df_fees['Handover_Status'] = 'Pending'
             if 'Teacher_Involved' in df_fees.columns:
                 df_fees.loc[df_fees['Teacher_Involved'] == 'SUKHAMAY KISKU', 'Handover_Status'] = 'Settled'
     
-    return df_students, df_teachers, df_fees, df_mdm
+    return df_students, df_teachers, df_fees, df_mdm, df_britti
 
 try:
     with st.spinner("Connecting to BPS Database..."):
-        df_students, df_teachers, df_fees, df_mdm = load_data()
+        df_students, df_teachers, df_fees, df_mdm, df_britti = load_data()
 except Exception as e:
-    st.error(f"Error loading data. Ensure the sheets are named correctly and the 'mdm_log' tab exists. Details: {e}")
+    st.error(f"Error loading data. Ensure the sheets are named correctly. Details: {e}")
     st.stop()
 
 # --- APP LAYOUT (Tabs Dynamic Routing) ---
 if st.session_state.user_role == "admin":
-    tab_pending, tab1, tab2, tab3 = st.tabs(["⚠️ Pending Fees", "📝 Record Funds", "📊 Collection Dashboard", "🤝 Handover Manager"])
+    tab_pending, tab1, tab2, tab_britti, tab3 = st.tabs(["⚠️ Pending Fees", "📝 Record Funds", "📊 Dashboard", "🏆 Britti Selection", "🤝 Handover Manager"])
 else:
-    tab_pending, tab1, tab2 = st.tabs(["⚠️ Pending Fees", "📝 Record Funds", "📊 Collection Dashboard"])
+    tab_pending, tab1, tab2 = st.tabs(["⚠️ Pending Fees", "📝 Record Funds", "📊 Dashboard"])
 
 # ==========================================
-# TAB 0: TODAY's PENDING FEES
+# TAB 0: PENDING FEES TRACKER
 # ==========================================
 with tab_pending:
     col_hdr, col_btn = st.columns([3, 1])
     with col_hdr:
-        st.subheader("⚠️ Today's Pending 'Evaluation-II' Fees")
+        st.subheader("⚠️ Pending Fees Tracker")
     with col_btn:
         if st.button("🔄 Refresh List", use_container_width=True):
             load_data.clear()
             st.rerun()
-    
+            
+    c_type, c_tog = st.columns(2)
+    with c_type:
+        pending_fee_type = st.selectbox("Check Pending For:", ["Evaluation-II", "Britti"])
+    with c_tog:
+        st.write("") 
+        filter_mdm = st.toggle("Filter by Today's MDM Attendance", value=True)
+        
     today_str = datetime.now(IST).strftime("%d-%m-%Y")
     
-    if df_mdm.empty or 'Date' not in df_mdm.columns:
-        st.info("🌸 **Gentle Reminder:** No attendance (MDM) records found. Please complete attendance first.")
-    else:
-        # Filter MDM for today
+    # 1. Define the base target students
+    if pending_fee_type == "Evaluation-II":
+        base_target = df_students.copy()
+        target_fee = 10
+    else: # Britti
+        base_target = df_britti.copy()
+        target_fee = st.number_input("Expected Britti Fee (₹) per student:", min_value=0, value=50, step=10)
+        if base_target.empty:
+            st.warning("No students have been selected for Britti yet. Go to the 'Britti Selection' tab to add students.")
+            st.stop()
+            
+    base_target['Match_Key'] = base_target.apply(lambda r: safe_key(r.get('Class',''), r.get('Roll',''), r.get('Name','')), axis=1)
+    
+    # 2. Filter by MDM if toggle is ON
+    if filter_mdm:
+        if df_mdm.empty or 'Date' not in df_mdm.columns:
+            st.info("🌸 **Gentle Reminder:** No attendance (MDM) records found. Please complete attendance first.")
+            st.stop()
+            
         today_mdm = df_mdm[df_mdm['Date'].astype(str).str.strip() == today_str].copy()
         
-        # Determine target MDM based on user role 
         if st.session_state.user_role == "teacher":
-            target_mdm = today_mdm[today_mdm['Teacher'].astype(str).str.strip() == st.session_state.user_name].copy()
-            reminder_msg = "🌸 **Gentle Reminder:** You haven't taken today's attendance (MDM Entry) yet. Please submit your class attendance in the BPS Digital App first to see the list of present students with pending fees."
-        else:
-            target_mdm = today_mdm.copy()
-            reminder_msg = "🌸 **Gentle Reminder:** It looks like today's attendance (MDM Entry) hasn't been completed yet. Please submit class attendance in the BPS Digital App first to see the list of present students with pending fees."
-
-        if target_mdm.empty:
-            st.info(reminder_msg)
-        else:
-            def safe_key(cls, roll, name):
-                try:
-                    r = str(int(float(roll)))
-                except:
-                    r = str(roll).strip()
-                return f"{str(cls).strip().upper()}_{r}_{str(name).strip().upper()}"
-
-            paid_amounts = {}
-            if not df_fees.empty and 'Collection Type' in df_fees.columns and 'Amount' in df_fees.columns:
-                eval_fees = df_fees[df_fees['Collection Type'].astype(str).str.strip() == 'Evaluation-II'].copy()
-                eval_fees['Amount'] = pd.to_numeric(eval_fees['Amount'], errors='coerce').fillna(0)
-                
-                # Get net amount paid per student
-                student_totals = eval_fees.groupby(['Class', 'Roll', 'Name'])['Amount'].sum().reset_index()
-                
-                for _, row in student_totals.iterrows():
-                    k = safe_key(row['Class'], row['Roll'], row['Name'])
-                    paid_amounts[k] = row['Amount']
+            today_mdm = today_mdm[today_mdm['Teacher'].astype(str).str.strip() == st.session_state.user_name]
             
-            target_mdm['Match_Key'] = target_mdm.apply(lambda r: safe_key(r.get('Class',''), r.get('Roll',''), r.get('Name','')), axis=1)
-            target_mdm['Paid (₹)'] = target_mdm['Match_Key'].apply(lambda k: paid_amounts.get(k, 0))
-            target_mdm['Due (₹)'] = 10 - target_mdm['Paid (₹)']
+        if today_mdm.empty:
+            st.info("🌸 **Gentle Reminder:** You haven't taken today's attendance (MDM Entry) yet, or no students are marked present.")
+            st.stop()
             
-            pending_students = target_mdm[target_mdm['Due (₹)'] > 0].copy()
+        today_mdm['Match_Key'] = today_mdm.apply(lambda r: safe_key(r.get('Class',''), r.get('Roll',''), r.get('Name','')), axis=1)
+        present_keys = today_mdm['Match_Key'].tolist()
+        
+        final_target = base_target[base_target['Match_Key'].isin(present_keys)].copy()
+        
+        if final_target.empty:
+            st.success(f"No {pending_fee_type} students from your list are present today.")
+            st.stop()
+    else:
+        # MDM off: Show all in base target
+        final_target = base_target.copy()
+        
+    # 3. Calculate Dues
+    paid_amounts = {}
+    if not df_fees.empty and 'Collection Type' in df_fees.columns and 'Amount' in df_fees.columns:
+        type_fees = df_fees[df_fees['Collection Type'].astype(str).str.strip() == pending_fee_type].copy()
+        type_fees['Amount'] = pd.to_numeric(type_fees['Amount'], errors='coerce').fillna(0)
+        
+        student_totals = type_fees.groupby(['Class', 'Roll', 'Name'])['Amount'].sum().reset_index()
+        for _, row in student_totals.iterrows():
+            k = safe_key(row['Class'], row['Roll'], row['Name'])
+            paid_amounts[k] = row['Amount']
             
-            if pending_students.empty:
-                st.success("🎉 Fantastic! All students marked present today have paid their Evaluation-II fees in full (₹10).")
-            else:
-                st.markdown("The following students are **present today** but have **not yet paid the full ₹10** for Evaluation-II:")
-                
-                class_order = {"CLASS PP": 0, "CLASS I": 1, "CLASS II": 2, "CLASS III": 3, "CLASS IV": 4, "CLASS V": 5}
-                classes_present = [c for c in pending_students['Class'].unique() if str(c).strip()]
-                classes_present.sort(key=lambda x: class_order.get(x, 99))
-                
-                for cls in classes_present:
-                    cls_pending = pending_students[pending_students['Class'] == cls].copy()
-                    cls_pending['Roll_Num'] = pd.to_numeric(cls_pending['Roll'], errors='coerce').fillna(999)
-                    cls_pending = cls_pending.sort_values('Roll_Num')
-                    
-                    with st.expander(f"📖 {cls} - {len(cls_pending)} Student(s) Pending", expanded=True):
-                        st.dataframe(
-                            cls_pending[['Section', 'Roll', 'Name', 'Paid (₹)', 'Due (₹)']], 
-                            hide_index=True, 
-                            use_container_width=True
-                        )
+    final_target['Paid (₹)'] = final_target['Match_Key'].apply(lambda k: paid_amounts.get(k, 0))
+    final_target['Due (₹)'] = target_fee - final_target['Paid (₹)']
+    
+    pending_students = final_target[final_target['Due (₹)'] > 0].copy()
+    
+    if pending_students.empty:
+        msg = "present today" if filter_mdm else "in the target list"
+        st.success(f"🎉 Fantastic! All targeted students {msg} have paid their {pending_fee_type} fees in full.")
+    else:
+        msg = "present today" if filter_mdm else "overall"
+        st.markdown(f"The following students are **{msg}** but have **not yet paid the full ₹{target_fee}** for {pending_fee_type}:")
+        
+        class_order = {"CLASS PP": 0, "CLASS I": 1, "CLASS II": 2, "CLASS III": 3, "CLASS IV": 4, "CLASS V": 5}
+        classes_present = [c for c in pending_students['Class'].unique() if str(c).strip()]
+        classes_present.sort(key=lambda x: class_order.get(x, 99))
+        
+        for cls in classes_present:
+            cls_pending = pending_students[pending_students['Class'] == cls].copy()
+            cls_pending['Roll_Num'] = pd.to_numeric(cls_pending['Roll'], errors='coerce').fillna(999)
+            cls_pending = cls_pending.sort_values('Roll_Num')
+            
+            with st.expander(f"📖 {cls} - {len(cls_pending)} Student(s) Pending", expanded=True):
+                st.dataframe(
+                    cls_pending[['Section', 'Roll', 'Name', 'Paid (₹)', 'Due (₹)']], 
+                    hide_index=True, 
+                    use_container_width=True
+                )
 
 # ==========================================
 # TAB 1: FUND COLLECTION FORM (BATCH MODE)
@@ -406,32 +449,22 @@ with tab2:
         
     dash_df = df_fees.copy()
     
-    # --- GLOBAL COLLECTION TYPE FILTER ---
     selected_type = "All"
     if not dash_df.empty and 'Collection Type' in dash_df.columns:
         unique_vals = list(dash_df['Collection Type'].dropna().unique())
         ctypes = ["All"]
-        
-        # Ensure Evaluation-II is always available in the dropdown
-        if "Evaluation-II" not in unique_vals:
-            ctypes.append("Evaluation-II")
+        if "Evaluation-II" not in unique_vals: ctypes.append("Evaluation-II")
             
         for val in unique_vals:
-            if val not in ctypes:
-                ctypes.append(val)
+            if val not in ctypes: ctypes.append(val)
                 
-        # Set Evaluation-II as default if present
         default_idx = ctypes.index("Evaluation-II") if "Evaluation-II" in ctypes else 0
-        
         selected_type = st.selectbox("🔍 Filter by Collection Type:", ctypes, index=default_idx)
         
-        # Filter the DataFrame globally for this Tab
         if selected_type != "All":
             dash_df = dash_df[dash_df['Collection Type'] == selected_type].copy()
             
-    # ----------------------------------------------------
-    # ASSISTANT TEACHER DASHBOARD VIEW
-    # ----------------------------------------------------
+    # --- TEACHER DASHBOARD VIEW ---
     if st.session_state.user_role != "admin":
         if not dash_df.empty:
             dash_df = dash_df[dash_df['Teacher_Involved'].astype(str).str.strip() == st.session_state.user_name]
@@ -447,8 +480,8 @@ with tab2:
             handed_over = dash_df[dash_df['Handover_Status'] == 'Handed Over']['Amount'].sum()
             
             col_t1, col_t2, col_t3 = st.columns(3)
-            col_t1.metric("💰 Gross Collected", f"₹ {gross_coll:,.2f}", help="Total cash taken in before returns.")
-            col_t2.metric("🤝 Handed to Head Sir", f"₹ {handed_over:,.2f}", help="Total cash given to admin.")
+            col_t1.metric("💰 Gross Collected", f"₹ {gross_coll:,.2f}")
+            col_t2.metric("🤝 Handed to Head Sir", f"₹ {handed_over:,.2f}")
             col_t3.metric("💵 Net Cash in Hand", f"₹ {net_pending:,.2f}", delta=f"-₹{total_ret:,.0f} Returned", delta_color="normal")
             
             st.divider()
@@ -472,16 +505,13 @@ with tab2:
         else:
             st.info(f"No {selected_type} data collected by you ({st.session_state.user_name}) yet.")
 
-    # ----------------------------------------------------
-    # HEAD TEACHER (ADMIN) DASHBOARD VIEW
-    # ----------------------------------------------------
+    # --- ADMIN DASHBOARD VIEW ---
     else:
         st.caption(f"Showing **All School Transactions** (Head Teacher View) | Type: **{selected_type}**")
             
         if not dash_df.empty and 'Amount' in dash_df.columns:
             dash_df['Amount'] = pd.to_numeric(dash_df['Amount'], errors='coerce').fillna(0)
             
-            # Accurate Admin Accounting
             admin_collected = dash_df[dash_df['Teacher_Involved'] == 'SUKHAMAY KISKU']['Amount'].sum()
             teachers_handed_over = dash_df[dash_df['Handover_Status'] == 'Handed Over']['Amount'].sum()
             admin_cash = admin_collected + teachers_handed_over
@@ -496,7 +526,6 @@ with tab2:
     
             st.divider()
 
-            # --- EXPECTED FEE TARGET SUMMARY (Conditional) ---
             if selected_type == "Evaluation-II":
                 st.markdown("##### 🏫 Expected Fee Target Summary")
                 st.info("""
@@ -511,18 +540,13 @@ with tab2:
                 """)
                 st.divider()
             
-            # --- CLASS-WISE LIST & TOTALS ---
             st.markdown(f"##### 📋 Class-wise Student List & Totals ({selected_type})")
-            
-            # Custom logic to force natural sorting of standard class names
             class_order = {"CLASS PP": 0, "CLASS I": 1, "CLASS II": 2, "CLASS III": 3, "CLASS IV": 4, "CLASS V": 5}
             found_classes = [c for c in dash_df['Class'].unique() if str(c).strip()]
             found_classes.sort(key=lambda x: class_order.get(x, 99))
             
             for cls in found_classes:
                 cls_df = dash_df[dash_df['Class'] == cls].copy()
-                
-                # Force Roll to numeric so it sorts naturally (1, 2, 3... instead of 1, 10, 2)
                 cls_df['Roll_Num'] = pd.to_numeric(cls_df['Roll'], errors='coerce').fillna(999)
                 cls_df = cls_df.sort_values('Roll_Num')
                 
@@ -534,12 +558,9 @@ with tab2:
                     if selected_type == "All" and 'Collection Type' in cls_df.columns:
                         display_cols.append('Collection Type')
                     display_cols.append('Teacher_Involved')
-                    
                     st.dataframe(cls_df[display_cols], hide_index=True, use_container_width=True)
             
             st.divider()
-            
-            # --- TEACHER HANDOVER LEDGER ---
             st.markdown("##### 👨‍🏫 Teacher Handover Ledger")
             def calc_teacher_stats(group):
                 gross = group[group['Amount'] > 0]['Amount'].sum()
@@ -551,45 +572,75 @@ with tab2:
             teacher_summary = dash_df.groupby('Teacher_Involved').apply(calc_teacher_stats).reset_index()
             st.dataframe(teacher_summary, hide_index=True, use_container_width=True)
             
-            st.markdown("##### 📜 Detailed Handover Log")
-            handed_over_df = dash_df[dash_df['Handover_Status'] == 'Handed Over']
-            if not handed_over_df.empty:
-                st.dataframe(handed_over_df[['Date', 'Teacher_Involved', 'Name', 'Class', 'Amount', 'Collection Type']], hide_index=True)
-            else:
-                st.info("No cash has been handed over by teachers yet.")
-                
-            st.divider()
-            
-            # --- BAR CHART VISUALIZATION ---
             st.markdown("##### 📈 Net Funds by Class")
             if 'Collection Type' in dash_df.columns and selected_type == "All":
                 class_totals = dash_df.groupby(['Class', 'Collection Type'])['Amount'].sum().reset_index()
-                fig = px.bar(
-                    class_totals, 
-                    x='Class', 
-                    y='Amount', 
-                    color='Collection Type',
-                    text_auto=True,
-                    barmode='group',
-                    color_discrete_sequence=px.colors.qualitative.Set2
-                )
-                fig.update_layout(xaxis_title="Class", yaxis_title="Net Amount (₹)")
+                fig = px.bar(class_totals, x='Class', y='Amount', color='Collection Type', text_auto=True, barmode='group')
             else:
                 class_totals = dash_df.groupby('Class')['Amount'].sum().reset_index()
-                fig = px.bar(
-                    class_totals, 
-                    x='Class', 
-                    y='Amount', 
-                    text_auto=True,
-                    color='Amount',
-                    color_continuous_scale='Viridis'
-                )
-                fig.update_layout(xaxis_title="Class", yaxis_title="Net Amount (₹)", showlegend=False)
-                
+                fig = px.bar(class_totals, x='Class', y='Amount', text_auto=True, color='Amount', color_continuous_scale='Viridis')
             st.plotly_chart(fig, use_container_width=True)
             
         else:
             st.info(f"No {selected_type} collections found. Transactions will appear here once recorded.")
+
+# ==========================================
+# TAB: BRITTI ELIGIBILITY (ADMIN ONLY)
+# ==========================================
+if st.session_state.user_role == "admin":
+    with tab_britti:
+        st.subheader("🏆 Britti Student Selection")
+        st.info("Select the specific students participating in the Britti examination. Only selected students will appear in the Britti Pending Fees tracker.")
+        
+        b_class = st.selectbox("Select Class to Manage Britti List", sorted([c for c in df_students['Class'].unique() if str(c).strip()]))
+        
+        c_students = df_students[df_students['Class'] == b_class].copy()
+        c_students['Match_Key'] = c_students.apply(lambda r: safe_key(r.get('Class',''), r.get('Roll',''), r.get('Name','')), axis=1)
+        
+        if not df_britti.empty:
+            df_britti['Match_Key'] = df_britti.apply(lambda r: safe_key(r.get('Class',''), r.get('Roll',''), r.get('Name','')), axis=1)
+            selected_keys = df_britti['Match_Key'].tolist()
+        else:
+            selected_keys = []
+            
+        c_students['Selected'] = c_students['Match_Key'].isin(selected_keys)
+        c_students['Roll_Num'] = pd.to_numeric(c_students['Roll'], errors='coerce').fillna(999)
+        c_students = c_students.sort_values('Roll_Num')
+        
+        edited_c = st.data_editor(
+            c_students[['Selected', 'Roll', 'Name', 'Section']],
+            hide_index=True,
+            disabled=['Roll', 'Name', 'Section'],
+            use_container_width=True
+        )
+        
+        if st.button(f"💾 Save Britti List for {b_class}", type="primary"):
+            new_selections = edited_c[edited_c['Selected'] == True]
+            
+            if not df_britti.empty:
+                other_classes_britti = df_britti[df_britti['Class'] != b_class].copy()
+            else:
+                other_classes_britti = pd.DataFrame(columns=["Class", "Section", "Roll", "Name"])
+                
+            new_append = []
+            for _, r in new_selections.iterrows():
+                new_append.append({"Class": b_class, "Section": r['Section'], "Roll": r['Roll'], "Name": r['Name']})
+                
+            final_britti = pd.concat([other_classes_britti, pd.DataFrame(new_append)], ignore_index=True)
+            
+            gc_write = get_gspread_client()
+            sh = gc_write.open("SCH_Exam_Fees")
+            ws = ensure_worksheet(sh, "Britti_List", ["Class", "Section", "Roll", "Name"])
+            ws.clear()
+            
+            if not final_britti.empty:
+                ws.update([final_britti.columns.values.tolist()] + final_britti.fillna("").astype(str).values.tolist())
+            else:
+                ws.append_row(["Class", "Section", "Roll", "Name"])
+                
+            load_data.clear()
+            st.success(f"Successfully saved {len(new_append)} Britti students for {b_class}!")
+            st.rerun()
 
 # ==========================================
 # TAB 3: ADMIN HANDOVER MANAGER (ADMIN ONLY)
@@ -601,7 +652,6 @@ if st.session_state.user_role == "admin":
         
         if not df_fees.empty and 'Handover_Status' in df_fees.columns:
             handover_col_idx = df_fees.columns.get_loc('Handover_Status') + 1
-            
             df_fees['Amount'] = pd.to_numeric(df_fees['Amount'], errors='coerce').fillna(0)
             pending_df = df_fees[df_fees['Handover_Status'] == 'Pending'].copy()
             
@@ -614,7 +664,6 @@ if st.session_state.user_role == "admin":
                 
                 total_owed = teacher_pending['Amount'].sum()
                 st.markdown(f"### Net Pending Cash with {selected_teacher}: **₹ {total_owed:,.2f}**")
-                st.caption("Check the boxes next to the transactions (both collections and returns) you are processing, then click Confirm.")
                 
                 edited_df = st.data_editor(
                     teacher_pending[['Receive', 'Date', 'Name', 'Class', 'Amount', 'Collection Type', '_Row_Num']],
@@ -634,10 +683,8 @@ if st.session_state.user_role == "admin":
                             try:
                                 gc_write = get_gspread_client()
                                 ws_fees_write = gc_write.open("SCH_Exam_Fees").worksheet("Sheet1")
-                                
                                 for r_num in selected_rows['_Row_Num']:
                                     ws_fees_write.update_cell(r_num, handover_col_idx, 'Handed Over')
-                                
                                 load_data.clear()
                                 st.success("Cash securely reconciled and recorded!")
                                 st.rerun()

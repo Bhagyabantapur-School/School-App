@@ -2,7 +2,7 @@ import streamlit as st, streamlit.components.v1 as components, pandas as pd, os,
 from datetime import datetime, time, timedelta, timezone
 from streamlit_qrcode_scanner import qrcode_scanner
 import gspread
-from gspread.exceptions import WorksheetNotFound
+from gspread.exceptions import WorksheetNotFound, SpreadsheetNotFound
 from google.oauth2.service_account import Credentials
 from google.auth.transport.requests import AuthorizedSession
 
@@ -78,12 +78,12 @@ def get_google_credentials(): return Credentials.from_service_account_info(dict(
 @st.cache_resource
 def init_gsheets():
     try: return gspread.authorize(get_google_credentials()).open("BPS_Database")
-    except: st.error("⚠️ Google Sheets Connection Failed!"); st.stop()
+    except Exception: st.error("⚠️ Google Sheets Connection Failed!"); st.stop()
 
 @st.cache_resource
 def init_routine_gsheet():
     try: return gspread.authorize(get_google_credentials()).open("bps_routine")
-    except: return None
+    except Exception: return None
 
 @st.cache_resource
 def get_drive_session(): return AuthorizedSession(get_google_credentials())
@@ -93,9 +93,112 @@ sh = init_gsheets()
 @st.cache_data(ttl=600) 
 def fetch_sheet_data(sheet_name):
     try: return pd.DataFrame(sh.worksheet(sheet_name).get_all_records()).replace({'TRUE': True, 'FALSE': False, 'True': True, 'False': False}).infer_objects(copy=False)
-    except: return pd.DataFrame()
+    except Exception: return pd.DataFrame()
 
-# --- NEW ROUTINE ENGINE ---
+# ==========================================
+# NEW: BPS EXAM ROUTINE ENGINE
+# ==========================================
+@st.cache_data(ttl=300)
+def fetch_exam_schedules():
+    try:
+        sh_ex = gspread.authorize(get_google_credentials()).open("BPS EXAM")
+        ws = sh_ex.worksheet("schedules")
+        df = pd.DataFrame(ws.get_all_records()).astype(str)
+        df.columns = [str(c).strip() for c in df.columns]
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+def build_exam_day_routine(date_str):
+    schedules = fetch_exam_schedules()
+    if schedules.empty or 'Date' not in schedules.columns:
+        return pd.DataFrame()
+        
+    today_exams = schedules[schedules['Date'].astype(str).str.strip() == date_str]
+    if today_exams.empty:
+        return pd.DataFrame()
+        
+    # Discover Next Exam Date to determine Next Day Exam Preparation teacher
+    all_dates = schedules['Date'].unique().tolist()
+    date_objs = []
+    for d in all_dates:
+        try: date_objs.append(datetime.strptime(str(d).strip(), "%d-%m-%Y"))
+        except Exception: pass
+    date_objs.sort()
+    
+    curr_obj = datetime.strptime(date_str, "%d-%m-%Y")
+    next_obj = None
+    for d_obj in date_objs:
+        if d_obj > curr_obj:
+            next_obj = d_obj
+            break
+            
+    next_date_str = next_obj.strftime("%d-%m-%Y") if next_obj else None
+    next_exams = schedules[schedules['Date'].astype(str).str.strip() == next_date_str] if next_date_str else pd.DataFrame()
+    
+    routine_rows = []
+    tdy_name = datetime.strptime(date_str, "%d-%m-%Y").strftime("%A")
+    
+    for _, row in today_exams.iterrows():
+        c = str(row.get('Class', ''))
+        sec = str(row.get('Section', 'A'))
+        sub = str(row.get('Subject', ''))
+        teacher_name = str(row.get('Teacher', ''))
+        t_init = TEACHER_INITIALS.get(teacher_name, teacher_name)
+        
+        # 1. 11:15 to 12:45 -> Exam Subject
+        routine_rows.append({
+            "Day": tdy_name,
+            "Start_Time": "11:15",
+            "End_Time": "12:45",
+            "Class": c,
+            "Section": sec,
+            "Subject": f"📝 EXAM: {sub}",
+            "Teacher": t_init,
+            "Is_Custom": True,
+            "Is_Exam_Day": True
+        })
+        
+        # 2. 12:45 to 13:30 -> Next Day Exam Preparation
+        next_sub = "📖 Final Revision"
+        next_t_init = t_init
+        if not next_exams.empty:
+            match_next = next_exams[(next_exams['Class'] == c) & (next_exams['Section'] == sec)]
+            if not match_next.empty:
+                next_sub_val = str(match_next.iloc[0]['Subject'])
+                next_teacher_val = str(match_next.iloc[0]['Teacher'])
+                next_sub = f"📖 Prep: {next_sub_val} (Next Exam)"
+                next_t_init = TEACHER_INITIALS.get(next_teacher_val, next_teacher_val)
+            else:
+                next_sub = "📖 Study / Exam Prep"
+                
+        routine_rows.append({
+            "Day": tdy_name,
+            "Start_Time": "12:45",
+            "End_Time": "13:30",
+            "Class": c,
+            "Section": sec,
+            "Subject": next_sub,
+            "Teacher": next_t_init,
+            "Is_Custom": True,
+            "Is_Exam_Day": True
+        })
+        
+        # 3. 14:20 to 15:30 -> Exam Copies Check (No classes after 14:20)
+        routine_rows.append({
+            "Day": tdy_name,
+            "Start_Time": "14:20",
+            "End_Time": "15:30",
+            "Class": c,
+            "Section": sec,
+            "Subject": f"✍️ Exam Copies Check ({sub})",
+            "Teacher": t_init,
+            "Is_Custom": True,
+            "Is_Exam_Day": True
+        })
+        
+    return pd.DataFrame(routine_rows)
+
 @st.cache_data(ttl=600)
 def fetch_all_routines():
     try:
@@ -106,23 +209,32 @@ def fetch_all_routines():
             try: 
                 df_override = pd.DataFrame(r_sh.worksheet("daily_override").get_all_records()).astype(str)
                 df_override.columns = [str(c).strip() for c in df_override.columns]
-            except: 
+            except Exception: 
                 df_override = pd.DataFrame()
             return df_base, df_override
-    except: pass
+    except Exception: pass
     return pd.DataFrame(), pd.DataFrame()
 
 def get_active_routine(date_str, day_of_week):
+    # 1. Highest Priority: Check if Today is an EXAM DAY in BPS EXAM Google Sheet
+    exam_routine = build_exam_day_routine(date_str)
+    if not exam_routine.empty:
+        return exam_routine
+        
+    # 2. Second Priority: Custom Daily Override in bps_routine
     base, override = fetch_all_routines()
     if not override.empty and 'Date' in override.columns:
         day_ov = override[override['Date'] == date_str].copy()
         if not day_ov.empty:
             day_ov['Is_Custom'] = True
+            day_ov['Is_Exam_Day'] = False
             return day_ov
     
+    # 3. Standard Weekly Routine
     if not base.empty and 'Day' in base.columns:
         day_base = base[base['Day'] == day_of_week].copy()
         day_base['Is_Custom'] = False
+        day_base['Is_Exam_Day'] = False
         return day_base
         
     return pd.DataFrame()
@@ -137,19 +249,16 @@ def save_daily_routine(date_str, edited_df):
         
     records = ws.get_all_records()
     existing = pd.DataFrame(records)
-    
     if not existing.empty and 'Date' in existing.columns:
         existing = existing[existing['Date'].astype(str) != date_str]
         
     edited_df['Date'] = date_str
     cols = ["Date", "Start_Time", "End_Time", "Class", "Section", "Subject", "Teacher"]
     for c in cols:
-        if c not in edited_df.columns:
-            edited_df[c] = ""
+        if c not in edited_df.columns: edited_df[c] = ""
             
     edited_df = edited_df[cols]
     final_df = pd.concat([existing, edited_df], ignore_index=True) if not existing.empty else edited_df
-    
     ws.clear()
     ws.update([final_df.columns.values.tolist()] + final_df.fillna("").values.tolist())
     fetch_all_routines.clear()
@@ -162,45 +271,42 @@ def delete_daily_routine(date_str):
         
     records = ws.get_all_records()
     existing = pd.DataFrame(records)
-    
     if not existing.empty and 'Date' in existing.columns:
         existing = existing[existing['Date'].astype(str) != date_str]
         ws.clear()
-        if not existing.empty:
-            ws.update([existing.columns.values.tolist()] + existing.fillna("").values.tolist())
-        else:
-            ws.append_row(["Date", "Start_Time", "End_Time", "Class", "Section", "Subject", "Teacher"])
+        if not existing.empty: ws.update([existing.columns.values.tolist()] + existing.fillna("").values.tolist())
+        else: ws.append_row(["Date", "Start_Time", "End_Time", "Class", "Section", "Subject", "Teacher"])
     fetch_all_routines.clear()
-# ---------------------------
 
 def clear_sheet_cache():
     fetch_sheet_data.clear()
     get_notice.clear()
     fetch_all_routines.clear()
+    fetch_exam_schedules.clear()
 
 def append_sheet_df(sheet_name, df):
     if df.empty: return
     try: ws = sh.worksheet(sheet_name)
     except WorksheetNotFound: ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=20); ws.append_row(list(df.columns))
-    except: st.error("⚠️ API Busy."); return
+    except Exception: st.error("⚠️ API Busy."); return
     try: ws.append_rows(df.fillna("").astype(str).values.tolist()); clear_sheet_cache()
-    except: st.error("⚠️ Submit Failed.")
+    except Exception: st.error("⚠️ Submit Failed.")
 
 def overwrite_sheet_df(sheet_name, df):
     try: ws = sh.worksheet(sheet_name)
     except WorksheetNotFound: ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=20)
-    except: return
+    except Exception: return
     try: ws.clear(); df = df.fillna("").astype(str); ws.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name='A1') if not df.empty else None; clear_sheet_cache()
-    except: st.error("⚠️ Clear Failed.")
+    except Exception: st.error("⚠️ Clear Failed.")
 
 @st.cache_data(ttl=600)
 def get_notice():
     try: return sh.worksheet("notice").acell("A1").value or ""
-    except: return ""
+    except Exception: return ""
 
 def publish_notice(text):
     try: ws = sh.worksheet("notice")
-    except: ws = sh.add_worksheet(title="notice", rows=10, cols=10)
+    except Exception: ws = sh.add_worksheet(title="notice", rows=10, cols=10)
     ws.update_acell("A1", text); clear_sheet_cache()
 
 def get_local_csv(file): return pd.read_csv(file) if os.path.exists(file) else pd.DataFrame()
@@ -210,7 +316,7 @@ def fetch_secure_image_bytes(file_id):
     try:
         r = get_drive_session().get(f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media")
         return r.content if r.status_code == 200 else None
-    except: return None
+    except Exception: return None
 
 def get_secure_photo_uri(url):
     fb = "https://www.w3schools.com/howto/img_avatar.png"
@@ -228,7 +334,7 @@ curr_date_str, curr_time = now.strftime("%d-%m-%Y"), now.time()
 def parse_time_safe(t_str):
     for fmt in ('%H:%M', '%I:%M %p', '%H:%M:%S'):
         try: return datetime.strptime(str(t_str).strip(), fmt).time()
-        except: continue
+        except Exception: continue
     return None
 
 def render_header():
@@ -296,8 +402,6 @@ if st.session_state.user_role == "teacher":
                 st.success("✅ MDM Submitted for today.")
             else:
                 st.subheader("Student MDM Entry")
-                
-                # Fetch routine from the active master (Base or Override)
                 tdy = now.strftime('%A')
                 mc = TEACHER_INITIALS.get(t_name_select, t_name_select)
                 active_rout = get_active_routine(curr_date_str, tdy)
@@ -420,8 +524,9 @@ if st.session_state.user_role == "teacher":
             mc = TEACHER_INITIALS.get(t_name_select, t_name_select)
             active_rout = get_active_routine(curr_date_str, tdy)
             
-            # Check Full Leave Status (Only for UI warning display)
-            if not ll.empty and 'Date' in ll.columns:
+            if not active_rout.empty and active_rout.iloc[0].get('Is_Exam_Day', False):
+                st.success("📝 **EXAM DAY MODE:** Operating on **BPS EXAM** schedule (11:15-12:45 Exam | 12:45-13:30 Next Day Prep | 14:20-15:30 Copies Check). Regular routine is suspended.")
+            elif not ll.empty and 'Date' in ll.columns:
                 mtl = ll[(ll['Date'] == curr_date_str) & (ll['Teacher'] == t_name_select)]
                 if not mtl.empty:
                     ld = mtl.iloc[0]
@@ -442,10 +547,12 @@ if st.session_state.user_role == "teacher":
                         
                 if active_classes:
                     for cc in active_classes:
-                        # Any class not matching standard Day defaults to "Sub" styling contextually
                         sty = "border-left: 5px solid #28a745;"
                         px = "🔴 NOW: "
-                        if active_rout.iloc[0].get('Is_Custom', False):
+                        if active_rout.iloc[0].get('Is_Exam_Day', False):
+                            sty = "border-left: 5px solid #6f42c1; background-color:#f3e8ff;"
+                            px = "📝 EXAM SLOT: "
+                        elif active_rout.iloc[0].get('Is_Custom', False):
                             sty = "border-left: 5px solid #ffc107; background-color:#fff3cd;"
                             px = "🔄 ASSIGNED: "
                             
@@ -455,7 +562,10 @@ if st.session_state.user_role == "teacher":
                     
                 st.divider()
                 st.markdown("#### Your Schedule Today")
-                def hls(row): return ['background-color: #fff3cd'] * len(row) if active_rout.iloc[0].get('Is_Custom', False) else [''] * len(row)
+                def hls(row):
+                    if active_rout.iloc[0].get('Is_Exam_Day', False): return ['background-color: #f3e8ff'] * len(row)
+                    elif active_rout.iloc[0].get('Is_Custom', False): return ['background-color: #fff3cd'] * len(row)
+                    return [''] * len(row)
                 st.dataframe(ms[['Start_Time', 'End_Time', 'Class', 'Section', 'Subject']].style.apply(hls, axis=1), hide_index=True)
             else: st.info("No classes scheduled for you today.")
 
@@ -732,8 +842,12 @@ elif st.session_state.user_role == "admin":
             active_rout['End_Obj'] = active_rout['End_Time'].apply(parse_time_safe)
             active_rout = active_rout.dropna(subset=['Start_Obj', 'End_Obj']).sort_values('Start_Obj')
             
+            is_exam_day = active_rout.iloc[0].get('Is_Exam_Day', False)
             is_custom = active_rout.iloc[0].get('Is_Custom', False)
-            if is_custom:
+            
+            if is_exam_day:
+                st.success("📝 **EXAM DAY ROUTINE ACTIVE:** Operating on automatic **BPS EXAM** schedule (11:15-12:45 Exam | 12:45-13:30 Next Day Prep | 14:20-15:30 Copies Check).")
+            elif is_custom:
                 st.success("🟢 Operating on Custom Generated Routine for today.")
             
             lc = []
@@ -750,7 +864,8 @@ elif st.session_state.user_role == "admin":
                     if r['Teacher'] == "--- UNASSIGNED ---": tn = "🚫 UNASSIGNED"
                     
                     sty = "border-left: 5px solid #28a745;"
-                    if is_sub: sty = "border-left: 5px solid #ffc107; background-color:#fff3cd;"
+                    if is_exam_day: sty = "border-left: 5px solid #6f42c1; background-color:#f3e8ff;"
+                    elif is_sub: sty = "border-left: 5px solid #ffc107; background-color:#fff3cd;"
                     
                     cls[i%2].markdown(f"<div class='routine-card' style='{sty}'><h4 style='margin:0;'>{r['Class']} {r.get('Section', '')}</h4><p style='margin:0; font-weight:bold;'>{tn}</p><p style='margin:0; font-size:12px; color:gray;'>{r['Subject']} | Ends: {r['End_Time']}</p></div>", unsafe_allow_html=True)
             else: 
@@ -833,14 +948,16 @@ elif st.session_state.user_role == "admin":
         if active_rout.empty:
             st.warning("No base routine found for this day to edit.")
         else:
+            is_exam_day = active_rout.iloc[0].get('Is_Exam_Day', False)
             is_custom = active_rout.iloc[0].get('Is_Custom', False)
-            if is_custom: st.success("🟢 Currently editing the **Custom Routine** for this date.")
+            
+            if is_exam_day: st.info("📝 **Exam Day Schedule Active:** This routine is automatically driven by the **BPS EXAM** schedule.")
+            elif is_custom: st.success("🟢 Currently editing the **Custom Routine** for this date.")
             else: st.info("🔵 Currently showing the **Default Routine**. Edits below will create a Custom Routine.")
             
             edit_df = active_rout[['Start_Time', 'End_Time', 'Class', 'Section', 'Subject', 'Teacher']].copy()
             
-            # If default, clear out absent teachers to make it obvious they need cover
-            if not is_custom:
+            if not is_custom and not is_exam_day:
                 for t in absent_teachers:
                     t_init = TEACHER_INITIALS.get(t, t)
                     edit_df.loc[edit_df['Teacher'] == t_init, 'Teacher'] = "--- UNASSIGNED ---"
@@ -859,7 +976,7 @@ elif st.session_state.user_role == "admin":
                 st.success("Custom Routine Saved! All teacher dashboards are now synced.")
                 st.rerun()
                 
-            if is_custom and st.button("🗑️ Revert & Delete Custom Routine"):
+            if is_custom and not is_exam_day and st.button("🗑️ Revert & Delete Custom Routine"):
                 delete_daily_routine(sds_str)
                 st.success("Reverted to default schedule.")
                 st.rerun()

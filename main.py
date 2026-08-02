@@ -73,13 +73,13 @@ personal_apps = [
 ]
 
 bps_admin_apps = [
-    "Main Dashboard", "Admission Hub", "Student Profiles", "ID Card Generator",
+    "Home Portal", "Main Dashboard", "Admission Hub", "Student Profiles", "ID Card Generator",
     "School Data", "Exam & Fees", "Library Manager", "Leave Management",
-    "Distributions", "Returns", "Form Manager", "Staff Portal", "Grocery Manager"
+    "Distributions", "Returns", "Form Manager", "Staff Portal", "Grocery Manager", "Gas Tracker"
 ]
 
 bps_teacher_apps = [
-    "Staff Portal", "Student Profiles", "Library Manager", 
+    "Home Portal", "Staff Portal", "Student Profiles", "Library Manager", 
     "Leave Management", "Distributions", "Returns", "Form Manager"
 ]
 
@@ -108,7 +108,7 @@ def get_last_opened_app(user_role):
         sheet = get_tracker_sheet(user_role)
         records = sheet.get_all_records()
         
-        latest_app = "Live Routine Hub" if user_role == "admin" else "Staff Portal"
+        latest_app = "Live Routine Hub" if user_role == "admin" else "Home Portal"
         latest_time = None
         
         for row in records:
@@ -123,7 +123,7 @@ def get_last_opened_app(user_role):
                 except: pass
         return latest_app
     except:
-        return "Live Routine Hub" if user_role == "admin" else "Staff Portal"
+        return "Live Routine Hub" if user_role == "admin" else "Home Portal"
 
 def log_app_change_bg(app_name, user_role):
     sheet = get_tracker_sheet(user_role)
@@ -196,7 +196,7 @@ st.sidebar.markdown("---")
 def is_default(app_name, system_category):
     last_app = st.session_state.last_opened_app
     if role == "teacher":
-        if last_app not in bps_teacher_apps: last_app = "Staff Portal"
+        if last_app not in bps_teacher_apps: last_app = "Home Portal"
         return last_app == app_name
 
     if system_choice == system_category and last_app == app_name:
@@ -204,7 +204,7 @@ def is_default(app_name, system_category):
     if system_choice == system_category and last_app not in (personal_apps if system_choice == 'Personal Hub' else bps_admin_apps):
         if system_category == 'Personal Hub' and app_name == "Live Routine Hub": 
             return True
-        if system_category == 'BPS Digital System' and app_name == "Main Dashboard": 
+        if system_category == 'BPS Digital System' and app_name == "Home Portal": 
             return True
     return False
 
@@ -235,6 +235,7 @@ app_updater = st.Page("app_update.py", title="App Updater", icon="🔄", default
 visual_dashboard = st.Page("dashboard.py", title="Visual Dashboard", icon="🚀", default=is_default("Visual Dashboard", "Personal Hub"))
 
 # --- BPS Digital Pages ---
+home_portal = st.Page("app.py", title="Home Portal", icon="🏠", default=is_default("Home Portal", "BPS Digital System")) # <-- Added app.py back in
 bps_dashboard = st.Page("bps_dashboard.py", title="Main Dashboard", icon="🏫", default=is_default("Main Dashboard", "BPS Digital System"))
 admission = st.Page("admission_hub.py", title="Admission Hub", icon="📝", default=is_default("Admission Hub", "BPS Digital System"))
 student_profile = st.Page("student_profile.py", title="Student Profiles", icon="🎓", default=is_default("Student Profiles", "BPS Digital System"))
@@ -248,6 +249,7 @@ returns = st.Page("bps_returns.py", title="Returns", icon="📑", default=is_def
 form_manager = st.Page("form_manager.py", title="Form Manager", icon="📋", default=is_default("Form Manager", "BPS Digital System"))
 staff_portal = st.Page("bps_digital_sk.py", title="Staff Portal", icon="🔐", default=is_default("Staff Portal", "BPS Digital System"))
 grocery_app = st.Page("bps_grocery_ad.py", title="Grocery Manager", icon="🥦", default=is_default("Grocery Manager", "BPS Digital System"))
+gas_tracker = st.Page("bps_gas_tracker.py", title="Gas Tracker", icon="⛽", default=is_default("Gas Tracker", "BPS Digital System")) # <-- Registered Gas Tracker
 
 # ==========================================
 # 9. NAVIGATION EXECUTION
@@ -269,18 +271,18 @@ if role == "admin":
         st.sidebar.caption("🔒 Personal Workspace Active")
     else:
         pg = st.navigation({
-            "System Home": [bps_dashboard],
+            "System Home": [home_portal, bps_dashboard], # <-- Home Portal now accessible here
             "Staff & Admin": [staff_portal],
             "Student Management": [admission, student_profile, id_card],
             "Academics & Finance": [school_data, exam_fees, library_app],
-            "Operations": [leave, distribution, returns, form_manager, grocery_app]
+            "Operations": [leave, distribution, returns, form_manager, grocery_app, gas_tracker] # <-- Gas Tracker added here
         })
         st.sidebar.markdown("#### Bhagyabantapur Primary School")
         st.sidebar.caption("Head Teacher Dashboard Active")
 else:
     # Restricted Navigation for Teachers
     pg = st.navigation({
-        "Dashboard": [staff_portal],
+        "Dashboard": [home_portal, staff_portal], # <-- Home Portal accessible for teachers
         "Academics": [student_profile, library_app],
         "Operations": [leave, distribution, returns, form_manager]
     })

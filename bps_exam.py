@@ -129,17 +129,17 @@ def detect_teacher_from_routine(routine_df, class_name, section_name, subject_na
     
     # Map Bengali/English aliases to match routine sheet entries flexibly
     aliases = {
-        "বাংলা": ["বাংলা", "bengali", "bangla", "l1", "first language"],
-        "ইংরেজি": ["ইংরেজি", "english", "ingreji", "l2", "second language"],
-        "গণিত": ["গণিত", "math", "mathematics", "gonit", "arithmetic"],
-        "পরিবেশ": ["পরিবেশ", "evs", "environment", "poribesh", "amader poribesh", "science"],
-        "Health & Physical Education": ["health", "physical", "hpe", "pe", "swasthya", "pt"],
-        "Art & Work Education": ["art", "work", "awe", "drawing", "shilpa", "craft"]
+        "বাংলা": ["বাংলা", "bengali", "bangla", "সহজপাঠ"],
+        "ইংরেজি": ["ইংরেজি", "english", "ingreji", "wings"],
+        "গণিত": ["গণিত", "math", "mathematics"],
+        "পরিবেশ": ["পরিবেশ", "evs", "environment", "poribesh", "জগৎ বাড়ি"],
+        "Health & Physical Education": ["স্বাস্থ্য", "খেলা", "health", "physical", "hpe", "pe", "swasthya"],
+        "Art & Work Education": ["ড্রয়িং", "নাচ", "গান", "নাটক", "আবৃত্তি", "art", "work", "craft", "কম্পিউটার", "জি. কে"]
     }
     
     target_keywords = aliases.get(subject_name, [subject_name.lower()])
     
-    # Filter by Class (and optional section if section exists in routine)
+    # Filter by Class and Section
     filtered = routine_df[routine_df['Class'].astype(str).str.strip().str.upper() == class_name.upper()]
     if 'Section' in filtered.columns and not filtered.empty:
         sec_match = filtered[filtered['Section'].astype(str).str.strip().str.upper() == section_name.upper()]
@@ -148,15 +148,14 @@ def detect_teacher_from_routine(routine_df, class_name, section_name, subject_na
             
     for _, row in filtered.iterrows():
         rout_sub = str(row.get('Subject', '')).strip().lower()
-        if any(kw in rout_sub for kw in target_keywords):
+        if any(kw.lower() in rout_sub for kw in target_keywords):
             teacher_code = str(row.get('Teacher', '')).strip()
-            # Remove any trailing "(Sub)" tags if present
             teacher_code = re.sub(r"\s*\(Sub\)", "", teacher_code, flags=re.IGNORECASE).strip()
             full_name = INV_TEACHER_INITIALS.get(teacher_code, teacher_code)
             if full_name in TEACHER_LIST:
                 return full_name
                 
-    return TEACHER_LIST[0]
+    return "TAPASI RANA"  # Default fallback if not found in routine
 
 # ==========================================
 # 4. MAIN APPLICATION UI

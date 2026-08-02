@@ -117,7 +117,7 @@ with tab_pending:
         # Filter MDM for today
         today_mdm = df_mdm[df_mdm['Date'].astype(str).str.strip() == today_str].copy()
         
-        # Determine target MDM based on user role (Fixing Issue #1: Teacher-specific lists)
+        # Determine target MDM based on user role 
         if st.session_state.user_role == "teacher":
             target_mdm = today_mdm[today_mdm['Teacher'].astype(str).str.strip() == st.session_state.user_name].copy()
             reminder_msg = "🌸 **Gentle Reminder:** You haven't taken today's attendance (MDM Entry) yet. Please submit your class attendance in the BPS Digital App first to see the list of present students with pending fees."
@@ -128,7 +128,6 @@ with tab_pending:
         if target_mdm.empty:
             st.info(reminder_msg)
         else:
-            # Safe key generation to prevent Float vs String mismatch (e.g. "1.0" vs "1")
             def safe_key(cls, roll, name):
                 try:
                     r = str(int(float(roll)))
@@ -136,7 +135,6 @@ with tab_pending:
                     r = str(roll).strip()
                 return f"{str(cls).strip().upper()}_{r}_{str(name).strip().upper()}"
 
-            # Track how much each student has paid (Fixing Issue #2: Checking against ₹10 total)
             paid_amounts = {}
             if not df_fees.empty and 'Collection Type' in df_fees.columns and 'Amount' in df_fees.columns:
                 eval_fees = df_fees[df_fees['Collection Type'].astype(str).str.strip() == 'Evaluation-II'].copy()
@@ -149,14 +147,10 @@ with tab_pending:
                     k = safe_key(row['Class'], row['Roll'], row['Name'])
                     paid_amounts[k] = row['Amount']
             
-            # Check who is present but hasn't paid the full ₹10
             target_mdm['Match_Key'] = target_mdm.apply(lambda r: safe_key(r.get('Class',''), r.get('Roll',''), r.get('Name','')), axis=1)
-            
-            # Map paid amounts and calculate dues
             target_mdm['Paid (₹)'] = target_mdm['Match_Key'].apply(lambda k: paid_amounts.get(k, 0))
             target_mdm['Due (₹)'] = 10 - target_mdm['Paid (₹)']
             
-            # Keep students who still owe money (Due > 0)
             pending_students = target_mdm[target_mdm['Due (₹)'] > 0].copy()
             
             if pending_students.empty:
@@ -412,6 +406,29 @@ with tab2:
         
     dash_df = df_fees.copy()
     
+    # --- GLOBAL COLLECTION TYPE FILTER ---
+    selected_type = "All"
+    if not dash_df.empty and 'Collection Type' in dash_df.columns:
+        unique_vals = list(dash_df['Collection Type'].dropna().unique())
+        ctypes = ["All"]
+        
+        # Ensure Evaluation-II is always available in the dropdown
+        if "Evaluation-II" not in unique_vals:
+            ctypes.append("Evaluation-II")
+            
+        for val in unique_vals:
+            if val not in ctypes:
+                ctypes.append(val)
+                
+        # Set Evaluation-II as default if present
+        default_idx = ctypes.index("Evaluation-II") if "Evaluation-II" in ctypes else 0
+        
+        selected_type = st.selectbox("🔍 Filter by Collection Type:", ctypes, index=default_idx)
+        
+        # Filter the DataFrame globally for this Tab
+        if selected_type != "All":
+            dash_df = dash_df[dash_df['Collection Type'] == selected_type].copy()
+            
     # ----------------------------------------------------
     # ASSISTANT TEACHER DASHBOARD VIEW
     # ----------------------------------------------------
@@ -419,7 +436,7 @@ with tab2:
         if not dash_df.empty:
             dash_df = dash_df[dash_df['Teacher_Involved'].astype(str).str.strip() == st.session_state.user_name]
         
-        st.caption(f"Showing personal transactions managed by: **{st.session_state.user_name}**")
+        st.caption(f"Showing personal transactions managed by: **{st.session_state.user_name}** | Type: **{selected_type}**")
         
         if not dash_df.empty and 'Amount' in dash_df.columns:
             dash_df['Amount'] = pd.to_numeric(dash_df['Amount'], errors='coerce').fillna(0)
@@ -453,13 +470,13 @@ with tab2:
                 else:
                     st.success("All clear! No pending cash.")
         else:
-            st.info(f"No data collected by you ({st.session_state.user_name}) yet.")
+            st.info(f"No {selected_type} data collected by you ({st.session_state.user_name}) yet.")
 
     # ----------------------------------------------------
     # HEAD TEACHER (ADMIN) DASHBOARD VIEW
     # ----------------------------------------------------
     else:
-        st.caption("Showing **All School Transactions** (Head Teacher View)")
+        st.caption(f"Showing **All School Transactions** (Head Teacher View) | Type: **{selected_type}**")
             
         if not dash_df.empty and 'Amount' in dash_df.columns:
             dash_df['Amount'] = pd.to_numeric(dash_df['Amount'], errors='coerce').fillna(0)
@@ -479,55 +496,46 @@ with tab2:
     
             st.divider()
 
-            # --- EXPECTED FEE TARGET SUMMARY ---
-            st.markdown("##### 🏫 Expected Fee Target Summary")
-            st.info("""
-            **BHAGYABANTAPUR PRY. SCHOOL**  
-            Class PP (14) @₹7 = ₹98  
-            Class I (46) @₹6 = ₹276  
-            Class II (41) @₹6 = ₹246  
-            Class III (24) @₹7 = ₹168  
-            Class IV (44) @₹7 = ₹308  
-            Class V (17) @₹7 = ₹119  
-            **TOTAL (186) : ₹1,215**
-            """)
-            
-            st.divider()
+            # --- EXPECTED FEE TARGET SUMMARY (Conditional) ---
+            if selected_type == "Evaluation-II":
+                st.markdown("##### 🏫 Expected Fee Target Summary")
+                st.info("""
+                **BHAGYABANTAPUR PRY. SCHOOL**  
+                Class PP (14) @₹7 = ₹98  
+                Class I (46) @₹6 = ₹276  
+                Class II (41) @₹6 = ₹246  
+                Class III (24) @₹7 = ₹168  
+                Class IV (44) @₹7 = ₹308  
+                Class V (17) @₹7 = ₹119  
+                **TOTAL (186) : ₹1,215**
+                """)
+                st.divider()
             
             # --- CLASS-WISE LIST & TOTALS ---
-            st.markdown("##### 📋 Class-wise Student List & Totals")
-            if 'Collection Type' in dash_df.columns:
-                ctypes = ["All"] + list(dash_df['Collection Type'].dropna().unique())
-                selected_type = st.selectbox("Filter by Collection Type:", ctypes)
-                filter_df = dash_df if selected_type == "All" else dash_df[dash_df['Collection Type'] == selected_type]
-            else:
-                filter_df = dash_df
-
-            if not filter_df.empty:
-                # Custom logic to force natural sorting of standard class names
-                class_order = {"CLASS PP": 0, "CLASS I": 1, "CLASS II": 2, "CLASS III": 3, "CLASS IV": 4, "CLASS V": 5}
-                found_classes = [c for c in filter_df['Class'].unique() if str(c).strip()]
-                found_classes.sort(key=lambda x: class_order.get(x, 99))
+            st.markdown(f"##### 📋 Class-wise Student List & Totals ({selected_type})")
+            
+            # Custom logic to force natural sorting of standard class names
+            class_order = {"CLASS PP": 0, "CLASS I": 1, "CLASS II": 2, "CLASS III": 3, "CLASS IV": 4, "CLASS V": 5}
+            found_classes = [c for c in dash_df['Class'].unique() if str(c).strip()]
+            found_classes.sort(key=lambda x: class_order.get(x, 99))
+            
+            for cls in found_classes:
+                cls_df = dash_df[dash_df['Class'] == cls].copy()
                 
-                for cls in found_classes:
-                    cls_df = filter_df[filter_df['Class'] == cls].copy()
+                # Force Roll to numeric so it sorts naturally (1, 2, 3... instead of 1, 10, 2)
+                cls_df['Roll_Num'] = pd.to_numeric(cls_df['Roll'], errors='coerce').fillna(999)
+                cls_df = cls_df.sort_values('Roll_Num')
+                
+                cls_total = cls_df['Amount'].sum()
+                unique_students = cls_df[cls_df['Amount'] > 0]['Name'].nunique() 
+                
+                with st.expander(f"📖 {cls} | Total Received: ₹ {cls_total:,.2f} | Paid By: {unique_students} Students"):
+                    display_cols = ['Date', 'Roll', 'Name', 'Amount']
+                    if selected_type == "All" and 'Collection Type' in cls_df.columns:
+                        display_cols.append('Collection Type')
+                    display_cols.append('Teacher_Involved')
                     
-                    # Force Roll to numeric so it sorts naturally (1, 2, 3... instead of 1, 10, 2)
-                    cls_df['Roll_Num'] = pd.to_numeric(cls_df['Roll'], errors='coerce').fillna(999)
-                    cls_df = cls_df.sort_values('Roll_Num')
-                    
-                    cls_total = cls_df['Amount'].sum()
-                    unique_students = cls_df[cls_df['Amount'] > 0]['Name'].nunique() 
-                    
-                    with st.expander(f"📖 {cls} | Total Received: ₹ {cls_total:,.2f} | Paid By: {unique_students} Students"):
-                        display_cols = ['Date', 'Roll', 'Name', 'Amount']
-                        if selected_type == "All" and 'Collection Type' in cls_df.columns:
-                            display_cols.append('Collection Type')
-                        display_cols.append('Teacher_Involved')
-                        
-                        st.dataframe(cls_df[display_cols], hide_index=True, use_container_width=True)
-            else:
-                st.info("No collections found.")
+                    st.dataframe(cls_df[display_cols], hide_index=True, use_container_width=True)
             
             st.divider()
             
@@ -551,8 +559,10 @@ with tab2:
                 st.info("No cash has been handed over by teachers yet.")
                 
             st.divider()
-            st.markdown("##### 📈 Net Funds by Class & Collection Type")
-            if 'Collection Type' in dash_df.columns:
+            
+            # --- BAR CHART VISUALIZATION ---
+            st.markdown("##### 📈 Net Funds by Class")
+            if 'Collection Type' in dash_df.columns and selected_type == "All":
                 class_totals = dash_df.groupby(['Class', 'Collection Type'])['Amount'].sum().reset_index()
                 fig = px.bar(
                     class_totals, 
@@ -579,7 +589,7 @@ with tab2:
             st.plotly_chart(fig, use_container_width=True)
             
         else:
-            st.info("No data available yet. Transactions will appear here once recorded.")
+            st.info(f"No {selected_type} collections found. Transactions will appear here once recorded.")
 
 # ==========================================
 # TAB 3: ADMIN HANDOVER MANAGER (ADMIN ONLY)

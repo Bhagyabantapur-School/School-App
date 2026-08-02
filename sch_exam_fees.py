@@ -138,7 +138,9 @@ with tab_pending:
         
     today_str = datetime.now(IST).strftime("%d-%m-%Y")
     
-    # 1. Define the base target students
+    # 1. Define the base target students & Set Processing Flag
+    can_proceed = True
+    
     if pending_fee_type == "Evaluation-II":
         base_target = df_students.copy()
         target_fee = 10
@@ -147,75 +149,77 @@ with tab_pending:
         target_fee = st.number_input("Expected Britti Fee (₹) per student:", min_value=0, value=50, step=10)
         if base_target.empty:
             st.warning("No students have been selected for Britti yet. Go to the 'Britti Selection' tab to add students.")
-            st.stop()
+            can_proceed = False
             
-    base_target['Match_Key'] = base_target.apply(lambda r: safe_key(r.get('Class',''), r.get('Roll',''), r.get('Name','')), axis=1)
-    
-    # 2. Filter by MDM if toggle is ON
-    if filter_mdm:
-        if df_mdm.empty or 'Date' not in df_mdm.columns:
-            st.info("🌸 **Gentle Reminder:** No attendance (MDM) records found. Please complete attendance first.")
-            st.stop()
+    if can_proceed:
+        base_target['Match_Key'] = base_target.apply(lambda r: safe_key(r.get('Class',''), r.get('Roll',''), r.get('Name','')), axis=1)
+        
+        # 2. Filter by MDM if toggle is ON
+        if filter_mdm:
+            if df_mdm.empty or 'Date' not in df_mdm.columns:
+                st.info("🌸 **Gentle Reminder:** No attendance (MDM) records found. Please complete attendance first.")
+                can_proceed = False
+            else:
+                today_mdm = df_mdm[df_mdm['Date'].astype(str).str.strip() == today_str].copy()
+                
+                if st.session_state.user_role == "teacher":
+                    today_mdm = today_mdm[today_mdm['Teacher'].astype(str).str.strip() == st.session_state.user_name]
+                    
+                if today_mdm.empty:
+                    st.info("🌸 **Gentle Reminder:** You haven't taken today's attendance (MDM Entry) yet, or no students are marked present.")
+                    can_proceed = False
+                else:
+                    today_mdm['Match_Key'] = today_mdm.apply(lambda r: safe_key(r.get('Class',''), r.get('Roll',''), r.get('Name','')), axis=1)
+                    present_keys = today_mdm['Match_Key'].tolist()
+                    
+                    final_target = base_target[base_target['Match_Key'].isin(present_keys)].copy()
+                    
+                    if final_target.empty:
+                        st.success(f"No {pending_fee_type} students from your list are present today.")
+                        can_proceed = False
+        else:
+            # MDM off: Show all in base target
+            final_target = base_target.copy()
             
-        today_mdm = df_mdm[df_mdm['Date'].astype(str).str.strip() == today_str].copy()
-        
-        if st.session_state.user_role == "teacher":
-            today_mdm = today_mdm[today_mdm['Teacher'].astype(str).str.strip() == st.session_state.user_name]
+    if can_proceed:
+        # 3. Calculate Dues
+        paid_amounts = {}
+        if not df_fees.empty and 'Collection Type' in df_fees.columns and 'Amount' in df_fees.columns:
+            type_fees = df_fees[df_fees['Collection Type'].astype(str).str.strip() == pending_fee_type].copy()
+            type_fees['Amount'] = pd.to_numeric(type_fees['Amount'], errors='coerce').fillna(0)
             
-        if today_mdm.empty:
-            st.info("🌸 **Gentle Reminder:** You haven't taken today's attendance (MDM Entry) yet, or no students are marked present.")
-            st.stop()
+            student_totals = type_fees.groupby(['Class', 'Roll', 'Name'])['Amount'].sum().reset_index()
+            for _, row in student_totals.iterrows():
+                k = safe_key(row['Class'], row['Roll'], row['Name'])
+                paid_amounts[k] = row['Amount']
+                
+        final_target['Paid (₹)'] = final_target['Match_Key'].apply(lambda k: paid_amounts.get(k, 0))
+        final_target['Due (₹)'] = target_fee - final_target['Paid (₹)']
+        
+        pending_students = final_target[final_target['Due (₹)'] > 0].copy()
+        
+        if pending_students.empty:
+            msg = "present today" if filter_mdm else "in the target list"
+            st.success(f"🎉 Fantastic! All targeted students {msg} have paid their {pending_fee_type} fees in full.")
+        else:
+            msg = "present today" if filter_mdm else "overall"
+            st.markdown(f"The following students are **{msg}** but have **not yet paid the full ₹{target_fee}** for {pending_fee_type}:")
             
-        today_mdm['Match_Key'] = today_mdm.apply(lambda r: safe_key(r.get('Class',''), r.get('Roll',''), r.get('Name','')), axis=1)
-        present_keys = today_mdm['Match_Key'].tolist()
-        
-        final_target = base_target[base_target['Match_Key'].isin(present_keys)].copy()
-        
-        if final_target.empty:
-            st.success(f"No {pending_fee_type} students from your list are present today.")
-            st.stop()
-    else:
-        # MDM off: Show all in base target
-        final_target = base_target.copy()
-        
-    # 3. Calculate Dues
-    paid_amounts = {}
-    if not df_fees.empty and 'Collection Type' in df_fees.columns and 'Amount' in df_fees.columns:
-        type_fees = df_fees[df_fees['Collection Type'].astype(str).str.strip() == pending_fee_type].copy()
-        type_fees['Amount'] = pd.to_numeric(type_fees['Amount'], errors='coerce').fillna(0)
-        
-        student_totals = type_fees.groupby(['Class', 'Roll', 'Name'])['Amount'].sum().reset_index()
-        for _, row in student_totals.iterrows():
-            k = safe_key(row['Class'], row['Roll'], row['Name'])
-            paid_amounts[k] = row['Amount']
+            class_order = {"CLASS PP": 0, "CLASS I": 1, "CLASS II": 2, "CLASS III": 3, "CLASS IV": 4, "CLASS V": 5}
+            classes_present = [c for c in pending_students['Class'].unique() if str(c).strip()]
+            classes_present.sort(key=lambda x: class_order.get(x, 99))
             
-    final_target['Paid (₹)'] = final_target['Match_Key'].apply(lambda k: paid_amounts.get(k, 0))
-    final_target['Due (₹)'] = target_fee - final_target['Paid (₹)']
-    
-    pending_students = final_target[final_target['Due (₹)'] > 0].copy()
-    
-    if pending_students.empty:
-        msg = "present today" if filter_mdm else "in the target list"
-        st.success(f"🎉 Fantastic! All targeted students {msg} have paid their {pending_fee_type} fees in full.")
-    else:
-        msg = "present today" if filter_mdm else "overall"
-        st.markdown(f"The following students are **{msg}** but have **not yet paid the full ₹{target_fee}** for {pending_fee_type}:")
-        
-        class_order = {"CLASS PP": 0, "CLASS I": 1, "CLASS II": 2, "CLASS III": 3, "CLASS IV": 4, "CLASS V": 5}
-        classes_present = [c for c in pending_students['Class'].unique() if str(c).strip()]
-        classes_present.sort(key=lambda x: class_order.get(x, 99))
-        
-        for cls in classes_present:
-            cls_pending = pending_students[pending_students['Class'] == cls].copy()
-            cls_pending['Roll_Num'] = pd.to_numeric(cls_pending['Roll'], errors='coerce').fillna(999)
-            cls_pending = cls_pending.sort_values('Roll_Num')
-            
-            with st.expander(f"📖 {cls} - {len(cls_pending)} Student(s) Pending", expanded=True):
-                st.dataframe(
-                    cls_pending[['Section', 'Roll', 'Name', 'Paid (₹)', 'Due (₹)']], 
-                    hide_index=True, 
-                    use_container_width=True
-                )
+            for cls in classes_present:
+                cls_pending = pending_students[pending_students['Class'] == cls].copy()
+                cls_pending['Roll_Num'] = pd.to_numeric(cls_pending['Roll'], errors='coerce').fillna(999)
+                cls_pending = cls_pending.sort_values('Roll_Num')
+                
+                with st.expander(f"📖 {cls} - {len(cls_pending)} Student(s) Pending", expanded=True):
+                    st.dataframe(
+                        cls_pending[['Section', 'Roll', 'Name', 'Paid (₹)', 'Due (₹)']], 
+                        hide_index=True, 
+                        use_container_width=True
+                    )
 
 # ==========================================
 # TAB 1: FUND COLLECTION FORM (BATCH MODE)

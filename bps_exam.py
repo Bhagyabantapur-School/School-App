@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import re
 from datetime import datetime
 import gspread
 from gspread.exceptions import SpreadsheetNotFound, WorksheetNotFound
@@ -12,11 +13,24 @@ if 'authenticated' not in st.session_state or not st.session_state.authenticated
     st.warning("🔒 Unauthorized Access. Please log in through the main portal.")
     st.stop()
 
-# Re-use standard teacher lists and options
-TEACHER_INITIALS = {"SUKHAMAY KISKU": "SK", "TAPASI RANA": "TR", "SUJATA BISWAS ROTHA": "SBR", "ROHINI SINGH": "RS", "UDAY NARAYAN JANA": "UNJ", "BIMAL KUMAR PATRA": "BKP", "SUSMITA PAUL": "SP", "TAPAN KUMAR MANDAL": "TKM", "MANJUMA KHATUN": "MK"}
+TEACHER_INITIALS = {
+    "SUKHAMAY KISKU": "SK", "TAPASI RANA": "TR", "SUJATA BISWAS ROTHA": "SBR", 
+    "ROHINI SINGH": "RS", "UDAY NARAYAN JANA": "UNJ", "BIMAL KUMAR PATRA": "BKP", 
+    "SUSMITA PAUL": "SP", "TAPAN KUMAR MANDAL": "TKM", "MANJUMA KHATUN": "MK"
+}
+INV_TEACHER_INITIALS = {v: k for k, v in TEACHER_INITIALS.items()}
 TEACHER_LIST = list(TEACHER_INITIALS.keys())
+
 CLASS_OPTIONS = ["CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V"]
 SECTIONS = ["A", "B", "C"]
+SUBJECT_OPTIONS = [
+    "বাংলা", 
+    "ইংরেজি", 
+    "গণিত", 
+    "পরিবেশ", 
+    "Health & Physical Education", 
+    "Art & Work Education"
+]
 
 def inject_security_css(user_name):
     wm = f"{user_name} - EXAM SECURE"
@@ -41,7 +55,7 @@ def get_google_credentials():
 @st.cache_resource
 def init_db_sheet():
     try: return gspread.authorize(get_google_credentials()).open("BPS_Database")
-    except: st.error("⚠️ BPS_Database not found!"); st.stop()
+    except Exception: st.error("⚠️ BPS_Database not found!"); st.stop()
 
 @st.cache_resource
 def init_exam_sheet():
@@ -51,6 +65,11 @@ def init_exam_sheet():
         st.info("Please create a blank Google Sheet named **BPS EXAM** and share it with your service account email.")
         st.stop()
 
+@st.cache_resource
+def init_routine_sheet():
+    try: return gspread.authorize(get_google_credentials()).open("bps_routine")
+    except Exception: return None
+
 def ensure_worksheet(sh, title, headers):
     try: ws = sh.worksheet(title)
     except WorksheetNotFound:
@@ -58,15 +77,27 @@ def ensure_worksheet(sh, title, headers):
         ws.append_row(headers)
     return ws
 
-# Clear caches for live reloads
 def refresh_exam_data():
     fetch_exam_schedules.clear()
     fetch_exam_marks.clear()
+    fetch_routine_data.clear()
 
 @st.cache_data(ttl=300)
 def fetch_mdm_log():
     try: return pd.DataFrame(init_db_sheet().worksheet("mdm_log").get_all_records()).astype(str)
-    except: return pd.DataFrame()
+    except Exception: return pd.DataFrame()
+
+@st.cache_data(ttl=300)
+def fetch_routine_data():
+    try:
+        r_sh = init_routine_sheet()
+        if r_sh:
+            df = pd.DataFrame(r_sh.sheet1.get_all_records()).astype(str)
+            df.columns = [str(c).strip() for c in df.columns]
+            return df
+    except Exception:
+        pass
+    return pd.DataFrame()
 
 @st.cache_data(ttl=300)
 def fetch_exam_schedules():
@@ -90,45 +121,128 @@ def overwrite_sheet(sh, sheet_name, df, headers):
     refresh_exam_data()
 
 # ==========================================
-# 3. MAIN APPLICATION UI
+# 3. INTELLIGENT ROUTINE TEACHER LOOKUP
 # ==========================================
-st.markdown(f"<h2>📝 BPS Examination Manager</h2>", unsafe_allow_html=True)
+def detect_teacher_from_routine(routine_df, class_name, section_name, subject_name):
+    if routine_df.empty or 'Class' not in routine_df.columns or 'Subject' not in routine_df.columns:
+        return TEACHER_LIST[0]
+    
+    # Map Bengali/English aliases to match routine sheet entries flexibly
+    aliases = {
+        "বাংলা": ["বাংলা", "bengali", "bangla", "l1", "first language"],
+        "ইংরেজি": ["ইংরেজি", "english", "ingreji", "l2", "second language"],
+        "গণিত": ["গণিত", "math", "mathematics", "gonit", "arithmetic"],
+        "পরিবেশ": ["পরিবেশ", "evs", "environment", "poribesh", "amader poribesh", "science"],
+        "Health & Physical Education": ["health", "physical", "hpe", "pe", "swasthya", "pt"],
+        "Art & Work Education": ["art", "work", "awe", "drawing", "shilpa", "craft"]
+    }
+    
+    target_keywords = aliases.get(subject_name, [subject_name.lower()])
+    
+    # Filter by Class (and optional section if section exists in routine)
+    filtered = routine_df[routine_df['Class'].astype(str).str.strip().str.upper() == class_name.upper()]
+    if 'Section' in filtered.columns and not filtered.empty:
+        sec_match = filtered[filtered['Section'].astype(str).str.strip().str.upper() == section_name.upper()]
+        if not sec_match.empty:
+            filtered = sec_match
+            
+    for _, row in filtered.iterrows():
+        rout_sub = str(row.get('Subject', '')).strip().lower()
+        if any(kw in rout_sub for kw in target_keywords):
+            teacher_code = str(row.get('Teacher', '')).strip()
+            # Remove any trailing "(Sub)" tags if present
+            teacher_code = re.sub(r"\s*\(Sub\)", "", teacher_code, flags=re.IGNORECASE).strip()
+            full_name = INV_TEACHER_INITIALS.get(teacher_code, teacher_code)
+            if full_name in TEACHER_LIST:
+                return full_name
+                
+    return TEACHER_LIST[0]
+
+# ==========================================
+# 4. MAIN APPLICATION UI
+# ==========================================
+st.markdown("<h2>📝 BPS Examination Manager</h2>", unsafe_allow_html=True)
 st.sidebar.button("🔄 Sync Exam Data", on_click=refresh_exam_data, use_container_width=True)
 
 # ---------------------------------------------------------
-# ADMIN VIEW: SCHEDULE EXAMS
+# ADMIN VIEW: SCHEDULE EXAMS WITH AUTO-TEACHER LOOKUP
 # ---------------------------------------------------------
 if st.session_state.user_role == "admin":
-    tabs = st.tabs(["📅 Schedule New Exam", "📋 View Scheduled Exams"])
+    tabs = st.tabs(["📅 Schedule New Exams (Multi-Class)", "📋 View Scheduled Exams"])
     
     with tabs[0]:
-        st.markdown("<div class='header-card'><h4>➕ Create Exam Schedule</h4></div>", unsafe_allow_html=True)
-        with st.form("schedule_exam_form"):
-            c1, c2 = st.columns(2)
-            ex_date = c1.date_input("Exam Date", datetime.now()).strftime("%d-%m-%Y")
-            ex_class = c2.selectbox("Class", CLASS_OPTIONS)
+        st.markdown("<div class='header-card'><h4>➕ Create Exam Schedule (Multi-Class Support)</h4><p style='margin:0; font-size:13px;'>Teachers are automatically detected from <b>bps_routine</b> for each Class & Subject!</p></div>", unsafe_allow_html=True)
+        
+        c1, c2 = st.columns(2)
+        ex_date = c1.date_input("Exam Date", datetime.now()).strftime("%d-%m-%Y")
+        ex_sub = c2.selectbox("Select Subject", SUBJECT_OPTIONS)
+        
+        c3, c4 = st.columns(2)
+        ex_classes = c3.multiselect("Select Class(es)", CLASS_OPTIONS, default=["CLASS III", "CLASS IV"])
+        ex_secs = c4.multiselect("Select Section(s)", SECTIONS, default=["A"])
+        
+        if ex_classes and ex_secs:
+            st.markdown("---")
+            st.markdown("##### 🔍 Review & Modify Auto-Detected Teachers")
             
-            c3, c4 = st.columns(2)
-            ex_sec = c3.selectbox("Section", SECTIONS)
-            ex_sub = c4.text_input("Subject (e.g., Bengali, Math, English)", "Mathematics")
+            routine_df = fetch_routine_data()
+            preview_rows = []
             
-            ex_teacher = st.selectbox("Assign Invigilator/Grader", TEACHER_LIST)
+            for cls_name in ex_classes:
+                for sec_name in ex_secs:
+                    auto_teacher = detect_teacher_from_routine(routine_df, cls_name, sec_name, ex_sub)
+                    preview_rows.append({
+                        "Date": ex_date,
+                        "Class": cls_name,
+                        "Section": sec_name,
+                        "Subject": ex_sub,
+                        "Teacher": auto_teacher
+                    })
             
-            if st.form_submit_button("Save Exam Schedule", type="primary"):
-                exam_id = f"{ex_date}_{ex_class}_{ex_sec}_{ex_sub}".replace(" ", "")
+            preview_df = pd.DataFrame(preview_rows)
+            
+            edited_schedule_grid = st.data_editor(
+                preview_df,
+                column_config={
+                    "Date": st.column_config.TextColumn("Date", disabled=True),
+                    "Class": st.column_config.TextColumn("Class", disabled=True),
+                    "Section": st.column_config.TextColumn("Section", disabled=True),
+                    "Subject": st.column_config.TextColumn("Subject", disabled=True),
+                    "Teacher": st.column_config.SelectboxColumn("Invigilator / Grader", options=TEACHER_LIST, required=True)
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+            
+            if st.button("💾 Confirm & Save All Schedules", type="primary"):
                 schedules = fetch_exam_schedules()
+                new_records = []
                 
-                # Check if exists to prevent duplicates
-                if not schedules.empty and exam_id in schedules['Exam_ID'].values:
-                    st.warning("⚠️ This exam is already scheduled!")
+                for _, r in edited_schedule_grid.iterrows():
+                    exam_id = f"{r['Date']}_{r['Class']}_{r['Section']}_{r['Subject']}".replace(" ", "")
+                    new_records.append({
+                        "Exam_ID": exam_id,
+                        "Date": r['Date'],
+                        "Class": r['Class'],
+                        "Section": r['Section'],
+                        "Subject": r['Subject'],
+                        "Teacher": r['Teacher']
+                    })
+                
+                new_df = pd.DataFrame(new_records)
+                
+                # Filter out existing Exam_IDs to prevent duplicates, then append
+                if not schedules.empty:
+                    schedules_cleaned = schedules[~schedules['Exam_ID'].isin(new_df['Exam_ID'])]
+                    final_schedules = pd.concat([schedules_cleaned, new_df], ignore_index=True)
                 else:
-                    new_row = {
-                        "Exam_ID": exam_id, "Date": ex_date, "Class": ex_class, 
-                        "Section": ex_sec, "Subject": ex_sub.strip(), "Teacher": ex_teacher
-                    }
-                    new_df = pd.concat([schedules, pd.DataFrame([new_row])], ignore_index=True) if not schedules.empty else pd.DataFrame([new_row])
-                    overwrite_sheet(init_exam_sheet(), "schedules", new_df, ["Exam_ID", "Date", "Class", "Section", "Subject", "Teacher"])
-                    st.success(f"✅ Scheduled {ex_sub} for {ex_class}-{ex_sec} on {ex_date}!")
+                    final_schedules = new_df
+                    
+                overwrite_sheet(init_exam_sheet(), "schedules", final_schedules, ["Exam_ID", "Date", "Class", "Section", "Subject", "Teacher"])
+                st.success(f"✅ Successfully scheduled {len(new_records)} exam(s) for {ex_sub} on {ex_date}!")
+                st.rerun()
+        else:
+            st.info("👆 Please select at least one Class and one Section above to preview schedules.")
 
     with tabs[1]:
         st.subheader("Upcoming & Past Exams")
@@ -154,15 +268,12 @@ elif st.session_state.user_role == "teacher":
     
     schedules = fetch_exam_schedules()
     if not schedules.empty:
-        # Filter schedules for the logged-in teacher
         my_exams = schedules[schedules['Teacher'] == st.session_state.user_name]
         
         if my_exams.empty:
             st.info("🏖️ You have no exams assigned for grading.")
         else:
-            # Create a readable display mapping for the dropdown
             exam_display = {f"{r['Date']} | {r['Class']}-{r['Section']} | {r['Subject']}": r['Exam_ID'] for _, r in my_exams.iterrows()}
-            
             selected_exam_str = st.selectbox("Select Exam to Grade", ["Select..."] + list(exam_display.keys()))
             
             if selected_exam_str != "Select...":
@@ -177,7 +288,6 @@ elif st.session_state.user_role == "teacher":
                 st.markdown("---")
                 st.subheader(f"Entering marks for: {e_sub}")
                 
-                # Fetch MDM attendance for that specific date & class
                 mdm = fetch_mdm_log()
                 if not mdm.empty:
                     mdm_present = mdm[(mdm['Date'] == e_date) & (mdm['Class'] == e_class) & (mdm['Section'] == e_sec)]
@@ -189,20 +299,17 @@ elif st.session_state.user_role == "teacher":
                 else:
                     st.success(f"✅ Found {len(mdm_present)} students present on {e_date}.")
                     
-                    # Fetch existing marks to populate if already partially graded
                     all_marks = fetch_exam_marks()
                     existing_marks = pd.DataFrame()
                     if not all_marks.empty:
                         existing_marks = all_marks[all_marks['Exam_ID'] == exam_id]
                     
-                    # Prepare dataframe for Data Editor
                     roster = mdm_present[['Roll', 'Name']].copy()
                     if not existing_marks.empty:
                         roster = pd.merge(roster, existing_marks[['Roll', 'Marks_Obtained']], on='Roll', how='left')
                     else:
                         roster['Marks_Obtained'] = ""
                         
-                    # Show Interactive Table
                     st.markdown("Fill in the **Marks_Obtained** column below and click Save.")
                     edited_marks = st.data_editor(
                         roster,
@@ -216,10 +323,8 @@ elif st.session_state.user_role == "teacher":
                     )
                     
                     if st.button("💾 Save Exam Marks", type="primary"):
-                        # Build the new records for this specific exam
                         new_records = []
                         for _, r in edited_marks.iterrows():
-                            # Only save if marks were actually entered
                             if pd.notna(r['Marks_Obtained']) and str(r['Marks_Obtained']).strip() != "":
                                 new_records.append({
                                     "Exam_ID": exam_id,
@@ -234,14 +339,12 @@ elif st.session_state.user_role == "teacher":
                                 
                         new_marks_df = pd.DataFrame(new_records)
                         
-                        # Purge old marks for this exam ID and merge new ones
                         if not all_marks.empty:
                             all_marks_purged = all_marks[all_marks['Exam_ID'] != exam_id]
                             final_marks = pd.concat([all_marks_purged, new_marks_df], ignore_index=True)
                         else:
                             final_marks = new_marks_df
                             
-                        # Save to Sheet
                         overwrite_sheet(
                             init_exam_sheet(), 
                             "marks", 

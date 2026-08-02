@@ -303,7 +303,7 @@ def home_page_ui():
         
     st.markdown("#### 🚀 Select Application")
     
-    # Primary Applications (Both Admin & Teachers)
+    # Primary Applications
     col1, col2 = st.columns(2)
     with col1:
         if st.button("🏫 BPS Digital App", type="primary", use_container_width=True):
@@ -312,18 +312,16 @@ def home_page_ui():
         if st.button("📝 BPS Exams", type="primary", use_container_width=True):
             st.switch_page(exam_page)
             
-    # Secondary Applications (Both Admin & Teachers)
+    # Secondary Applications
     col3, col4 = st.columns(2)
     with col3:
         if st.button("💰 Funds & Fees", type="secondary", use_container_width=True):
             st.switch_page(fees_page)
             
-    # ==========================================
-    # ADMIN-ONLY APPLICATION BUTTONS
-    # ==========================================
+    # Admin-only Applications
     if st.session_state.user_role == "admin":
         with col4:
-            if st.button("🎙️ Assembly Planner", type="secondary", use_container_width=True): # <-- 2. Admin Assembly Button
+            if st.button("🎙️ Assembly Planner", type="secondary", use_container_width=True): # <-- 2. Assembly Button
                 st.switch_page(assembly_page)
                 
         col5, col6 = st.columns(2)
@@ -341,9 +339,8 @@ nav_pages = {
     "Applications": [app_page, exam_page, fees_page]
 }
 
-# 3. Add Admin-Only pages to Sidebar Navigation
 if st.session_state.user_role == "admin":
-    nav_pages["Applications"].append(assembly_page) # <-- 3. Admin Sidebar Entry
+    nav_pages["Applications"].append(assembly_page) # <-- 3. Added to Admin Sidebar
     nav_pages["Applications"].append(udise_page)
     nav_pages["Applications"].append(gas_page)
 

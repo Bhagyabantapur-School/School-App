@@ -593,58 +593,68 @@ with tab2:
 # ==========================================
 if st.session_state.user_role == "admin":
     with tab_britti:
-        st.subheader("🏆 Britti Student Selection")
-        st.info("Select the specific students participating in the Britti examination. Only selected students will appear in the Britti Pending Fees tracker.")
+        st.subheader("🏆 Britti Student Selection (Class IV Only)")
+        st.info("Select the specific Class IV (Section A & B) students participating in the Britti examination.")
         
-        b_class = st.selectbox("Select Class to Manage Britti List", sorted([c for c in df_students['Class'].unique() if str(c).strip()]))
+        b_class = "CLASS IV"
         
-        c_students = df_students[df_students['Class'] == b_class].copy()
-        c_students['Match_Key'] = c_students.apply(lambda r: safe_key(r.get('Class',''), r.get('Roll',''), r.get('Name','')), axis=1)
+        # Filter for CLASS IV and Sections A & B
+        c_students = df_students[
+            (df_students['Class'].astype(str).str.strip().str.upper() == b_class) & 
+            (df_students['Section'].astype(str).str.strip().str.upper().isin(['A', 'B']))
+        ].copy()
         
-        if not df_britti.empty:
-            df_britti['Match_Key'] = df_britti.apply(lambda r: safe_key(r.get('Class',''), r.get('Roll',''), r.get('Name','')), axis=1)
-            selected_keys = df_britti['Match_Key'].tolist()
+        if c_students.empty:
+            st.warning(f"No students found in {b_class} Section A or B.")
         else:
-            selected_keys = []
-            
-        c_students['Selected'] = c_students['Match_Key'].isin(selected_keys)
-        c_students['Roll_Num'] = pd.to_numeric(c_students['Roll'], errors='coerce').fillna(999)
-        c_students = c_students.sort_values('Roll_Num')
-        
-        edited_c = st.data_editor(
-            c_students[['Selected', 'Roll', 'Name', 'Section']],
-            hide_index=True,
-            disabled=['Roll', 'Name', 'Section'],
-            use_container_width=True
-        )
-        
-        if st.button(f"💾 Save Britti List for {b_class}", type="primary"):
-            new_selections = edited_c[edited_c['Selected'] == True]
+            c_students['Match_Key'] = c_students.apply(lambda r: safe_key(r.get('Class',''), r.get('Roll',''), r.get('Name','')), axis=1)
             
             if not df_britti.empty:
-                other_classes_britti = df_britti[df_britti['Class'] != b_class].copy()
+                df_britti['Match_Key'] = df_britti.apply(lambda r: safe_key(r.get('Class',''), r.get('Roll',''), r.get('Name','')), axis=1)
+                selected_keys = df_britti['Match_Key'].tolist()
             else:
-                other_classes_britti = pd.DataFrame(columns=["Class", "Section", "Roll", "Name"])
+                selected_keys = []
                 
-            new_append = []
-            for _, r in new_selections.iterrows():
-                new_append.append({"Class": b_class, "Section": r['Section'], "Roll": r['Roll'], "Name": r['Name']})
-                
-            final_britti = pd.concat([other_classes_britti, pd.DataFrame(new_append)], ignore_index=True)
+            c_students['Selected'] = c_students['Match_Key'].isin(selected_keys)
             
-            gc_write = get_gspread_client()
-            sh = gc_write.open("SCH_Exam_Fees")
-            ws = ensure_worksheet(sh, "Britti_List", ["Class", "Section", "Roll", "Name"])
-            ws.clear()
+            # Sort by Section then Roll Number naturally
+            c_students['Roll_Num'] = pd.to_numeric(c_students['Roll'], errors='coerce').fillna(999)
+            c_students = c_students.sort_values(['Section', 'Roll_Num'])
             
-            if not final_britti.empty:
-                ws.update([final_britti.columns.values.tolist()] + final_britti.fillna("").astype(str).values.tolist())
-            else:
-                ws.append_row(["Class", "Section", "Roll", "Name"])
+            edited_c = st.data_editor(
+                c_students[['Selected', 'Section', 'Roll', 'Name']],
+                hide_index=True,
+                disabled=['Section', 'Roll', 'Name'],
+                use_container_width=True
+            )
+            
+            if st.button(f"💾 Save Britti List for {b_class}", type="primary"):
+                new_selections = edited_c[edited_c['Selected'] == True]
                 
-            load_data.clear()
-            st.success(f"Successfully saved {len(new_append)} Britti students for {b_class}!")
-            st.rerun()
+                if not df_britti.empty:
+                    other_classes_britti = df_britti[df_britti['Class'].astype(str).str.strip().str.upper() != b_class].copy()
+                else:
+                    other_classes_britti = pd.DataFrame(columns=["Class", "Section", "Roll", "Name"])
+                    
+                new_append = []
+                for _, r in new_selections.iterrows():
+                    new_append.append({"Class": b_class, "Section": r['Section'], "Roll": r['Roll'], "Name": r['Name']})
+                    
+                final_britti = pd.concat([other_classes_britti, pd.DataFrame(new_append)], ignore_index=True)
+                
+                gc_write = get_gspread_client()
+                sh = gc_write.open("SCH_Exam_Fees")
+                ws = ensure_worksheet(sh, "Britti_List", ["Class", "Section", "Roll", "Name"])
+                ws.clear()
+                
+                if not final_britti.empty:
+                    ws.update([final_britti.columns.values.tolist()] + final_britti.fillna("").astype(str).values.tolist())
+                else:
+                    ws.append_row(["Class", "Section", "Roll", "Name"])
+                    
+                load_data.clear()
+                st.success(f"Successfully saved {len(new_append)} Britti students for {b_class}!")
+                st.rerun()
 
 # ==========================================
 # TAB 3: ADMIN HANDOVER MANAGER (ADMIN ONLY)

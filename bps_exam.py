@@ -191,35 +191,66 @@ def init_subject_map():
         
     return pd.DataFrame(records).astype(str)
 
-def save_subject_map(edited_df, original_df, user_name):
+def save_subject_map(edited_df, original_df, user_name, is_partial=False):
     now_str = datetime.now().strftime("%Y-%m-%d %I:%M %p")
-    final_records = []
     
-    for _, row in edited_df.iterrows():
-        row_dict = row.to_dict()
-        map_id = str(row_dict.get('Map_ID', ''))
-        
-        if not map_id or map_id == 'nan' or map_id == 'None' or map_id == '':
-            row_dict['Map_ID'] = uuid.uuid4().hex
-            row_dict['Modified_By'] = user_name
-            row_dict['Timestamp'] = now_str
-        else:
-            orig_match = original_df[original_df['Map_ID'] == map_id]
-            if not orig_match.empty:
-                orig = orig_match.iloc[0]
-                if (str(row_dict.get('Class')) != str(orig.get('Class')) or 
-                    str(row_dict.get('Section')) != str(orig.get('Section')) or 
-                    str(row_dict.get('Subject')) != str(orig.get('Subject')) or 
-                    str(row_dict.get('Teacher')) != str(orig.get('Teacher'))):
-                    row_dict['Modified_By'] = user_name
-                    row_dict['Timestamp'] = now_str
+    if not is_partial:
+        # Full Map Replacement (Admin)
+        final_df = edited_df.copy()
+        for i, row in final_df.iterrows():
+            map_id = str(row.get('Map_ID', ''))
+            if not map_id or map_id == 'nan' or map_id == 'None' or map_id == '':
+                final_df.at[i, 'Map_ID'] = uuid.uuid4().hex
+                final_df.at[i, 'Modified_By'] = user_name
+                final_df.at[i, 'Timestamp'] = now_str
             else:
+                orig_match = original_df[original_df['Map_ID'] == map_id]
+                if not orig_match.empty:
+                    orig = orig_match.iloc[0]
+                    if (str(row.get('Class')) != str(orig.get('Class')) or 
+                        str(row.get('Section')) != str(orig.get('Section')) or 
+                        str(row.get('Subject')) != str(orig.get('Subject')) or 
+                        str(row.get('Teacher')) != str(orig.get('Teacher'))):
+                        final_df.at[i, 'Modified_By'] = user_name
+                        final_df.at[i, 'Timestamp'] = now_str
+    else:
+        # Partial Map Replacement (Teacher editing only their rows)
+        orig_teacher_ids = original_df[original_df['Teacher'] == user_name]['Map_ID'].tolist()
+        edited_ids = [str(mid) for mid in edited_df['Map_ID'] if pd.notna(mid) and str(mid).strip() != '' and str(mid) != 'nan']
+        deleted_ids = [mid for mid in orig_teacher_ids if mid not in edited_ids]
+        
+        # Start with original DF minus whatever the teacher deleted
+        final_df = original_df[~original_df['Map_ID'].isin(deleted_ids)].copy()
+        
+        # Merge the teacher's edits & additions
+        for _, row in edited_df.iterrows():
+            row_dict = row.to_dict()
+            map_id = str(row_dict.get('Map_ID', ''))
+            
+            if not map_id or map_id == 'nan' or map_id == 'None' or map_id == '':
+                row_dict['Map_ID'] = uuid.uuid4().hex
                 row_dict['Modified_By'] = user_name
                 row_dict['Timestamp'] = now_str
-                
-        final_records.append(row_dict)
-        
-    final_df = pd.DataFrame(final_records)
+                row_dict['Teacher'] = user_name 
+                final_df = pd.concat([final_df, pd.DataFrame([row_dict])], ignore_index=True)
+            else:
+                idx = final_df.index[final_df['Map_ID'] == map_id].tolist()
+                if idx:
+                    idx = idx[0]
+                    orig_row = final_df.iloc[idx]
+                    if (str(row_dict.get('Class')) != str(orig_row.get('Class')) or 
+                        str(row_dict.get('Section')) != str(orig_row.get('Section')) or 
+                        str(row_dict.get('Subject')) != str(orig_row.get('Subject')) or 
+                        str(row_dict.get('Teacher')) != str(orig_row.get('Teacher'))):
+                        row_dict['Modified_By'] = user_name
+                        row_dict['Timestamp'] = now_str
+                    for col, val in row_dict.items():
+                        final_df.at[idx, col] = val
+                else:
+                    row_dict['Modified_By'] = user_name
+                    row_dict['Timestamp'] = now_str
+                    final_df = pd.concat([final_df, pd.DataFrame([row_dict])], ignore_index=True)
+
     overwrite_sheet(init_exam_sheet(), "exam_subject_map", final_df, ["Map_ID", "Class", "Section", "Subject", "Teacher", "Modified_By", "Timestamp"])
     refresh_exam_data()
 
@@ -280,8 +311,7 @@ if st.session_state.user_role == "admin":
         with st.expander("📊 View Teacher Acknowledgement Status", expanded=True):
             status_df = fetch_teacher_status()
             
-            # Create a master list to show all teachers even if they haven't logged in
-            all_teachers = pd.DataFrame({"Teacher": [t for t in TEACHER_LIST if t != "SUKHAMAY KISKU"]}) # Excluding Admin
+            all_teachers = pd.DataFrame({"Teacher": [t for t in TEACHER_LIST if t != "SUKHAMAY KISKU"]})
             
             if not status_df.empty and 'Teacher' in status_df.columns:
                 merged_status = pd.merge(all_teachers, status_df, on="Teacher", how="left").fillna({"Status": "Pending ⏳", "Timestamp": "Never"})
@@ -328,7 +358,7 @@ if st.session_state.user_role == "admin":
         )
         
         if st.button("💾 Save Master Map Changes", type="primary"):
-            save_subject_map(edited_map_admin, subject_map_df, st.session_state.user_name)
+            save_subject_map(edited_map_admin, subject_map_df, st.session_state.user_name, is_partial=False)
             st.success("Master Subject Map has been successfully updated!")
             st.rerun()
 
@@ -426,9 +456,9 @@ elif st.session_state.user_role == "teacher":
     tabs = st.tabs(["📚 My Subject Mapping", "🎓 Enter Marks"])
     
     with tabs[0]:
-        st.markdown("<div class='header-card'><h4>📚 Check & Update Exam Subjects</h4><p style='margin:0; font-size:14px;'>Review your assigned exam subjects below. You can update the Class, Section, or Subject if required.</p></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='header-card'><h4>📚 Manage Your Subjects</h4><p style='margin:0; font-size:14px;'>You are currently viewing <b>only</b> the subjects assigned to you. You can update Class, Section, or Subject below.</p></div>", unsafe_allow_html=True)
         
-        # --- BACKGROUND LOGGING: Log "Viewed" Status if they haven't confirmed/edited recently ---
+        # --- BACKGROUND LOGGING: Log "Viewed" Status ---
         status_df = fetch_teacher_status()
         if not status_df.empty and 'Teacher' in status_df.columns:
             current_status = status_df[status_df['Teacher'] == st.session_state.user_name]['Status'].values
@@ -440,19 +470,20 @@ elif st.session_state.user_role == "teacher":
             
         subject_map_df = init_subject_map()
         
-        def highlight_teacher(row):
-            if row['Teacher'] == st.session_state.user_name:
-                return ['background-color: #e2e3e5; font-weight: bold'] * len(row)
-            return [''] * len(row)
+        # Filter strictly for the logged-in teacher
+        my_map_df = subject_map_df[subject_map_df['Teacher'] == st.session_state.user_name].copy()
+        
+        if my_map_df.empty:
+            st.info("You currently have no subjects assigned in the Master Map. If this is a mistake, you can add them below.")
             
         edited_map_teacher = st.data_editor(
-            subject_map_df.style.apply(highlight_teacher, axis=1),
+            my_map_df,
             num_rows="dynamic",
             column_config={
                 "Map_ID": None,
-                "Timestamp": st.column_config.TextColumn("Last Updated", disabled=True),
-                "Modified_By": st.column_config.TextColumn("Changed By", disabled=True),
-                "Teacher": st.column_config.SelectboxColumn("Teacher", options=TEACHER_LIST, required=True),
+                "Timestamp": None, # Hide timestamp from teacher view
+                "Modified_By": None, # Hide modifier from teacher view
+                "Teacher": st.column_config.SelectboxColumn("Teacher", options=[st.session_state.user_name], disabled=True),
                 "Class": st.column_config.SelectboxColumn("Class", options=CLASS_OPTIONS, required=True),
                 "Section": st.column_config.SelectboxColumn("Section", options=SECTIONS, required=True),
                 "Subject": st.column_config.SelectboxColumn("Subject", options=SUBJECT_OPTIONS, required=True)
@@ -472,7 +503,7 @@ elif st.session_state.user_role == "teacher":
                 
         with col_save:
             if st.button("💾 Save My Changes", type="primary", use_container_width=True):
-                save_subject_map(edited_map_teacher, subject_map_df, st.session_state.user_name)
+                save_subject_map(edited_map_teacher, subject_map_df, st.session_state.user_name, is_partial=True)
                 update_teacher_status(st.session_state.user_name, "Edited ✏️")
                 st.success("Changes saved! The Head Teacher will review your updates.")
                 st.rerun()

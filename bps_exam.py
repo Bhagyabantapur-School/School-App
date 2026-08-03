@@ -141,7 +141,8 @@ def sort_display_df(df):
     temp_df['C_Sort'] = pd.Categorical(temp_df['Class'], categories=CLASS_OPTIONS, ordered=True)
     temp_df['S_Sort'] = pd.Categorical(temp_df['Section'], categories=SECTIONS, ordered=True)
     temp_df['Sub_Sort'] = pd.Categorical(temp_df['Subject'], categories=SUBJECT_OPTIONS, ordered=True)
-    temp_df = temp_df.sort_values(['C_Sort', 'S_Sort', 'Sub_Sort']).drop(columns=['C_Sort', 'S_Sort', 'Sub_Sort']).reset_index(drop=True)
+    # Changed priority: Subject first, then Class, then Section
+    temp_df = temp_df.sort_values(['Sub_Sort', 'C_Sort', 'S_Sort']).drop(columns=['C_Sort', 'S_Sort', 'Sub_Sort']).reset_index(drop=True)
     return temp_df
 
 @st.cache_data(ttl=300)
@@ -352,7 +353,7 @@ if st.session_state.user_role == "admin":
         st.divider()
 
         subject_map_df = init_subject_map()
-        subject_map_df = sort_display_df(subject_map_df) # Applies logical sorting order
+        subject_map_df = sort_display_df(subject_map_df) 
         
         def highlight_modified(row):
             if row['Modified_By'] != 'Auto-Generated' and str(row['Modified_By']).strip() != '':

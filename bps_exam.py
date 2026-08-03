@@ -141,7 +141,6 @@ def sort_display_df(df):
     temp_df['C_Sort'] = pd.Categorical(temp_df['Class'], categories=CLASS_OPTIONS, ordered=True)
     temp_df['S_Sort'] = pd.Categorical(temp_df['Section'], categories=SECTIONS, ordered=True)
     temp_df['Sub_Sort'] = pd.Categorical(temp_df['Subject'], categories=SUBJECT_OPTIONS, ordered=True)
-    # Changed priority: Subject first, then Class, then Section
     temp_df = temp_df.sort_values(['Sub_Sort', 'C_Sort', 'S_Sort']).drop(columns=['C_Sort', 'S_Sort', 'Sub_Sort']).reset_index(drop=True)
     return temp_df
 
@@ -555,7 +554,11 @@ elif st.session_state.user_role == "teacher":
                     
                     mdm = fetch_mdm_log()
                     if not mdm.empty:
-                        mdm_present = mdm[(mdm['Date'] == e_date) & (mdm['Class'] == e_class) & (mdm['Section'] == e_sec)]
+                        # NEW LOGIC: If the exam is mapped to CLASS PP, pull both CLASS PP and CLASS LPP from MDM log
+                        if e_class == "CLASS PP":
+                            mdm_present = mdm[(mdm['Date'] == e_date) & (mdm['Class'].isin(["CLASS PP", "CLASS LPP"])) & (mdm['Section'] == e_sec)]
+                        else:
+                            mdm_present = mdm[(mdm['Date'] == e_date) & (mdm['Class'] == e_class) & (mdm['Section'] == e_sec)]
                     else:
                         mdm_present = pd.DataFrame()
                         
@@ -569,9 +572,11 @@ elif st.session_state.user_role == "teacher":
                         if not all_marks.empty:
                             existing_marks = all_marks[all_marks['Exam_ID'] == exam_id]
                         
-                        roster = mdm_present[['Roll', 'Name']].copy()
+                        # NEW LOGIC: Keep the 'Class' column in the roster so teachers can see who is LPP and who is PP
+                        roster = mdm_present[['Class', 'Roll', 'Name']].copy()
                         if not existing_marks.empty:
-                            roster = pd.merge(roster, existing_marks[['Roll', 'Marks_Obtained']], on='Roll', how='left')
+                            existing_subset = existing_marks[['Class', 'Roll', 'Marks_Obtained']].drop_duplicates(subset=['Class', 'Roll'])
+                            roster = pd.merge(roster, existing_subset, on=['Class', 'Roll'], how='left')
                         else:
                             roster['Marks_Obtained'] = ""
                             
@@ -579,6 +584,7 @@ elif st.session_state.user_role == "teacher":
                         edited_marks = st.data_editor(
                             roster,
                             column_config={
+                                "Class": st.column_config.TextColumn("Class", disabled=True), # Display class (LPP or PP)
                                 "Roll": st.column_config.TextColumn("Roll No.", disabled=True),
                                 "Name": st.column_config.TextColumn("Student Name", disabled=True),
                                 "Marks_Obtained": st.column_config.TextColumn("Marks", required=True)
@@ -594,7 +600,7 @@ elif st.session_state.user_role == "teacher":
                                     new_records.append({
                                         "Exam_ID": exam_id,
                                         "Date": e_date,
-                                        "Class": e_class,
+                                        "Class": r['Class'], # Save their actual class (LPP or PP) to the database
                                         "Section": e_sec,
                                         "Subject": e_sub,
                                         "Roll": r['Roll'],

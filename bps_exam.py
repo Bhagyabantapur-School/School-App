@@ -82,6 +82,7 @@ def refresh_exam_data():
     fetch_exam_marks.clear()
     fetch_routine_data.clear()
     init_subject_map.clear()
+    fetch_teacher_status.clear()
 
 @st.cache_data(ttl=300)
 def fetch_mdm_log():
@@ -129,8 +130,28 @@ def detect_teacher_from_routine(routine_df, class_name, section_name, subject_na
     return "TAPASI RANA"
 
 # ==========================================
-# 3. MASTER SUBJECT MAPPING (NEW ENGINE)
+# 3. MASTER SUBJECT MAPPING & STATUS TRACKING
 # ==========================================
+@st.cache_data(ttl=300)
+def fetch_teacher_status():
+    sh = init_exam_sheet()
+    ws = ensure_worksheet(sh, "teacher_exam_status", ["Teacher", "Status", "Timestamp"])
+    return pd.DataFrame(ws.get_all_records()).astype(str)
+
+def update_teacher_status(teacher_name, status):
+    df = fetch_teacher_status()
+    now_str = datetime.now().strftime("%Y-%m-%d %I:%M %p")
+    
+    if not df.empty and teacher_name in df['Teacher'].values:
+        df.loc[df['Teacher'] == teacher_name, 'Status'] = status
+        df.loc[df['Teacher'] == teacher_name, 'Timestamp'] = now_str
+    else:
+        new_row = pd.DataFrame([{"Teacher": teacher_name, "Status": status, "Timestamp": now_str}])
+        df = pd.concat([df, new_row], ignore_index=True)
+        
+    overwrite_sheet(init_exam_sheet(), "teacher_exam_status", df, ["Teacher", "Status", "Timestamp"])
+    fetch_teacher_status.clear()
+
 @st.cache_data(ttl=300)
 def init_subject_map():
     sh = init_exam_sheet()
@@ -156,7 +177,7 @@ def init_subject_map():
                     "Subject": sub,
                     "Teacher": teacher,
                     "Modified_By": "Auto-Generated",
-                    "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    "Timestamp": datetime.now().strftime("%Y-%m-%d %I:%M %p")
                 })
         df = pd.DataFrame(new_records)
         ws.update([df.columns.values.tolist()] + df.values.tolist())
@@ -165,7 +186,7 @@ def init_subject_map():
     return pd.DataFrame(records).astype(str)
 
 def save_subject_map(edited_df, original_df, user_name):
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_str = datetime.now().strftime("%Y-%m-%d %I:%M %p")
     final_records = []
     
     for _, row in edited_df.iterrows():
@@ -243,6 +264,34 @@ if st.session_state.user_role == "admin":
     with tabs[0]:
         st.markdown("<div class='header-card'><h4>👨‍🏫 Master Subject Mapping</h4><p style='margin:0; font-size:13px;'>Review all teacher assignments. <b>Rows changed by teachers are highlighted in green.</b></p></div>", unsafe_allow_html=True)
         
+        # --- ADMIN TRACKING DASHBOARD ---
+        with st.expander("📊 View Teacher Acknowledgement Status", expanded=True):
+            status_df = fetch_teacher_status()
+            
+            # Create a master list to show all teachers even if they haven't logged in
+            all_teachers = pd.DataFrame({"Teacher": [t for t in TEACHER_LIST if t != "SUKHAMAY KISKU"]}) # Excluding Admin
+            
+            if not status_df.empty:
+                merged_status = pd.merge(all_teachers, status_df, on="Teacher", how="left").fillna({"Status": "Pending ⏳", "Timestamp": "Never"})
+            else:
+                merged_status = all_teachers.copy()
+                merged_status["Status"] = "Pending ⏳"
+                merged_status["Timestamp"] = "Never"
+                
+            def highlight_status(val):
+                if "Confirmed" in str(val): return 'color: green; font-weight: bold'
+                if "Edited" in str(val): return 'color: orange; font-weight: bold'
+                if "Viewed" in str(val): return 'color: blue; font-weight: bold'
+                return 'color: red'
+                
+            st.dataframe(
+                merged_status.style.map(highlight_status, subset=['Status']), 
+                hide_index=True, 
+                use_container_width=True
+            )
+            
+        st.divider()
+
         subject_map_df = init_subject_map()
         
         def highlight_modified(row):
@@ -367,6 +416,12 @@ elif st.session_state.user_role == "teacher":
     with tabs[0]:
         st.markdown("<div class='header-card'><h4>📚 Check & Update Exam Subjects</h4><p style='margin:0; font-size:14px;'>Review your assigned exam subjects below. You can update the Class, Section, or Subject if required.</p></div>", unsafe_allow_html=True)
         
+        # --- BACKGROUND LOGGING: Log "Viewed" Status if they haven't confirmed/edited recently ---
+        status_df = fetch_teacher_status()
+        current_status = status_df[status_df['Teacher'] == st.session_state.user_name]['Status'].values
+        if len(current_status) == 0 or current_status[0] not in ["Confirmed ✅", "Edited ✏️", "Viewed 👀"]:
+            update_teacher_status(st.session_state.user_name, "Viewed 👀")
+            
         subject_map_df = init_subject_map()
         
         def highlight_teacher(row):
@@ -390,10 +445,21 @@ elif st.session_state.user_role == "teacher":
             use_container_width=True
         )
         
-        if st.button("💾 Save My Changes", type="primary"):
-            save_subject_map(edited_map_teacher, subject_map_df, st.session_state.user_name)
-            st.success("Changes saved! The Head Teacher will review your updates.")
-            st.rerun()
+        st.write("")
+        col_ok, col_save = st.columns(2)
+        
+        with col_ok:
+            if st.button("✅ Confirm All My Subjects are Correct", type="secondary", use_container_width=True):
+                update_teacher_status(st.session_state.user_name, "Confirmed ✅")
+                st.success("Thank you! Head Sir has been notified that your subjects are correct.")
+                st.rerun()
+                
+        with col_save:
+            if st.button("💾 Save My Changes", type="primary", use_container_width=True):
+                save_subject_map(edited_map_teacher, subject_map_df, st.session_state.user_name)
+                update_teacher_status(st.session_state.user_name, "Edited ✏️")
+                st.success("Changes saved! The Head Teacher will review your updates.")
+                st.rerun()
             
     with tabs[1]:
         st.markdown("<div class='header-card'><h4>🎓 Grade Entry Portal</h4><p style='margin:0; font-size:14px;'>Only students present in the MDM Log on the exam date will appear here.</p></div>", unsafe_allow_html=True)

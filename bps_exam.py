@@ -136,19 +136,25 @@ def detect_teacher_from_routine(routine_df, class_name, section_name, subject_na
 def fetch_teacher_status():
     sh = init_exam_sheet()
     ws = ensure_worksheet(sh, "teacher_exam_status", ["Teacher", "Status", "Timestamp"])
-    return pd.DataFrame(ws.get_all_records()).astype(str)
+    records = ws.get_all_records()
+    if not records: 
+        return pd.DataFrame(columns=["Teacher", "Status", "Timestamp"])
+    return pd.DataFrame(records).astype(str)
 
 def update_teacher_status(teacher_name, status):
     df = fetch_teacher_status()
     now_str = datetime.now().strftime("%Y-%m-%d %I:%M %p")
     
-    if not df.empty and teacher_name in df['Teacher'].values:
+    if not df.empty and 'Teacher' in df.columns and teacher_name in df['Teacher'].values:
         df.loc[df['Teacher'] == teacher_name, 'Status'] = status
         df.loc[df['Teacher'] == teacher_name, 'Timestamp'] = now_str
     else:
         new_row = pd.DataFrame([{"Teacher": teacher_name, "Status": status, "Timestamp": now_str}])
-        df = pd.concat([df, new_row], ignore_index=True)
-        
+        if not df.empty:
+            df = pd.concat([df, new_row], ignore_index=True)
+        else:
+            df = new_row
+            
     overwrite_sheet(init_exam_sheet(), "teacher_exam_status", df, ["Teacher", "Status", "Timestamp"])
     fetch_teacher_status.clear()
 
@@ -232,13 +238,19 @@ def get_auto_teacher(cls_name, sec_name, sub_name):
 def fetch_exam_schedules():
     sh = init_exam_sheet()
     ws = ensure_worksheet(sh, "schedules", ["Exam_ID", "Date", "Class", "Section", "Subject", "Teacher"])
-    return pd.DataFrame(ws.get_all_records()).astype(str)
+    records = ws.get_all_records()
+    if not records:
+        return pd.DataFrame(columns=["Exam_ID", "Date", "Class", "Section", "Subject", "Teacher"])
+    return pd.DataFrame(records).astype(str)
 
 @st.cache_data(ttl=300)
 def fetch_exam_marks():
     sh = init_exam_sheet()
     ws = ensure_worksheet(sh, "marks", ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Marks_Obtained"])
-    return pd.DataFrame(ws.get_all_records()).astype(str)
+    records = ws.get_all_records()
+    if not records:
+        return pd.DataFrame(columns=["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Marks_Obtained"])
+    return pd.DataFrame(records).astype(str)
 
 def overwrite_sheet(sh, sheet_name, df, headers):
     ws = ensure_worksheet(sh, sheet_name, headers)
@@ -271,7 +283,7 @@ if st.session_state.user_role == "admin":
             # Create a master list to show all teachers even if they haven't logged in
             all_teachers = pd.DataFrame({"Teacher": [t for t in TEACHER_LIST if t != "SUKHAMAY KISKU"]}) # Excluding Admin
             
-            if not status_df.empty:
+            if not status_df.empty and 'Teacher' in status_df.columns:
                 merged_status = pd.merge(all_teachers, status_df, on="Teacher", how="left").fillna({"Status": "Pending ⏳", "Timestamp": "Never"})
             else:
                 merged_status = all_teachers.copy()
@@ -418,7 +430,11 @@ elif st.session_state.user_role == "teacher":
         
         # --- BACKGROUND LOGGING: Log "Viewed" Status if they haven't confirmed/edited recently ---
         status_df = fetch_teacher_status()
-        current_status = status_df[status_df['Teacher'] == st.session_state.user_name]['Status'].values
+        if not status_df.empty and 'Teacher' in status_df.columns:
+            current_status = status_df[status_df['Teacher'] == st.session_state.user_name]['Status'].values
+        else:
+            current_status = []
+            
         if len(current_status) == 0 or current_status[0] not in ["Confirmed ✅", "Edited ✏️", "Viewed 👀"]:
             update_teacher_status(st.session_state.user_name, "Viewed 👀")
             

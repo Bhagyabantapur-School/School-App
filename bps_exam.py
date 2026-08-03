@@ -135,6 +135,15 @@ def detect_teacher_from_routine(routine_df, class_name, section_name, subject_na
 # ==========================================
 # 3. MASTER SUBJECT MAPPING & STATUS TRACKING
 # ==========================================
+def sort_display_df(df):
+    if df.empty: return df
+    temp_df = df.copy()
+    temp_df['C_Sort'] = pd.Categorical(temp_df['Class'], categories=CLASS_OPTIONS, ordered=True)
+    temp_df['S_Sort'] = pd.Categorical(temp_df['Section'], categories=SECTIONS, ordered=True)
+    temp_df['Sub_Sort'] = pd.Categorical(temp_df['Subject'], categories=SUBJECT_OPTIONS, ordered=True)
+    temp_df = temp_df.sort_values(['C_Sort', 'S_Sort', 'Sub_Sort']).drop(columns=['C_Sort', 'S_Sort', 'Sub_Sort']).reset_index(drop=True)
+    return temp_df
+
 @st.cache_data(ttl=300)
 def fetch_teacher_status():
     sh = init_exam_sheet()
@@ -178,7 +187,6 @@ def init_subject_map():
         new_records = []
         for c, s in classes:
             for sub in SUBJECT_OPTIONS:
-                # Force fallback to "বাংলা" teacher for these specific subjects
                 search_sub = sub
                 if sub in ["Health & Physical Education", "Art & Work Education"]:
                     search_sub = "বাংলা"
@@ -204,7 +212,6 @@ def save_subject_map(edited_df, original_df, user_name, is_partial=False):
     now_str = datetime.now(IST).strftime("%Y-%m-%d %I:%M %p")
     
     if not is_partial:
-        # Full Map Replacement (Admin)
         final_df = edited_df.copy()
         for i, row in final_df.iterrows():
             map_id = str(row.get('Map_ID', ''))
@@ -223,15 +230,12 @@ def save_subject_map(edited_df, original_df, user_name, is_partial=False):
                         final_df.at[i, 'Modified_By'] = user_name
                         final_df.at[i, 'Timestamp'] = now_str
     else:
-        # Partial Map Replacement (Teacher editing only their rows)
         orig_teacher_ids = original_df[original_df['Teacher'] == user_name]['Map_ID'].tolist()
         edited_ids = [str(mid) for mid in edited_df['Map_ID'] if pd.notna(mid) and str(mid).strip() != '' and str(mid) != 'nan']
         deleted_ids = [mid for mid in orig_teacher_ids if mid not in edited_ids]
         
-        # Start with original DF minus whatever the teacher deleted
         final_df = original_df[~original_df['Map_ID'].isin(deleted_ids)].copy()
         
-        # Merge the teacher's edits & additions
         for _, row in edited_df.iterrows():
             row_dict = row.to_dict()
             map_id = str(row_dict.get('Map_ID', ''))
@@ -264,13 +268,11 @@ def save_subject_map(edited_df, original_df, user_name, is_partial=False):
     refresh_exam_data()
 
 def get_auto_teacher(cls_name, sec_name, sub_name):
-    # Map Check: It will automatically pull the correctly assigned teacher from map_df
     map_df = init_subject_map()
     match = map_df[(map_df['Class'] == cls_name) & (map_df['Section'] == sec_name) & (map_df['Subject'] == sub_name)]
     if not match.empty:
         return match.iloc[0]['Teacher']
         
-    # Routine Fallback (just in case they deleted the map row manually)
     search_sub = sub_name
     if sub_name in ["Health & Physical Education", "Art & Work Education"]:
         search_sub = "বাংলা"
@@ -350,6 +352,7 @@ if st.session_state.user_role == "admin":
         st.divider()
 
         subject_map_df = init_subject_map()
+        subject_map_df = sort_display_df(subject_map_df) # Applies logical sorting order
         
         def highlight_modified(row):
             if row['Modified_By'] != 'Auto-Generated' and str(row['Modified_By']).strip() != '':
@@ -485,8 +488,9 @@ elif st.session_state.user_role == "teacher":
             
         subject_map_df = init_subject_map()
         
-        # Filter strictly for the logged-in teacher
+        # Filter strictly for the logged-in teacher and sort logically
         my_map_df = subject_map_df[subject_map_df['Teacher'] == st.session_state.user_name].copy()
+        my_map_df = sort_display_df(my_map_df)
         
         if my_map_df.empty:
             st.info("You currently have no subjects assigned in the Master Map. If this is a mistake, you can add them below.")

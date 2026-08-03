@@ -255,12 +255,18 @@ def save_subject_map(edited_df, original_df, user_name, is_partial=False):
     refresh_exam_data()
 
 def get_auto_teacher(cls_name, sec_name, sub_name):
+    # If subject is Health & PE or Art & Work Ed, reroute the search to "বাংলা"
+    search_sub = sub_name
+    if sub_name in ["Health & Physical Education", "Art & Work Education"]:
+        search_sub = "বাংলা"
+        
     map_df = init_subject_map()
-    match = map_df[(map_df['Class'] == cls_name) & (map_df['Section'] == sec_name) & (map_df['Subject'] == sub_name)]
+    match = map_df[(map_df['Class'] == cls_name) & (map_df['Section'] == sec_name) & (map_df['Subject'] == search_sub)]
     if not match.empty:
         return match.iloc[0]['Teacher']
+        
     routine_df = fetch_routine_data()
-    return detect_teacher_from_routine(routine_df, cls_name, sec_name, sub_name)
+    return detect_teacher_from_routine(routine_df, cls_name, sec_name, search_sub)
 
 # ==========================================
 # 4. EXAM SCHEDULES & MARKS ENGINES

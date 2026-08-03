@@ -3,6 +3,7 @@ import pandas as pd
 import re
 import uuid
 from datetime import datetime
+import pytz
 import gspread
 from gspread.exceptions import SpreadsheetNotFound, WorksheetNotFound
 from google.oauth2.service_account import Credentials
@@ -13,6 +14,8 @@ from google.oauth2.service_account import Credentials
 if 'authenticated' not in st.session_state or not st.session_state.authenticated:
     st.warning("🔒 Unauthorized Access. Please log in through the main portal.")
     st.stop()
+
+IST = pytz.timezone('Asia/Kolkata')
 
 TEACHER_INITIALS = {
     "SUKHAMAY KISKU": "SK", "TAPASI RANA": "TR", "SUJATA BISWAS ROTHA": "SBR", 
@@ -143,7 +146,7 @@ def fetch_teacher_status():
 
 def update_teacher_status(teacher_name, status):
     df = fetch_teacher_status()
-    now_str = datetime.now().strftime("%Y-%m-%d %I:%M %p")
+    now_str = datetime.now(IST).strftime("%Y-%m-%d %I:%M %p")
     
     if not df.empty and 'Teacher' in df.columns and teacher_name in df['Teacher'].values:
         df.loc[df['Teacher'] == teacher_name, 'Status'] = status
@@ -175,7 +178,13 @@ def init_subject_map():
         new_records = []
         for c, s in classes:
             for sub in SUBJECT_OPTIONS:
-                teacher = detect_teacher_from_routine(routine_df, c, s, sub)
+                # Force fallback to "বাংলা" teacher for these specific subjects
+                search_sub = sub
+                if sub in ["Health & Physical Education", "Art & Work Education"]:
+                    search_sub = "বাংলা"
+                    
+                teacher = detect_teacher_from_routine(routine_df, c, s, search_sub)
+                
                 new_records.append({
                     "Map_ID": uuid.uuid4().hex,
                     "Class": c,
@@ -183,7 +192,7 @@ def init_subject_map():
                     "Subject": sub,
                     "Teacher": teacher,
                     "Modified_By": "Auto-Generated",
-                    "Timestamp": datetime.now().strftime("%Y-%m-%d %I:%M %p")
+                    "Timestamp": datetime.now(IST).strftime("%Y-%m-%d %I:%M %p")
                 })
         df = pd.DataFrame(new_records)
         ws.update([df.columns.values.tolist()] + df.values.tolist())
@@ -192,7 +201,7 @@ def init_subject_map():
     return pd.DataFrame(records).astype(str)
 
 def save_subject_map(edited_df, original_df, user_name, is_partial=False):
-    now_str = datetime.now().strftime("%Y-%m-%d %I:%M %p")
+    now_str = datetime.now(IST).strftime("%Y-%m-%d %I:%M %p")
     
     if not is_partial:
         # Full Map Replacement (Admin)
@@ -255,16 +264,16 @@ def save_subject_map(edited_df, original_df, user_name, is_partial=False):
     refresh_exam_data()
 
 def get_auto_teacher(cls_name, sec_name, sub_name):
-    # If subject is Health & PE or Art & Work Ed, reroute the search to "বাংলা"
-    search_sub = sub_name
-    if sub_name in ["Health & Physical Education", "Art & Work Education"]:
-        search_sub = "বাংলা"
-        
+    # Map Check: It will automatically pull the correctly assigned teacher from map_df
     map_df = init_subject_map()
-    match = map_df[(map_df['Class'] == cls_name) & (map_df['Section'] == sec_name) & (map_df['Subject'] == search_sub)]
+    match = map_df[(map_df['Class'] == cls_name) & (map_df['Section'] == sec_name) & (map_df['Subject'] == sub_name)]
     if not match.empty:
         return match.iloc[0]['Teacher']
         
+    # Routine Fallback (just in case they deleted the map row manually)
+    search_sub = sub_name
+    if sub_name in ["Health & Physical Education", "Art & Work Education"]:
+        search_sub = "বাংলা"
     routine_df = fetch_routine_data()
     return detect_teacher_from_routine(routine_df, cls_name, sec_name, search_sub)
 
@@ -372,7 +381,7 @@ if st.session_state.user_role == "admin":
         st.markdown("<div class='header-card'><h4>➕ Create Exam Schedule</h4><p style='margin:0; font-size:13px;'>Teachers are automatically detected from the <b>Master Subject Map</b>!</p></div>", unsafe_allow_html=True)
         
         c1, c2 = st.columns(2)
-        ex_date = c1.date_input("Exam Date", datetime.now()).strftime("%d-%m-%Y")
+        ex_date = c1.date_input("Exam Date", datetime.now(IST).date()).strftime("%d-%m-%Y")
         ex_sub = c2.selectbox("Select Subject", SUBJECT_OPTIONS)
         
         c3, c4 = st.columns(2)

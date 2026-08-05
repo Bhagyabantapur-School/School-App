@@ -94,6 +94,10 @@ def load_data():
     # Load Britti Eligibility List
     ws_britti = ensure_worksheet(fees_sheet, "Britti_List", ["Class", "Section", "Roll", "Name"])
     df_britti = pd.DataFrame(ws_britti.get_all_records())
+
+    # Load Investigation List
+    ws_investigate = ensure_worksheet(fees_sheet, "Investigation_List", ["Class", "Section", "Roll", "Name", "Collection Type", "Date_Flagged", "Status"])
+    df_investigate = pd.DataFrame(ws_investigate.get_all_records())
     
     if not df_fees.empty:
         df_fees['_Row_Num'] = range(2, len(df_fees) + 2)
@@ -102,11 +106,11 @@ def load_data():
             if 'Teacher_Involved' in df_fees.columns:
                 df_fees.loc[df_fees['Teacher_Involved'] == 'SUKHAMAY KISKU', 'Handover_Status'] = 'Settled'
     
-    return df_students, df_teachers, df_fees, df_mdm, df_britti
+    return df_students, df_teachers, df_fees, df_mdm, df_britti, df_investigate
 
 try:
     with st.spinner("Connecting to BPS Database..."):
-        df_students, df_teachers, df_fees, df_mdm, df_britti = load_data()
+        df_students, df_teachers, df_fees, df_mdm, df_britti, df_investigate = load_data()
 except Exception as e:
     st.error(f"Error loading data. Ensure the sheets are named correctly. Details: {e}")
     st.stop()
@@ -154,6 +158,18 @@ with tab_pending:
     if can_proceed:
         base_target['Match_Key'] = base_target.apply(lambda r: safe_key(r.get('Class',''), r.get('Roll',''), r.get('Name','')), axis=1)
         
+        # Extract active investigations for skipping
+        if not df_investigate.empty:
+            active_inv = df_investigate[(df_investigate['Status'] == 'Investigating') & (df_investigate['Collection Type'] == pending_fee_type)].copy()
+            if not active_inv.empty:
+                active_inv['Match_Key'] = active_inv.apply(lambda r: safe_key(r.get('Class',''), r.get('Roll',''), r.get('Name','')), axis=1)
+                investigating_keys = active_inv['Match_Key'].tolist()
+            else:
+                investigating_keys = []
+        else:
+            investigating_keys = []
+            active_inv = pd.DataFrame()
+
         # 2. Filter by MDM if toggle is ON
         if filter_mdm:
             if df_mdm.empty or 'Date' not in df_mdm.columns:
@@ -196,11 +212,15 @@ with tab_pending:
         final_target['Paid (₹)'] = final_target['Match_Key'].apply(lambda k: paid_amounts.get(k, 0))
         final_target['Due (₹)'] = target_fee - final_target['Paid (₹)']
         
-        pending_students = final_target[final_target['Due (₹)'] > 0].copy()
+        # Separate pending vs under investigation
+        all_pending_unpaid = final_target[final_target['Due (₹)'] > 0].copy()
+        
+        pending_students = all_pending_unpaid[~all_pending_unpaid['Match_Key'].isin(investigating_keys)].copy()
+        investigation_students = all_pending_unpaid[all_pending_unpaid['Match_Key'].isin(investigating_keys)].copy()
         
         if pending_students.empty:
             msg = "present today" if filter_mdm else "in the target list"
-            st.success(f"🎉 Fantastic! All targeted students {msg} have paid their {pending_fee_type} fees in full.")
+            st.success(f"🎉 Fantastic! All targeted students {msg} have either paid their {pending_fee_type} fees in full or are under investigation.")
         else:
             msg = "present today" if filter_mdm else "overall"
             st.markdown(f"The following students are **{msg}** but have **not yet paid the full ₹{target_fee}** for {pending_fee_type}:")
@@ -209,17 +229,92 @@ with tab_pending:
             classes_present = [c for c in pending_students['Class'].unique() if str(c).strip()]
             classes_present.sort(key=lambda x: class_order.get(x, 99))
             
+            edited_dfs = [] # To store all data editors
+            
             for cls in classes_present:
                 cls_pending = pending_students[pending_students['Class'] == cls].copy()
                 cls_pending['Roll_Num'] = pd.to_numeric(cls_pending['Roll'], errors='coerce').fillna(999)
                 cls_pending = cls_pending.sort_values('Roll_Num')
                 
+                # Add checkbox column for investigations
+                cls_pending.insert(0, 'Investigate 🔍', False)
+                
                 with st.expander(f"📖 {cls} - {len(cls_pending)} Student(s) Pending", expanded=True):
-                    st.dataframe(
-                        cls_pending[['Section', 'Roll', 'Name', 'Paid (₹)', 'Due (₹)']], 
+                    st.caption("If a student claims they paid, check their box below to move them to the Investigation List.")
+                    edited_df = st.data_editor(
+                        cls_pending[['Investigate 🔍', 'Class', 'Section', 'Roll', 'Name', 'Paid (₹)', 'Due (₹)']], 
                         hide_index=True, 
-                        use_container_width=True
+                        use_container_width=True,
+                        disabled=['Class', 'Section', 'Roll', 'Name', 'Paid (₹)', 'Due (₹)'],
+                        column_config={'Class': None}, # Hidden because it's in the expander header
+                        key=f"edit_pending_{cls}_{pending_fee_type}"
                     )
+                    edited_dfs.append(edited_df)
+            
+            # --- Save New Investigations Button ---
+            st.write("")
+            if st.button("🚨 Move Selected to Investigation List", type="primary"):
+                if edited_dfs:
+                    combined_edits = pd.concat(edited_dfs)
+                    new_flags = combined_edits[combined_edits['Investigate 🔍'] == True]
+                    
+                    if not new_flags.empty:
+                        gc_write = get_gspread_client()
+                        ws_invest = gc_write.open("SCH_Exam_Fees").worksheet("Investigation_List")
+                        
+                        for _, r in new_flags.iterrows():
+                            ws_invest.append_row([
+                                r['Class'], r['Section'], r['Roll'], r['Name'],
+                                pending_fee_type, today_str, 'Investigating'
+                            ])
+                            
+                        load_data.clear()
+                        st.success(f"Successfully moved {len(new_flags)} student(s) to the Investigation List!")
+                        st.rerun()
+                    else:
+                        st.info("No students selected to flag.")
+
+        # --- Display Active Investigations & Resolution ---
+        st.divider()
+        if not active_inv.empty:
+            st.markdown(f"### 🔍 Active Investigations ({pending_fee_type})")
+            st.info("These students are skipped in reminders because they claim they already paid. Please check with other teachers or look for alternate spellings. Once verified/resolved, check the box below to remove them from this list.")
+            
+            # Combine the active investigation database info with current dues
+            active_display = active_inv.copy()
+            active_display.insert(0, 'Resolve Flag ✅', False)
+            
+            edited_inv = st.data_editor(
+                active_display[['Resolve Flag ✅', 'Class', 'Section', 'Roll', 'Name', 'Date_Flagged', 'Match_Key']],
+                hide_index=True,
+                use_container_width=True,
+                disabled=['Class', 'Section', 'Roll', 'Name', 'Date_Flagged', 'Match_Key'],
+                column_config={'Match_Key': None} # Hidden
+            )
+            
+            if st.button("✅ Mark Selected as Resolved", type="secondary"):
+                resolved_rows = edited_inv[edited_inv['Resolve Flag ✅'] == True]
+                if not resolved_rows.empty:
+                    resolved_keys = resolved_rows['Match_Key'].tolist()
+                    
+                    # Keep only the rows in df_investigate that are NOT being resolved
+                    new_inv_df = df_investigate[~df_investigate.apply(lambda r: safe_key(r.get('Class',''), r.get('Roll',''), r.get('Name','')), axis=1).isin(resolved_keys)]
+                    
+                    # Rewrite the sheet
+                    gc_write = get_gspread_client()
+                    sh = gc_write.open("SCH_Exam_Fees")
+                    ws_invest = sh.worksheet("Investigation_List")
+                    ws_invest.clear()
+                    
+                    if not new_inv_df.empty:
+                        ws_invest.update([new_inv_df.columns.values.tolist()] + new_inv_df.fillna("").astype(str).values.tolist())
+                    else:
+                        ws_invest.append_row(["Class", "Section", "Roll", "Name", "Collection Type", "Date_Flagged", "Status"])
+                    
+                    load_data.clear()
+                    st.success(f"Resolved {len(resolved_rows)} investigation(s)!")
+                    st.rerun()
+
 
 # ==========================================
 # TAB 1: FUND COLLECTION FORM (BATCH MODE)

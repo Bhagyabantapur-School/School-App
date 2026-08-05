@@ -86,6 +86,7 @@ def refresh_exam_data():
     fetch_routine_data.clear()
     init_subject_map.clear()
     fetch_teacher_status.clear()
+    fetch_student_photos.clear()
     
     # Safely clear active grading cache to prevent stale data
     for key in list(st.session_state.keys()):
@@ -96,6 +97,20 @@ def refresh_exam_data():
 def fetch_mdm_log():
     try: return pd.DataFrame(init_db_sheet().worksheet("mdm_log").get_all_records()).astype(str)
     except Exception: return pd.DataFrame()
+
+@st.cache_data(ttl=300)
+def fetch_student_photos():
+    try:
+        db = init_db_sheet()
+        # EXPLICITLY targeting the students_master tab as requested
+        try:
+            df = pd.DataFrame(db.worksheet("students_master").get_all_records()).astype(str)
+            if 'Thumb_URL' in df.columns:
+                return df[['Class', 'Roll', 'Thumb_URL']]
+        except WorksheetNotFound:
+            pass
+    except Exception: pass
+    return pd.DataFrame(columns=["Class", "Roll", "Thumb_URL"])
 
 @st.cache_data(ttl=300)
 def fetch_routine_data():
@@ -599,7 +614,7 @@ elif st.session_state.user_role == "teacher":
                         state_key = f"roster_{exam_id}"
                         editor_key = f"editor_{exam_id}"
                         
-                        if state_key not in st.session_state:
+                        if state_key not in st.session_state or 'Thumb_URL' not in st.session_state[state_key].columns:
                             all_marks = fetch_exam_marks()
                             existing_marks = pd.DataFrame()
                             if not all_marks.empty:
@@ -607,6 +622,13 @@ elif st.session_state.user_role == "teacher":
                             
                             roster = mdm_present[['Class', 'Roll', 'Name']].copy()
                             
+                            # Fetch photos exactly from students_master
+                            photos_df = fetch_student_photos()
+                            if not photos_df.empty:
+                                roster = pd.merge(roster, photos_df, on=['Class', 'Roll'], how='left')
+                            else:
+                                roster['Thumb_URL'] = None
+                                
                             if not existing_marks.empty:
                                 existing_subset = existing_marks[['Class', 'Roll', 'Actual_Marks', 'Extra_Marks', 'Total_Marks', 'Percentage']].drop_duplicates(subset=['Class', 'Roll'])
                                 roster = pd.merge(roster, existing_subset, on=['Class', 'Roll'], how='left')
@@ -661,6 +683,7 @@ elif st.session_state.user_role == "teacher":
                             on_change=apply_live_edits,
                             column_config={
                                 "Class": None, 
+                                "Thumb_URL": st.column_config.ImageColumn("📸", width="small"), # STAMP SIZE PHOTO ACTIVATED
                                 "Roll": st.column_config.TextColumn("Roll", width="small", disabled=True),
                                 "Name": st.column_config.TextColumn("Name", width="medium", disabled=True),
                                 "Actual_Marks": st.column_config.NumberColumn(f"Actual (/{int(e_fm)})", min_value=0.0, max_value=e_fm, required=True, width="small"),

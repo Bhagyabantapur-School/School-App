@@ -147,7 +147,6 @@ def fetch_student_photos():
             df.columns = df.iloc[0].astype(str).str.strip()
             df = df[1:].reset_index(drop=True)
             
-            # Now requires Section to ensure IV A and IV B photos don't mix!
             if 'Thumb_URL' in df.columns and 'Class' in df.columns and 'Roll' in df.columns:
                 if 'Section' not in df.columns:
                     df['Section'] = 'A'
@@ -646,7 +645,6 @@ elif st.session_state.user_role == "teacher":
                     
                     st.markdown("---")
                     st.subheader(f"Entering marks for: {e_sub}")
-                    
                     st.info(f"🎯 **Full Marks:** {int(e_fm)} (Read-Only)")
                     
                     mdm = fetch_mdm_log()
@@ -663,7 +661,6 @@ elif st.session_state.user_role == "teacher":
                     else:
                         st.success(f"✅ Found {len(mdm_present)} students present on {e_date}.")
                         
-                        # --- BUILD ROSTER AND FETCH PHOTOS WITH STRICT SECTION ISOLATION ---
                         all_marks = fetch_exam_marks()
                         existing_marks = pd.DataFrame()
                         if not all_marks.empty:
@@ -674,7 +671,6 @@ elif st.session_state.user_role == "teacher":
                         roster['Section'] = roster['Section'].astype(str).str.strip().str.upper()
                         roster['Roll'] = roster['Roll'].astype(str).str.strip()
                         
-                        # 🛡️ ANTI-DUPLICATION SHIELD
                         roster = roster.drop_duplicates(subset=['Class', 'Section', 'Roll']).reset_index(drop=True)
                         
                         photos_df = fetch_student_photos()
@@ -707,18 +703,9 @@ elif st.session_state.user_role == "teacher":
                             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe:
                                 roster['Photo'] = list(exe.map(get_secure_photo_uri, roster['Thumb_URL'].tolist()))
 
-                        # --- RENDER CARD-STYLE ROSTER ---
-                        st.markdown("### Grade Entry Roster")
-                        st.markdown('<div class="roster-container">', unsafe_allow_html=True)
-                        
-                        hc1, hc2, hc3, hc4, hc5 = st.columns([1.2, 3, 2, 2, 1.8])
-                        hc3.markdown("<div style='font-size:13px; font-weight:bold; text-align:center;'>Act</div>", unsafe_allow_html=True)
-                        hc4.markdown("<div style='font-size:13px; font-weight:bold; text-align:center;'>Ext(+)</div>", unsafe_allow_html=True)
-                        hc5.markdown("<div style='font-size:13px; font-weight:bold; text-align:center;'>Res</div>", unsafe_allow_html=True)
-                        st.divider()
-
+                        # --- NEW: LIVE PRE-COMPUTATION & RANKING ENGINE ---
+                        live_totals = []
                         for idx, r in roster.iterrows():
-                            # Generating a completely unique key using the row index
                             rk = f"{exam_id}_{r['Roll']}_{idx}"
                             actual_key = f"act_{rk}"
                             extra_key = f"ext_{rk}"
@@ -733,17 +720,63 @@ elif st.session_state.user_role == "teacher":
                             act_val = st.session_state[actual_key]
                             ext_val = st.session_state[extra_key]
                             
+                            if act_val is not None:
+                                live_totals.append(act_val + (ext_val if ext_val is not None else 0.0))
+                            else:
+                                live_totals.append(np.nan)
+                                
+                        roster['Live_Total'] = live_totals
+                        roster['Rank'] = roster['Live_Total'].rank(method='min', ascending=False, na_option='bottom')
+                        
+                        st.markdown("### Grade Entry Roster")
+                        
+                        # --- TOGGLE SORTING ---
+                        sort_col1, sort_col2 = st.columns([1, 1])
+                        with sort_col1:
+                            sort_by_rank = st.toggle("🏆 Sort by Rank")
+                        with sort_col2:
+                            if sort_by_rank:
+                                st.caption("⚠️ *Live sorting is ON.*")
+                                
+                        if sort_by_rank:
+                            roster['Numeric_Roll'] = pd.to_numeric(roster['Roll'], errors='coerce')
+                            roster = roster.sort_values(by=['Live_Total', 'Numeric_Roll'], ascending=[False, True])
+                        else:
+                            roster['Numeric_Roll'] = pd.to_numeric(roster['Roll'], errors='coerce')
+                            roster = roster.sort_values(by=['Numeric_Roll'])
+
+                        st.markdown('<div class="roster-container">', unsafe_allow_html=True)
+                        
+                        hc1, hc2, hc3, hc4, hc5 = st.columns([1.2, 3, 2, 2, 1.8])
+                        hc3.markdown("<div style='font-size:13px; font-weight:bold; text-align:center;'>Act</div>", unsafe_allow_html=True)
+                        hc4.markdown("<div style='font-size:13px; font-weight:bold; text-align:center;'>Ext(+)</div>", unsafe_allow_html=True)
+                        hc5.markdown("<div style='font-size:13px; font-weight:bold; text-align:center;'>Res</div>", unsafe_allow_html=True)
+                        st.divider()
+
+                        for idx, r in roster.iterrows():
+                            rk = f"{exam_id}_{r['Roll']}_{idx}"
+                            actual_key = f"act_{rk}"
+                            extra_key = f"ext_{rk}"
+                            
+                            act_val = st.session_state[actual_key]
+                            ext_val = st.session_state[extra_key]
+                            
                             tot_val = None
                             pct_val = None
                             if act_val is not None:
                                 tot_val = act_val + (ext_val if ext_val is not None else 0.0)
                                 pct_val = round((tot_val / e_fm) * 100, 1) if e_fm > 0 else 0.0
 
+                            if pd.notna(r['Rank']):
+                                rank_html = f"<span style='background-color:#ffeb3b; color:#856404; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:11px;'>🏆 #{int(r['Rank'])}</span>"
+                            else:
+                                rank_html = f"<span style='background-color:#e9ecef; color:#6c757d; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:11px;'>-</span>"
+
                             c1, c2, c3, c4, c5 = st.columns([1.2, 3, 2, 2, 1.8])
                             with c1: 
                                 st.image(r['Photo'], width=65) 
                             with c2: 
-                                st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']}</span></div>", unsafe_allow_html=True)
+                                st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} &nbsp;{rank_html}</span></div>", unsafe_allow_html=True)
                             with c3: 
                                 st.number_input("Act", min_value=0.0, max_value=float(e_fm), key=actual_key, label_visibility="collapsed")
                             with c4: 

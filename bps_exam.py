@@ -87,6 +87,7 @@ def refresh_exam_data():
     init_subject_map.clear()
     fetch_teacher_status.clear()
     
+    # Safely clear active grading cache to prevent stale data
     for key in list(st.session_state.keys()):
         if key.startswith("roster_") or key.startswith("editor_"):
             del st.session_state[key]
@@ -303,14 +304,15 @@ def fetch_exam_schedules():
 @st.cache_data(ttl=300)
 def fetch_exam_marks():
     sh = init_exam_sheet()
-    ws = ensure_worksheet(sh, "marks", ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks"])
+    ws = ensure_worksheet(sh, "marks", ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks", "Percentage"])
     records = ws.get_all_records()
     
     if not records:
-        return pd.DataFrame(columns=["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks"])
+        return pd.DataFrame(columns=["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks", "Percentage"])
         
     df = pd.DataFrame(records)
-    # Legacy Migration Support for old marks
+    
+    # Automatic Legacy Database Upgrades
     if 'Marks_Obtained' in df.columns and 'Actual_Marks' not in df.columns:
         df['Actual_Marks'] = df['Marks_Obtained']
         df['Extra_Marks'] = 0
@@ -318,6 +320,9 @@ def fetch_exam_marks():
         
     if 'Full_Marks' not in df.columns:
         df['Full_Marks'] = "50"
+        
+    if 'Percentage' not in df.columns:
+        df['Percentage'] = ""
         
     return df.astype(str)
 
@@ -400,12 +405,13 @@ if st.session_state.user_role == "admin":
             st.rerun()
 
     with tabs[1]:
-        st.markdown("<div class='header-card'><h4>➕ Create Exam Schedule</h4><p style='margin:0; font-size:13px;'>Teachers are automatically detected from the <b>Master Subject Map</b>!</p></div>", unsafe_allow_html=True)
+        st.markdown("<div class='header-card'><h4>➕ Create Exam Schedule</h4><p style='margin:0; font-size:13px;'>Teachers are auto-detected. Adjust the <b>Full Marks</b> specifically for each class directly in the grid below!</p></div>", unsafe_allow_html=True)
         
         c1, c2, c3 = st.columns([2, 2, 1])
         ex_date = c1.date_input("Exam Date", datetime.now(IST).date()).strftime("%d-%m-%Y")
         ex_sub = c2.selectbox("Select Subject", SUBJECT_OPTIONS)
-        ex_full_marks = c3.number_input("Full Marks", min_value=1, value=50, step=1)
+        # Default value just to quick-fill the grid, admin edits the exact marks per row below
+        default_batch_fm = c3.number_input("Default Batch Marks", min_value=1, value=50, step=1, help="This fills the grid below. You can change them class-wise there.")
         
         c4, c5 = st.columns(2)
         ex_classes = c4.multiselect("Select Class(es)", CLASS_OPTIONS, default=["CLASS III", "CLASS IV"])
@@ -413,7 +419,7 @@ if st.session_state.user_role == "admin":
         
         if ex_classes and ex_secs:
             st.markdown("---")
-            st.markdown("##### 🔍 Review Assigned Invigilators")
+            st.markdown("##### 🔍 Verify Invigilators & Class-Wise Full Marks")
             
             preview_rows = []
             for cls_name in ex_classes:
@@ -425,11 +431,12 @@ if st.session_state.user_role == "admin":
                         "Section": sec_name,
                         "Subject": ex_sub,
                         "Teacher": auto_teacher,
-                        "Full_Marks": ex_full_marks
+                        "Full_Marks": default_batch_fm
                     })
             
             preview_df = pd.DataFrame(preview_rows)
             
+            # The Admin can edit the Full Marks per class directly in this grid
             edited_schedule_grid = st.data_editor(
                 preview_df,
                 column_config={
@@ -438,7 +445,7 @@ if st.session_state.user_role == "admin":
                     "Section": st.column_config.TextColumn("Section", disabled=True),
                     "Subject": st.column_config.TextColumn("Subject", disabled=True),
                     "Teacher": st.column_config.SelectboxColumn("Invigilator / Grader", options=TEACHER_LIST, required=True),
-                    "Full_Marks": st.column_config.NumberColumn("Full Marks", min_value=1, required=True)
+                    "Full_Marks": st.column_config.NumberColumn("Full Marks (Edit if needed)", min_value=1, required=True)
                 },
                 hide_index=True,
                 use_container_width=True
@@ -569,16 +576,16 @@ elif st.session_state.user_role == "teacher":
                     e_sec = exam_info['Section']
                     e_sub = exam_info['Subject']
                     
-                    e_fm = 50
+                    e_fm = 50.0
                     if 'Full_Marks' in exam_info and pd.notna(exam_info['Full_Marks']) and str(exam_info['Full_Marks']).strip() != "":
-                        try: e_fm = int(float(exam_info['Full_Marks']))
+                        try: e_fm = float(exam_info['Full_Marks'])
                         except: pass
                     
                     st.markdown("---")
                     st.subheader(f"Entering marks for: {e_sub}")
                     
-                    # MANDATORY FULL MARKS VERIFICATION
-                    confirmed_fm = st.number_input("🎯 Mandatory: Verify Full Marks for this Exam", min_value=1, value=e_fm, step=1, help="Actual Marks cannot exceed this value.")
+                    # Clean Read-Only Display for Teachers
+                    st.info(f"🎯 **Full Marks:** {int(e_fm)} (Read-Only)")
                     
                     mdm = fetch_mdm_log()
                     if not mdm.empty:
@@ -606,16 +613,18 @@ elif st.session_state.user_role == "teacher":
                             roster = mdm_present[['Class', 'Roll', 'Name']].copy()
                             
                             if not existing_marks.empty:
-                                existing_subset = existing_marks[['Class', 'Roll', 'Actual_Marks', 'Extra_Marks', 'Total_Marks']].drop_duplicates(subset=['Class', 'Roll'])
+                                existing_subset = existing_marks[['Class', 'Roll', 'Actual_Marks', 'Extra_Marks', 'Total_Marks', 'Percentage']].drop_duplicates(subset=['Class', 'Roll'])
                                 roster = pd.merge(roster, existing_subset, on=['Class', 'Roll'], how='left')
                             else:
                                 roster['Actual_Marks'] = None
                                 roster['Extra_Marks'] = 0.0
                                 roster['Total_Marks'] = None
+                                roster['Percentage'] = None
                                 
                             roster['Actual_Marks'] = pd.to_numeric(roster['Actual_Marks'], errors='coerce')
                             roster['Extra_Marks'] = pd.to_numeric(roster['Extra_Marks'], errors='coerce').fillna(0.0)
                             roster['Total_Marks'] = pd.to_numeric(roster['Total_Marks'], errors='coerce')
+                            roster['Percentage'] = pd.to_numeric(roster.get('Percentage', None), errors='coerce')
                             
                             st.session_state[state_key] = roster
 
@@ -634,11 +643,18 @@ elif st.session_state.user_role == "teacher":
                                 
                                 if pd.notna(actual):
                                     extra_val = float(extra) if pd.notna(extra) else 0.0
-                                    st.session_state[state_key].at[idx, 'Total_Marks'] = float(actual) + extra_val
+                                    total_val = float(actual) + extra_val
+                                    st.session_state[state_key].at[idx, 'Total_Marks'] = total_val
+                                    
+                                    if e_fm > 0:
+                                        st.session_state[state_key].at[idx, 'Percentage'] = round((total_val / e_fm) * 100, 1)
+                                    else:
+                                        st.session_state[state_key].at[idx, 'Percentage'] = 0.0
                                 else:
                                     st.session_state[state_key].at[idx, 'Total_Marks'] = None
+                                    st.session_state[state_key].at[idx, 'Percentage'] = None
 
-                        st.markdown(f"Fill in the **Actual Marks** and any **Extra Marks (+)**. The **Total** will automatically calculate in real-time.")
+                        st.markdown(f"Fill in the **Actual Marks** and any **Extra Marks (+)**. The **Total** and **Percentage** will calculate automatically in real-time.")
                         
                         edited_marks = st.data_editor(
                             st.session_state[state_key],
@@ -648,9 +664,10 @@ elif st.session_state.user_role == "teacher":
                                 "Class": st.column_config.TextColumn("Class", disabled=True),
                                 "Roll": st.column_config.TextColumn("Roll No.", disabled=True),
                                 "Name": st.column_config.TextColumn("Student Name", disabled=True),
-                                "Actual_Marks": st.column_config.NumberColumn(f"Actual Marks (out of {confirmed_fm})", min_value=0.0, max_value=float(confirmed_fm), required=True),
-                                "Extra_Marks": st.column_config.NumberColumn("Extra Marks (+)", default=0.0),
-                                "Total_Marks": st.column_config.NumberColumn("Total (Auto)", disabled=True)
+                                "Actual_Marks": st.column_config.NumberColumn(f"Actual (/{int(e_fm)})", min_value=0.0, max_value=e_fm, required=True),
+                                "Extra_Marks": st.column_config.NumberColumn("Extra (+)", default=0.0),
+                                "Total_Marks": st.column_config.NumberColumn("Total", disabled=True),
+                                "Percentage": st.column_config.NumberColumn("Percentage", format="%.1f %%", disabled=True)
                             },
                             hide_index=True,
                             use_container_width=True
@@ -665,6 +682,7 @@ elif st.session_state.user_role == "teacher":
                                     actual = float(r['Actual_Marks'])
                                     extra = float(r['Extra_Marks']) if pd.notna(r['Extra_Marks']) else 0.0
                                     total = actual + extra
+                                    pct = round((total / e_fm) * 100, 1) if e_fm > 0 else 0.0
                                     
                                     new_records.append({
                                         "Exam_ID": exam_id,
@@ -677,7 +695,8 @@ elif st.session_state.user_role == "teacher":
                                         "Actual_Marks": actual,
                                         "Extra_Marks": extra,
                                         "Total_Marks": total,
-                                        "Full_Marks": confirmed_fm
+                                        "Full_Marks": int(e_fm),
+                                        "Percentage": pct
                                     })
                                     
                             new_marks_df = pd.DataFrame(new_records)
@@ -694,7 +713,7 @@ elif st.session_state.user_role == "teacher":
                                 init_exam_sheet(), 
                                 "marks", 
                                 final_marks, 
-                                ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks"]
+                                ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks", "Percentage"]
                             )
                             
                             if state_key in st.session_state:
@@ -702,7 +721,7 @@ elif st.session_state.user_role == "teacher":
                             if editor_key in st.session_state:
                                 del st.session_state[editor_key]
                                 
-                            st.success(f"🎉 Marks saved successfully for {len(new_records)} students! Totals and Full Marks have been locked in.")
+                            st.success(f"🎉 Marks saved successfully for {len(new_records)} students! Totals and Percentages have been locked in.")
                             st.rerun()
         else:
             st.info("No exams have been scheduled in the system yet.")

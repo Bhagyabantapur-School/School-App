@@ -621,38 +621,47 @@ elif st.session_state.user_role == "teacher":
                                 roster['Total_Marks'] = None
                                 roster['Percentage'] = None
                                 
-                            roster['Actual_Marks'] = pd.to_numeric(roster['Actual_Marks'], errors='coerce')
-                            roster['Extra_Marks'] = pd.to_numeric(roster['Extra_Marks'], errors='coerce').fillna(0.0)
-                            roster['Total_Marks'] = pd.to_numeric(roster['Total_Marks'], errors='coerce')
-                            roster['Percentage'] = pd.to_numeric(roster.get('Percentage', None), errors='coerce')
+                            # Convert to correct float types so calculations work flawlessly
+                            roster['Actual_Marks'] = pd.to_numeric(roster['Actual_Marks'], errors='coerce').astype('float')
+                            roster['Extra_Marks'] = pd.to_numeric(roster['Extra_Marks'], errors='coerce').fillna(0.0).astype('float')
+                            roster['Total_Marks'] = pd.to_numeric(roster['Total_Marks'], errors='coerce').astype('float')
+                            roster['Percentage'] = pd.to_numeric(roster.get('Percentage', None), errors='coerce').astype('float')
                             
                             st.session_state[state_key] = roster
 
                         def apply_live_edits():
+                            # CREATE A DEEP COPY: This forces Streamlit to recognize it as brand new data and repaint the screen instantly
+                            df = st.session_state[state_key].copy()
                             edits = st.session_state[editor_key].get('edited_rows', {})
+                            
+                            # 1. Apply changes
                             for idx_str, changes in edits.items():
                                 idx = int(idx_str)
-                                
                                 if 'Actual_Marks' in changes:
-                                    st.session_state[state_key].at[idx, 'Actual_Marks'] = pd.to_numeric(changes['Actual_Marks'], errors='coerce')
+                                    df.at[idx, 'Actual_Marks'] = pd.to_numeric(changes['Actual_Marks'], errors='coerce')
                                 if 'Extra_Marks' in changes:
-                                    st.session_state[state_key].at[idx, 'Extra_Marks'] = pd.to_numeric(changes['Extra_Marks'], errors='coerce')
-                                
-                                actual = st.session_state[state_key].at[idx, 'Actual_Marks']
-                                extra = st.session_state[state_key].at[idx, 'Extra_Marks']
+                                    df.at[idx, 'Extra_Marks'] = pd.to_numeric(changes['Extra_Marks'], errors='coerce')
+                                    
+                            # 2. Recalculate everything
+                            for idx in df.index:
+                                actual = pd.to_numeric(df.at[idx, 'Actual_Marks'], errors='coerce')
+                                extra = pd.to_numeric(df.at[idx, 'Extra_Marks'], errors='coerce')
                                 
                                 if pd.notna(actual):
                                     extra_val = float(extra) if pd.notna(extra) else 0.0
                                     total_val = float(actual) + extra_val
-                                    st.session_state[state_key].at[idx, 'Total_Marks'] = total_val
+                                    df.at[idx, 'Total_Marks'] = total_val
                                     
                                     if e_fm > 0:
-                                        st.session_state[state_key].at[idx, 'Percentage'] = round((total_val / e_fm) * 100, 1)
+                                        df.at[idx, 'Percentage'] = round((total_val / e_fm) * 100, 1)
                                     else:
-                                        st.session_state[state_key].at[idx, 'Percentage'] = 0.0
+                                        df.at[idx, 'Percentage'] = 0.0
                                 else:
-                                    st.session_state[state_key].at[idx, 'Total_Marks'] = None
-                                    st.session_state[state_key].at[idx, 'Percentage'] = None
+                                    df.at[idx, 'Total_Marks'] = None
+                                    df.at[idx, 'Percentage'] = None
+                                    
+                            # Overwrite the old memory with the fresh copy
+                            st.session_state[state_key] = df
 
                         st.markdown(f"Fill in the **Actual Marks** and any **Extra Marks (+)**. The **Total** and **Percentage** will calculate automatically in real-time.")
                         

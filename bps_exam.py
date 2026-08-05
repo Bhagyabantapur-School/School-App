@@ -87,7 +87,6 @@ def refresh_exam_data():
     init_subject_map.clear()
     fetch_teacher_status.clear()
     
-    # CLEAR LIVE MEMORY CACHE ON REFRESH
     for key in list(st.session_state.keys()):
         if key.startswith("roster_") or key.startswith("editor_"):
             del st.session_state[key]
@@ -290,27 +289,35 @@ def get_auto_teacher(cls_name, sec_name, sub_name):
 @st.cache_data(ttl=300)
 def fetch_exam_schedules():
     sh = init_exam_sheet()
-    ws = ensure_worksheet(sh, "schedules", ["Exam_ID", "Date", "Class", "Section", "Subject", "Teacher"])
+    ws = ensure_worksheet(sh, "schedules", ["Exam_ID", "Date", "Class", "Section", "Subject", "Teacher", "Full_Marks"])
     records = ws.get_all_records()
     if not records:
-        return pd.DataFrame(columns=["Exam_ID", "Date", "Class", "Section", "Subject", "Teacher"])
-    return pd.DataFrame(records).astype(str)
+        return pd.DataFrame(columns=["Exam_ID", "Date", "Class", "Section", "Subject", "Teacher", "Full_Marks"])
+        
+    df = pd.DataFrame(records)
+    # Legacy Migration Support for old schedules
+    if 'Full_Marks' not in df.columns:
+        df['Full_Marks'] = "50"
+    return df.astype(str)
 
 @st.cache_data(ttl=300)
 def fetch_exam_marks():
     sh = init_exam_sheet()
-    ws = ensure_worksheet(sh, "marks", ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks"])
+    ws = ensure_worksheet(sh, "marks", ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks"])
     records = ws.get_all_records()
     
     if not records:
-        return pd.DataFrame(columns=["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks"])
+        return pd.DataFrame(columns=["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks"])
         
     df = pd.DataFrame(records)
-    # Legacy Migration Support
+    # Legacy Migration Support for old marks
     if 'Marks_Obtained' in df.columns and 'Actual_Marks' not in df.columns:
         df['Actual_Marks'] = df['Marks_Obtained']
         df['Extra_Marks'] = 0
         df['Total_Marks'] = df['Marks_Obtained']
+        
+    if 'Full_Marks' not in df.columns:
+        df['Full_Marks'] = "50"
         
     return df.astype(str)
 
@@ -340,7 +347,6 @@ if st.session_state.user_role == "admin":
         
         with st.expander("📊 View Teacher Acknowledgement Status", expanded=True):
             status_df = fetch_teacher_status()
-            
             all_teachers = pd.DataFrame({"Teacher": [t for t in TEACHER_LIST if t != "SUKHAMAY KISKU"]})
             
             if not status_df.empty and 'Teacher' in status_df.columns:
@@ -396,13 +402,14 @@ if st.session_state.user_role == "admin":
     with tabs[1]:
         st.markdown("<div class='header-card'><h4>➕ Create Exam Schedule</h4><p style='margin:0; font-size:13px;'>Teachers are automatically detected from the <b>Master Subject Map</b>!</p></div>", unsafe_allow_html=True)
         
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns([2, 2, 1])
         ex_date = c1.date_input("Exam Date", datetime.now(IST).date()).strftime("%d-%m-%Y")
         ex_sub = c2.selectbox("Select Subject", SUBJECT_OPTIONS)
+        ex_full_marks = c3.number_input("Full Marks", min_value=1, value=50, step=1)
         
-        c3, c4 = st.columns(2)
-        ex_classes = c3.multiselect("Select Class(es)", CLASS_OPTIONS, default=["CLASS III", "CLASS IV"])
-        ex_secs = c4.multiselect("Select Section(s)", SECTIONS, default=["A"])
+        c4, c5 = st.columns(2)
+        ex_classes = c4.multiselect("Select Class(es)", CLASS_OPTIONS, default=["CLASS III", "CLASS IV"])
+        ex_secs = c5.multiselect("Select Section(s)", SECTIONS, default=["A"])
         
         if ex_classes and ex_secs:
             st.markdown("---")
@@ -417,7 +424,8 @@ if st.session_state.user_role == "admin":
                         "Class": cls_name,
                         "Section": sec_name,
                         "Subject": ex_sub,
-                        "Teacher": auto_teacher
+                        "Teacher": auto_teacher,
+                        "Full_Marks": ex_full_marks
                     })
             
             preview_df = pd.DataFrame(preview_rows)
@@ -429,7 +437,8 @@ if st.session_state.user_role == "admin":
                     "Class": st.column_config.TextColumn("Class", disabled=True),
                     "Section": st.column_config.TextColumn("Section", disabled=True),
                     "Subject": st.column_config.TextColumn("Subject", disabled=True),
-                    "Teacher": st.column_config.SelectboxColumn("Invigilator / Grader", options=TEACHER_LIST, required=True)
+                    "Teacher": st.column_config.SelectboxColumn("Invigilator / Grader", options=TEACHER_LIST, required=True),
+                    "Full_Marks": st.column_config.NumberColumn("Full Marks", min_value=1, required=True)
                 },
                 hide_index=True,
                 use_container_width=True
@@ -447,7 +456,8 @@ if st.session_state.user_role == "admin":
                         "Class": r['Class'],
                         "Section": r['Section'],
                         "Subject": r['Subject'],
-                        "Teacher": r['Teacher']
+                        "Teacher": r['Teacher'],
+                        "Full_Marks": r['Full_Marks']
                     })
                 
                 new_df = pd.DataFrame(new_records)
@@ -458,7 +468,7 @@ if st.session_state.user_role == "admin":
                 else:
                     final_schedules = new_df
                     
-                overwrite_sheet(init_exam_sheet(), "schedules", final_schedules, ["Exam_ID", "Date", "Class", "Section", "Subject", "Teacher"])
+                overwrite_sheet(init_exam_sheet(), "schedules", final_schedules, ["Exam_ID", "Date", "Class", "Section", "Subject", "Teacher", "Full_Marks"])
                 st.success(f"✅ Successfully scheduled {len(new_records)} exam(s) for {ex_sub} on {ex_date}!")
                 st.rerun()
         else:
@@ -468,13 +478,13 @@ if st.session_state.user_role == "admin":
         st.subheader("Upcoming & Past Exams")
         schedules = fetch_exam_schedules()
         if not schedules.empty:
-            st.dataframe(schedules[['Date', 'Class', 'Section', 'Subject', 'Teacher']], use_container_width=True, hide_index=True)
+            st.dataframe(schedules[['Date', 'Class', 'Section', 'Subject', 'Teacher', 'Full_Marks']], use_container_width=True, hide_index=True)
             
             st.markdown("##### 🗑️ Delete an Exam")
             del_id = st.selectbox("Select Exam to Remove", ["Select..."] + schedules['Exam_ID'].tolist())
             if del_id != "Select..." and st.button("Delete Schedule", type="primary"):
                 filtered_df = schedules[schedules['Exam_ID'] != del_id]
-                overwrite_sheet(init_exam_sheet(), "schedules", filtered_df, ["Exam_ID", "Date", "Class", "Section", "Subject", "Teacher"])
+                overwrite_sheet(init_exam_sheet(), "schedules", filtered_df, ["Exam_ID", "Date", "Class", "Section", "Subject", "Teacher", "Full_Marks"])
                 st.success("Deleted!")
                 st.rerun()
         else:
@@ -499,7 +509,6 @@ elif st.session_state.user_role == "teacher":
             update_teacher_status(st.session_state.user_name, "Viewed 👀")
             
         subject_map_df = init_subject_map()
-        
         my_map_df = subject_map_df[subject_map_df['Teacher'] == st.session_state.user_name].copy()
         my_map_df = sort_display_df(my_map_df)
         
@@ -560,8 +569,16 @@ elif st.session_state.user_role == "teacher":
                     e_sec = exam_info['Section']
                     e_sub = exam_info['Subject']
                     
+                    e_fm = 50
+                    if 'Full_Marks' in exam_info and pd.notna(exam_info['Full_Marks']) and str(exam_info['Full_Marks']).strip() != "":
+                        try: e_fm = int(float(exam_info['Full_Marks']))
+                        except: pass
+                    
                     st.markdown("---")
                     st.subheader(f"Entering marks for: {e_sub}")
+                    
+                    # MANDATORY FULL MARKS VERIFICATION
+                    confirmed_fm = st.number_input("🎯 Mandatory: Verify Full Marks for this Exam", min_value=1, value=e_fm, step=1, help="Actual Marks cannot exceed this value.")
                     
                     mdm = fetch_mdm_log()
                     if not mdm.empty:
@@ -577,7 +594,6 @@ elif st.session_state.user_role == "teacher":
                     else:
                         st.success(f"✅ Found {len(mdm_present)} students present on {e_date}.")
                         
-                        # --- LIVE MEMORY CACHE SETUP ---
                         state_key = f"roster_{exam_id}"
                         editor_key = f"editor_{exam_id}"
                         
@@ -603,7 +619,6 @@ elif st.session_state.user_role == "teacher":
                             
                             st.session_state[state_key] = roster
 
-                        # --- LIVE MATH CALCULATION TRIGGER ---
                         def apply_live_edits():
                             edits = st.session_state[editor_key].get('edited_rows', {})
                             for idx_str, changes in edits.items():
@@ -623,9 +638,8 @@ elif st.session_state.user_role == "teacher":
                                 else:
                                     st.session_state[state_key].at[idx, 'Total_Marks'] = None
 
-                        st.markdown("Fill in the **Actual Marks** and any **Extra Marks (+)**. The **Total** will automatically calculate in real-time.")
+                        st.markdown(f"Fill in the **Actual Marks** and any **Extra Marks (+)**. The **Total** will automatically calculate in real-time.")
                         
-                        # --- DISPLAY LIVE MEMORY TABLE ---
                         edited_marks = st.data_editor(
                             st.session_state[state_key],
                             key=editor_key,
@@ -634,7 +648,7 @@ elif st.session_state.user_role == "teacher":
                                 "Class": st.column_config.TextColumn("Class", disabled=True),
                                 "Roll": st.column_config.TextColumn("Roll No.", disabled=True),
                                 "Name": st.column_config.TextColumn("Student Name", disabled=True),
-                                "Actual_Marks": st.column_config.NumberColumn("Actual Marks", min_value=0, required=True),
+                                "Actual_Marks": st.column_config.NumberColumn(f"Actual Marks (out of {confirmed_fm})", min_value=0.0, max_value=float(confirmed_fm), required=True),
                                 "Extra_Marks": st.column_config.NumberColumn("Extra Marks (+)", default=0.0),
                                 "Total_Marks": st.column_config.NumberColumn("Total (Auto)", disabled=True)
                             },
@@ -662,7 +676,8 @@ elif st.session_state.user_role == "teacher":
                                         "Name": r['Name'],
                                         "Actual_Marks": actual,
                                         "Extra_Marks": extra,
-                                        "Total_Marks": total
+                                        "Total_Marks": total,
+                                        "Full_Marks": confirmed_fm
                                     })
                                     
                             new_marks_df = pd.DataFrame(new_records)
@@ -679,16 +694,15 @@ elif st.session_state.user_role == "teacher":
                                 init_exam_sheet(), 
                                 "marks", 
                                 final_marks, 
-                                ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks"]
+                                ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks"]
                             )
                             
-                            # SAFETY FIX: Safely clear the memory cache
                             if state_key in st.session_state:
                                 del st.session_state[state_key]
                             if editor_key in st.session_state:
                                 del st.session_state[editor_key]
                                 
-                            st.success(f"🎉 Marks saved successfully for {len(new_records)} students! Totals have been locked in.")
+                            st.success(f"🎉 Marks saved successfully for {len(new_records)} students! Totals and Full Marks have been locked in.")
                             st.rerun()
         else:
             st.info("No exams have been scheduled in the system yet.")

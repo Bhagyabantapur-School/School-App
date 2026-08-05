@@ -581,7 +581,6 @@ elif st.session_state.user_role == "teacher":
                         state_key = f"roster_{exam_id}"
                         editor_key = f"editor_{exam_id}"
                         
-                        # Only fetch from DB if it's the very first time opening this exam during this session
                         if state_key not in st.session_state:
                             all_marks = fetch_exam_marks()
                             existing_marks = pd.DataFrame()
@@ -606,18 +605,15 @@ elif st.session_state.user_role == "teacher":
 
                         # --- LIVE MATH CALCULATION TRIGGER ---
                         def apply_live_edits():
-                            # Intercept the edits the exact second the teacher types them
                             edits = st.session_state[editor_key].get('edited_rows', {})
                             for idx_str, changes in edits.items():
                                 idx = int(idx_str)
                                 
-                                # Update memory safely
                                 if 'Actual_Marks' in changes:
                                     st.session_state[state_key].at[idx, 'Actual_Marks'] = pd.to_numeric(changes['Actual_Marks'], errors='coerce')
                                 if 'Extra_Marks' in changes:
                                     st.session_state[state_key].at[idx, 'Extra_Marks'] = pd.to_numeric(changes['Extra_Marks'], errors='coerce')
                                 
-                                # Automatically calculate and lock the Total in memory
                                 actual = st.session_state[state_key].at[idx, 'Actual_Marks']
                                 extra = st.session_state[state_key].at[idx, 'Extra_Marks']
                                 
@@ -631,7 +627,7 @@ elif st.session_state.user_role == "teacher":
                         
                         # --- DISPLAY LIVE MEMORY TABLE ---
                         edited_marks = st.data_editor(
-                            st.session_state[state_key],  # Pull directly from memory, not the DB
+                            st.session_state[state_key],
                             key=editor_key,
                             on_change=apply_live_edits,
                             column_config={
@@ -650,7 +646,6 @@ elif st.session_state.user_role == "teacher":
                             all_marks = fetch_exam_marks() 
                             new_records = []
                             
-                            # Grab everything that was locked into memory
                             for _, r in st.session_state[state_key].iterrows():
                                 if pd.notna(r['Actual_Marks']) and str(r['Actual_Marks']).strip() != "":
                                     actual = float(r['Actual_Marks'])
@@ -687,10 +682,13 @@ elif st.session_state.user_role == "teacher":
                                 ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks"]
                             )
                             
-                            # Safely clear the memory cache so the next load is completely fresh from the DB
-                            del st.session_state[state_key]
+                            # SAFETY FIX: Safely clear the memory cache
+                            if state_key in st.session_state:
+                                del st.session_state[state_key]
                             if editor_key in st.session_state:
                                 del st.session_state[editor_key]
                                 
                             st.success(f"🎉 Marks saved successfully for {len(new_records)} students! Totals have been locked in.")
                             st.rerun()
+        else:
+            st.info("No exams have been scheduled in the system yet.")

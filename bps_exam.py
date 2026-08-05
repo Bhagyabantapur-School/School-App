@@ -7,7 +7,10 @@ import pytz
 import gspread
 from gspread.exceptions import SpreadsheetNotFound, WorksheetNotFound
 from google.oauth2.service_account import Credentials
+from google.auth.transport.requests import AuthorizedSession
 import numpy as np
+import base64
+import concurrent.futures
 
 # ==========================================
 # 1. AUTHENTICATION & SECURITY
@@ -43,6 +46,17 @@ def inject_security_css(user_name):
         .watermark {{ position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 9999; background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"><text x="50" y="150" fill="rgba(200, 200, 200, 0.15)" font-size="20" transform="rotate(-45 150 150)" font-family="Arial, sans-serif">{wm}</text></svg>'); background-repeat: repeat; }}
         .stButton>button {{ border-radius: 8px; font-weight: bold; }}
         .header-card {{ background-color: #f8f9fa; padding: 15px; border-radius: 10px; border-left: 5px solid #6f42c1; margin-bottom: 15px; }}
+        
+        /* Mobile-friendly roster card layout mapped from bps_digital.py */
+        @media (max-width: 768px) {{
+            .roster-container [data-testid="stHorizontalBlock"] {{ display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; align-items: center !important; width: 100% !important; }}
+            .roster-container [data-testid="column"] {{ display: block !important; min-width: 0 !important; margin-top: 0 !important; padding: 0 4px !important; }}
+            .roster-container [data-testid="column"]:nth-child(1) {{ flex: 0 0 65px !important; max-width: 65px !important; width: 65px !important; }}
+            .roster-container [data-testid="column"]:nth-child(2) {{ flex: 1 1 0% !important; min-width: 70px !important; overflow: hidden; }}
+            .roster-container [data-testid="column"]:nth-child(3) {{ flex: 0 0 65px !important; max-width: 65px !important; }}
+            .roster-container [data-testid="column"]:nth-child(4) {{ flex: 0 0 65px !important; max-width: 65px !important; }}
+            .roster-container [data-testid="column"]:nth-child(5) {{ flex: 0 0 50px !important; max-width: 50px !important; text-align: center; }}
+        }}
     </style><div class="watermark"></div>""", unsafe_allow_html=True)
 
 inject_security_css(st.session_state.user_name)
@@ -74,6 +88,9 @@ def init_routine_sheet():
     try: return gspread.authorize(get_google_credentials()).open("bps_routine")
     except Exception: return None
 
+@st.cache_resource
+def get_drive_session(): return AuthorizedSession(get_google_credentials())
+
 def ensure_worksheet(sh, title, headers):
     try: ws = sh.worksheet(title)
     except WorksheetNotFound:
@@ -90,9 +107,9 @@ def refresh_exam_data():
     fetch_student_photos.clear()
     
     # Safely clear active grading cache to prevent stale data
-    for key in list(st.session_state.keys()):
-        if key.startswith("roster_") or key.startswith("editor_"):
-            del st.session_state[key]
+    keys_to_clear = [key for key in st.session_state.keys() if key.startswith("act_") or key.startswith("ext_") or key.startswith("roster_")]
+    for key in keys_to_clear:
+        del st.session_state[key]
 
 @st.cache_data(ttl=300)
 def fetch_mdm_log():
@@ -100,33 +117,41 @@ def fetch_mdm_log():
     except Exception: return pd.DataFrame()
 
 # ---------------------------------------------------------
-# BULLETPROOF PHOTO ENGINE
+# SECURE PHOTO ENGINE (From bps_digital.py)
 # ---------------------------------------------------------
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_secure_image_bytes(file_id):
+    try:
+        r = get_drive_session().get(f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media")
+        return r.content if r.status_code == 200 else None
+    except Exception: return None
+
+def get_secure_photo_uri(url):
+    fb = "https://www.w3schools.com/howto/img_avatar.png"
+    if pd.isna(url) or url == "" or not isinstance(url, str): return fb
+    match = re.search(r"(?:id=|/d/)([\w-]+)", url)
+    if match:
+        b = fetch_secure_image_bytes(match.group(1))
+        if b: return f"data:image/jpeg;base64,{base64.b64encode(b).decode()}"
+    return url if url.startswith("http") else fb
+
 @st.cache_data(ttl=300)
 def fetch_student_photos():
     try:
         db = init_db_sheet()
         ws = db.worksheet("students_master")
-        
-        # Use get_all_values() to avoid strict header formatting crashes
         data = ws.get_all_values()
         
         if len(data) > 1:
-            # Let pandas build the grid to auto-pad any mismatched row lengths
             df = pd.DataFrame(data)
-            
-            # Extract header and strip spaces to catch "Thumb_URL "
             df.columns = df.iloc[0].astype(str).str.strip()
             df = df[1:].reset_index(drop=True)
             
             if 'Thumb_URL' in df.columns and 'Class' in df.columns and 'Roll' in df.columns:
                 photo_df = df[['Class', 'Roll', 'Thumb_URL']].copy()
-                
-                # Aggressively format Class and Roll to guarantee perfect merges
                 photo_df['Class'] = photo_df['Class'].astype(str).str.strip().str.upper()
                 photo_df['Roll'] = photo_df['Roll'].astype(str).str.strip()
                 photo_df['Thumb_URL'] = photo_df['Thumb_URL'].astype(str).str.strip()
-                
                 return photo_df
     except Exception as e: 
         print(f"Photo Fetch Error: {e}")
@@ -633,155 +658,116 @@ elif st.session_state.user_role == "teacher":
                     else:
                         st.success(f"✅ Found {len(mdm_present)} students present on {e_date}.")
                         
-                        state_key = f"roster_{exam_id}"
-                        editor_key = f"editor_{exam_id}"
+                        # --- BUILD ROSTER AND FETCH PHOTOS EXACTLY LIKE bps_digital.py ---
+                        all_marks = fetch_exam_marks()
+                        existing_marks = pd.DataFrame()
+                        if not all_marks.empty:
+                            existing_marks = all_marks[all_marks['Exam_ID'] == exam_id]
                         
-                        if state_key not in st.session_state or 'Thumb_URL' not in st.session_state[state_key].columns:
-                            all_marks = fetch_exam_marks()
-                            existing_marks = pd.DataFrame()
-                            if not all_marks.empty:
-                                existing_marks = all_marks[all_marks['Exam_ID'] == exam_id]
+                        roster = mdm_present[['Class', 'Roll', 'Name']].copy()
+                        roster['Class'] = roster['Class'].astype(str).str.strip().str.upper()
+                        roster['Roll'] = roster['Roll'].astype(str).str.strip()
+                        
+                        photos_df = fetch_student_photos()
+                        if not photos_df.empty:
+                            roster = pd.merge(roster, photos_df, on=['Class', 'Roll'], how='left')
+                        else:
+                            roster['Thumb_URL'] = None
                             
-                            # Standardize roster strings for perfect merging
-                            roster = mdm_present[['Class', 'Roll', 'Name']].copy()
-                            roster['Class'] = roster['Class'].astype(str).str.strip().str.upper()
-                            roster['Roll'] = roster['Roll'].astype(str).str.strip()
+                        if 'Thumb_URL' in roster.columns:
+                            roster['Thumb_URL'] = roster['Thumb_URL'].replace({"": None, "nan": None, "None": None})
                             
-                            # MERGE PHOTOS
-                            photos_df = fetch_student_photos()
-                            if not photos_df.empty:
-                                roster = pd.merge(roster, photos_df, on=['Class', 'Roll'], how='left')
-                            else:
-                                roster['Thumb_URL'] = None
-                                
-                            # Safe handling of empty image cells to prevent Streamlit rendering errors
-                            if 'Thumb_URL' in roster.columns:
-                                roster['Thumb_URL'] = roster['Thumb_URL'].replace({"": None, "nan": None, "None": None})
-                                
-                            if not existing_marks.empty:
-                                existing_subset = existing_marks[['Class', 'Roll', 'Actual_Marks', 'Extra_Marks', 'Total_Marks', 'Percentage']].drop_duplicates(subset=['Class', 'Roll'])
-                                existing_subset['Class'] = existing_subset['Class'].astype(str).str.strip().str.upper()
-                                existing_subset['Roll'] = existing_subset['Roll'].astype(str).str.strip()
-                                roster = pd.merge(roster, existing_subset, on=['Class', 'Roll'], how='left')
-                            else:
-                                roster['Actual_Marks'] = None
-                                roster['Extra_Marks'] = 0.0
-                                roster['Total_Marks'] = None
-                                roster['Percentage'] = None
-                                
-                            roster['Actual_Marks'] = pd.to_numeric(roster['Actual_Marks'], errors='coerce').astype('float')
-                            roster['Extra_Marks'] = pd.to_numeric(roster['Extra_Marks'], errors='coerce').fillna(0.0).astype('float')
-                            roster['Total_Marks'] = pd.to_numeric(roster['Total_Marks'], errors='coerce').astype('float')
-                            roster['Percentage'] = pd.to_numeric(roster.get('Percentage', None), errors='coerce').astype('float')
+                        if not existing_marks.empty:
+                            existing_subset = existing_marks[['Class', 'Roll', 'Actual_Marks', 'Extra_Marks', 'Total_Marks', 'Percentage']].drop_duplicates(subset=['Class', 'Roll'])
+                            existing_subset['Class'] = existing_subset['Class'].astype(str).str.strip().str.upper()
+                            existing_subset['Roll'] = existing_subset['Roll'].astype(str).str.strip()
+                            roster = pd.merge(roster, existing_subset, on=['Class', 'Roll'], how='left')
+                        else:
+                            roster['Actual_Marks'] = None
+                            roster['Extra_Marks'] = 0.0
+                            roster['Total_Marks'] = None
+                            roster['Percentage'] = None
                             
-                            st.session_state[state_key] = roster
+                        roster['Actual_Marks'] = pd.to_numeric(roster['Actual_Marks'], errors='coerce').astype('float')
+                        roster['Extra_Marks'] = pd.to_numeric(roster['Extra_Marks'], errors='coerce').fillna(0.0).astype('float')
+                        
+                        if 'Thumb_URL' not in roster.columns: roster['Thumb_URL'] = ""
+                        with st.spinner("Loading profiles..."):
+                            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe:
+                                roster['Photo'] = list(exe.map(get_secure_photo_uri, roster['Thumb_URL'].tolist()))
 
-                        def apply_live_edits():
-                            df = st.session_state[state_key].copy()
-                            edits = st.session_state[editor_key].get('edited_rows', {})
+                        # --- RENDER CARD-STYLE ROSTER ---
+                        st.markdown("### Grade Entry Roster")
+                        st.markdown('<div class="roster-container">', unsafe_allow_html=True)
+                        
+                        hc1, hc2, hc3, hc4, hc5 = st.columns([1.2, 3, 2, 2, 1.8])
+                        hc3.markdown("<div style='font-size:13px; font-weight:bold; text-align:center;'>Act</div>", unsafe_allow_html=True)
+                        hc4.markdown("<div style='font-size:13px; font-weight:bold; text-align:center;'>Ext(+)</div>", unsafe_allow_html=True)
+                        hc5.markdown("<div style='font-size:13px; font-weight:bold; text-align:center;'>Res</div>", unsafe_allow_html=True)
+                        st.divider()
+
+                        for _, r in roster.iterrows():
+                            rk = f"{exam_id}_{r['Roll']}"
+                            actual_key = f"act_{rk}"
+                            extra_key = f"ext_{rk}"
                             
-                            for idx_str, changes in edits.items():
-                                idx = int(idx_str)
-                                if 'Actual_Marks' in changes:
-                                    df.at[idx, 'Actual_Marks'] = pd.to_numeric(changes['Actual_Marks'], errors='coerce')
-                                if 'Extra_Marks' in changes:
-                                    df.at[idx, 'Extra_Marks'] = pd.to_numeric(changes['Extra_Marks'], errors='coerce')
-                                    
-                            for idx in df.index:
-                                actual = pd.to_numeric(df.at[idx, 'Actual_Marks'], errors='coerce')
-                                extra = pd.to_numeric(df.at[idx, 'Extra_Marks'], errors='coerce')
+                            if actual_key not in st.session_state:
+                                val = r['Actual_Marks']
+                                st.session_state[actual_key] = float(val) if pd.notna(val) else None
+                            if extra_key not in st.session_state:
+                                val = r['Extra_Marks']
+                                st.session_state[extra_key] = float(val) if pd.notna(val) else 0.0
                                 
-                                if pd.notna(actual):
-                                    extra_val = float(extra) if pd.notna(extra) else 0.0
-                                    total_val = float(actual) + extra_val
-                                    df.at[idx, 'Total_Marks'] = total_val
-                                    
-                                    if e_fm > 0:
-                                        df.at[idx, 'Percentage'] = round((total_val / e_fm) * 100, 1)
-                                    else:
-                                        df.at[idx, 'Percentage'] = 0.0
+                            act_val = st.session_state[actual_key]
+                            ext_val = st.session_state[extra_key]
+                            
+                            tot_val = None
+                            pct_val = None
+                            if act_val is not None:
+                                tot_val = act_val + (ext_val if ext_val is not None else 0.0)
+                                pct_val = round((tot_val / e_fm) * 100, 1) if e_fm > 0 else 0.0
+
+                            c1, c2, c3, c4, c5 = st.columns([1.2, 3, 2, 2, 1.8])
+                            with c1: 
+                                st.image(r['Photo'], width=65) 
+                            with c2: 
+                                st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']}</span></div>", unsafe_allow_html=True)
+                            with c3: 
+                                st.number_input("Act", min_value=0.0, max_value=float(e_fm), key=actual_key, label_visibility="collapsed")
+                            with c4: 
+                                st.number_input("Ext", min_value=0.0, key=extra_key, label_visibility="collapsed")
+                            with c5:
+                                if tot_val is not None:
+                                    st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px; text-align:center;'><b>{tot_val}</b><br><span style='font-size:12px; color:#28a745;'>{pct_val}%</span></div>", unsafe_allow_html=True)
                                 else:
-                                    df.at[idx, 'Total_Marks'] = None
-                                    df.at[idx, 'Percentage'] = None
-                                    
-                            st.session_state[state_key] = df
+                                    st.markdown("<div style='text-align:center; color:gray; font-size:13px; margin-top:10px;'>-</div>", unsafe_allow_html=True)
+                            st.divider()
 
-                        st.markdown(f"Fill in the **Actual Marks** and any **Extra Marks (+)**. The **Total** and **Percentage** will calculate automatically in real-time.")
-                        
-                        edited_marks = st.data_editor(
-                            st.session_state[state_key],
-                            key=editor_key,
-                            on_change=apply_live_edits,
-                            column_config={
-                                "Class": None, 
-                                "Thumb_URL": st.column_config.ImageColumn("📸", width="small"),
-                                "Roll": st.column_config.TextColumn("Roll", width="small", disabled=True),
-                                "Name": st.column_config.TextColumn("Name", width="medium", disabled=True),
-                                "Actual_Marks": st.column_config.NumberColumn(f"Actual (/{int(e_fm)})", min_value=0.0, max_value=e_fm, required=True, width="small"),
-                                "Extra_Marks": st.column_config.NumberColumn("Extra (+)", default=0.0, width="small"),
-                                "Total_Marks": st.column_config.NumberColumn("Total", disabled=True, width="small"),
-                                "Percentage": st.column_config.NumberColumn("%", format="%.1f", disabled=True, width="small")
-                            },
-                            hide_index=True,
-                            use_container_width=True
-                        )
-                        
-                        needs_update = False
-                        calc_df = edited_marks.copy()
-                        
-                        for idx in calc_df.index:
-                            actual = pd.to_numeric(calc_df.at[idx, 'Actual_Marks'], errors='coerce')
-                            extra = pd.to_numeric(calc_df.at[idx, 'Extra_Marks'], errors='coerce')
-                            curr_tot = pd.to_numeric(calc_df.at[idx, 'Total_Marks'], errors='coerce')
-                            curr_pct = pd.to_numeric(calc_df.at[idx, 'Percentage'], errors='coerce')
-                            
-                            if pd.notna(actual):
-                                extra_val = float(extra) if pd.notna(extra) else 0.0
-                                exp_tot = float(actual) + extra_val
-                                exp_pct = round((exp_tot / e_fm) * 100, 1) if e_fm > 0 else 0.0
-                                
-                                if pd.isna(curr_tot) or abs(float(curr_tot) - exp_tot) > 0.001:
-                                    calc_df.at[idx, 'Total_Marks'] = exp_tot
-                                    needs_update = True
-                                
-                                if pd.isna(curr_pct) or abs(float(curr_pct) - exp_pct) > 0.001:
-                                    calc_df.at[idx, 'Percentage'] = exp_pct
-                                    needs_update = True
-                            else:
-                                if pd.notna(curr_tot):
-                                    calc_df.at[idx, 'Total_Marks'] = None
-                                    needs_update = True
-                                if pd.notna(curr_pct):
-                                    calc_df.at[idx, 'Percentage'] = None
-                                    needs_update = True
-                                    
-                        if needs_update:
-                            st.session_state[state_key] = calc_df
-                            st.rerun()
+                        st.markdown('</div>', unsafe_allow_html=True)
                         
                         if st.button("💾 Save Exam Marks", type="primary"):
                             all_marks = fetch_exam_marks() 
                             new_records = []
                             
-                            for _, r in calc_df.iterrows():
-                                if pd.notna(r['Actual_Marks']) and str(r['Actual_Marks']).strip() != "":
-                                    actual = float(r['Actual_Marks'])
-                                    extra = float(r['Extra_Marks']) if pd.notna(r['Extra_Marks']) else 0.0
-                                    total = actual + extra
+                            for _, r in roster.iterrows():
+                                rk = f"{exam_id}_{r['Roll']}"
+                                act_val = st.session_state.get(f"act_{rk}")
+                                ext_val = st.session_state.get(f"ext_{rk}", 0.0)
+                                
+                                if act_val is not None:
+                                    total = act_val + (ext_val if ext_val is not None else 0.0)
                                     pct = round((total / e_fm) * 100, 1) if e_fm > 0 else 0.0
-                                    
-                                    saved_class = r.get('Class', e_class) 
                                     
                                     new_records.append({
                                         "Exam_ID": exam_id,
                                         "Date": e_date,
-                                        "Class": saved_class,
+                                        "Class": e_class,
                                         "Section": e_sec,
                                         "Subject": e_sub,
                                         "Roll": r['Roll'],
                                         "Name": r['Name'],
-                                        "Actual_Marks": actual,
-                                        "Extra_Marks": extra,
+                                        "Actual_Marks": act_val,
+                                        "Extra_Marks": ext_val,
                                         "Total_Marks": total,
                                         "Full_Marks": int(e_fm),
                                         "Percentage": pct
@@ -804,11 +790,6 @@ elif st.session_state.user_role == "teacher":
                                 ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks", "Percentage"]
                             )
                             
-                            if state_key in st.session_state:
-                                del st.session_state[state_key]
-                            if editor_key in st.session_state:
-                                del st.session_state[editor_key]
-                                
                             st.success(f"🎉 Marks saved successfully for {len(new_records)} students! Totals and Percentages have been locked in.")
                             st.rerun()
         else:

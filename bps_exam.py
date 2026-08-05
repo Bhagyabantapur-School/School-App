@@ -563,7 +563,6 @@ elif st.session_state.user_role == "teacher":
                     
                     mdm = fetch_mdm_log()
                     if not mdm.empty:
-                        # NEW LOGIC: If the exam is mapped to CLASS PP, pull both CLASS PP and CLASS LPP from MDM log
                         if e_class == "CLASS PP":
                             mdm_present = mdm[(mdm['Date'] == e_date) & (mdm['Class'].isin(["CLASS PP", "CLASS LPP"])) & (mdm['Section'] == e_sec)]
                         else:
@@ -588,18 +587,40 @@ elif st.session_state.user_role == "teacher":
                             roster = pd.merge(roster, existing_subset, on=['Class', 'Roll'], how='left')
                         else:
                             roster['Actual_Marks'] = None
-                            roster['Extra_Marks'] = 0
+                            roster['Extra_Marks'] = 0.0
                             roster['Total_Marks'] = None
                             
-                        # Formatting numeric values correctly for the data editor
                         roster['Actual_Marks'] = pd.to_numeric(roster['Actual_Marks'], errors='coerce')
-                        roster['Extra_Marks'] = pd.to_numeric(roster['Extra_Marks'], errors='coerce').fillna(0)
+                        roster['Extra_Marks'] = pd.to_numeric(roster['Extra_Marks'], errors='coerce').fillna(0.0)
                         roster['Total_Marks'] = pd.to_numeric(roster['Total_Marks'], errors='coerce')
-                            
-                        st.markdown("Fill in the **Actual Marks** and any **Extra Marks (+)**. The **Total** will automatically calculate when you click Save.")
+
+                        # --- LIVE CALCULATION ENGINE ---
+                        editor_key = f"grade_editor_{exam_id}"
                         
+                        # Step 1: Check if the user is currently typing in the table and grab those live edits
+                        if editor_key in st.session_state:
+                            live_edits = st.session_state[editor_key].get('edited_rows', {})
+                            for idx_str, changes in live_edits.items():
+                                idx = int(idx_str)
+                                if 'Actual_Marks' in changes:
+                                    roster.at[idx, 'Actual_Marks'] = pd.to_numeric(changes['Actual_Marks'], errors='coerce')
+                                if 'Extra_Marks' in changes:
+                                    roster.at[idx, 'Extra_Marks'] = pd.to_numeric(changes['Extra_Marks'], errors='coerce')
+
+                        # Step 2: Recalculate all Totals dynamically before drawing the table
+                        for idx, row in roster.iterrows():
+                            if pd.notna(row['Actual_Marks']):
+                                extra = row['Extra_Marks'] if pd.notna(row['Extra_Marks']) else 0.0
+                                roster.at[idx, 'Total_Marks'] = row['Actual_Marks'] + extra
+                            else:
+                                roster.at[idx, 'Total_Marks'] = None
+                                
+                        st.markdown("Fill in the **Actual Marks** and any **Extra Marks (+)**. The **Total** will automatically update as you type.")
+                        
+                        # Step 3: Render the updated table (the user instantly sees their calculated total)
                         edited_marks = st.data_editor(
                             roster,
+                            key=editor_key,
                             column_config={
                                 "Class": st.column_config.TextColumn("Class", disabled=True),
                                 "Roll": st.column_config.TextColumn("Roll No.", disabled=True),
@@ -616,7 +637,6 @@ elif st.session_state.user_role == "teacher":
                             new_records = []
                             for _, r in edited_marks.iterrows():
                                 if pd.notna(r['Actual_Marks']) and str(r['Actual_Marks']).strip() != "":
-                                    # Perform math safely
                                     actual = float(r['Actual_Marks'])
                                     extra = float(r['Extra_Marks']) if pd.notna(r['Extra_Marks']) and str(r['Extra_Marks']).strip() != "" else 0.0
                                     total = actual + extra
@@ -638,7 +658,6 @@ elif st.session_state.user_role == "teacher":
                             
                             if not all_marks.empty:
                                 all_marks_purged = all_marks[all_marks['Exam_ID'] != exam_id]
-                                # Drop legacy columns from purged data before concating if they exist
                                 if 'Marks_Obtained' in all_marks_purged.columns:
                                     all_marks_purged = all_marks_purged.drop(columns=['Marks_Obtained'])
                                 final_marks = pd.concat([all_marks_purged, new_marks_df], ignore_index=True)
@@ -651,7 +670,12 @@ elif st.session_state.user_role == "teacher":
                                 final_marks, 
                                 ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks"]
                             )
-                            st.success(f"🎉 Marks saved successfully for {len(new_records)} students! Totals have been calculated.")
+                            
+                            # Clear the live editor state so it resets cleanly on reload
+                            if editor_key in st.session_state:
+                                del st.session_state[editor_key]
+                                
+                            st.success(f"🎉 Marks saved successfully for {len(new_records)} students!")
                             st.rerun()
         else:
             st.info("No exams have been scheduled in the system yet.")

@@ -7,6 +7,7 @@ import pytz
 import gspread
 from gspread.exceptions import SpreadsheetNotFound, WorksheetNotFound
 from google.oauth2.service_account import Credentials
+import numpy as np
 
 # ==========================================
 # 1. AUTHENTICATION & SECURITY
@@ -98,18 +99,39 @@ def fetch_mdm_log():
     try: return pd.DataFrame(init_db_sheet().worksheet("mdm_log").get_all_records()).astype(str)
     except Exception: return pd.DataFrame()
 
+# ---------------------------------------------------------
+# BULLETPROOF PHOTO ENGINE
+# ---------------------------------------------------------
 @st.cache_data(ttl=300)
 def fetch_student_photos():
     try:
         db = init_db_sheet()
-        # EXPLICITLY targeting the students_master tab as requested
-        try:
-            df = pd.DataFrame(db.worksheet("students_master").get_all_records()).astype(str)
-            if 'Thumb_URL' in df.columns:
-                return df[['Class', 'Roll', 'Thumb_URL']]
-        except WorksheetNotFound:
-            pass
-    except Exception: pass
+        ws = db.worksheet("students_master")
+        
+        # Use get_all_values() to avoid strict header formatting crashes
+        data = ws.get_all_values()
+        
+        if len(data) > 1:
+            # Let pandas build the grid to auto-pad any mismatched row lengths
+            df = pd.DataFrame(data)
+            
+            # Extract header and strip spaces to catch "Thumb_URL "
+            df.columns = df.iloc[0].astype(str).str.strip()
+            df = df[1:].reset_index(drop=True)
+            
+            if 'Thumb_URL' in df.columns and 'Class' in df.columns and 'Roll' in df.columns:
+                photo_df = df[['Class', 'Roll', 'Thumb_URL']].copy()
+                
+                # Aggressively format Class and Roll to guarantee perfect merges
+                photo_df['Class'] = photo_df['Class'].astype(str).str.strip().str.upper()
+                photo_df['Roll'] = photo_df['Roll'].astype(str).str.strip()
+                photo_df['Thumb_URL'] = photo_df['Thumb_URL'].astype(str).str.strip()
+                
+                return photo_df
+    except Exception as e: 
+        print(f"Photo Fetch Error: {e}")
+        pass
+    
     return pd.DataFrame(columns=["Class", "Roll", "Thumb_URL"])
 
 @st.cache_data(ttl=300)
@@ -620,17 +642,26 @@ elif st.session_state.user_role == "teacher":
                             if not all_marks.empty:
                                 existing_marks = all_marks[all_marks['Exam_ID'] == exam_id]
                             
+                            # Standardize roster strings for perfect merging
                             roster = mdm_present[['Class', 'Roll', 'Name']].copy()
+                            roster['Class'] = roster['Class'].astype(str).str.strip().str.upper()
+                            roster['Roll'] = roster['Roll'].astype(str).str.strip()
                             
-                            # Fetch photos exactly from students_master
+                            # MERGE PHOTOS
                             photos_df = fetch_student_photos()
                             if not photos_df.empty:
                                 roster = pd.merge(roster, photos_df, on=['Class', 'Roll'], how='left')
                             else:
                                 roster['Thumb_URL'] = None
                                 
+                            # Safe handling of empty image cells to prevent Streamlit rendering errors
+                            if 'Thumb_URL' in roster.columns:
+                                roster['Thumb_URL'] = roster['Thumb_URL'].replace({"": None, "nan": None, "None": None})
+                                
                             if not existing_marks.empty:
                                 existing_subset = existing_marks[['Class', 'Roll', 'Actual_Marks', 'Extra_Marks', 'Total_Marks', 'Percentage']].drop_duplicates(subset=['Class', 'Roll'])
+                                existing_subset['Class'] = existing_subset['Class'].astype(str).str.strip().str.upper()
+                                existing_subset['Roll'] = existing_subset['Roll'].astype(str).str.strip()
                                 roster = pd.merge(roster, existing_subset, on=['Class', 'Roll'], how='left')
                             else:
                                 roster['Actual_Marks'] = None
@@ -683,7 +714,7 @@ elif st.session_state.user_role == "teacher":
                             on_change=apply_live_edits,
                             column_config={
                                 "Class": None, 
-                                "Thumb_URL": st.column_config.ImageColumn("📸", width="small"), # STAMP SIZE PHOTO ACTIVATED
+                                "Thumb_URL": st.column_config.ImageColumn("📸", width="small"),
                                 "Roll": st.column_config.TextColumn("Roll", width="small", disabled=True),
                                 "Name": st.column_config.TextColumn("Name", width="medium", disabled=True),
                                 "Actual_Marks": st.column_config.NumberColumn(f"Actual (/{int(e_fm)})", min_value=0.0, max_value=e_fm, required=True, width="small"),

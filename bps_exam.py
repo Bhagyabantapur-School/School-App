@@ -102,7 +102,6 @@ def fetch_mdm_log():
 def fetch_student_photos():
     try:
         db = init_db_sheet()
-        # Scan typical student record sheet names to pull the Thumb_URL
         for sheet_name in ["students", "student_db", "Students", "Student_DB", "Admission", "student_profile"]:
             try:
                 df = pd.DataFrame(db.worksheet(sheet_name).get_all_records()).astype(str)
@@ -616,7 +615,8 @@ elif st.session_state.user_role == "teacher":
                         state_key = f"roster_{exam_id}"
                         editor_key = f"editor_{exam_id}"
                         
-                        if state_key not in st.session_state:
+                        # AUTO-HEAL: If memory is old and missing Thumb_URL, rebuild it automatically
+                        if state_key not in st.session_state or 'Thumb_URL' not in st.session_state[state_key].columns:
                             all_marks = fetch_exam_marks()
                             existing_marks = pd.DataFrame()
                             if not all_marks.empty:
@@ -624,7 +624,6 @@ elif st.session_state.user_role == "teacher":
                             
                             roster = mdm_present[['Class', 'Roll', 'Name']].copy()
                             
-                            # MERGE STAMP SIZE PHOTOS
                             photos_df = fetch_student_photos()
                             if not photos_df.empty:
                                 roster = pd.merge(roster, photos_df, on=['Class', 'Roll'], how='left')
@@ -679,14 +678,13 @@ elif st.session_state.user_role == "teacher":
 
                         st.markdown(f"Fill in the **Actual Marks** and any **Extra Marks (+)**. The **Total** and **Percentage** will calculate automatically in real-time.")
                         
-                        # SCROLL PREVENTION & CONDENSED COLUMNS
                         edited_marks = st.data_editor(
                             st.session_state[state_key],
                             key=editor_key,
                             on_change=apply_live_edits,
                             column_config={
-                                "Class": None, # HIDDEN TO SAVE SPACE
-                                "Thumb_URL": st.column_config.ImageColumn("📸", width="small"), # STAMP SIZE PHOTO
+                                "Class": None, 
+                                "Thumb_URL": st.column_config.ImageColumn("📸", width="small"), 
                                 "Roll": st.column_config.TextColumn("Roll", width="small", disabled=True),
                                 "Name": st.column_config.TextColumn("Name", width="medium", disabled=True),
                                 "Actual_Marks": st.column_config.NumberColumn(f"Actual (/{int(e_fm)})", min_value=0.0, max_value=e_fm, required=True, width="small"),
@@ -742,7 +740,6 @@ elif st.session_state.user_role == "teacher":
                                     total = actual + extra
                                     pct = round((total / e_fm) * 100, 1) if e_fm > 0 else 0.0
                                     
-                                    # Ensure Class isn't lost during saving even though it's hidden
                                     saved_class = r.get('Class', e_class) 
                                     
                                     new_records.append({

@@ -233,23 +233,31 @@ with tab_pending:
             
             for cls in classes_present:
                 cls_pending = pending_students[pending_students['Class'] == cls].copy()
-                cls_pending['Roll_Num'] = pd.to_numeric(cls_pending['Roll'], errors='coerce').fillna(999)
-                cls_pending = cls_pending.sort_values('Roll_Num')
-                
-                # Add checkbox column for investigations
-                cls_pending.insert(0, 'Investigate 🔍', False)
                 
                 with st.expander(f"📖 {cls} - {len(cls_pending)} Student(s) Pending", expanded=True):
                     st.caption("If a student claims they paid, check their box below to move them to the Investigation List.")
-                    edited_df = st.data_editor(
-                        cls_pending[['Investigate 🔍', 'Class', 'Section', 'Roll', 'Name', 'Paid (₹)', 'Due (₹)']], 
-                        hide_index=True, 
-                        use_container_width=True,
-                        disabled=['Class', 'Section', 'Roll', 'Name', 'Paid (₹)', 'Due (₹)'],
-                        column_config={'Class': None}, # Hidden because it's in the expander header
-                        key=f"edit_pending_{cls}_{pending_fee_type}"
-                    )
-                    edited_dfs.append(edited_df)
+                    
+                    # Sort sections alphabetically
+                    sections_present = sorted([str(s) for s in cls_pending['Section'].unique() if str(s).strip()])
+                    
+                    for sec in sections_present:
+                        sec_pending = cls_pending[cls_pending['Section'] == sec].copy()
+                        sec_pending['Roll_Num'] = pd.to_numeric(sec_pending['Roll'], errors='coerce').fillna(999)
+                        sec_pending = sec_pending.sort_values('Roll_Num')
+                        
+                        # Add checkbox column for investigations
+                        sec_pending.insert(0, 'Investigate 🔍', False)
+                        
+                        st.markdown(f"###### Section {sec}")
+                        edited_df = st.data_editor(
+                            sec_pending[['Investigate 🔍', 'Class', 'Section', 'Roll', 'Name', 'Paid (₹)', 'Due (₹)']], 
+                            hide_index=True, 
+                            use_container_width=True,
+                            disabled=['Class', 'Section', 'Roll', 'Name', 'Paid (₹)', 'Due (₹)'],
+                            column_config={'Class': None, 'Section': None}, # Hidden because it's clear from headers
+                            key=f"edit_pending_{cls}_{sec}_{pending_fee_type}"
+                        )
+                        edited_dfs.append(edited_df)
             
             # --- Save New Investigations Button ---
             st.write("")

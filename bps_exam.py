@@ -294,11 +294,20 @@ def fetch_exam_schedules():
 @st.cache_data(ttl=300)
 def fetch_exam_marks():
     sh = init_exam_sheet()
-    ws = ensure_worksheet(sh, "marks", ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Marks_Obtained"])
+    ws = ensure_worksheet(sh, "marks", ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks"])
     records = ws.get_all_records()
+    
     if not records:
-        return pd.DataFrame(columns=["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Marks_Obtained"])
-    return pd.DataFrame(records).astype(str)
+        return pd.DataFrame(columns=["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks"])
+        
+    df = pd.DataFrame(records)
+    # Legacy Migration Support: If old Marks_Obtained column exists, map it to the new Actual_Marks
+    if 'Marks_Obtained' in df.columns and 'Actual_Marks' not in df.columns:
+        df['Actual_Marks'] = df['Marks_Obtained']
+        df['Extra_Marks'] = 0
+        df['Total_Marks'] = df['Marks_Obtained']
+        
+    return df.astype(str)
 
 def overwrite_sheet(sh, sheet_name, df, headers):
     ws = ensure_worksheet(sh, sheet_name, headers)
@@ -572,22 +581,32 @@ elif st.session_state.user_role == "teacher":
                         if not all_marks.empty:
                             existing_marks = all_marks[all_marks['Exam_ID'] == exam_id]
                         
-                        # NEW LOGIC: Keep the 'Class' column in the roster so teachers can see who is LPP and who is PP
                         roster = mdm_present[['Class', 'Roll', 'Name']].copy()
+                        
                         if not existing_marks.empty:
-                            existing_subset = existing_marks[['Class', 'Roll', 'Marks_Obtained']].drop_duplicates(subset=['Class', 'Roll'])
+                            existing_subset = existing_marks[['Class', 'Roll', 'Actual_Marks', 'Extra_Marks', 'Total_Marks']].drop_duplicates(subset=['Class', 'Roll'])
                             roster = pd.merge(roster, existing_subset, on=['Class', 'Roll'], how='left')
                         else:
-                            roster['Marks_Obtained'] = ""
+                            roster['Actual_Marks'] = None
+                            roster['Extra_Marks'] = 0
+                            roster['Total_Marks'] = None
                             
-                        st.markdown("Fill in the **Marks_Obtained** column below and click Save.")
+                        # Formatting numeric values correctly for the data editor
+                        roster['Actual_Marks'] = pd.to_numeric(roster['Actual_Marks'], errors='coerce')
+                        roster['Extra_Marks'] = pd.to_numeric(roster['Extra_Marks'], errors='coerce').fillna(0)
+                        roster['Total_Marks'] = pd.to_numeric(roster['Total_Marks'], errors='coerce')
+                            
+                        st.markdown("Fill in the **Actual Marks** and any **Extra Marks (+)**. The **Total** will automatically calculate when you click Save.")
+                        
                         edited_marks = st.data_editor(
                             roster,
                             column_config={
-                                "Class": st.column_config.TextColumn("Class", disabled=True), # Display class (LPP or PP)
+                                "Class": st.column_config.TextColumn("Class", disabled=True),
                                 "Roll": st.column_config.TextColumn("Roll No.", disabled=True),
                                 "Name": st.column_config.TextColumn("Student Name", disabled=True),
-                                "Marks_Obtained": st.column_config.TextColumn("Marks", required=True)
+                                "Actual_Marks": st.column_config.NumberColumn("Actual Marks", min_value=0, required=True),
+                                "Extra_Marks": st.column_config.NumberColumn("Extra Marks (+)", default=0),
+                                "Total_Marks": st.column_config.NumberColumn("Total (Auto)", disabled=True)
                             },
                             hide_index=True,
                             use_container_width=True
@@ -596,22 +615,32 @@ elif st.session_state.user_role == "teacher":
                         if st.button("💾 Save Exam Marks", type="primary"):
                             new_records = []
                             for _, r in edited_marks.iterrows():
-                                if pd.notna(r['Marks_Obtained']) and str(r['Marks_Obtained']).strip() != "":
+                                if pd.notna(r['Actual_Marks']) and str(r['Actual_Marks']).strip() != "":
+                                    # Perform math safely
+                                    actual = float(r['Actual_Marks'])
+                                    extra = float(r['Extra_Marks']) if pd.notna(r['Extra_Marks']) and str(r['Extra_Marks']).strip() != "" else 0.0
+                                    total = actual + extra
+                                    
                                     new_records.append({
                                         "Exam_ID": exam_id,
                                         "Date": e_date,
-                                        "Class": r['Class'], # Save their actual class (LPP or PP) to the database
+                                        "Class": r['Class'],
                                         "Section": e_sec,
                                         "Subject": e_sub,
                                         "Roll": r['Roll'],
                                         "Name": r['Name'],
-                                        "Marks_Obtained": r['Marks_Obtained']
+                                        "Actual_Marks": actual,
+                                        "Extra_Marks": extra,
+                                        "Total_Marks": total
                                     })
                                     
                             new_marks_df = pd.DataFrame(new_records)
                             
                             if not all_marks.empty:
                                 all_marks_purged = all_marks[all_marks['Exam_ID'] != exam_id]
+                                # Drop legacy columns from purged data before concating if they exist
+                                if 'Marks_Obtained' in all_marks_purged.columns:
+                                    all_marks_purged = all_marks_purged.drop(columns=['Marks_Obtained'])
                                 final_marks = pd.concat([all_marks_purged, new_marks_df], ignore_index=True)
                             else:
                                 final_marks = new_marks_df
@@ -620,9 +649,9 @@ elif st.session_state.user_role == "teacher":
                                 init_exam_sheet(), 
                                 "marks", 
                                 final_marks, 
-                                ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Marks_Obtained"]
+                                ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks"]
                             )
-                            st.success(f"🎉 Marks saved successfully for {len(new_records)} students!")
+                            st.success(f"🎉 Marks saved successfully for {len(new_records)} students! Totals have been calculated.")
                             st.rerun()
         else:
             st.info("No exams have been scheduled in the system yet.")

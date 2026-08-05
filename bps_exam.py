@@ -86,6 +86,11 @@ def refresh_exam_data():
     fetch_routine_data.clear()
     init_subject_map.clear()
     fetch_teacher_status.clear()
+    
+    # CLEAR LIVE MEMORY CACHE ON REFRESH
+    for key in list(st.session_state.keys()):
+        if key.startswith("roster_") or key.startswith("editor_"):
+            del st.session_state[key]
 
 @st.cache_data(ttl=300)
 def fetch_mdm_log():
@@ -572,49 +577,84 @@ elif st.session_state.user_role == "teacher":
                     else:
                         st.success(f"✅ Found {len(mdm_present)} students present on {e_date}.")
                         
-                        all_marks = fetch_exam_marks()
-                        existing_marks = pd.DataFrame()
-                        if not all_marks.empty:
-                            existing_marks = all_marks[all_marks['Exam_ID'] == exam_id]
+                        # --- LIVE MEMORY CACHE SETUP ---
+                        state_key = f"roster_{exam_id}"
+                        editor_key = f"editor_{exam_id}"
                         
-                        roster = mdm_present[['Class', 'Roll', 'Name']].copy()
-                        
-                        if not existing_marks.empty:
-                            existing_subset = existing_marks[['Class', 'Roll', 'Actual_Marks', 'Extra_Marks', 'Total_Marks']].drop_duplicates(subset=['Class', 'Roll'])
-                            roster = pd.merge(roster, existing_subset, on=['Class', 'Roll'], how='left')
-                        else:
-                            roster['Actual_Marks'] = None
-                            roster['Extra_Marks'] = 0.0
-                            roster['Total_Marks'] = None
+                        # Only fetch from DB if it's the very first time opening this exam during this session
+                        if state_key not in st.session_state:
+                            all_marks = fetch_exam_marks()
+                            existing_marks = pd.DataFrame()
+                            if not all_marks.empty:
+                                existing_marks = all_marks[all_marks['Exam_ID'] == exam_id]
                             
-                        # Formatting numeric values correctly
-                        roster['Actual_Marks'] = pd.to_numeric(roster['Actual_Marks'], errors='coerce')
-                        roster['Extra_Marks'] = pd.to_numeric(roster['Extra_Marks'], errors='coerce').fillna(0.0)
-                        roster['Total_Marks'] = pd.to_numeric(roster['Total_Marks'], errors='coerce')
+                            roster = mdm_present[['Class', 'Roll', 'Name']].copy()
+                            
+                            if not existing_marks.empty:
+                                existing_subset = existing_marks[['Class', 'Roll', 'Actual_Marks', 'Extra_Marks', 'Total_Marks']].drop_duplicates(subset=['Class', 'Roll'])
+                                roster = pd.merge(roster, existing_subset, on=['Class', 'Roll'], how='left')
+                            else:
+                                roster['Actual_Marks'] = None
+                                roster['Extra_Marks'] = 0.0
+                                roster['Total_Marks'] = None
+                                
+                            roster['Actual_Marks'] = pd.to_numeric(roster['Actual_Marks'], errors='coerce')
+                            roster['Extra_Marks'] = pd.to_numeric(roster['Extra_Marks'], errors='coerce').fillna(0.0)
+                            roster['Total_Marks'] = pd.to_numeric(roster['Total_Marks'], errors='coerce')
+                            
+                            st.session_state[state_key] = roster
 
-                        st.markdown("Fill in the **Actual Marks** and any **Extra Marks (+)**. The **Total** will automatically calculate and lock in when you click Save.")
+                        # --- LIVE MATH CALCULATION TRIGGER ---
+                        def apply_live_edits():
+                            # Intercept the edits the exact second the teacher types them
+                            edits = st.session_state[editor_key].get('edited_rows', {})
+                            for idx_str, changes in edits.items():
+                                idx = int(idx_str)
+                                
+                                # Update memory safely
+                                if 'Actual_Marks' in changes:
+                                    st.session_state[state_key].at[idx, 'Actual_Marks'] = pd.to_numeric(changes['Actual_Marks'], errors='coerce')
+                                if 'Extra_Marks' in changes:
+                                    st.session_state[state_key].at[idx, 'Extra_Marks'] = pd.to_numeric(changes['Extra_Marks'], errors='coerce')
+                                
+                                # Automatically calculate and lock the Total in memory
+                                actual = st.session_state[state_key].at[idx, 'Actual_Marks']
+                                extra = st.session_state[state_key].at[idx, 'Extra_Marks']
+                                
+                                if pd.notna(actual):
+                                    extra_val = float(extra) if pd.notna(extra) else 0.0
+                                    st.session_state[state_key].at[idx, 'Total_Marks'] = float(actual) + extra_val
+                                else:
+                                    st.session_state[state_key].at[idx, 'Total_Marks'] = None
+
+                        st.markdown("Fill in the **Actual Marks** and any **Extra Marks (+)**. The **Total** will automatically calculate in real-time.")
                         
-                        # Use the standard stable data editor
+                        # --- DISPLAY LIVE MEMORY TABLE ---
                         edited_marks = st.data_editor(
-                            roster,
+                            st.session_state[state_key],  # Pull directly from memory, not the DB
+                            key=editor_key,
+                            on_change=apply_live_edits,
                             column_config={
                                 "Class": st.column_config.TextColumn("Class", disabled=True),
                                 "Roll": st.column_config.TextColumn("Roll No.", disabled=True),
                                 "Name": st.column_config.TextColumn("Student Name", disabled=True),
                                 "Actual_Marks": st.column_config.NumberColumn("Actual Marks", min_value=0, required=True),
                                 "Extra_Marks": st.column_config.NumberColumn("Extra Marks (+)", default=0.0),
-                                "Total_Marks": st.column_config.NumberColumn("Total (Saved)", disabled=True)
+                                "Total_Marks": st.column_config.NumberColumn("Total (Auto)", disabled=True)
                             },
                             hide_index=True,
                             use_container_width=True
                         )
                         
                         if st.button("💾 Save Exam Marks", type="primary"):
+                            all_marks = fetch_exam_marks() 
                             new_records = []
-                            for _, r in edited_marks.iterrows():
+                            
+                            # Grab everything that was locked into memory
+                            for _, r in st.session_state[state_key].iterrows():
                                 if pd.notna(r['Actual_Marks']) and str(r['Actual_Marks']).strip() != "":
                                     actual = float(r['Actual_Marks'])
-                                    extra = float(r['Extra_Marks']) if pd.notna(r['Extra_Marks']) and str(r['Extra_Marks']).strip() != "" else 0.0
+                                    extra = float(r['Extra_Marks']) if pd.notna(r['Extra_Marks']) else 0.0
                                     total = actual + extra
                                     
                                     new_records.append({
@@ -646,7 +686,11 @@ elif st.session_state.user_role == "teacher":
                                 final_marks, 
                                 ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks"]
                             )
-                            st.success(f"🎉 Marks saved successfully for {len(new_records)} students! Totals have been calculated.")
+                            
+                            # Safely clear the memory cache so the next load is completely fresh from the DB
+                            del st.session_state[state_key]
+                            if editor_key in st.session_state:
+                                del st.session_state[editor_key]
+                                
+                            st.success(f"🎉 Marks saved successfully for {len(new_records)} students! Totals have been locked in.")
                             st.rerun()
-        else:
-            st.info("No exams have been scheduled in the system yet.")

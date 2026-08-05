@@ -629,46 +629,11 @@ elif st.session_state.user_role == "teacher":
                             
                             st.session_state[state_key] = roster
 
-                        def apply_live_edits():
-                            # CREATE A DEEP COPY: This forces Streamlit to recognize it as brand new data and repaint the screen instantly
-                            df = st.session_state[state_key].copy()
-                            edits = st.session_state[editor_key].get('edited_rows', {})
-                            
-                            # 1. Apply changes
-                            for idx_str, changes in edits.items():
-                                idx = int(idx_str)
-                                if 'Actual_Marks' in changes:
-                                    df.at[idx, 'Actual_Marks'] = pd.to_numeric(changes['Actual_Marks'], errors='coerce')
-                                if 'Extra_Marks' in changes:
-                                    df.at[idx, 'Extra_Marks'] = pd.to_numeric(changes['Extra_Marks'], errors='coerce')
-                                    
-                            # 2. Recalculate everything
-                            for idx in df.index:
-                                actual = pd.to_numeric(df.at[idx, 'Actual_Marks'], errors='coerce')
-                                extra = pd.to_numeric(df.at[idx, 'Extra_Marks'], errors='coerce')
-                                
-                                if pd.notna(actual):
-                                    extra_val = float(extra) if pd.notna(extra) else 0.0
-                                    total_val = float(actual) + extra_val
-                                    df.at[idx, 'Total_Marks'] = total_val
-                                    
-                                    if e_fm > 0:
-                                        df.at[idx, 'Percentage'] = round((total_val / e_fm) * 100, 1)
-                                    else:
-                                        df.at[idx, 'Percentage'] = 0.0
-                                else:
-                                    df.at[idx, 'Total_Marks'] = None
-                                    df.at[idx, 'Percentage'] = None
-                                    
-                            # Overwrite the old memory with the fresh copy
-                            st.session_state[state_key] = df
-
                         st.markdown(f"Fill in the **Actual Marks** and any **Extra Marks (+)**. The **Total** and **Percentage** will calculate automatically in real-time.")
                         
                         edited_marks = st.data_editor(
                             st.session_state[state_key],
                             key=editor_key,
-                            on_change=apply_live_edits,
                             column_config={
                                 "Class": st.column_config.TextColumn("Class", disabled=True),
                                 "Roll": st.column_config.TextColumn("Roll No.", disabled=True),
@@ -682,11 +647,49 @@ elif st.session_state.user_role == "teacher":
                             use_container_width=True
                         )
                         
+                        # --- TRUE REAL-TIME MATH ENGINE ---
+                        # If a teacher types a number, it will instantly check the math and refresh the screen!
+                        needs_update = False
+                        calc_df = edited_marks.copy()
+                        
+                        for idx in calc_df.index:
+                            actual = pd.to_numeric(calc_df.at[idx, 'Actual_Marks'], errors='coerce')
+                            extra = pd.to_numeric(calc_df.at[idx, 'Extra_Marks'], errors='coerce')
+                            curr_tot = pd.to_numeric(calc_df.at[idx, 'Total_Marks'], errors='coerce')
+                            curr_pct = pd.to_numeric(calc_df.at[idx, 'Percentage'], errors='coerce')
+                            
+                            if pd.notna(actual):
+                                extra_val = float(extra) if pd.notna(extra) else 0.0
+                                exp_tot = float(actual) + extra_val
+                                exp_pct = round((exp_tot / e_fm) * 100, 1) if e_fm > 0 else 0.0
+                                
+                                # Detect if the math is out of sync (meaning the user just typed something new)
+                                if pd.isna(curr_tot) or abs(float(curr_tot) - exp_tot) > 0.001:
+                                    calc_df.at[idx, 'Total_Marks'] = exp_tot
+                                    needs_update = True
+                                
+                                if pd.isna(curr_pct) or abs(float(curr_pct) - exp_pct) > 0.001:
+                                    calc_df.at[idx, 'Percentage'] = exp_pct
+                                    needs_update = True
+                            else:
+                                if pd.notna(curr_tot):
+                                    calc_df.at[idx, 'Total_Marks'] = None
+                                    needs_update = True
+                                if pd.notna(curr_pct):
+                                    calc_df.at[idx, 'Percentage'] = None
+                                    needs_update = True
+                                    
+                        # Force a hard screen redraw to instantly display the calculated Totals and Percentages
+                        if needs_update:
+                            st.session_state[state_key] = calc_df
+                            st.rerun()
+                        
+                        # --- SAVE LOGIC ---
                         if st.button("💾 Save Exam Marks", type="primary"):
                             all_marks = fetch_exam_marks() 
                             new_records = []
                             
-                            for _, r in st.session_state[state_key].iterrows():
+                            for _, r in calc_df.iterrows():
                                 if pd.notna(r['Actual_Marks']) and str(r['Actual_Marks']).strip() != "":
                                     actual = float(r['Actual_Marks'])
                                     extra = float(r['Extra_Marks']) if pd.notna(r['Extra_Marks']) else 0.0

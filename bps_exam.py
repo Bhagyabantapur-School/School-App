@@ -86,6 +86,7 @@ def refresh_exam_data():
     fetch_routine_data.clear()
     init_subject_map.clear()
     fetch_teacher_status.clear()
+    fetch_student_photos.clear()
     
     # Safely clear active grading cache to prevent stale data
     for key in list(st.session_state.keys()):
@@ -96,6 +97,21 @@ def refresh_exam_data():
 def fetch_mdm_log():
     try: return pd.DataFrame(init_db_sheet().worksheet("mdm_log").get_all_records()).astype(str)
     except Exception: return pd.DataFrame()
+
+@st.cache_data(ttl=300)
+def fetch_student_photos():
+    try:
+        db = init_db_sheet()
+        # Scan typical student record sheet names to pull the Thumb_URL
+        for sheet_name in ["students", "student_db", "Students", "Student_DB", "Admission", "student_profile"]:
+            try:
+                df = pd.DataFrame(db.worksheet(sheet_name).get_all_records()).astype(str)
+                if 'Thumb_URL' in df.columns:
+                    return df[['Class', 'Roll', 'Thumb_URL']]
+            except WorksheetNotFound:
+                continue
+    except Exception: pass
+    return pd.DataFrame(columns=["Class", "Roll", "Thumb_URL"])
 
 @st.cache_data(ttl=300)
 def fetch_routine_data():
@@ -296,7 +312,6 @@ def fetch_exam_schedules():
         return pd.DataFrame(columns=["Exam_ID", "Date", "Class", "Section", "Subject", "Teacher", "Full_Marks"])
         
     df = pd.DataFrame(records)
-    # Legacy Migration Support for old schedules
     if 'Full_Marks' not in df.columns:
         df['Full_Marks'] = "50"
     return df.astype(str)
@@ -312,7 +327,6 @@ def fetch_exam_marks():
         
     df = pd.DataFrame(records)
     
-    # Automatic Legacy Database Upgrades
     if 'Marks_Obtained' in df.columns and 'Actual_Marks' not in df.columns:
         df['Actual_Marks'] = df['Marks_Obtained']
         df['Extra_Marks'] = 0
@@ -410,7 +424,6 @@ if st.session_state.user_role == "admin":
         c1, c2, c3 = st.columns([2, 2, 1])
         ex_date = c1.date_input("Exam Date", datetime.now(IST).date()).strftime("%d-%m-%Y")
         ex_sub = c2.selectbox("Select Subject", SUBJECT_OPTIONS)
-        # Default value just to quick-fill the grid, admin edits the exact marks per row below
         default_batch_fm = c3.number_input("Default Batch Marks", min_value=1, value=50, step=1, help="This fills the grid below. You can change them class-wise there.")
         
         c4, c5 = st.columns(2)
@@ -436,7 +449,6 @@ if st.session_state.user_role == "admin":
             
             preview_df = pd.DataFrame(preview_rows)
             
-            # The Admin can edit the Full Marks per class directly in this grid
             edited_schedule_grid = st.data_editor(
                 preview_df,
                 column_config={
@@ -582,9 +594,9 @@ elif st.session_state.user_role == "teacher":
                         except: pass
                     
                     st.markdown("---")
-                    st.subheader(f"Entering marks for: {e_sub}")
+                    # DYNAMIC HEADER WITH CLASS NAME
+                    st.subheader(f"Entering marks for: {e_sub} ({e_class} - {e_sec})")
                     
-                    # Clean Read-Only Display for Teachers
                     st.info(f"🎯 **Full Marks:** {int(e_fm)} (Read-Only)")
                     
                     mdm = fetch_mdm_log()
@@ -612,6 +624,13 @@ elif st.session_state.user_role == "teacher":
                             
                             roster = mdm_present[['Class', 'Roll', 'Name']].copy()
                             
+                            # MERGE STAMP SIZE PHOTOS
+                            photos_df = fetch_student_photos()
+                            if not photos_df.empty:
+                                roster = pd.merge(roster, photos_df, on=['Class', 'Roll'], how='left')
+                            else:
+                                roster['Thumb_URL'] = None
+                            
                             if not existing_marks.empty:
                                 existing_subset = existing_marks[['Class', 'Roll', 'Actual_Marks', 'Extra_Marks', 'Total_Marks', 'Percentage']].drop_duplicates(subset=['Class', 'Roll'])
                                 roster = pd.merge(roster, existing_subset, on=['Class', 'Roll'], how='left')
@@ -621,7 +640,6 @@ elif st.session_state.user_role == "teacher":
                                 roster['Total_Marks'] = None
                                 roster['Percentage'] = None
                                 
-                            # Convert to correct float types so calculations work flawlessly
                             roster['Actual_Marks'] = pd.to_numeric(roster['Actual_Marks'], errors='coerce').astype('float')
                             roster['Extra_Marks'] = pd.to_numeric(roster['Extra_Marks'], errors='coerce').fillna(0.0).astype('float')
                             roster['Total_Marks'] = pd.to_numeric(roster['Total_Marks'], errors='coerce').astype('float')
@@ -629,26 +647,57 @@ elif st.session_state.user_role == "teacher":
                             
                             st.session_state[state_key] = roster
 
+                        def apply_live_edits():
+                            df = st.session_state[state_key].copy()
+                            edits = st.session_state[editor_key].get('edited_rows', {})
+                            
+                            for idx_str, changes in edits.items():
+                                idx = int(idx_str)
+                                if 'Actual_Marks' in changes:
+                                    df.at[idx, 'Actual_Marks'] = pd.to_numeric(changes['Actual_Marks'], errors='coerce')
+                                if 'Extra_Marks' in changes:
+                                    df.at[idx, 'Extra_Marks'] = pd.to_numeric(changes['Extra_Marks'], errors='coerce')
+                                    
+                            for idx in df.index:
+                                actual = pd.to_numeric(df.at[idx, 'Actual_Marks'], errors='coerce')
+                                extra = pd.to_numeric(df.at[idx, 'Extra_Marks'], errors='coerce')
+                                
+                                if pd.notna(actual):
+                                    extra_val = float(extra) if pd.notna(extra) else 0.0
+                                    total_val = float(actual) + extra_val
+                                    df.at[idx, 'Total_Marks'] = total_val
+                                    
+                                    if e_fm > 0:
+                                        df.at[idx, 'Percentage'] = round((total_val / e_fm) * 100, 1)
+                                    else:
+                                        df.at[idx, 'Percentage'] = 0.0
+                                else:
+                                    df.at[idx, 'Total_Marks'] = None
+                                    df.at[idx, 'Percentage'] = None
+                                    
+                            st.session_state[state_key] = df
+
                         st.markdown(f"Fill in the **Actual Marks** and any **Extra Marks (+)**. The **Total** and **Percentage** will calculate automatically in real-time.")
                         
+                        # SCROLL PREVENTION & CONDENSED COLUMNS
                         edited_marks = st.data_editor(
                             st.session_state[state_key],
                             key=editor_key,
+                            on_change=apply_live_edits,
                             column_config={
-                                "Class": st.column_config.TextColumn("Class", disabled=True),
-                                "Roll": st.column_config.TextColumn("Roll No.", disabled=True),
-                                "Name": st.column_config.TextColumn("Student Name", disabled=True),
-                                "Actual_Marks": st.column_config.NumberColumn(f"Actual (/{int(e_fm)})", min_value=0.0, max_value=e_fm, required=True),
-                                "Extra_Marks": st.column_config.NumberColumn("Extra (+)", default=0.0),
-                                "Total_Marks": st.column_config.NumberColumn("Total", disabled=True),
-                                "Percentage": st.column_config.NumberColumn("Percentage", format="%.1f %%", disabled=True)
+                                "Class": None, # HIDDEN TO SAVE SPACE
+                                "Thumb_URL": st.column_config.ImageColumn("📸", width="small"), # STAMP SIZE PHOTO
+                                "Roll": st.column_config.TextColumn("Roll", width="small", disabled=True),
+                                "Name": st.column_config.TextColumn("Name", width="medium", disabled=True),
+                                "Actual_Marks": st.column_config.NumberColumn(f"Actual (/{int(e_fm)})", min_value=0.0, max_value=e_fm, required=True, width="small"),
+                                "Extra_Marks": st.column_config.NumberColumn("Extra (+)", default=0.0, width="small"),
+                                "Total_Marks": st.column_config.NumberColumn("Total", disabled=True, width="small"),
+                                "Percentage": st.column_config.NumberColumn("%", format="%.1f", disabled=True, width="small")
                             },
                             hide_index=True,
                             use_container_width=True
                         )
                         
-                        # --- TRUE REAL-TIME MATH ENGINE ---
-                        # If a teacher types a number, it will instantly check the math and refresh the screen!
                         needs_update = False
                         calc_df = edited_marks.copy()
                         
@@ -663,7 +712,6 @@ elif st.session_state.user_role == "teacher":
                                 exp_tot = float(actual) + extra_val
                                 exp_pct = round((exp_tot / e_fm) * 100, 1) if e_fm > 0 else 0.0
                                 
-                                # Detect if the math is out of sync (meaning the user just typed something new)
                                 if pd.isna(curr_tot) or abs(float(curr_tot) - exp_tot) > 0.001:
                                     calc_df.at[idx, 'Total_Marks'] = exp_tot
                                     needs_update = True
@@ -679,12 +727,10 @@ elif st.session_state.user_role == "teacher":
                                     calc_df.at[idx, 'Percentage'] = None
                                     needs_update = True
                                     
-                        # Force a hard screen redraw to instantly display the calculated Totals and Percentages
                         if needs_update:
                             st.session_state[state_key] = calc_df
                             st.rerun()
                         
-                        # --- SAVE LOGIC ---
                         if st.button("💾 Save Exam Marks", type="primary"):
                             all_marks = fetch_exam_marks() 
                             new_records = []
@@ -696,10 +742,13 @@ elif st.session_state.user_role == "teacher":
                                     total = actual + extra
                                     pct = round((total / e_fm) * 100, 1) if e_fm > 0 else 0.0
                                     
+                                    # Ensure Class isn't lost during saving even though it's hidden
+                                    saved_class = r.get('Class', e_class) 
+                                    
                                     new_records.append({
                                         "Exam_ID": exam_id,
                                         "Date": e_date,
-                                        "Class": r['Class'],
+                                        "Class": saved_class,
                                         "Section": e_sec,
                                         "Subject": e_sub,
                                         "Roll": r['Roll'],

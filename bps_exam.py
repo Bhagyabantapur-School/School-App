@@ -147,9 +147,14 @@ def fetch_student_photos():
             df.columns = df.iloc[0].astype(str).str.strip()
             df = df[1:].reset_index(drop=True)
             
+            # Now requires Section to ensure IV A and IV B photos don't mix!
             if 'Thumb_URL' in df.columns and 'Class' in df.columns and 'Roll' in df.columns:
-                photo_df = df[['Class', 'Roll', 'Thumb_URL']].copy()
+                if 'Section' not in df.columns:
+                    df['Section'] = 'A'
+                    
+                photo_df = df[['Class', 'Section', 'Roll', 'Thumb_URL']].copy()
                 photo_df['Class'] = photo_df['Class'].astype(str).str.strip().str.upper()
+                photo_df['Section'] = photo_df['Section'].astype(str).str.strip().str.upper()
                 photo_df['Roll'] = photo_df['Roll'].astype(str).str.strip()
                 photo_df['Thumb_URL'] = photo_df['Thumb_URL'].astype(str).str.strip()
                 return photo_df
@@ -157,7 +162,7 @@ def fetch_student_photos():
         print(f"Photo Fetch Error: {e}")
         pass
     
-    return pd.DataFrame(columns=["Class", "Roll", "Thumb_URL"])
+    return pd.DataFrame(columns=["Class", "Section", "Roll", "Thumb_URL"])
 
 @st.cache_data(ttl=300)
 def fetch_routine_data():
@@ -658,23 +663,24 @@ elif st.session_state.user_role == "teacher":
                     else:
                         st.success(f"✅ Found {len(mdm_present)} students present on {e_date}.")
                         
-                        # --- BUILD ROSTER AND FETCH PHOTOS EXACTLY LIKE bps_digital.py ---
+                        # --- BUILD ROSTER AND FETCH PHOTOS WITH STRICT SECTION ISOLATION ---
                         all_marks = fetch_exam_marks()
                         existing_marks = pd.DataFrame()
                         if not all_marks.empty:
                             existing_marks = all_marks[all_marks['Exam_ID'] == exam_id]
                         
-                        roster = mdm_present[['Class', 'Roll', 'Name']].copy()
+                        roster = mdm_present[['Class', 'Section', 'Roll', 'Name']].copy()
                         roster['Class'] = roster['Class'].astype(str).str.strip().str.upper()
+                        roster['Section'] = roster['Section'].astype(str).str.strip().str.upper()
                         roster['Roll'] = roster['Roll'].astype(str).str.strip()
                         
-                        # 🛡️ ANTI-DUPLICATION SHIELD: Prevents Streamlit DuplicateElementKey error
-                        roster = roster.drop_duplicates(subset=['Class', 'Roll']).reset_index(drop=True)
+                        # 🛡️ ANTI-DUPLICATION SHIELD
+                        roster = roster.drop_duplicates(subset=['Class', 'Section', 'Roll']).reset_index(drop=True)
                         
                         photos_df = fetch_student_photos()
                         if not photos_df.empty:
-                            photos_df = photos_df.drop_duplicates(subset=['Class', 'Roll'])
-                            roster = pd.merge(roster, photos_df, on=['Class', 'Roll'], how='left')
+                            photos_df = photos_df.drop_duplicates(subset=['Class', 'Section', 'Roll'])
+                            roster = pd.merge(roster, photos_df, on=['Class', 'Section', 'Roll'], how='left')
                         else:
                             roster['Thumb_URL'] = None
                             
@@ -682,10 +688,11 @@ elif st.session_state.user_role == "teacher":
                             roster['Thumb_URL'] = roster['Thumb_URL'].replace({"": None, "nan": None, "None": None})
                             
                         if not existing_marks.empty:
-                            existing_subset = existing_marks[['Class', 'Roll', 'Actual_Marks', 'Extra_Marks', 'Total_Marks', 'Percentage']].drop_duplicates(subset=['Class', 'Roll'])
+                            existing_subset = existing_marks[['Class', 'Section', 'Roll', 'Actual_Marks', 'Extra_Marks', 'Total_Marks', 'Percentage']].drop_duplicates(subset=['Class', 'Section', 'Roll'])
                             existing_subset['Class'] = existing_subset['Class'].astype(str).str.strip().str.upper()
+                            existing_subset['Section'] = existing_subset['Section'].astype(str).str.strip().str.upper()
                             existing_subset['Roll'] = existing_subset['Roll'].astype(str).str.strip()
-                            roster = pd.merge(roster, existing_subset, on=['Class', 'Roll'], how='left')
+                            roster = pd.merge(roster, existing_subset, on=['Class', 'Section', 'Roll'], how='left')
                         else:
                             roster['Actual_Marks'] = None
                             roster['Extra_Marks'] = 0.0

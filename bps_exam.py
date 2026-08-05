@@ -301,7 +301,7 @@ def fetch_exam_marks():
         return pd.DataFrame(columns=["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks"])
         
     df = pd.DataFrame(records)
-    # Legacy Migration Support: If old Marks_Obtained column exists, map it to the new Actual_Marks
+    # Legacy Migration Support
     if 'Marks_Obtained' in df.columns and 'Actual_Marks' not in df.columns:
         df['Actual_Marks'] = df['Marks_Obtained']
         df['Extra_Marks'] = 0
@@ -333,7 +333,6 @@ if st.session_state.user_role == "admin":
     with tabs[0]:
         st.markdown("<div class='header-card'><h4>👨‍🏫 Master Subject Mapping</h4><p style='margin:0; font-size:13px;'>Review all teacher assignments. <b>Rows changed by teachers are highlighted in green.</b></p></div>", unsafe_allow_html=True)
         
-        # --- ADMIN TRACKING DASHBOARD ---
         with st.expander("📊 View Teacher Acknowledgement Status", expanded=True):
             status_df = fetch_teacher_status()
             
@@ -485,7 +484,6 @@ elif st.session_state.user_role == "teacher":
     with tabs[0]:
         st.markdown(f"<div class='header-card'><h4>📚 Manage Your Subjects</h4><p style='margin:0; font-size:14px;'>You are currently viewing <b>only</b> the subjects assigned to you. You can update Class, Section, or Subject below.</p></div>", unsafe_allow_html=True)
         
-        # --- BACKGROUND LOGGING: Log "Viewed" Status ---
         status_df = fetch_teacher_status()
         if not status_df.empty and 'Teacher' in status_df.columns:
             current_status = status_df[status_df['Teacher'] == st.session_state.user_name]['Status'].values
@@ -497,7 +495,6 @@ elif st.session_state.user_role == "teacher":
             
         subject_map_df = init_subject_map()
         
-        # Filter strictly for the logged-in teacher and sort logically
         my_map_df = subject_map_df[subject_map_df['Teacher'] == st.session_state.user_name].copy()
         my_map_df = sort_display_df(my_map_df)
         
@@ -509,8 +506,8 @@ elif st.session_state.user_role == "teacher":
             num_rows="dynamic",
             column_config={
                 "Map_ID": None,
-                "Timestamp": None, # Hide timestamp from teacher view
-                "Modified_By": None, # Hide modifier from teacher view
+                "Timestamp": None, 
+                "Modified_By": None, 
                 "Teacher": st.column_config.SelectboxColumn("Teacher", options=[st.session_state.user_name], disabled=True),
                 "Class": st.column_config.SelectboxColumn("Class", options=CLASS_OPTIONS, required=True),
                 "Section": st.column_config.SelectboxColumn("Section", options=SECTIONS, required=True),
@@ -590,44 +587,23 @@ elif st.session_state.user_role == "teacher":
                             roster['Extra_Marks'] = 0.0
                             roster['Total_Marks'] = None
                             
+                        # Formatting numeric values correctly
                         roster['Actual_Marks'] = pd.to_numeric(roster['Actual_Marks'], errors='coerce')
                         roster['Extra_Marks'] = pd.to_numeric(roster['Extra_Marks'], errors='coerce').fillna(0.0)
                         roster['Total_Marks'] = pd.to_numeric(roster['Total_Marks'], errors='coerce')
 
-                        # --- LIVE CALCULATION ENGINE ---
-                        editor_key = f"grade_editor_{exam_id}"
+                        st.markdown("Fill in the **Actual Marks** and any **Extra Marks (+)**. The **Total** will automatically calculate and lock in when you click Save.")
                         
-                        # Step 1: Check if the user is currently typing in the table and grab those live edits
-                        if editor_key in st.session_state:
-                            live_edits = st.session_state[editor_key].get('edited_rows', {})
-                            for idx_str, changes in live_edits.items():
-                                idx = int(idx_str)
-                                if 'Actual_Marks' in changes:
-                                    roster.at[idx, 'Actual_Marks'] = pd.to_numeric(changes['Actual_Marks'], errors='coerce')
-                                if 'Extra_Marks' in changes:
-                                    roster.at[idx, 'Extra_Marks'] = pd.to_numeric(changes['Extra_Marks'], errors='coerce')
-
-                        # Step 2: Recalculate all Totals dynamically before drawing the table
-                        for idx, row in roster.iterrows():
-                            if pd.notna(row['Actual_Marks']):
-                                extra = row['Extra_Marks'] if pd.notna(row['Extra_Marks']) else 0.0
-                                roster.at[idx, 'Total_Marks'] = row['Actual_Marks'] + extra
-                            else:
-                                roster.at[idx, 'Total_Marks'] = None
-                                
-                        st.markdown("Fill in the **Actual Marks** and any **Extra Marks (+)**. The **Total** will automatically update as you type.")
-                        
-                        # Step 3: Render the updated table (the user instantly sees their calculated total)
+                        # Use the standard stable data editor
                         edited_marks = st.data_editor(
                             roster,
-                            key=editor_key,
                             column_config={
                                 "Class": st.column_config.TextColumn("Class", disabled=True),
                                 "Roll": st.column_config.TextColumn("Roll No.", disabled=True),
                                 "Name": st.column_config.TextColumn("Student Name", disabled=True),
                                 "Actual_Marks": st.column_config.NumberColumn("Actual Marks", min_value=0, required=True),
-                                "Extra_Marks": st.column_config.NumberColumn("Extra Marks (+)", default=0),
-                                "Total_Marks": st.column_config.NumberColumn("Total (Auto)", disabled=True)
+                                "Extra_Marks": st.column_config.NumberColumn("Extra Marks (+)", default=0.0),
+                                "Total_Marks": st.column_config.NumberColumn("Total (Saved)", disabled=True)
                             },
                             hide_index=True,
                             use_container_width=True
@@ -670,12 +646,7 @@ elif st.session_state.user_role == "teacher":
                                 final_marks, 
                                 ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks"]
                             )
-                            
-                            # Clear the live editor state so it resets cleanly on reload
-                            if editor_key in st.session_state:
-                                del st.session_state[editor_key]
-                                
-                            st.success(f"🎉 Marks saved successfully for {len(new_records)} students!")
+                            st.success(f"🎉 Marks saved successfully for {len(new_records)} students! Totals have been calculated.")
                             st.rerun()
         else:
             st.info("No exams have been scheduled in the system yet.")

@@ -117,7 +117,7 @@ def fetch_mdm_log():
     except Exception: return pd.DataFrame()
 
 # ---------------------------------------------------------
-# SECURE PHOTO ENGINE (From bps_digital.py)
+# SECURE PHOTO ENGINE
 # ---------------------------------------------------------
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_secure_image_bytes(file_id):
@@ -668,8 +668,12 @@ elif st.session_state.user_role == "teacher":
                         roster['Class'] = roster['Class'].astype(str).str.strip().str.upper()
                         roster['Roll'] = roster['Roll'].astype(str).str.strip()
                         
+                        # 🛡️ ANTI-DUPLICATION SHIELD: Prevents Streamlit DuplicateElementKey error
+                        roster = roster.drop_duplicates(subset=['Class', 'Roll']).reset_index(drop=True)
+                        
                         photos_df = fetch_student_photos()
                         if not photos_df.empty:
+                            photos_df = photos_df.drop_duplicates(subset=['Class', 'Roll'])
                             roster = pd.merge(roster, photos_df, on=['Class', 'Roll'], how='left')
                         else:
                             roster['Thumb_URL'] = None
@@ -706,8 +710,9 @@ elif st.session_state.user_role == "teacher":
                         hc5.markdown("<div style='font-size:13px; font-weight:bold; text-align:center;'>Res</div>", unsafe_allow_html=True)
                         st.divider()
 
-                        for _, r in roster.iterrows():
-                            rk = f"{exam_id}_{r['Roll']}"
+                        for idx, r in roster.iterrows():
+                            # Generating a completely unique key using the row index
+                            rk = f"{exam_id}_{r['Roll']}_{idx}"
                             actual_key = f"act_{rk}"
                             extra_key = f"ext_{rk}"
                             
@@ -749,8 +754,8 @@ elif st.session_state.user_role == "teacher":
                             all_marks = fetch_exam_marks() 
                             new_records = []
                             
-                            for _, r in roster.iterrows():
-                                rk = f"{exam_id}_{r['Roll']}"
+                            for idx, r in roster.iterrows():
+                                rk = f"{exam_id}_{r['Roll']}_{idx}"
                                 act_val = st.session_state.get(f"act_{rk}")
                                 ext_val = st.session_state.get(f"ext_{rk}", 0.0)
                                 

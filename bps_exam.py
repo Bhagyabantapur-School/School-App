@@ -158,7 +158,6 @@ def fetch_student_photos():
                 photo_df['Thumb_URL'] = photo_df['Thumb_URL'].astype(str).str.strip()
                 return photo_df
     except Exception as e: 
-        print(f"Photo Fetch Error: {e}")
         pass
     
     return pd.DataFrame(columns=["Class", "Section", "Roll", "Thumb_URL"])
@@ -369,11 +368,11 @@ def fetch_exam_schedules():
 @st.cache_data(ttl=300)
 def fetch_exam_marks():
     sh = init_exam_sheet()
-    ws = ensure_worksheet(sh, "marks", ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks", "Percentage"])
+    ws = ensure_worksheet(sh, "marks", ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks", "Percentage", "Graded_By"])
     records = ws.get_all_records()
     
     if not records:
-        return pd.DataFrame(columns=["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks", "Percentage"])
+        return pd.DataFrame(columns=["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks", "Percentage", "Graded_By"])
         
     df = pd.DataFrame(records)
     
@@ -382,11 +381,9 @@ def fetch_exam_marks():
         df['Extra_Marks'] = 0
         df['Total_Marks'] = df['Marks_Obtained']
         
-    if 'Full_Marks' not in df.columns:
-        df['Full_Marks'] = "50"
-        
-    if 'Percentage' not in df.columns:
-        df['Percentage'] = ""
+    if 'Full_Marks' not in df.columns: df['Full_Marks'] = "50"
+    if 'Percentage' not in df.columns: df['Percentage'] = ""
+    if 'Graded_By' not in df.columns: df['Graded_By'] = ""
         
     return df.astype(str)
 
@@ -409,7 +406,7 @@ st.sidebar.button("🔄 Sync Exam Data", on_click=refresh_exam_data, use_contain
 # ADMIN VIEW
 # ---------------------------------------------------------
 if st.session_state.user_role == "admin":
-    tabs = st.tabs(["📚 Master Subject Map", "📅 Schedule New Exams", "📋 View Scheduled Exams"])
+    tabs = st.tabs(["📚 Master Subject Map", "📅 Schedule New Exams", "📋 View Scheduled Exams", "📈 Mark Entry Progress", "📊 View Student Marks"])
     
     with tabs[0]:
         st.markdown("<div class='header-card'><h4>👨‍🏫 Master Subject Mapping</h4><p style='margin:0; font-size:13px;'>Review all teacher assignments. <b>Rows changed by teachers are highlighted in green.</b></p></div>", unsafe_allow_html=True)
@@ -559,6 +556,94 @@ if st.session_state.user_role == "admin":
         else:
             st.info("No exams scheduled yet.")
 
+    with tabs[3]:
+        st.subheader("📈 Mark Entry Progress Dashboard")
+        schedules = fetch_exam_schedules()
+        mdm = fetch_mdm_log()
+        marks = fetch_exam_marks()
+        
+        if schedules.empty:
+            st.info("No exams have been scheduled yet.")
+        else:
+            progress_data = []
+            for _, r in schedules.iterrows():
+                e_id = r['Exam_ID']
+                e_date = r['Date']
+                e_class = r['Class']
+                e_sec = r['Section']
+                e_sub = r['Subject']
+                allotted_t = r['Teacher']
+                
+                # Fetch MDM Count for Total Present
+                if not mdm.empty:
+                    if e_class == "CLASS PP":
+                        mdm_present = mdm[(mdm['Date'] == e_date) & (mdm['Class'].isin(["CLASS PP", "CLASS LPP"])) & (mdm['Section'] == e_sec)]
+                    else:
+                        mdm_present = mdm[(mdm['Date'] == e_date) & (mdm['Class'] == e_class) & (mdm['Section'] == e_sec)]
+                    tot_present = len(mdm_present)
+                else:
+                    tot_present = 0
+                    
+                # Fetch Marks Count
+                entered_count = 0
+                graded_by_str = "---"
+                if not marks.empty:
+                    exam_marks = marks[marks['Exam_ID'] == e_id]
+                    # Calculate how many students actually got marks entered
+                    entered_count = len(exam_marks[(exam_marks['Actual_Marks'].notna()) & (exam_marks['Actual_Marks'] != "") & (exam_marks['Actual_Marks'] != "nan") & (exam_marks['Actual_Marks'] != "None")])
+                    
+                    # Discover who actually graded it
+                    g_list = exam_marks['Graded_By'].unique().tolist()
+                    g_list = [t for t in g_list if str(t).strip() not in ["", "nan", "None"]]
+                    if g_list:
+                        graded_by_str = ", ".join([TEACHER_INITIALS.get(t.strip(), t.strip()) for t in g_list])
+                        
+                progress_data.append({
+                    "Date": e_date,
+                    "Class": f"{e_class}-{e_sec}",
+                    "Subject": e_sub,
+                    "Allotted": TEACHER_INITIALS.get(allotted_t.strip(), allotted_t.strip()),
+                    "Graded By": graded_by_str,
+                    "Present": tot_present,
+                    "Entered": entered_count,
+                    "Progress": f"{entered_count} / {tot_present}" if tot_present > 0 else "0 / 0"
+                })
+                
+            prog_df = pd.DataFrame(progress_data)
+            st.dataframe(prog_df, use_container_width=True, hide_index=True)
+
+    with tabs[4]:
+        st.subheader("📊 View Student Marks")
+        schedules = fetch_exam_schedules()
+        marks = fetch_exam_marks()
+        
+        if schedules.empty:
+            st.info("No exams scheduled.")
+        else:
+            exam_opts = {}
+            for _, r in schedules.iterrows():
+                key_str = f"{r['Date']} | {r['Class']}-{r['Section']} | {r['Subject']}"
+                exam_opts[key_str] = r['Exam_ID']
+                
+            sel_ex = st.selectbox("Select Exam to View", ["Select..."] + list(exam_opts.keys()))
+            
+            if sel_ex != "Select...":
+                e_id = exam_opts[sel_ex]
+                if marks.empty:
+                    st.warning("No marks recorded in the system yet.")
+                else:
+                    em = marks[marks['Exam_ID'] == e_id].copy()
+                    if em.empty:
+                        st.info("No marks entered for this exam yet.")
+                    else:
+                        # Rank students purely for the Admin view
+                        em['Numeric_Total'] = pd.to_numeric(em['Total_Marks'], errors='coerce')
+                        em['Rank'] = em['Numeric_Total'].rank(method='min', ascending=False, na_option='bottom')
+                        em = em.sort_values(by=['Rank'])
+                        
+                        view_df = em[['Roll', 'Name', 'Actual_Marks', 'Extra_Marks', 'Total_Marks', 'Percentage', 'Rank', 'Graded_By']]
+                        st.dataframe(view_df, use_container_width=True, hide_index=True)
+
 # ---------------------------------------------------------
 # TEACHER VIEW
 # ---------------------------------------------------------
@@ -617,225 +702,232 @@ elif st.session_state.user_role == "teacher":
                 st.rerun()
             
     with tabs[1]:
-        st.markdown("<div class='header-card'><h4>🎓 Grade Entry Portal</h4><p style='margin:0; font-size:14px;'>Only students present in the MDM Log on the exam date will appear here.</p></div>", unsafe_allow_html=True)
+        st.markdown("<div class='header-card'><h4>🎓 Grade Entry Portal</h4><p style='margin:0; font-size:14px;'>Select any exam below. Your assigned exams are starred at the top.</p></div>", unsafe_allow_html=True)
         
         schedules = fetch_exam_schedules()
-        if not schedules.empty:
-            my_exams = schedules[schedules['Teacher'] == st.session_state.user_name]
-            
-            if my_exams.empty:
-                st.info("🏖️ You have no exams assigned for grading.")
-            else:
-                exam_display = {f"{r['Date']} | {r['Class']}-{r['Section']} | {r['Subject']}": r['Exam_ID'] for _, r in my_exams.iterrows()}
-                selected_exam_str = st.selectbox("Select Exam to Grade", ["Select..."] + list(exam_display.keys()))
+        if schedules.empty:
+            st.info("🏖️ No exams are scheduled in the system right now.")
+        else:
+            # UNIVERSAL DROPDOWN: Teachers can select ANY exam from the full schedule
+            exam_display = {}
+            for _, r in schedules.iterrows():
+                is_mine = r['Teacher'] == st.session_state.user_name
+                prefix = "⭐ [Assigned] " if is_mine else "🔹 [Other] "
+                key_str = f"{prefix}{r['Date']} | {r['Class']}-{r['Section']} | {r['Subject']}"
+                exam_display[key_str] = r['Exam_ID']
                 
-                if selected_exam_str != "Select...":
-                    exam_id = exam_display[selected_exam_str]
-                    exam_info = my_exams[my_exams['Exam_ID'] == exam_id].iloc[0]
-                    
-                    e_date = exam_info['Date']
-                    e_class = exam_info['Class']
-                    e_sec = exam_info['Section']
-                    e_sub = exam_info['Subject']
-                    
-                    e_fm = 50.0
-                    if 'Full_Marks' in exam_info and pd.notna(exam_info['Full_Marks']) and str(exam_info['Full_Marks']).strip() != "":
-                        try: e_fm = float(exam_info['Full_Marks'])
-                        except: pass
-                    
-                    st.markdown("---")
-                    st.subheader(f"Entering marks for: {e_sub}")
-                    st.info(f"🎯 **Full Marks:** {int(e_fm)} (Read-Only)")
-                    
-                    mdm = fetch_mdm_log()
-                    if not mdm.empty:
-                        if e_class == "CLASS PP":
-                            mdm_present = mdm[(mdm['Date'] == e_date) & (mdm['Class'].isin(["CLASS PP", "CLASS LPP"])) & (mdm['Section'] == e_sec)]
-                        else:
-                            mdm_present = mdm[(mdm['Date'] == e_date) & (mdm['Class'] == e_class) & (mdm['Section'] == e_sec)]
+            # Sort the dropdown so the teacher's assigned exams always float to the top
+            sorted_keys = sorted(list(exam_display.keys()), key=lambda x: (not x.startswith("⭐"), x))
+            
+            selected_exam_str = st.selectbox("Select Exam to Grade", ["Select..."] + sorted_keys)
+            
+            if selected_exam_str != "Select...":
+                exam_id = exam_display[selected_exam_str]
+                exam_info = schedules[schedules['Exam_ID'] == exam_id].iloc[0]
+                
+                e_date = exam_info['Date']
+                e_class = exam_info['Class']
+                e_sec = exam_info['Section']
+                e_sub = exam_info['Subject']
+                
+                e_fm = 50.0
+                if 'Full_Marks' in exam_info and pd.notna(exam_info['Full_Marks']) and str(exam_info['Full_Marks']).strip() != "":
+                    try: e_fm = float(exam_info['Full_Marks'])
+                    except: pass
+                
+                st.markdown("---")
+                st.subheader(f"Entering marks for: {e_sub}")
+                st.info(f"🎯 **Full Marks:** {int(e_fm)} (Read-Only)")
+                
+                mdm = fetch_mdm_log()
+                if not mdm.empty:
+                    if e_class == "CLASS PP":
+                        mdm_present = mdm[(mdm['Date'] == e_date) & (mdm['Class'].isin(["CLASS PP", "CLASS LPP"])) & (mdm['Section'] == e_sec)]
                     else:
-                        mdm_present = pd.DataFrame()
-                        
-                    if mdm_present.empty:
-                        st.error(f"🚨 **No Students Found!** The MDM attendance log for **{e_class}-{e_sec}** on **{e_date}** is empty. You must complete MDM entry for this day before you can enter marks.")
+                        mdm_present = mdm[(mdm['Date'] == e_date) & (mdm['Class'] == e_class) & (mdm['Section'] == e_sec)]
+                else:
+                    mdm_present = pd.DataFrame()
+                    
+                if mdm_present.empty:
+                    st.error(f"🚨 **No Students Found!** The MDM attendance log for **{e_class}-{e_sec}** on **{e_date}** is empty. You must complete MDM entry for this day before you can enter marks.")
+                else:
+                    st.success(f"✅ Found {len(mdm_present)} students present on {e_date}.")
+                    
+                    all_marks = fetch_exam_marks()
+                    existing_marks = pd.DataFrame()
+                    if not all_marks.empty:
+                        existing_marks = all_marks[all_marks['Exam_ID'] == exam_id]
+                    
+                    roster = mdm_present[['Class', 'Section', 'Roll', 'Name']].copy()
+                    roster['Class'] = roster['Class'].astype(str).str.strip().str.upper()
+                    roster['Section'] = roster['Section'].astype(str).str.strip().str.upper()
+                    roster['Roll'] = roster['Roll'].astype(str).str.strip()
+                    
+                    # 🛡️ ANTI-DUPLICATION SHIELD
+                    roster = roster.drop_duplicates(subset=['Class', 'Section', 'Roll']).reset_index(drop=True)
+                    
+                    photos_df = fetch_student_photos()
+                    if not photos_df.empty:
+                        photos_df = photos_df.drop_duplicates(subset=['Class', 'Section', 'Roll'])
+                        roster = pd.merge(roster, photos_df, on=['Class', 'Section', 'Roll'], how='left')
                     else:
-                        st.success(f"✅ Found {len(mdm_present)} students present on {e_date}.")
+                        roster['Thumb_URL'] = None
                         
-                        all_marks = fetch_exam_marks()
-                        existing_marks = pd.DataFrame()
-                        if not all_marks.empty:
-                            existing_marks = all_marks[all_marks['Exam_ID'] == exam_id]
+                    if 'Thumb_URL' in roster.columns:
+                        roster['Thumb_URL'] = roster['Thumb_URL'].replace({"": None, "nan": None, "None": None})
                         
-                        roster = mdm_present[['Class', 'Section', 'Roll', 'Name']].copy()
-                        roster['Class'] = roster['Class'].astype(str).str.strip().str.upper()
-                        roster['Section'] = roster['Section'].astype(str).str.strip().str.upper()
-                        roster['Roll'] = roster['Roll'].astype(str).str.strip()
+                    if not existing_marks.empty:
+                        existing_subset = existing_marks[['Class', 'Section', 'Roll', 'Actual_Marks', 'Extra_Marks', 'Total_Marks', 'Percentage']].drop_duplicates(subset=['Class', 'Section', 'Roll'])
+                        existing_subset['Class'] = existing_subset['Class'].astype(str).str.strip().str.upper()
+                        existing_subset['Section'] = existing_subset['Section'].astype(str).str.strip().str.upper()
+                        existing_subset['Roll'] = existing_subset['Roll'].astype(str).str.strip()
+                        roster = pd.merge(roster, existing_subset, on=['Class', 'Section', 'Roll'], how='left')
+                    else:
+                        roster['Actual_Marks'] = None
+                        roster['Extra_Marks'] = 0.0
+                        roster['Total_Marks'] = None
+                        roster['Percentage'] = None
                         
-                        roster = roster.drop_duplicates(subset=['Class', 'Section', 'Roll']).reset_index(drop=True)
-                        
-                        photos_df = fetch_student_photos()
-                        if not photos_df.empty:
-                            photos_df = photos_df.drop_duplicates(subset=['Class', 'Section', 'Roll'])
-                            roster = pd.merge(roster, photos_df, on=['Class', 'Section', 'Roll'], how='left')
-                        else:
-                            roster['Thumb_URL'] = None
-                            
-                        if 'Thumb_URL' in roster.columns:
-                            roster['Thumb_URL'] = roster['Thumb_URL'].replace({"": None, "nan": None, "None": None})
-                            
-                        if not existing_marks.empty:
-                            existing_subset = existing_marks[['Class', 'Section', 'Roll', 'Actual_Marks', 'Extra_Marks', 'Total_Marks', 'Percentage']].drop_duplicates(subset=['Class', 'Section', 'Roll'])
-                            existing_subset['Class'] = existing_subset['Class'].astype(str).str.strip().str.upper()
-                            existing_subset['Section'] = existing_subset['Section'].astype(str).str.strip().str.upper()
-                            existing_subset['Roll'] = existing_subset['Roll'].astype(str).str.strip()
-                            roster = pd.merge(roster, existing_subset, on=['Class', 'Section', 'Roll'], how='left')
-                        else:
-                            roster['Actual_Marks'] = None
-                            roster['Extra_Marks'] = 0.0
-                            roster['Total_Marks'] = None
-                            roster['Percentage'] = None
-                            
-                        roster['Actual_Marks'] = pd.to_numeric(roster['Actual_Marks'], errors='coerce').astype('float')
-                        roster['Extra_Marks'] = pd.to_numeric(roster['Extra_Marks'], errors='coerce').fillna(0.0).astype('float')
-                        
-                        if 'Thumb_URL' not in roster.columns: roster['Thumb_URL'] = ""
-                        with st.spinner("Loading profiles..."):
-                            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe:
-                                roster['Photo'] = list(exe.map(get_secure_photo_uri, roster['Thumb_URL'].tolist()))
+                    roster['Actual_Marks'] = pd.to_numeric(roster['Actual_Marks'], errors='coerce').astype('float')
+                    roster['Extra_Marks'] = pd.to_numeric(roster['Extra_Marks'], errors='coerce').fillna(0.0).astype('float')
+                    
+                    if 'Thumb_URL' not in roster.columns: roster['Thumb_URL'] = ""
+                    with st.spinner("Loading profiles..."):
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe:
+                            roster['Photo'] = list(exe.map(get_secure_photo_uri, roster['Thumb_URL'].tolist()))
 
-                        # --- NEW: LIVE PRE-COMPUTATION & RANKING ENGINE ---
-                        live_totals = []
-                        for idx, r in roster.iterrows():
-                            rk = f"{exam_id}_{r['Roll']}_{idx}"
-                            actual_key = f"act_{rk}"
-                            extra_key = f"ext_{rk}"
-                            
-                            if actual_key not in st.session_state:
-                                val = r['Actual_Marks']
-                                st.session_state[actual_key] = float(val) if pd.notna(val) else None
-                            if extra_key not in st.session_state:
-                                val = r['Extra_Marks']
-                                st.session_state[extra_key] = float(val) if pd.notna(val) else 0.0
-                                
-                            act_val = st.session_state[actual_key]
-                            ext_val = st.session_state[extra_key]
-                            
-                            if act_val is not None:
-                                live_totals.append(act_val + (ext_val if ext_val is not None else 0.0))
-                            else:
-                                live_totals.append(np.nan)
-                                
-                        roster['Live_Total'] = live_totals
-                        roster['Rank'] = roster['Live_Total'].rank(method='min', ascending=False, na_option='bottom')
+                    # --- LIVE PRE-COMPUTATION & RANKING ENGINE ---
+                    live_totals = []
+                    for idx, r in roster.iterrows():
+                        rk = f"{exam_id}_{r['Roll']}_{idx}"
+                        actual_key = f"act_{rk}"
+                        extra_key = f"ext_{rk}"
                         
-                        st.markdown("### Grade Entry Roster")
+                        if actual_key not in st.session_state:
+                            val = r['Actual_Marks']
+                            st.session_state[actual_key] = float(val) if pd.notna(val) else None
+                        if extra_key not in st.session_state:
+                            val = r['Extra_Marks']
+                            st.session_state[extra_key] = float(val) if pd.notna(val) else 0.0
+                            
+                        act_val = st.session_state[actual_key]
+                        ext_val = st.session_state[extra_key]
                         
-                        # --- TOGGLE SORTING ---
-                        sort_col1, sort_col2 = st.columns([1, 1])
-                        with sort_col1:
-                            sort_by_rank = st.toggle("🏆 Sort by Rank")
-                        with sort_col2:
-                            if sort_by_rank:
-                                st.caption("⚠️ *Live sorting is ON.*")
-                                
+                        if act_val is not None:
+                            live_totals.append(act_val + (ext_val if ext_val is not None else 0.0))
+                        else:
+                            live_totals.append(np.nan)
+                            
+                    roster['Live_Total'] = live_totals
+                    roster['Rank'] = roster['Live_Total'].rank(method='min', ascending=False, na_option='bottom')
+                    
+                    st.markdown("### Grade Entry Roster")
+                    
+                    # --- TOGGLE SORTING ---
+                    sort_col1, sort_col2 = st.columns([1, 1])
+                    with sort_col1:
+                        sort_by_rank = st.toggle("🏆 Sort by Rank")
+                    with sort_col2:
                         if sort_by_rank:
-                            roster['Numeric_Roll'] = pd.to_numeric(roster['Roll'], errors='coerce')
-                            roster = roster.sort_values(by=['Live_Total', 'Numeric_Roll'], ascending=[False, True])
-                        else:
-                            roster['Numeric_Roll'] = pd.to_numeric(roster['Roll'], errors='coerce')
-                            roster = roster.sort_values(by=['Numeric_Roll'])
+                            st.caption("⚠️ *Live sorting is ON.*")
+                            
+                    if sort_by_rank:
+                        roster['Numeric_Roll'] = pd.to_numeric(roster['Roll'], errors='coerce')
+                        roster = roster.sort_values(by=['Live_Total', 'Numeric_Roll'], ascending=[False, True])
+                    else:
+                        roster['Numeric_Roll'] = pd.to_numeric(roster['Roll'], errors='coerce')
+                        roster = roster.sort_values(by=['Numeric_Roll'])
 
-                        st.markdown('<div class="roster-container">', unsafe_allow_html=True)
+                    st.markdown('<div class="roster-container">', unsafe_allow_html=True)
+                    
+                    hc1, hc2, hc3, hc4, hc5 = st.columns([1.2, 3, 2, 2, 1.8])
+                    hc3.markdown("<div style='font-size:13px; font-weight:bold; text-align:center;'>Act</div>", unsafe_allow_html=True)
+                    hc4.markdown("<div style='font-size:13px; font-weight:bold; text-align:center;'>Ext(+)</div>", unsafe_allow_html=True)
+                    hc5.markdown("<div style='font-size:13px; font-weight:bold; text-align:center;'>Res</div>", unsafe_allow_html=True)
+                    st.divider()
+
+                    for idx, r in roster.iterrows():
+                        rk = f"{exam_id}_{r['Roll']}_{idx}"
+                        actual_key = f"act_{rk}"
+                        extra_key = f"ext_{rk}"
                         
-                        hc1, hc2, hc3, hc4, hc5 = st.columns([1.2, 3, 2, 2, 1.8])
-                        hc3.markdown("<div style='font-size:13px; font-weight:bold; text-align:center;'>Act</div>", unsafe_allow_html=True)
-                        hc4.markdown("<div style='font-size:13px; font-weight:bold; text-align:center;'>Ext(+)</div>", unsafe_allow_html=True)
-                        hc5.markdown("<div style='font-size:13px; font-weight:bold; text-align:center;'>Res</div>", unsafe_allow_html=True)
+                        act_val = st.session_state[actual_key]
+                        ext_val = st.session_state[extra_key]
+                        
+                        tot_val = None
+                        pct_val = None
+                        if act_val is not None:
+                            tot_val = act_val + (ext_val if ext_val is not None else 0.0)
+                            pct_val = round((tot_val / e_fm) * 100, 1) if e_fm > 0 else 0.0
+
+                        if pd.notna(r['Rank']):
+                            rank_html = f"<span style='background-color:#ffeb3b; color:#856404; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:11px;'>🏆 #{int(r['Rank'])}</span>"
+                        else:
+                            rank_html = f"<span style='background-color:#e9ecef; color:#6c757d; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:11px;'>-</span>"
+
+                        c1, c2, c3, c4, c5 = st.columns([1.2, 3, 2, 2, 1.8])
+                        with c1: 
+                            st.image(r['Photo'], width=65) 
+                        with c2: 
+                            st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} &nbsp;{rank_html}</span></div>", unsafe_allow_html=True)
+                        with c3: 
+                            st.number_input("Act", min_value=0.0, max_value=float(e_fm), key=actual_key, label_visibility="collapsed")
+                        with c4: 
+                            st.number_input("Ext", min_value=0.0, key=extra_key, label_visibility="collapsed")
+                        with c5:
+                            if tot_val is not None:
+                                st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px; text-align:center;'><b>{tot_val}</b><br><span style='font-size:12px; color:#28a745;'>{pct_val}%</span></div>", unsafe_allow_html=True)
+                            else:
+                                st.markdown("<div style='text-align:center; color:gray; font-size:13px; margin-top:10px;'>-</div>", unsafe_allow_html=True)
                         st.divider()
 
+                    st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    if st.button("💾 Save Exam Marks", type="primary"):
+                        all_marks = fetch_exam_marks() 
+                        new_records = []
+                        
                         for idx, r in roster.iterrows():
                             rk = f"{exam_id}_{r['Roll']}_{idx}"
-                            actual_key = f"act_{rk}"
-                            extra_key = f"ext_{rk}"
+                            act_val = st.session_state.get(f"act_{rk}")
+                            ext_val = st.session_state.get(f"ext_{rk}", 0.0)
                             
-                            act_val = st.session_state[actual_key]
-                            ext_val = st.session_state[extra_key]
-                            
-                            tot_val = None
-                            pct_val = None
                             if act_val is not None:
-                                tot_val = act_val + (ext_val if ext_val is not None else 0.0)
-                                pct_val = round((tot_val / e_fm) * 100, 1) if e_fm > 0 else 0.0
-
-                            if pd.notna(r['Rank']):
-                                rank_html = f"<span style='background-color:#ffeb3b; color:#856404; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:11px;'>🏆 #{int(r['Rank'])}</span>"
-                            else:
-                                rank_html = f"<span style='background-color:#e9ecef; color:#6c757d; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:11px;'>-</span>"
-
-                            c1, c2, c3, c4, c5 = st.columns([1.2, 3, 2, 2, 1.8])
-                            with c1: 
-                                st.image(r['Photo'], width=65) 
-                            with c2: 
-                                st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} &nbsp;{rank_html}</span></div>", unsafe_allow_html=True)
-                            with c3: 
-                                st.number_input("Act", min_value=0.0, max_value=float(e_fm), key=actual_key, label_visibility="collapsed")
-                            with c4: 
-                                st.number_input("Ext", min_value=0.0, key=extra_key, label_visibility="collapsed")
-                            with c5:
-                                if tot_val is not None:
-                                    st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px; text-align:center;'><b>{tot_val}</b><br><span style='font-size:12px; color:#28a745;'>{pct_val}%</span></div>", unsafe_allow_html=True)
-                                else:
-                                    st.markdown("<div style='text-align:center; color:gray; font-size:13px; margin-top:10px;'>-</div>", unsafe_allow_html=True)
-                            st.divider()
-
-                        st.markdown('</div>', unsafe_allow_html=True)
+                                total = act_val + (ext_val if ext_val is not None else 0.0)
+                                pct = round((total / e_fm) * 100, 1) if e_fm > 0 else 0.0
+                                
+                                new_records.append({
+                                    "Exam_ID": exam_id,
+                                    "Date": e_date,
+                                    "Class": e_class,
+                                    "Section": e_sec,
+                                    "Subject": e_sub,
+                                    "Roll": r['Roll'],
+                                    "Name": r['Name'],
+                                    "Actual_Marks": act_val,
+                                    "Extra_Marks": ext_val,
+                                    "Total_Marks": total,
+                                    "Full_Marks": int(e_fm),
+                                    "Percentage": pct,
+                                    "Graded_By": st.session_state.user_name # Records who actually did the override entry
+                                })
+                                
+                        new_marks_df = pd.DataFrame(new_records)
                         
-                        if st.button("💾 Save Exam Marks", type="primary"):
-                            all_marks = fetch_exam_marks() 
-                            new_records = []
+                        if not all_marks.empty:
+                            all_marks_purged = all_marks[all_marks['Exam_ID'] != exam_id]
+                            if 'Marks_Obtained' in all_marks_purged.columns:
+                                all_marks_purged = all_marks_purged.drop(columns=['Marks_Obtained'])
+                            final_marks = pd.concat([all_marks_purged, new_marks_df], ignore_index=True)
+                        else:
+                            final_marks = new_marks_df
                             
-                            for idx, r in roster.iterrows():
-                                rk = f"{exam_id}_{r['Roll']}_{idx}"
-                                act_val = st.session_state.get(f"act_{rk}")
-                                ext_val = st.session_state.get(f"ext_{rk}", 0.0)
-                                
-                                if act_val is not None:
-                                    total = act_val + (ext_val if ext_val is not None else 0.0)
-                                    pct = round((total / e_fm) * 100, 1) if e_fm > 0 else 0.0
-                                    
-                                    new_records.append({
-                                        "Exam_ID": exam_id,
-                                        "Date": e_date,
-                                        "Class": e_class,
-                                        "Section": e_sec,
-                                        "Subject": e_sub,
-                                        "Roll": r['Roll'],
-                                        "Name": r['Name'],
-                                        "Actual_Marks": act_val,
-                                        "Extra_Marks": ext_val,
-                                        "Total_Marks": total,
-                                        "Full_Marks": int(e_fm),
-                                        "Percentage": pct
-                                    })
-                                    
-                            new_marks_df = pd.DataFrame(new_records)
-                            
-                            if not all_marks.empty:
-                                all_marks_purged = all_marks[all_marks['Exam_ID'] != exam_id]
-                                if 'Marks_Obtained' in all_marks_purged.columns:
-                                    all_marks_purged = all_marks_purged.drop(columns=['Marks_Obtained'])
-                                final_marks = pd.concat([all_marks_purged, new_marks_df], ignore_index=True)
-                            else:
-                                final_marks = new_marks_df
-                                
-                            overwrite_sheet(
-                                init_exam_sheet(), 
-                                "marks", 
-                                final_marks, 
-                                ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks", "Percentage"]
-                            )
-                            
-                            st.success(f"🎉 Marks saved successfully for {len(new_records)} students! Totals and Percentages have been locked in.")
-                            st.rerun()
-        else:
-            st.info("No exams have been scheduled in the system yet.")
+                        overwrite_sheet(
+                            init_exam_sheet(), 
+                            "marks", 
+                            final_marks, 
+                            ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks", "Percentage", "Graded_By"]
+                        )
+                        
+                        st.success(f"🎉 Marks saved successfully for {len(new_records)} students! Totals and Percentages have been locked in.")
+                        st.rerun()

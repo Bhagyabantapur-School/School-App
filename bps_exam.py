@@ -106,7 +106,6 @@ def refresh_exam_data():
     fetch_teacher_status.clear()
     fetch_student_photos.clear()
     
-    # Safely clear active grading cache to prevent stale data
     keys_to_clear = [key for key in st.session_state.keys() if key.startswith("act_") or key.startswith("ext_") or key.startswith("roster_")]
     for key in keys_to_clear:
         del st.session_state[key]
@@ -589,24 +588,36 @@ if st.session_state.user_role == "admin":
                 graded_by_str = "---"
                 if not marks.empty:
                     exam_marks = marks[marks['Exam_ID'] == e_id]
-                    # Calculate how many students actually got marks entered
-                    entered_count = len(exam_marks[(exam_marks['Actual_Marks'].notna()) & (exam_marks['Actual_Marks'] != "") & (exam_marks['Actual_Marks'] != "nan") & (exam_marks['Actual_Marks'] != "None")])
                     
-                    # Discover who actually graded it
-                    g_list = exam_marks['Graded_By'].unique().tolist()
-                    g_list = [t for t in g_list if str(t).strip() not in ["", "nan", "None"]]
-                    if g_list:
-                        graded_by_str = ", ".join([TEACHER_INITIALS.get(t.strip(), t.strip()) for t in g_list])
+                    # Clean out empty strings safely
+                    valid_marks = exam_marks[
+                        exam_marks['Actual_Marks'].notna() & 
+                        (exam_marks['Actual_Marks'].astype(str).str.strip() != "") & 
+                        (exam_marks['Actual_Marks'].astype(str).str.lower() != "nan") & 
+                        (exam_marks['Actual_Marks'].astype(str).str.lower() != "none")
+                    ]
+                    entered_count = len(valid_marks)
+                    
+                    # Safely handle old databases that don't have the Graded_By column yet
+                    if 'Graded_By' in valid_marks.columns:
+                        g_list = valid_marks['Graded_By'].unique().tolist()
+                        g_list = [str(t).strip() for t in g_list if str(t).strip() not in ["", "nan", "None"]]
+                        if g_list:
+                            graded_by_str = ", ".join([TEACHER_INITIALS.get(t, t) for t in g_list])
+                        elif entered_count > 0:
+                            graded_by_str = f"{TEACHER_INITIALS.get(allotted_t.strip(), allotted_t.strip())} (Legacy)"
+                    elif entered_count > 0:
+                        graded_by_str = f"{TEACHER_INITIALS.get(allotted_t.strip(), allotted_t.strip())} (Legacy)"
                         
                 progress_data.append({
                     "Date": e_date,
                     "Class": f"{e_class}-{e_sec}",
                     "Subject": e_sub,
-                    "Allotted": TEACHER_INITIALS.get(allotted_t.strip(), allotted_t.strip()),
-                    "Graded By": graded_by_str,
+                    "Allotted To": TEACHER_INITIALS.get(allotted_t.strip(), allotted_t.strip()),
+                    "Entered By": graded_by_str,
                     "Present": tot_present,
-                    "Entered": entered_count,
-                    "Progress": f"{entered_count} / {tot_present}" if tot_present > 0 else "0 / 0"
+                    "Marks Entered": entered_count,
+                    "Progress Ratio": f"{entered_count} / {tot_present}" if tot_present > 0 else "0 / 0"
                 })
                 
             prog_df = pd.DataFrame(progress_data)
@@ -636,12 +647,18 @@ if st.session_state.user_role == "admin":
                     if em.empty:
                         st.info("No marks entered for this exam yet.")
                     else:
-                        # Rank students purely for the Admin view
+                        # Pre-calculate Ranks for the Admin view
                         em['Numeric_Total'] = pd.to_numeric(em['Total_Marks'], errors='coerce')
                         em['Rank'] = em['Numeric_Total'].rank(method='min', ascending=False, na_option='bottom')
                         em = em.sort_values(by=['Rank'])
                         
-                        view_df = em[['Roll', 'Name', 'Actual_Marks', 'Extra_Marks', 'Total_Marks', 'Percentage', 'Rank', 'Graded_By']]
+                        # Properly parse Graded By or fallback to Legacy if missing
+                        if 'Graded_By' in em.columns:
+                            em['Entered By'] = em['Graded_By'].apply(lambda x: TEACHER_INITIALS.get(str(x).strip(), str(x).strip()) if str(x).strip() not in ["", "nan", "None"] else "Legacy Data")
+                        else:
+                            em['Entered By'] = "Legacy Data"
+                            
+                        view_df = em[['Roll', 'Name', 'Actual_Marks', 'Extra_Marks', 'Total_Marks', 'Percentage', 'Rank', 'Entered By']]
                         st.dataframe(view_df, use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------
@@ -708,7 +725,6 @@ elif st.session_state.user_role == "teacher":
         if schedules.empty:
             st.info("🏖️ No exams are scheduled in the system right now.")
         else:
-            # UNIVERSAL DROPDOWN: Teachers can select ANY exam from the full schedule
             exam_display = {}
             for _, r in schedules.iterrows():
                 is_mine = r['Teacher'] == st.session_state.user_name
@@ -716,7 +732,6 @@ elif st.session_state.user_role == "teacher":
                 key_str = f"{prefix}{r['Date']} | {r['Class']}-{r['Section']} | {r['Subject']}"
                 exam_display[key_str] = r['Exam_ID']
                 
-            # Sort the dropdown so the teacher's assigned exams always float to the top
             sorted_keys = sorted(list(exam_display.keys()), key=lambda x: (not x.startswith("⭐"), x))
             
             selected_exam_str = st.selectbox("Select Exam to Grade", ["Select..."] + sorted_keys)
@@ -763,7 +778,6 @@ elif st.session_state.user_role == "teacher":
                     roster['Section'] = roster['Section'].astype(str).str.strip().str.upper()
                     roster['Roll'] = roster['Roll'].astype(str).str.strip()
                     
-                    # 🛡️ ANTI-DUPLICATION SHIELD
                     roster = roster.drop_duplicates(subset=['Class', 'Section', 'Roll']).reset_index(drop=True)
                     
                     photos_df = fetch_student_photos()
@@ -796,7 +810,6 @@ elif st.session_state.user_role == "teacher":
                         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe:
                             roster['Photo'] = list(exe.map(get_secure_photo_uri, roster['Thumb_URL'].tolist()))
 
-                    # --- LIVE PRE-COMPUTATION & RANKING ENGINE ---
                     live_totals = []
                     for idx, r in roster.iterrows():
                         rk = f"{exam_id}_{r['Roll']}_{idx}"
@@ -823,7 +836,6 @@ elif st.session_state.user_role == "teacher":
                     
                     st.markdown("### Grade Entry Roster")
                     
-                    # --- TOGGLE SORTING ---
                     sort_col1, sort_col2 = st.columns([1, 1])
                     with sort_col1:
                         sort_by_rank = st.toggle("🏆 Sort by Rank")
@@ -899,7 +911,7 @@ elif st.session_state.user_role == "teacher":
                                 new_records.append({
                                     "Exam_ID": exam_id,
                                     "Date": e_date,
-                                    "Class": e_class,
+                                    "Class": r.get('Class', e_class), # Ensure match with MDM
                                     "Section": e_sec,
                                     "Subject": e_sub,
                                     "Roll": r['Roll'],

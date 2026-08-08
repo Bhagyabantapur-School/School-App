@@ -106,6 +106,7 @@ def refresh_exam_data():
     fetch_teacher_status.clear()
     fetch_student_photos.clear()
     
+    # Safely clear active grading cache to prevent stale data
     keys_to_clear = [key for key in st.session_state.keys() if key.startswith("act_") or key.startswith("ext_") or key.startswith("roster_")]
     for key in keys_to_clear:
         del st.session_state[key]
@@ -573,7 +574,6 @@ if st.session_state.user_role == "admin":
                 e_sub = r['Subject']
                 allotted_t = r['Teacher']
                 
-                # Fetch MDM Count for Total Present
                 if not mdm.empty:
                     if e_class == "CLASS PP":
                         mdm_present = mdm[(mdm['Date'] == e_date) & (mdm['Class'].isin(["CLASS PP", "CLASS LPP"])) & (mdm['Section'] == e_sec)]
@@ -583,41 +583,26 @@ if st.session_state.user_role == "admin":
                 else:
                     tot_present = 0
                     
-                # Fetch Marks Count
                 entered_count = 0
                 graded_by_str = "---"
                 if not marks.empty:
                     exam_marks = marks[marks['Exam_ID'] == e_id]
+                    entered_count = len(exam_marks[(exam_marks['Actual_Marks'].notna()) & (exam_marks['Actual_Marks'] != "") & (exam_marks['Actual_Marks'] != "nan") & (exam_marks['Actual_Marks'] != "None")])
                     
-                    # Clean out empty strings safely
-                    valid_marks = exam_marks[
-                        exam_marks['Actual_Marks'].notna() & 
-                        (exam_marks['Actual_Marks'].astype(str).str.strip() != "") & 
-                        (exam_marks['Actual_Marks'].astype(str).str.lower() != "nan") & 
-                        (exam_marks['Actual_Marks'].astype(str).str.lower() != "none")
-                    ]
-                    entered_count = len(valid_marks)
-                    
-                    # Safely handle old databases that don't have the Graded_By column yet
-                    if 'Graded_By' in valid_marks.columns:
-                        g_list = valid_marks['Graded_By'].unique().tolist()
-                        g_list = [str(t).strip() for t in g_list if str(t).strip() not in ["", "nan", "None"]]
-                        if g_list:
-                            graded_by_str = ", ".join([TEACHER_INITIALS.get(t, t) for t in g_list])
-                        elif entered_count > 0:
-                            graded_by_str = f"{TEACHER_INITIALS.get(allotted_t.strip(), allotted_t.strip())} (Legacy)"
-                    elif entered_count > 0:
-                        graded_by_str = f"{TEACHER_INITIALS.get(allotted_t.strip(), allotted_t.strip())} (Legacy)"
+                    g_list = exam_marks['Graded_By'].unique().tolist()
+                    g_list = [t for t in g_list if str(t).strip() not in ["", "nan", "None"]]
+                    if g_list:
+                        graded_by_str = ", ".join([TEACHER_INITIALS.get(t.strip(), t.strip()) for t in g_list])
                         
                 progress_data.append({
                     "Date": e_date,
                     "Class": f"{e_class}-{e_sec}",
                     "Subject": e_sub,
-                    "Allotted To": TEACHER_INITIALS.get(allotted_t.strip(), allotted_t.strip()),
-                    "Entered By": graded_by_str,
+                    "Allotted": TEACHER_INITIALS.get(allotted_t.strip(), allotted_t.strip()),
+                    "Graded By": graded_by_str,
                     "Present": tot_present,
-                    "Marks Entered": entered_count,
-                    "Progress Ratio": f"{entered_count} / {tot_present}" if tot_present > 0 else "0 / 0"
+                    "Entered": entered_count,
+                    "Progress": f"{entered_count} / {tot_present}" if tot_present > 0 else "0 / 0"
                 })
                 
             prog_df = pd.DataFrame(progress_data)
@@ -647,18 +632,11 @@ if st.session_state.user_role == "admin":
                     if em.empty:
                         st.info("No marks entered for this exam yet.")
                     else:
-                        # Pre-calculate Ranks for the Admin view
                         em['Numeric_Total'] = pd.to_numeric(em['Total_Marks'], errors='coerce')
                         em['Rank'] = em['Numeric_Total'].rank(method='min', ascending=False, na_option='bottom')
                         em = em.sort_values(by=['Rank'])
                         
-                        # Properly parse Graded By or fallback to Legacy if missing
-                        if 'Graded_By' in em.columns:
-                            em['Entered By'] = em['Graded_By'].apply(lambda x: TEACHER_INITIALS.get(str(x).strip(), str(x).strip()) if str(x).strip() not in ["", "nan", "None"] else "Legacy Data")
-                        else:
-                            em['Entered By'] = "Legacy Data"
-                            
-                        view_df = em[['Roll', 'Name', 'Actual_Marks', 'Extra_Marks', 'Total_Marks', 'Percentage', 'Rank', 'Entered By']]
+                        view_df = em[['Roll', 'Name', 'Actual_Marks', 'Extra_Marks', 'Total_Marks', 'Percentage', 'Rank', 'Graded_By']]
                         st.dataframe(view_df, use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------
@@ -858,6 +836,8 @@ elif st.session_state.user_role == "teacher":
                     hc5.markdown("<div style='font-size:13px; font-weight:bold; text-align:center;'>Res</div>", unsafe_allow_html=True)
                     st.divider()
 
+                    has_error = False
+
                     for idx, r in roster.iterrows():
                         rk = f"{exam_id}_{r['Roll']}_{idx}"
                         actual_key = f"act_{rk}"
@@ -872,6 +852,9 @@ elif st.session_state.user_role == "teacher":
                             tot_val = act_val + (ext_val if ext_val is not None else 0.0)
                             pct_val = round((tot_val / e_fm) * 100, 1) if e_fm > 0 else 0.0
 
+                        if tot_val is not None and tot_val > e_fm:
+                            has_error = True
+
                         if pd.notna(r['Rank']):
                             rank_html = f"<span style='background-color:#ffeb3b; color:#856404; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:11px;'>🏆 #{int(r['Rank'])}</span>"
                         else:
@@ -883,63 +866,72 @@ elif st.session_state.user_role == "teacher":
                         with c2: 
                             st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} &nbsp;{rank_html}</span></div>", unsafe_allow_html=True)
                         with c3: 
-                            st.number_input("Act", min_value=0.0, max_value=float(e_fm), key=actual_key, label_visibility="collapsed")
+                            # Removed max_value to prevent hard blocking just the Act input
+                            st.number_input("Act", min_value=0.0, key=actual_key, label_visibility="collapsed")
                         with c4: 
                             st.number_input("Ext", min_value=0.0, key=extra_key, label_visibility="collapsed")
                         with c5:
                             if tot_val is not None:
-                                st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px; text-align:center;'><b>{tot_val}</b><br><span style='font-size:12px; color:#28a745;'>{pct_val}%</span></div>", unsafe_allow_html=True)
+                                if tot_val > e_fm:
+                                    st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px; text-align:center; color:red;'><b>{tot_val}</b><br><span style='font-size:11px; font-weight:bold;'>Exceeds {int(e_fm)}!</span></div>", unsafe_allow_html=True)
+                                else:
+                                    st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px; text-align:center;'><b>{tot_val}</b><br><span style='font-size:12px; color:#28a745;'>{pct_val}%</span></div>", unsafe_allow_html=True)
                             else:
                                 st.markdown("<div style='text-align:center; color:gray; font-size:13px; margin-top:10px;'>-</div>", unsafe_allow_html=True)
                         st.divider()
 
                     st.markdown('</div>', unsafe_allow_html=True)
                     
-                    if st.button("💾 Save Exam Marks", type="primary"):
-                        all_marks = fetch_exam_marks() 
-                        new_records = []
-                        
-                        for idx, r in roster.iterrows():
-                            rk = f"{exam_id}_{r['Roll']}_{idx}"
-                            act_val = st.session_state.get(f"act_{rk}")
-                            ext_val = st.session_state.get(f"ext_{rk}", 0.0)
+                    if has_error:
+                        st.error(f"🚨 Cannot save. One or more students have a Total Mark exceeding the Full Mark ({int(e_fm)}). Please fix the errors highlighted in red above.")
+                    else:
+                        if st.button("💾 Save Exam Marks", type="primary"):
+                            all_marks = fetch_exam_marks() 
+                            new_records = []
                             
-                            if act_val is not None:
-                                total = act_val + (ext_val if ext_val is not None else 0.0)
-                                pct = round((total / e_fm) * 100, 1) if e_fm > 0 else 0.0
+                            for idx, r in roster.iterrows():
+                                rk = f"{exam_id}_{r['Roll']}_{idx}"
+                                act_val = st.session_state.get(f"act_{rk}")
+                                ext_val = st.session_state.get(f"ext_{rk}", 0.0)
                                 
-                                new_records.append({
-                                    "Exam_ID": exam_id,
-                                    "Date": e_date,
-                                    "Class": r.get('Class', e_class), # Ensure match with MDM
-                                    "Section": e_sec,
-                                    "Subject": e_sub,
-                                    "Roll": r['Roll'],
-                                    "Name": r['Name'],
-                                    "Actual_Marks": act_val,
-                                    "Extra_Marks": ext_val,
-                                    "Total_Marks": total,
-                                    "Full_Marks": int(e_fm),
-                                    "Percentage": pct,
-                                    "Graded_By": st.session_state.user_name # Records who actually did the override entry
-                                })
-                                
-                        new_marks_df = pd.DataFrame(new_records)
-                        
-                        if not all_marks.empty:
-                            all_marks_purged = all_marks[all_marks['Exam_ID'] != exam_id]
-                            if 'Marks_Obtained' in all_marks_purged.columns:
-                                all_marks_purged = all_marks_purged.drop(columns=['Marks_Obtained'])
-                            final_marks = pd.concat([all_marks_purged, new_marks_df], ignore_index=True)
-                        else:
-                            final_marks = new_marks_df
+                                if act_val is not None:
+                                    total = act_val + (ext_val if ext_val is not None else 0.0)
+                                    pct = round((total / e_fm) * 100, 1) if e_fm > 0 else 0.0
+                                    
+                                    new_records.append({
+                                        "Exam_ID": exam_id,
+                                        "Date": e_date,
+                                        "Class": e_class,
+                                        "Section": e_sec,
+                                        "Subject": e_sub,
+                                        "Roll": r['Roll'],
+                                        "Name": r['Name'],
+                                        "Actual_Marks": act_val,
+                                        "Extra_Marks": ext_val,
+                                        "Total_Marks": total,
+                                        "Full_Marks": int(e_fm),
+                                        "Percentage": pct,
+                                        "Graded_By": st.session_state.user_name
+                                    })
+                                    
+                            new_marks_df = pd.DataFrame(new_records)
                             
-                        overwrite_sheet(
-                            init_exam_sheet(), 
-                            "marks", 
-                            final_marks, 
-                            ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks", "Percentage", "Graded_By"]
-                        )
-                        
-                        st.success(f"🎉 Marks saved successfully for {len(new_records)} students! Totals and Percentages have been locked in.")
-                        st.rerun()
+                            if not all_marks.empty:
+                                all_marks_purged = all_marks[all_marks['Exam_ID'] != exam_id]
+                                if 'Marks_Obtained' in all_marks_purged.columns:
+                                    all_marks_purged = all_marks_purged.drop(columns=['Marks_Obtained'])
+                                final_marks = pd.concat([all_marks_purged, new_marks_df], ignore_index=True)
+                            else:
+                                final_marks = new_marks_df
+                                
+                            overwrite_sheet(
+                                init_exam_sheet(), 
+                                "marks", 
+                                final_marks, 
+                                ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks", "Percentage", "Graded_By"]
+                            )
+                            
+                            st.success(f"🎉 Marks saved successfully for {len(new_records)} students! Totals and Percentages have been locked in.")
+                            st.rerun()
+        else:
+            st.info("No exams have been scheduled in the system yet.")

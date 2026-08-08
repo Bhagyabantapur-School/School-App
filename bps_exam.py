@@ -657,8 +657,8 @@ if st.session_state.user_role == "admin":
                     valid_actual = exam_marks[(exam_marks['Actual_Marks'].notna()) & (exam_marks['Actual_Marks'] != "") & (exam_marks['Actual_Marks'] != "nan") & (exam_marks['Actual_Marks'] != "None")]
                     actual_count = len(valid_actual)
                     
-                    exam_marks['Ext_Num'] = pd.to_numeric(exam_marks['Extra_Marks'], errors='coerce').fillna(0)
-                    extra_count = len(exam_marks[exam_marks['Ext_Num'] > 0])
+                    valid_extra = exam_marks[(exam_marks['Extra_Marks'].notna()) & (exam_marks['Extra_Marks'] != "") & (exam_marks['Extra_Marks'] != "nan") & (exam_marks['Extra_Marks'] != "None")]
+                    extra_count = len(valid_extra)
                     
                     g_list = exam_marks['Graded_By'].unique().tolist()
                     g_list = [t for t in g_list if str(t).strip() not in ["", "nan", "None"]]
@@ -692,10 +692,22 @@ if st.session_state.user_role == "admin":
                     except Exception:
                         sub_idx = 0
                         
-                    if sub_idx % 2 == 0:
-                        return ['background-color: #ffffff; color: #000000'] * len(row)
+                    try:
+                        p_val = int(row['Present'])
+                        a_val = int(row['Actual'])
+                        e_val = int(row['Extra'])
+                    except Exception:
+                        p_val, a_val, e_val = 0, 0, 0
+                        
+                    if p_val > 0 and a_val == p_val and e_val == p_val:
+                        return ['background-color: #d4edda; color: #155724; font-weight: bold'] * len(row)
+                    elif p_val > 0 and (a_val > 0 or e_val > 0) and (a_val < p_val or e_val < p_val):
+                        return ['background-color: #fff3cd; color: #856404; font-weight: bold'] * len(row)
                     else:
-                        return ['background-color: #e9ecef; color: #000000'] * len(row)
+                        if sub_idx % 2 == 0:
+                            return ['background-color: #ffffff; color: #000000'] * len(row)
+                        else:
+                            return ['background-color: #e9ecef; color: #000000'] * len(row)
 
                 styled_df = prog_df.style.apply(highlight_subjects, axis=1)
                 st.dataframe(styled_df, use_container_width=True, hide_index=True)
@@ -1083,3 +1095,5 @@ elif st.session_state.user_role == "teacher":
                             log_action("Grade Entry", "Saved marks for " + str(len(new_records)) + " students in " + str(e_sub) + " (" + str(e_class) + "-" + str(e_sec) + ")")
                             st.success(f"🎉 Marks saved successfully for {len(new_records)} students! Totals and Percentages have been locked in.")
                             st.rerun()
+        else:
+            st.info("No exams have been scheduled in the system yet.")

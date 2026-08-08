@@ -41,20 +41,25 @@ SUBJECT_OPTIONS = [
 ]
 
 def inject_security_css(user_name):
-    wm = f"{user_name} - EXAM SECURE"
-    st.markdown(f"""<style>
-        .watermark {{ position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 9999; background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"><text x="50" y="150" fill="rgba(200, 200, 200, 0.15)" font-size="20" transform="rotate(-45 150 150)" font-family="Arial, sans-serif">{wm}</text></svg>'); background-repeat: repeat; }}
-        .stButton>button {{ border-radius: 8px; font-weight: bold; }}
-        .header-card {{ background-color: #f8f9fa; padding: 15px; border-radius: 10px; border-left: 5px solid #6f42c1; margin-bottom: 15px; }}
-        .student-card {{ background-color: #f8f9fa; border-radius: 12px; padding: 15px; margin-bottom: 15px; border: 1px solid #e0e0e0; box-shadow: 0 2px 4px rgba(0,0,0,0.03); }}
-        
-        @media (max-width: 768px) {{
-            .roster-container [data-testid="stHorizontalBlock"] {{ display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; gap: 15px; }}
-            .roster-container [data-testid="column"] {{ width: 50% !important; min-width: 0 !important; flex: 1 1 50% !important; display: block !important; }}
-            .roster-container [data-testid="stNumberInputStepUp"], .roster-container [data-testid="stNumberInputStepDown"] {{ display: none !important; }}
-            .roster-container input {{ padding: 0.5rem !important; font-size: 16px !important; }}
-        }}
-    </style><div class="watermark"></div>""", unsafe_allow_html=True)
+    wm = str(user_name) + " - EXAM SECURE"
+    css = (
+        "<style>"
+        ".watermark { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 9999; "
+        "background-image: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"300\" height=\"300\" viewBox=\"0 0 300 300\">"
+        "<text x=\"50\" y=\"150\" fill=\"rgba(200, 200, 200, 0.15)\" font-size=\"20\" transform=\"rotate(-45 150 150)\" font-family=\"Arial, sans-serif\">" + wm + "</text></svg>'); "
+        "background-repeat: repeat; }"
+        ".stButton>button { border-radius: 8px; font-weight: bold; }"
+        ".header-card { background-color: #f8f9fa; padding: 15px; border-radius: 10px; border-left: 5px solid #6f42c1; margin-bottom: 15px; }"
+        ".student-card { background-color: #f8f9fa; border-radius: 12px; padding: 15px; margin-bottom: 15px; border: 1px solid #e0e0e0; box-shadow: 0 2px 4px rgba(0,0,0,0.03); }"
+        "@media (max-width: 768px) {"
+        ".roster-container [data-testid=\"stHorizontalBlock\"] { display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; gap: 15px; }"
+        ".roster-container [data-testid=\"column\"] { width: 50% !important; min-width: 0 !important; flex: 1 1 50% !important; display: block !important; }"
+        ".roster-container [data-testid=\"stNumberInputStepUp\"], .roster-container [data-testid=\"stNumberInputStepDown\"] { display: none !important; }"
+        ".roster-container input { padding: 0.5rem !important; font-size: 16px !important; }"
+        "}"
+        "</style><div class=\"watermark\"></div>"
+    )
+    st.markdown(css, unsafe_allow_html=True)
 
 inject_security_css(st.session_state.user_name)
 
@@ -394,11 +399,11 @@ def fetch_exam_marks():
         df['Extra_Marks'] = 0
         df['Total_Marks'] = df['Marks_Obtained']
         
-    if 'Full_Marks' not in df.columns:
+    if 'Full_Marks' not in df.columns: 
         df['Full_Marks'] = "50"
-    if 'Percentage' not in df.columns:
+    if 'Percentage' not in df.columns: 
         df['Percentage'] = ""
-    if 'Graded_By' not in df.columns:
+    if 'Graded_By' not in df.columns: 
         df['Graded_By'] = ""
         
     return df.astype(str)
@@ -883,22 +888,21 @@ elif st.session_state.user_role == "teacher":
                             has_error = True
 
                         if pd.notna(r['Rank']):
-                            rank_html = f"<span style='background-color:#ffeb3b; color:#856404; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:11px;'>🏆 #{int(r['Rank'])}</span>"
+                            rank_html = "<span style='background-color:#ffeb3b; color:#856404; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:11px;'>🏆 #" + str(int(r['Rank'])) + "</span>"
                         else:
-                            rank_html = f"<span style='background-color:#e9ecef; color:#6c757d; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:11px;'>-</span>"
+                            rank_html = "<span style='background-color:#e9ecef; color:#6c757d; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:11px;'>-</span>"
 
                         st.markdown("<div class='student-card'>", unsafe_allow_html=True)
                         
-                        top_row = f"""
-                        <div style="display:flex; align-items:center; gap:15px; margin-bottom: 12px;">
-                            <img src="{r['Photo']}" style="width:65px; height:65px; object-fit:cover; border-radius:8px; border: 1px solid #ddd;">
-                            <div style="line-height:1.3;">
-                                <b style="font-size:16px; color:#222;">{r['Name']}</b><br>
-                                <span style="font-size:13px; color:#666;">Roll: {r['Roll']} &nbsp;&nbsp; {rank_html}</span>
-                            </div>
-                        </div>
-                        """
-                        st.markdown(top_row, unsafe_allow_html=True)
+                        top_row_html = (
+                            "<div style='display:flex; align-items:center; gap:15px; margin-bottom: 12px;'>"
+                            "<img src='" + str(r['Photo']) + "' style='width:65px; height:65px; object-fit:cover; border-radius:8px; border: 1px solid #ddd;'>"
+                            "<div style='line-height:1.3;'>"
+                            "<b style='font-size:16px; color:#222;'>" + str(r['Name']) + "</b><br>"
+                            "<span style='font-size:13px; color:#666;'>Roll: " + str(r['Roll']) + " &nbsp;&nbsp; " + rank_html + "</span>"
+                            "</div></div>"
+                        )
+                        st.markdown(top_row_html, unsafe_allow_html=True)
                         
                         col_act, col_ext = st.columns(2)
                         with col_act:
@@ -908,29 +912,29 @@ elif st.session_state.user_role == "teacher":
                             
                         if tot_val is not None:
                             if tot_val > e_fm:
-                                tot_disp = f"<span style='color:red;'><b>{tot_val}</b> <span style='font-size:11px;'>(Exceeds {int(e_fm)}!)</span></span>"
-                                pct_disp = f"<span style='color:gray;'>-</span>"
+                                tot_disp = "<span style='color:red;'><b>" + str(tot_val) + "</b> <span style='font-size:11px;'>(Exceeds " + str(int(e_fm)) + "!)</span></span>"
+                                pct_disp = "<span style='color:gray;'>-</span>"
                             else:
-                                tot_disp = f"<b>{tot_val}</b>"
-                                pct_disp = f"<b>{pct_val}%</b>"
+                                tot_disp = "<b>" + str(tot_val) + "</b>"
+                                pct_disp = "<b>" + str(pct_val) + "%</b>"
                         else:
-                            tot_disp = f"<span style='color:gray;'>-</span>"
-                            pct_disp = f"<span style='color:gray;'>-</span>"
+                            tot_disp = "<span style='color:gray;'>-</span>"
+                            pct_disp = "<span style='color:gray;'>-</span>"
 
-                        bottom_row = f"""
-                        <div style="display:flex; justify-content: space-between; background:#fff; padding:10px 15px; border-radius:8px; border:1px solid #dee2e6; margin-top:2px;">
-                            <div style="font-size:15px; color:#333;">Total: {tot_disp}</div>
-                            <div style="font-size:15px; color:#28a745;">%: {pct_disp}</div>
-                        </div>
-                        """
-                        st.markdown(bottom_row, unsafe_allow_html=True)
+                        bottom_row_html = (
+                            "<div style='display:flex; justify-content: space-between; background:#fff; padding:10px 15px; border-radius:8px; border:1px solid #dee2e6; margin-top:2px;'>"
+                            "<div style='font-size:15px; color:#333;'>Total: " + tot_disp + "</div>"
+                            "<div style='font-size:15px; color:#28a745;'>%: " + pct_disp + "</div>"
+                            "</div>"
+                        )
+                        st.markdown(bottom_row_html, unsafe_allow_html=True)
                         
                         st.markdown("</div>", unsafe_allow_html=True)
 
                     st.markdown('</div>', unsafe_allow_html=True)
                     
                     if has_error:
-                        st.error(f"🚨 Cannot save. One or more students have a Total Mark exceeding the Full Mark ({int(e_fm)}). Please fix the errors highlighted in red above.")
+                        st.error("🚨 Cannot save. One or more students have a Total Mark exceeding the Full Mark (" + str(int(e_fm)) + "). Please fix the errors highlighted in red above.")
                     else:
                         if st.button("💾 Save Exam Marks", type="primary"):
                             all_marks = fetch_exam_marks() 

@@ -47,15 +47,40 @@ def inject_security_css(user_name):
         .stButton>button {{ border-radius: 8px; font-weight: bold; }}
         .header-card {{ background-color: #f8f9fa; padding: 15px; border-radius: 10px; border-left: 5px solid #6f42c1; margin-bottom: 15px; }}
         
-        /* Mobile-friendly roster card layout mapped from bps_digital.py */
+        /* MODERN CARD-STYLE MOBILE LAYOUT */
+        .student-card {{
+            background-color: #f8f9fa;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border: 1px solid #e0e0e0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.03);
+        }}
+        
+        /* Force Input Columns to be side-by-side half-size even on mobile */
+        .roster-container [data-testid="stHorizontalBlock"] {{
+            display: flex !important;
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+            gap: 15px;
+        }}
+        .roster-container [data-testid="column"] {{
+            width: 50% !important;
+            min-width: 0 !important;
+            flex: 1 1 50% !important;
+            display: block !important;
+        }}
+        
+        /* Clean up Mobile Input Boxes */
         @media (max-width: 768px) {{
-            .roster-container [data-testid="stHorizontalBlock"] {{ display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; align-items: center !important; width: 100% !important; }}
-            .roster-container [data-testid="column"] {{ display: block !important; min-width: 0 !important; margin-top: 0 !important; padding: 0 4px !important; }}
-            .roster-container [data-testid="column"]:nth-child(1) {{ flex: 0 0 65px !important; max-width: 65px !important; width: 65px !important; }}
-            .roster-container [data-testid="column"]:nth-child(2) {{ flex: 1 1 0% !important; min-width: 70px !important; overflow: hidden; }}
-            .roster-container [data-testid="column"]:nth-child(3) {{ flex: 0 0 65px !important; max-width: 65px !important; }}
-            .roster-container [data-testid="column"]:nth-child(4) {{ flex: 0 0 65px !important; max-width: 65px !important; }}
-            .roster-container [data-testid="column"]:nth-child(5) {{ flex: 0 0 50px !important; max-width: 50px !important; text-align: center; }}
+            .roster-container [data-testid="stNumberInputStepUp"],
+            .roster-container [data-testid="stNumberInputStepDown"] {{
+                display: none !important;
+            }}
+            .roster-container input {{
+                padding: 0.5rem !important;
+                font-size: 16px !important; /* Prevents auto-zoom on iPhones */
+            }}
         }}
     </style><div class="watermark"></div>""", unsafe_allow_html=True)
 
@@ -842,14 +867,9 @@ elif st.session_state.user_role == "teacher":
 
                     st.markdown('<div class="roster-container">', unsafe_allow_html=True)
                     
-                    hc1, hc2, hc3, hc4, hc5 = st.columns([1.2, 3, 2, 2, 1.8])
-                    hc3.markdown("<div style='font-size:13px; font-weight:bold; text-align:center;'>Act</div>", unsafe_allow_html=True)
-                    hc4.markdown("<div style='font-size:13px; font-weight:bold; text-align:center;'>Ext(+)</div>", unsafe_allow_html=True)
-                    hc5.markdown("<div style='font-size:13px; font-weight:bold; text-align:center;'>Res</div>", unsafe_allow_html=True)
-                    st.divider()
-
                     has_error = False
 
+                    # Render Mobile-Friendly Student Cards
                     for idx, r in roster.iterrows():
                         rk = f"{exam_id}_{r['Roll']}_{idx}"
                         actual_key = f"act_{rk}"
@@ -872,24 +892,46 @@ elif st.session_state.user_role == "teacher":
                         else:
                             rank_html = f"<span style='background-color:#e9ecef; color:#6c757d; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:11px;'>-</span>"
 
-                        c1, c2, c3, c4, c5 = st.columns([1.2, 3, 2, 2, 1.8])
-                        with c1: 
-                            st.image(r['Photo'], width=65) 
-                        with c2: 
-                            st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} &nbsp;{rank_html}</span></div>", unsafe_allow_html=True)
-                        with c3: 
-                            st.number_input("Act", min_value=0.0, key=actual_key, label_visibility="collapsed")
-                        with c4: 
-                            st.number_input("Ext", min_value=0.0, key=extra_key, label_visibility="collapsed")
-                        with c5:
-                            if tot_val is not None:
-                                if tot_val > e_fm:
-                                    st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px; text-align:center; color:red;'><b>{tot_val}</b><br><span style='font-size:11px; font-weight:bold;'>Exceeds {int(e_fm)}!</span></div>", unsafe_allow_html=True)
-                                else:
-                                    st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px; text-align:center;'><b>{tot_val}</b><br><span style='font-size:12px; color:#28a745;'>{pct_val}%</span></div>", unsafe_allow_html=True)
+                        st.markdown("<div class='student-card'>", unsafe_allow_html=True)
+                        
+                        # --- TOP ROW: PROFILE ---
+                        st.markdown(f"""
+                        <div style="display:flex; align-items:center; gap:15px; margin-bottom: 12px;">
+                            <img src="{r['Photo']}" style="width:65px; height:65px; object-fit:cover; border-radius:8px; border: 1px solid #ddd;">
+                            <div style="line-height:1.3;">
+                                <b style="font-size:16px; color:#222;">{r['Name']}</b><br>
+                                <span style="font-size:13px; color:#666;">Roll: {r['Roll']} &nbsp;&nbsp; {rank_html}</span>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # --- MIDDLE ROW: SIDE-BY-SIDE INPUTS ---
+                        col_act, col_ext = st.columns(2)
+                        with col_act:
+                            st.number_input("Actual Marks", min_value=0.0, key=actual_key)
+                        with col_ext:
+                            st.number_input("Extra Marks (+)", min_value=0.0, key=extra_key)
+                            
+                        # --- BOTTOM ROW: SIDE-BY-SIDE TOTALS ---
+                        if tot_val is not None:
+                            if tot_val > e_fm:
+                                tot_disp = f"<span style='color:red;'><b>{tot_val}</b> <span style='font-size:11px;'>(Exceeds {int(e_fm)}!)</span></span>"
+                                pct_disp = "<span style='color:gray;'>-</span>"
                             else:
-                                st.markdown("<div style='text-align:center; color:gray; font-size:13px; margin-top:10px;'>-</div>", unsafe_allow_html=True)
-                        st.divider()
+                                tot_disp = f"<b>{tot_val}</b>"
+                                pct_disp = f"<b>{pct_val}%</b>"
+                        else:
+                            tot_disp = "<span style='color:gray;'>-</span>"
+                            pct_disp = "<span style='color:gray;'>-</span>"
+
+                        st.markdown(f"""
+                        <div style="display:flex; justify-content: space-between; background:#fff; padding:10px 15px; border-radius:8px; border:1px solid #dee2e6; margin-top:2px;">
+                            <div style="font-size:15px; color:#333;">Total: {tot_disp}</div>
+                            <div style="font-size:15px; color:#28a745;">%: {pct_disp}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        st.markdown("</div>", unsafe_allow_html=True)
 
                     st.markdown('</div>', unsafe_allow_html=True)
                     

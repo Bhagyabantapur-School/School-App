@@ -42,25 +42,20 @@ SUBJECT_OPTIONS = [
 ]
 
 def inject_security_css(user_name):
-    wm = str(user_name) + " - EXAM SECURE"
-    css = (
-        "<style>"
-        ".watermark { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 9999; "
-        "background-image: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"300\" height=\"300\" viewBox=\"0 0 300 300\">"
-        "<text x=\"50\" y=\"150\" fill=\"rgba(200, 200, 200, 0.15)\" font-size=\"20\" transform=\"rotate(-45 150 150)\" font-family=\"Arial, sans-serif\">" + wm + "</text></svg>'); "
-        "background-repeat: repeat; }"
-        ".stButton>button { border-radius: 8px; font-weight: bold; }"
-        ".header-card { background-color: #f8f9fa; padding: 15px; border-radius: 10px; border-left: 5px solid #6f42c1; margin-bottom: 15px; }"
-        ".student-card { background-color: #f8f9fa; border-radius: 12px; padding: 15px; margin-bottom: 15px; border: 1px solid #e0e0e0; box-shadow: 0 2px 4px rgba(0,0,0,0.03); }"
-        "@media (max-width: 768px) {"
-        ".roster-container [data-testid=\"stHorizontalBlock\"] { display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; gap: 15px; }"
-        ".roster-container [data-testid=\"column\"] { width: 50% !important; min-width: 0 !important; flex: 1 1 50% !important; display: block !important; }"
-        ".roster-container [data-testid=\"stNumberInputStepUp\"], .roster-container [data-testid=\"stNumberInputStepDown\"] { display: none !important; }"
-        ".roster-container input { padding: 0.5rem !important; font-size: 16px !important; }"
-        "}"
-        "</style><div class=\"watermark\"></div>"
-    )
-    st.markdown(css, unsafe_allow_html=True)
+    wm = f"{user_name} - EXAM SECURE"
+    st.markdown(f"""<style>
+        .watermark {{ position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 9999; background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"><text x="50" y="150" fill="rgba(200, 200, 200, 0.15)" font-size="20" transform="rotate(-45 150 150)" font-family="Arial, sans-serif">{wm}</text></svg>'); background-repeat: repeat; }}
+        .stButton>button {{ border-radius: 8px; font-weight: bold; }}
+        .header-card {{ background-color: #f8f9fa; padding: 15px; border-radius: 10px; border-left: 5px solid #6f42c1; margin-bottom: 15px; }}
+        .student-card {{ background-color: #f8f9fa; border-radius: 12px; padding: 15px; margin-bottom: 15px; border: 1px solid #e0e0e0; box-shadow: 0 2px 4px rgba(0,0,0,0.03); }}
+        
+        @media (max-width: 768px) {{
+            .roster-container [data-testid="stHorizontalBlock"] {{ display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; gap: 15px; }}
+            .roster-container [data-testid="column"] {{ width: 50% !important; min-width: 0 !important; flex: 1 1 50% !important; display: block !important; }}
+            .roster-container [data-testid="stNumberInputStepUp"], .roster-container [data-testid="stNumberInputStepDown"] {{ display: none !important; }}
+            .roster-container input {{ padding: 0.5rem !important; font-size: 16px !important; }}
+        }}
+    </style><div class="watermark"></div>""", unsafe_allow_html=True)
 
 inject_security_css(st.session_state.user_name)
 
@@ -76,34 +71,26 @@ def get_google_credentials():
 
 @st.cache_resource
 def init_db_sheet():
-    try: 
-        return gspread.authorize(get_google_credentials()).open("BPS_Database")
-    except Exception: 
-        st.error("⚠️ BPS_Database not found!")
-        st.stop()
+    try: return gspread.authorize(get_google_credentials()).open("BPS_Database")
+    except Exception: st.error("⚠️ BPS_Database not found!"); st.stop()
 
 @st.cache_resource
 def init_exam_sheet():
-    try: 
-        return gspread.authorize(get_google_credentials()).open("BPS EXAM")
+    try: return gspread.authorize(get_google_credentials()).open("BPS EXAM")
     except SpreadsheetNotFound: 
         st.error("🚨 **Critical Error:** Could not find a Google Sheet named `BPS EXAM`.")
         st.stop()
 
 @st.cache_resource
 def init_routine_sheet():
-    try: 
-        return gspread.authorize(get_google_credentials()).open("bps_routine")
-    except Exception: 
-        return None
+    try: return gspread.authorize(get_google_credentials()).open("bps_routine")
+    except Exception: return None
 
 @st.cache_resource
-def get_drive_session(): 
-    return AuthorizedSession(get_google_credentials())
+def get_drive_session(): return AuthorizedSession(get_google_credentials())
 
 def ensure_worksheet(sh, title, headers):
-    try: 
-        ws = sh.worksheet(title)
+    try: ws = sh.worksheet(title)
     except WorksheetNotFound:
         ws = sh.add_worksheet(title=title, rows=1000, cols=20)
         ws.append_row(headers)
@@ -119,15 +106,13 @@ def log_action(action, details):
     def background_log():
         try:
             sh = gspread.authorize(get_google_credentials()).open("BPS EXAM")
-            try: 
-                ws = sh.worksheet("audit_log")
+            try: ws = sh.worksheet("audit_log")
             except WorksheetNotFound: 
                 ws = sh.add_worksheet(title="audit_log", rows=1000, cols=5)
                 ws.append_row(["Timestamp", "User", "Role", "Action", "Details"])
             now_str = datetime.now(IST).strftime("%Y-%m-%d %I:%M:%S %p")
             ws.append_row([now_str, user_name, user_role, action, details])
-        except Exception: 
-            pass
+        except Exception: pass
             
     threading.Thread(target=background_log).start()
 
@@ -141,8 +126,7 @@ def fetch_audit_logs():
         sh = init_exam_sheet()
         ws = sh.worksheet("audit_log")
         records = ws.get_all_records()
-        if not records:
-            return pd.DataFrame(columns=["Timestamp", "User", "Role", "Action", "Details"])
+        if not records: return pd.DataFrame(columns=["Timestamp", "User", "Role", "Action", "Details"])
         return pd.DataFrame(records).astype(str)
     except Exception:
         return pd.DataFrame(columns=["Timestamp", "User", "Role", "Action", "Details"])
@@ -162,10 +146,8 @@ def refresh_exam_data():
 
 @st.cache_data(ttl=300)
 def fetch_mdm_log():
-    try: 
-        return pd.DataFrame(init_db_sheet().worksheet("mdm_log").get_all_records()).astype(str)
-    except Exception: 
-        return pd.DataFrame()
+    try: return pd.DataFrame(init_db_sheet().worksheet("mdm_log").get_all_records()).astype(str)
+    except Exception: return pd.DataFrame()
 
 # ---------------------------------------------------------
 # SECURE PHOTO ENGINE
@@ -175,18 +157,15 @@ def fetch_secure_image_bytes(file_id):
     try:
         r = get_drive_session().get(f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media")
         return r.content if r.status_code == 200 else None
-    except Exception: 
-        return None
+    except Exception: return None
 
 def get_secure_photo_uri(url):
     fb = "https://www.w3schools.com/howto/img_avatar.png"
-    if pd.isna(url) or url == "" or not isinstance(url, str): 
-        return fb
+    if pd.isna(url) or url == "" or not isinstance(url, str): return fb
     match = re.search(r"(?:id=|/d/)([\w-]+)", url)
     if match:
         b = fetch_secure_image_bytes(match.group(1))
-        if b: 
-            return f"data:image/jpeg;base64,{base64.b64encode(b).decode()}"
+        if b: return f"data:image/jpeg;base64,{base64.b64encode(b).decode()}"
     return url if url.startswith("http") else fb
 
 @st.cache_data(ttl=300)
@@ -202,18 +181,14 @@ def fetch_student_photos():
             df = df[1:].reset_index(drop=True)
             
             if 'Thumb_URL' in df.columns and 'Class' in df.columns and 'Roll' in df.columns:
-                if 'Section' not in df.columns:
-                    df['Section'] = 'A'
-                    
+                if 'Section' not in df.columns: df['Section'] = 'A'
                 photo_df = df[['Class', 'Section', 'Roll', 'Thumb_URL']].copy()
                 photo_df['Class'] = photo_df['Class'].astype(str).str.strip().str.upper()
                 photo_df['Section'] = photo_df['Section'].astype(str).str.strip().str.upper()
                 photo_df['Roll'] = photo_df['Roll'].astype(str).str.strip()
                 photo_df['Thumb_URL'] = photo_df['Thumb_URL'].astype(str).str.strip()
                 return photo_df
-    except Exception: 
-        pass
-    
+    except Exception: pass
     return pd.DataFrame(columns=["Class", "Section", "Roll", "Thumb_URL"])
 
 @st.cache_data(ttl=300)
@@ -224,8 +199,7 @@ def fetch_routine_data():
             df = pd.DataFrame(r_sh.sheet1.get_all_records()).astype(str)
             df.columns = [str(c).strip() for c in df.columns]
             return df
-    except Exception: 
-        pass
+    except Exception: pass
     return pd.DataFrame()
 
 def detect_teacher_from_routine(routine_df, class_name, section_name, subject_name):
@@ -245,8 +219,7 @@ def detect_teacher_from_routine(routine_df, class_name, section_name, subject_na
     filtered = routine_df[routine_df['Class'].astype(str).str.strip().str.upper() == class_name.upper()]
     if 'Section' in filtered.columns and not filtered.empty:
         sec_match = filtered[filtered['Section'].astype(str).str.strip().str.upper() == section_name.upper()]
-        if not sec_match.empty: 
-            filtered = sec_match
+        if not sec_match.empty: filtered = sec_match
             
     for _, row in filtered.iterrows():
         rout_sub = str(row.get('Subject', '')).strip().lower()
@@ -254,8 +227,7 @@ def detect_teacher_from_routine(routine_df, class_name, section_name, subject_na
             teacher_code = str(row.get('Teacher', '')).strip()
             teacher_code = re.sub(r"\s*\(Sub\)", "", teacher_code, flags=re.IGNORECASE).strip()
             full_name = INV_TEACHER_INITIALS.get(teacher_code, teacher_code)
-            if full_name in TEACHER_LIST: 
-                return full_name
+            if full_name in TEACHER_LIST: return full_name
                 
     return "TAPASI RANA"
 
@@ -263,8 +235,7 @@ def detect_teacher_from_routine(routine_df, class_name, section_name, subject_na
 # 3. MASTER SUBJECT MAPPING & STATUS TRACKING
 # ==========================================
 def sort_display_df(df):
-    if df.empty: 
-        return df
+    if df.empty: return df
     temp_df = df.copy()
     temp_df['C_Sort'] = pd.Categorical(temp_df['Class'], categories=CLASS_OPTIONS, ordered=True)
     temp_df['S_Sort'] = pd.Categorical(temp_df['Section'], categories=SECTIONS, ordered=True)
@@ -277,8 +248,7 @@ def fetch_teacher_status():
     sh = init_exam_sheet()
     ws = ensure_worksheet(sh, "teacher_exam_status", ["Teacher", "Status", "Timestamp"])
     records = ws.get_all_records()
-    if not records: 
-        return pd.DataFrame(columns=["Teacher", "Status", "Timestamp"])
+    if not records: return pd.DataFrame(columns=["Teacher", "Status", "Timestamp"])
     return pd.DataFrame(records).astype(str)
 
 def update_teacher_status(teacher_name, status):
@@ -290,10 +260,8 @@ def update_teacher_status(teacher_name, status):
         df.loc[df['Teacher'] == teacher_name, 'Timestamp'] = now_str
     else:
         new_row = pd.DataFrame([{"Teacher": teacher_name, "Status": status, "Timestamp": now_str}])
-        if not df.empty:
-            df = pd.concat([df, new_row], ignore_index=True)
-        else:
-            df = new_row
+        if not df.empty: df = pd.concat([df, new_row], ignore_index=True)
+        else: df = new_row
             
     overwrite_sheet(init_exam_sheet(), "teacher_exam_status", df, ["Teacher", "Status", "Timestamp"])
     fetch_teacher_status.clear()
@@ -316,24 +284,16 @@ def init_subject_map():
         for c, s in classes:
             for sub in SUBJECT_OPTIONS:
                 search_sub = sub
-                if sub in ["Health & Physical Education", "Art & Work Education"]:
-                    search_sub = "বাংলা"
-                    
+                if sub in ["Health & Physical Education", "Art & Work Education"]: search_sub = "বাংলা"
                 teacher = detect_teacher_from_routine(routine_df, c, s, search_sub)
-                
                 new_records.append({
-                    "Map_ID": uuid.uuid4().hex,
-                    "Class": c,
-                    "Section": s,
-                    "Subject": sub,
-                    "Teacher": teacher,
-                    "Modified_By": "Auto-Generated",
+                    "Map_ID": uuid.uuid4().hex, "Class": c, "Section": s, "Subject": sub,
+                    "Teacher": teacher, "Modified_By": "Auto-Generated",
                     "Timestamp": datetime.now(IST).strftime("%Y-%m-%d %I:%M %p")
                 })
         df = pd.DataFrame(new_records)
         ws.update([df.columns.values.tolist()] + df.values.tolist())
         return df
-        
     return pd.DataFrame(records).astype(str)
 
 def save_subject_map(edited_df, original_df, user_name, is_partial=False):
@@ -398,12 +358,9 @@ def save_subject_map(edited_df, original_df, user_name, is_partial=False):
 def get_auto_teacher(cls_name, sec_name, sub_name):
     map_df = init_subject_map()
     match = map_df[(map_df['Class'] == cls_name) & (map_df['Section'] == sec_name) & (map_df['Subject'] == sub_name)]
-    if not match.empty:
-        return match.iloc[0]['Teacher']
-        
+    if not match.empty: return match.iloc[0]['Teacher']
     search_sub = sub_name
-    if sub_name in ["Health & Physical Education", "Art & Work Education"]:
-        search_sub = "বাংলা"
+    if sub_name in ["Health & Physical Education", "Art & Work Education"]: search_sub = "বাংলা"
     routine_df = fetch_routine_data()
     return detect_teacher_from_routine(routine_df, cls_name, sec_name, search_sub)
 
@@ -415,12 +372,9 @@ def fetch_exam_schedules():
     sh = init_exam_sheet()
     ws = ensure_worksheet(sh, "schedules", ["Exam_ID", "Date", "Class", "Section", "Subject", "Teacher", "Full_Marks"])
     records = ws.get_all_records()
-    if not records:
-        return pd.DataFrame(columns=["Exam_ID", "Date", "Class", "Section", "Subject", "Teacher", "Full_Marks"])
-        
+    if not records: return pd.DataFrame(columns=["Exam_ID", "Date", "Class", "Section", "Subject", "Teacher", "Full_Marks"])
     df = pd.DataFrame(records)
-    if 'Full_Marks' not in df.columns:
-        df['Full_Marks'] = "50"
+    if 'Full_Marks' not in df.columns: df['Full_Marks'] = "50"
     return df.astype(str)
 
 @st.cache_data(ttl=300)
@@ -429,9 +383,7 @@ def fetch_exam_marks():
     ws = ensure_worksheet(sh, "marks", ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks", "Percentage", "Graded_By"])
     records = ws.get_all_records()
     
-    if not records:
-        return pd.DataFrame(columns=["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks", "Percentage", "Graded_By"])
-        
+    if not records: return pd.DataFrame(columns=["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks", "Percentage", "Graded_By"])
     df = pd.DataFrame(records)
     
     if 'Marks_Obtained' in df.columns and 'Actual_Marks' not in df.columns:
@@ -439,12 +391,9 @@ def fetch_exam_marks():
         df['Extra_Marks'] = 0
         df['Total_Marks'] = df['Marks_Obtained']
         
-    if 'Full_Marks' not in df.columns: 
-        df['Full_Marks'] = "50"
-    if 'Percentage' not in df.columns: 
-        df['Percentage'] = ""
-    if 'Graded_By' not in df.columns: 
-        df['Graded_By'] = ""
+    if 'Full_Marks' not in df.columns: df['Full_Marks'] = "50"
+    if 'Percentage' not in df.columns: df['Percentage'] = ""
+    if 'Graded_By' not in df.columns: df['Graded_By'] = ""
         
     return df.astype(str)
 
@@ -489,11 +438,7 @@ if st.session_state.user_role == "admin":
                 if "Viewed" in str(val): return 'color: blue; font-weight: bold'
                 return 'color: red'
                 
-            st.dataframe(
-                merged_status.style.map(highlight_status, subset=['Status']), 
-                hide_index=True, 
-                use_container_width=True
-            )
+            st.dataframe(merged_status.style.map(highlight_status, subset=['Status']), hide_index=True, use_container_width=True)
             
         st.divider()
 
@@ -597,7 +542,7 @@ if st.session_state.user_role == "admin":
                     final_schedules = new_df
                     
                 overwrite_sheet(init_exam_sheet(), "schedules", final_schedules, ["Exam_ID", "Date", "Class", "Section", "Subject", "Teacher", "Full_Marks"])
-                log_action("Create Schedule", "Scheduled " + str(len(new_records)) + " exam(s) for " + str(ex_sub) + " on " + str(ex_date))
+                log_action("Create Schedule", f"Scheduled {len(new_records)} exam(s) for {ex_sub} on {ex_date}")
                 st.success(f"✅ Successfully scheduled {len(new_records)} exam(s) for {ex_sub} on {ex_date}!")
                 st.rerun()
         else:
@@ -615,7 +560,7 @@ if st.session_state.user_role == "admin":
                 if st.button("Delete Schedule", type="primary"):
                     filtered_df = schedules[schedules['Exam_ID'] != del_id]
                     overwrite_sheet(init_exam_sheet(), "schedules", filtered_df, ["Exam_ID", "Date", "Class", "Section", "Subject", "Teacher", "Full_Marks"])
-                    log_action("Delete Schedule", "Deleted exam schedule ID: " + str(del_id))
+                    log_action("Delete Schedule", f"Deleted exam schedule ID: {del_id}")
                     st.success("Deleted!")
                     st.rerun()
         else:
@@ -657,8 +602,8 @@ if st.session_state.user_role == "admin":
                     valid_actual = exam_marks[(exam_marks['Actual_Marks'].notna()) & (exam_marks['Actual_Marks'] != "") & (exam_marks['Actual_Marks'] != "nan") & (exam_marks['Actual_Marks'] != "None")]
                     actual_count = len(valid_actual)
                     
-                    valid_extra = exam_marks[(exam_marks['Extra_Marks'].notna()) & (exam_marks['Extra_Marks'] != "") & (exam_marks['Extra_Marks'] != "nan") & (exam_marks['Extra_Marks'] != "None")]
-                    extra_count = len(valid_extra)
+                    exam_marks['Ext_Num'] = pd.to_numeric(exam_marks['Extra_Marks'], errors='coerce').fillna(0)
+                    extra_count = len(exam_marks[exam_marks['Ext_Num'] > 0])
                     
                     g_list = exam_marks['Graded_By'].unique().tolist()
                     g_list = [t for t in g_list if str(t).strip() not in ["", "nan", "None"]]
@@ -667,14 +612,14 @@ if st.session_state.user_role == "admin":
                         
                 progress_data.append({
                     "Subject": e_sub,
-                    "Class": str(e_class) + "-" + str(e_sec),
+                    "Class": f"{e_class}-{e_sec}",
                     "Date": e_date,
                     "Allotted": TEACHER_INITIALS.get(allotted_t.strip(), allotted_t.strip()),
                     "Graded By": graded_by_str,
                     "Present": tot_present,
                     "Actual": actual_count,
                     "Extra": extra_count,
-                    "Progress": str(actual_count) + " / " + str(tot_present) if tot_present > 0 else "0 / 0"
+                    "Progress": f"{actual_count} / {tot_present}" if tot_present > 0 else "0 / 0"
                 })
                 
             prog_df = pd.DataFrame(progress_data)
@@ -997,18 +942,18 @@ elif st.session_state.user_role == "teacher":
                             has_error = True
 
                         if pd.notna(r['Rank']):
-                            rank_html = "<span style='background-color:#ffeb3b; color:#856404; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:11px;'>🏆 #" + str(int(r['Rank'])) + "</span>"
+                            rank_html = f"<span style='background-color:#ffeb3b; color:#856404; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:11px;'>🏆 #{int(r['Rank'])}</span>"
                         else:
-                            rank_html = "<span style='background-color:#e9ecef; color:#6c757d; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:11px;'>-</span>"
+                            rank_html = f"<span style='background-color:#e9ecef; color:#6c757d; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:11px;'>-</span>"
 
                         st.markdown("<div class='student-card'>", unsafe_allow_html=True)
                         
                         top_row_html = (
                             "<div style='display:flex; align-items:center; gap:15px; margin-bottom: 12px;'>"
-                            "<img src='" + str(r['Photo']) + "' style='width:65px; height:65px; object-fit:cover; border-radius:8px; border: 1px solid #ddd;'>"
+                            f"<img src='{r['Photo']}' style='width:65px; height:65px; object-fit:cover; border-radius:8px; border: 1px solid #ddd;'>"
                             "<div style='line-height:1.3;'>"
-                            "<b style='font-size:16px; color:#222;'>" + str(r['Name']) + "</b><br>"
-                            "<span style='font-size:13px; color:#666;'>Roll: " + str(r['Roll']) + " &nbsp;&nbsp; " + rank_html + "</span>"
+                            f"<b style='font-size:16px; color:#222;'>{r['Name']}</b><br>"
+                            f"<span style='font-size:13px; color:#666;'>Roll: {r['Roll']} &nbsp;&nbsp; {rank_html}</span>"
                             "</div></div>"
                         )
                         st.markdown(top_row_html, unsafe_allow_html=True)
@@ -1021,19 +966,19 @@ elif st.session_state.user_role == "teacher":
                             
                         if tot_val is not None:
                             if tot_val > e_fm:
-                                tot_disp = "<span style='color:red;'><b>" + str(tot_val) + "</b> <span style='font-size:11px;'>(Exceeds " + str(e_fm) + "!)</span></span>"
-                                pct_disp = "<span style='color:gray;'>-</span>"
+                                tot_disp = f"<span style='color:red;'><b>{tot_val}</b> <span style='font-size:11px;'>(Exceeds {e_fm}!)</span></span>"
+                                pct_disp = f"<span style='color:gray;'>-</span>"
                             else:
-                                tot_disp = "<b>" + str(tot_val) + "</b>"
-                                pct_disp = "<b>" + str(pct_val) + "%</b>"
+                                tot_disp = f"<b>{tot_val}</b>"
+                                pct_disp = f"<b>{pct_val}%</b>"
                         else:
-                            tot_disp = "<span style='color:gray;'>-</span>"
-                            pct_disp = "<span style='color:gray;'>-</span>"
+                            tot_disp = f"<span style='color:gray;'>-</span>"
+                            pct_disp = f"<span style='color:gray;'>-</span>"
 
                         bottom_row_html = (
                             "<div style='display:flex; justify-content: space-between; background:#fff; padding:10px 15px; border-radius:8px; border:1px solid #dee2e6; margin-top:2px;'>"
-                            "<div style='font-size:15px; color:#333;'>Total: " + tot_disp + "</div>"
-                            "<div style='font-size:15px; color:#28a745;'>%: " + pct_disp + "</div>"
+                            f"<div style='font-size:15px; color:#333;'>Total: {tot_disp}</div>"
+                            f"<div style='font-size:15px; color:#28a745;'>%: {pct_disp}</div>"
                             "</div>"
                         )
                         st.markdown(bottom_row_html, unsafe_allow_html=True)
@@ -1043,7 +988,7 @@ elif st.session_state.user_role == "teacher":
                     st.markdown('</div>', unsafe_allow_html=True)
                     
                     if has_error:
-                        st.error("🚨 Cannot save. One or more students have a Total Mark exceeding the Full Mark (" + str(e_fm) + "). Please fix the errors highlighted in red above.")
+                        st.error(f"🚨 Cannot save. One or more students have a Total Mark exceeding the Full Mark ({e_fm}). Please fix the errors highlighted in red above.")
                     else:
                         if st.button("💾 Save Exam Marks", type="primary"):
                             all_marks = fetch_exam_marks() 
@@ -1092,8 +1037,6 @@ elif st.session_state.user_role == "teacher":
                                 ["Exam_ID", "Date", "Class", "Section", "Subject", "Roll", "Name", "Actual_Marks", "Extra_Marks", "Total_Marks", "Full_Marks", "Percentage", "Graded_By"]
                             )
                             
-                            log_action("Grade Entry", "Saved marks for " + str(len(new_records)) + " students in " + str(e_sub) + " (" + str(e_class) + "-" + str(e_sec) + ")")
+                            log_action("Grade Entry", f"Saved marks for {len(new_records)} students in {e_sub} ({e_class}-{e_sec})")
                             st.success(f"🎉 Marks saved successfully for {len(new_records)} students! Totals and Percentages have been locked in.")
                             st.rerun()
-        else:
-            st.info("No exams have been scheduled in the system yet.")

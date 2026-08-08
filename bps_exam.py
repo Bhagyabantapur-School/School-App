@@ -131,7 +131,6 @@ def log_action(action, details):
             
     threading.Thread(target=background_log).start()
 
-# Log initial module access
 if 'exam_tracker_logged' not in st.session_state:
     log_action("Login / Access", "Accessed BPS Examination Manager")
     st.session_state.exam_tracker_logged = True
@@ -806,16 +805,16 @@ elif st.session_state.user_role == "teacher":
                 e_sec = exam_info['Section']
                 e_sub = exam_info['Subject']
                 
-                e_fm = 50.0
+                e_fm = 50
                 try: 
                     if 'Full_Marks' in exam_info and pd.notna(exam_info['Full_Marks']) and str(exam_info['Full_Marks']).strip() != "":
-                        e_fm = float(exam_info['Full_Marks'])
+                        e_fm = int(float(exam_info['Full_Marks']))
                 except Exception: 
                     pass
                 
                 st.markdown("---")
                 st.subheader(f"Entering marks for: {e_sub}")
-                st.info(f"🎯 **Full Marks:** {int(e_fm)} (Read-Only)")
+                st.info(f"🎯 **Full Marks:** {e_fm} (Read-Only)")
                 
                 check_all_marks = fetch_exam_marks()
                 if not check_all_marks.empty:
@@ -873,12 +872,12 @@ elif st.session_state.user_role == "teacher":
                         roster = pd.merge(roster, existing_subset, on=['Class', 'Section', 'Roll'], how='left')
                     else:
                         roster['Actual_Marks'] = None
-                        roster['Extra_Marks'] = 0.0
+                        roster['Extra_Marks'] = None
                         roster['Total_Marks'] = None
                         roster['Percentage'] = None
                         
-                    roster['Actual_Marks'] = pd.to_numeric(roster['Actual_Marks'], errors='coerce').astype('float')
-                    roster['Extra_Marks'] = pd.to_numeric(roster['Extra_Marks'], errors='coerce').fillna(0.0).astype('float')
+                    roster['Actual_Marks'] = pd.to_numeric(roster['Actual_Marks'], errors='coerce')
+                    roster['Extra_Marks'] = pd.to_numeric(roster['Extra_Marks'], errors='coerce')
                     
                     if 'Thumb_URL' not in roster.columns: 
                         roster['Thumb_URL'] = ""
@@ -895,16 +894,24 @@ elif st.session_state.user_role == "teacher":
                         
                         if actual_key not in st.session_state:
                             val = r['Actual_Marks']
-                            st.session_state[actual_key] = float(val) if pd.notna(val) else None
+                            if pd.notna(val) and str(val).strip() != "":
+                                st.session_state[actual_key] = int(float(val))
+                            else:
+                                st.session_state[actual_key] = None
+                                
                         if extra_key not in st.session_state:
                             val = r['Extra_Marks']
-                            st.session_state[extra_key] = float(val) if pd.notna(val) else 0.0
+                            if pd.notna(val) and str(val).strip() != "":
+                                ev = float(val)
+                                st.session_state[extra_key] = int(ev) if ev != 0 else None
+                            else:
+                                st.session_state[extra_key] = None
                             
                         act_val = st.session_state[actual_key]
                         ext_val = st.session_state[extra_key]
                         
                         if act_val is not None:
-                            live_totals.append(act_val + (ext_val if ext_val is not None else 0.0))
+                            live_totals.append(act_val + (ext_val if ext_val is not None else 0))
                         else:
                             live_totals.append(np.nan)
                             
@@ -942,8 +949,8 @@ elif st.session_state.user_role == "teacher":
                         tot_val = None
                         pct_val = None
                         if act_val is not None:
-                            tot_val = act_val + (ext_val if ext_val is not None else 0.0)
-                            pct_val = round((tot_val / e_fm) * 100, 1) if e_fm > 0 else 0.0
+                            tot_val = act_val + (ext_val if ext_val is not None else 0)
+                            pct_val = int(round((tot_val / e_fm) * 100)) if e_fm > 0 else 0
 
                         if tot_val is not None and tot_val > e_fm:
                             has_error = True
@@ -967,13 +974,13 @@ elif st.session_state.user_role == "teacher":
                         
                         col_act, col_ext = st.columns(2)
                         with col_act:
-                            st.number_input("Actual Marks", min_value=0.0, key=actual_key)
+                            st.number_input("Actual Marks", min_value=0, max_value=e_fm, step=1, key=actual_key)
                         with col_ext:
-                            st.number_input("Extra Marks (+)", min_value=0.0, key=extra_key)
+                            st.number_input("Extra Marks (+)", min_value=0, step=1, key=extra_key)
                             
                         if tot_val is not None:
                             if tot_val > e_fm:
-                                tot_disp = "<span style='color:red;'><b>" + str(tot_val) + "</b> <span style='font-size:11px;'>(Exceeds " + str(int(e_fm)) + "!)</span></span>"
+                                tot_disp = "<span style='color:red;'><b>" + str(tot_val) + "</b> <span style='font-size:11px;'>(Exceeds " + str(e_fm) + "!)</span></span>"
                                 pct_disp = "<span style='color:gray;'>-</span>"
                             else:
                                 tot_disp = "<b>" + str(tot_val) + "</b>"
@@ -995,7 +1002,7 @@ elif st.session_state.user_role == "teacher":
                     st.markdown('</div>', unsafe_allow_html=True)
                     
                     if has_error:
-                        st.error("🚨 Cannot save. One or more students have a Total Mark exceeding the Full Mark (" + str(int(e_fm)) + "). Please fix the errors highlighted in red above.")
+                        st.error("🚨 Cannot save. One or more students have a Total Mark exceeding the Full Mark (" + str(e_fm) + "). Please fix the errors highlighted in red above.")
                     else:
                         if st.button("💾 Save Exam Marks", type="primary"):
                             all_marks = fetch_exam_marks() 
@@ -1004,11 +1011,12 @@ elif st.session_state.user_role == "teacher":
                             for idx, r in roster.iterrows():
                                 rk = f"{exam_id}_{r['Roll']}_{idx}"
                                 act_val = st.session_state.get(f"act_{rk}")
-                                ext_val = st.session_state.get(f"ext_{rk}", 0.0)
+                                ext_val = st.session_state.get(f"ext_{rk}")
                                 
                                 if act_val is not None:
-                                    total = act_val + (ext_val if ext_val is not None else 0.0)
-                                    pct = round((total / e_fm) * 100, 1) if e_fm > 0 else 0.0
+                                    ext_v = ext_val if ext_val is not None else 0
+                                    total = act_val + ext_v
+                                    pct = int(round((total / e_fm) * 100)) if e_fm > 0 else 0
                                     
                                     new_records.append({
                                         "Exam_ID": exam_id,
@@ -1019,9 +1027,9 @@ elif st.session_state.user_role == "teacher":
                                         "Roll": r['Roll'],
                                         "Name": r['Name'],
                                         "Actual_Marks": act_val,
-                                        "Extra_Marks": ext_val,
+                                        "Extra_Marks": ext_v,
                                         "Total_Marks": total,
-                                        "Full_Marks": int(e_fm),
+                                        "Full_Marks": e_fm,
                                         "Percentage": pct,
                                         "Graded_By": st.session_state.user_name
                                     })

@@ -70,26 +70,34 @@ def get_google_credentials():
 
 @st.cache_resource
 def init_db_sheet():
-    try: return gspread.authorize(get_google_credentials()).open("BPS_Database")
-    except Exception: st.error("⚠️ BPS_Database not found!"); st.stop()
+    try: 
+        return gspread.authorize(get_google_credentials()).open("BPS_Database")
+    except Exception: 
+        st.error("⚠️ BPS_Database not found!")
+        st.stop()
 
 @st.cache_resource
 def init_exam_sheet():
-    try: return gspread.authorize(get_google_credentials()).open("BPS EXAM")
+    try: 
+        return gspread.authorize(get_google_credentials()).open("BPS EXAM")
     except SpreadsheetNotFound: 
         st.error("🚨 **Critical Error:** Could not find a Google Sheet named `BPS EXAM`.")
         st.stop()
 
 @st.cache_resource
 def init_routine_sheet():
-    try: return gspread.authorize(get_google_credentials()).open("bps_routine")
-    except Exception: return None
+    try: 
+        return gspread.authorize(get_google_credentials()).open("bps_routine")
+    except Exception: 
+        return None
 
 @st.cache_resource
-def get_drive_session(): return AuthorizedSession(get_google_credentials())
+def get_drive_session(): 
+    return AuthorizedSession(get_google_credentials())
 
 def ensure_worksheet(sh, title, headers):
-    try: ws = sh.worksheet(title)
+    try: 
+        ws = sh.worksheet(title)
     except WorksheetNotFound:
         ws = sh.add_worksheet(title=title, rows=1000, cols=20)
         ws.append_row(headers)
@@ -109,8 +117,10 @@ def refresh_exam_data():
 
 @st.cache_data(ttl=300)
 def fetch_mdm_log():
-    try: return pd.DataFrame(init_db_sheet().worksheet("mdm_log").get_all_records()).astype(str)
-    except Exception: return pd.DataFrame()
+    try: 
+        return pd.DataFrame(init_db_sheet().worksheet("mdm_log").get_all_records()).astype(str)
+    except Exception: 
+        return pd.DataFrame()
 
 # ---------------------------------------------------------
 # SECURE PHOTO ENGINE
@@ -120,15 +130,18 @@ def fetch_secure_image_bytes(file_id):
     try:
         r = get_drive_session().get(f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media")
         return r.content if r.status_code == 200 else None
-    except Exception: return None
+    except Exception: 
+        return None
 
 def get_secure_photo_uri(url):
     fb = "https://www.w3schools.com/howto/img_avatar.png"
-    if pd.isna(url) or url == "" or not isinstance(url, str): return fb
+    if pd.isna(url) or url == "" or not isinstance(url, str): 
+        return fb
     match = re.search(r"(?:id=|/d/)([\w-]+)", url)
     if match:
         b = fetch_secure_image_bytes(match.group(1))
-        if b: return f"data:image/jpeg;base64,{base64.b64encode(b).decode()}"
+        if b: 
+            return f"data:image/jpeg;base64,{base64.b64encode(b).decode()}"
     return url if url.startswith("http") else fb
 
 @st.cache_data(ttl=300)
@@ -153,7 +166,7 @@ def fetch_student_photos():
                 photo_df['Roll'] = photo_df['Roll'].astype(str).str.strip()
                 photo_df['Thumb_URL'] = photo_df['Thumb_URL'].astype(str).str.strip()
                 return photo_df
-    except Exception as e: 
+    except Exception: 
         pass
     
     return pd.DataFrame(columns=["Class", "Section", "Roll", "Thumb_URL"])
@@ -166,7 +179,8 @@ def fetch_routine_data():
             df = pd.DataFrame(r_sh.sheet1.get_all_records()).astype(str)
             df.columns = [str(c).strip() for c in df.columns]
             return df
-    except Exception: pass
+    except Exception: 
+        pass
     return pd.DataFrame()
 
 def detect_teacher_from_routine(routine_df, class_name, section_name, subject_name):
@@ -186,7 +200,8 @@ def detect_teacher_from_routine(routine_df, class_name, section_name, subject_na
     filtered = routine_df[routine_df['Class'].astype(str).str.strip().str.upper() == class_name.upper()]
     if 'Section' in filtered.columns and not filtered.empty:
         sec_match = filtered[filtered['Section'].astype(str).str.strip().str.upper() == section_name.upper()]
-        if not sec_match.empty: filtered = sec_match
+        if not sec_match.empty: 
+            filtered = sec_match
             
     for _, row in filtered.iterrows():
         rout_sub = str(row.get('Subject', '')).strip().lower()
@@ -194,7 +209,8 @@ def detect_teacher_from_routine(routine_df, class_name, section_name, subject_na
             teacher_code = str(row.get('Teacher', '')).strip()
             teacher_code = re.sub(r"\s*\(Sub\)", "", teacher_code, flags=re.IGNORECASE).strip()
             full_name = INV_TEACHER_INITIALS.get(teacher_code, teacher_code)
-            if full_name in TEACHER_LIST: return full_name
+            if full_name in TEACHER_LIST: 
+                return full_name
                 
     return "TAPASI RANA"
 
@@ -202,7 +218,8 @@ def detect_teacher_from_routine(routine_df, class_name, section_name, subject_na
 # 3. MASTER SUBJECT MAPPING & STATUS TRACKING
 # ==========================================
 def sort_display_df(df):
-    if df.empty: return df
+    if df.empty: 
+        return df
     temp_df = df.copy()
     temp_df['C_Sort'] = pd.Categorical(temp_df['Class'], categories=CLASS_OPTIONS, ordered=True)
     temp_df['S_Sort'] = pd.Categorical(temp_df['Section'], categories=SECTIONS, ordered=True)
@@ -377,9 +394,12 @@ def fetch_exam_marks():
         df['Extra_Marks'] = 0
         df['Total_Marks'] = df['Marks_Obtained']
         
-    if 'Full_Marks' not in df.columns: df['Full_Marks'] = "50"
-    if 'Percentage' not in df.columns: df['Percentage'] = ""
-    if 'Graded_By' not in df.columns: df['Graded_By'] = ""
+    if 'Full_Marks' not in df.columns:
+        df['Full_Marks'] = "50"
+    if 'Percentage' not in df.columns:
+        df['Percentage'] = ""
+    if 'Graded_By' not in df.columns:
+        df['Graded_By'] = ""
         
     return df.astype(str)
 
@@ -544,11 +564,12 @@ if st.session_state.user_role == "admin":
             
             st.markdown("##### 🗑️ Delete an Exam")
             del_id = st.selectbox("Select Exam to Remove", ["Select..."] + schedules['Exam_ID'].tolist())
-            if del_id != "Select..." and st.button("Delete Schedule", type="primary"):
-                filtered_df = schedules[schedules['Exam_ID'] != del_id]
-                overwrite_sheet(init_exam_sheet(), "schedules", filtered_df, ["Exam_ID", "Date", "Class", "Section", "Subject", "Teacher", "Full_Marks"])
-                st.success("Deleted!")
-                st.rerun()
+            if del_id != "Select...":
+                if st.button("Delete Schedule", type="primary"):
+                    filtered_df = schedules[schedules['Exam_ID'] != del_id]
+                    overwrite_sheet(init_exam_sheet(), "schedules", filtered_df, ["Exam_ID", "Date", "Class", "Section", "Subject", "Teacher", "Full_Marks"])
+                    st.success("Deleted!")
+                    st.rerun()
         else:
             st.info("No exams scheduled yet.")
 
@@ -720,9 +741,11 @@ elif st.session_state.user_role == "teacher":
                 e_sub = exam_info['Subject']
                 
                 e_fm = 50.0
-                if 'Full_Marks' in exam_info and pd.notna(exam_info['Full_Marks']) and str(exam_info['Full_Marks']).strip() != "":
-                    try: e_fm = float(exam_info['Full_Marks'])
-                    except: pass
+                try: 
+                    if 'Full_Marks' in exam_info and pd.notna(exam_info['Full_Marks']) and str(exam_info['Full_Marks']).strip() != "":
+                        e_fm = float(exam_info['Full_Marks'])
+                except Exception: 
+                    pass
                 
                 st.markdown("---")
                 st.subheader(f"Entering marks for: {e_sub}")
@@ -735,7 +758,8 @@ elif st.session_state.user_role == "teacher":
                         prev_graders = [str(g).strip() for g in existing_for_alert['Graded_By'].unique() if str(g).strip() not in ["", "nan", "None"]]
                         if prev_graders:
                             if st.session_state.user_name not in prev_graders:
-                                st.warning(f"🚨 **WARNING:** Marks for this exam have already been entered by **{', '.join(prev_graders)}**. Any changes you save will OVERWRITE their data!")
+                                warning_names = ", ".join(prev_graders)
+                                st.warning(f"🚨 **WARNING:** Marks for this exam have already been entered by **{warning_names}**. Any changes you save will OVERWRITE their data!")
                             else:
                                 st.info("✏️ You have previously entered marks for this exam. You can edit them below.")
                 
@@ -790,7 +814,9 @@ elif st.session_state.user_role == "teacher":
                     roster['Actual_Marks'] = pd.to_numeric(roster['Actual_Marks'], errors='coerce').astype('float')
                     roster['Extra_Marks'] = pd.to_numeric(roster['Extra_Marks'], errors='coerce').fillna(0.0).astype('float')
                     
-                    if 'Thumb_URL' not in roster.columns: roster['Thumb_URL'] = ""
+                    if 'Thumb_URL' not in roster.columns: 
+                        roster['Thumb_URL'] = ""
+                        
                     with st.spinner("Loading profiles..."):
                         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe:
                             roster['Photo'] = list(exe.map(get_secure_photo_uri, roster['Thumb_URL'].tolist()))
@@ -857,14 +883,22 @@ elif st.session_state.user_role == "teacher":
                             has_error = True
 
                         if pd.notna(r['Rank']):
-                            rank_html = "<span style='background-color:#ffeb3b; color:#856404; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:11px;'>🏆 #" + str(int(r['Rank'])) + "</span>"
+                            rank_html = f"<span style='background-color:#ffeb3b; color:#856404; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:11px;'>🏆 #{int(r['Rank'])}</span>"
                         else:
-                            rank_html = "<span style='background-color:#e9ecef; color:#6c757d; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:11px;'>-</span>"
+                            rank_html = f"<span style='background-color:#e9ecef; color:#6c757d; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:11px;'>-</span>"
 
                         st.markdown("<div class='student-card'>", unsafe_allow_html=True)
                         
-                        top_row_html = "<div style='display:flex; align-items:center; gap:15px; margin-bottom: 12px;'><img src='" + str(r['Photo']) + "' style='width:65px; height:65px; object-fit:cover; border-radius:8px; border: 1px solid #ddd;'><div style='line-height:1.3;'><b style='font-size:16px; color:#222;'>" + str(r['Name']) + "</b><br><span style='font-size:13px; color:#666;'>Roll: " + str(r['Roll']) + " &nbsp;&nbsp; " + rank_html + "</span></div></div>"
-                        st.markdown(top_row_html, unsafe_allow_html=True)
+                        top_row = f"""
+                        <div style="display:flex; align-items:center; gap:15px; margin-bottom: 12px;">
+                            <img src="{r['Photo']}" style="width:65px; height:65px; object-fit:cover; border-radius:8px; border: 1px solid #ddd;">
+                            <div style="line-height:1.3;">
+                                <b style="font-size:16px; color:#222;">{r['Name']}</b><br>
+                                <span style="font-size:13px; color:#666;">Roll: {r['Roll']} &nbsp;&nbsp; {rank_html}</span>
+                            </div>
+                        </div>
+                        """
+                        st.markdown(top_row, unsafe_allow_html=True)
                         
                         col_act, col_ext = st.columns(2)
                         with col_act:
@@ -874,24 +908,29 @@ elif st.session_state.user_role == "teacher":
                             
                         if tot_val is not None:
                             if tot_val > e_fm:
-                                tot_disp = "<span style='color:red;'><b>" + str(tot_val) + "</b> <span style='font-size:11px;'>(Exceeds " + str(int(e_fm)) + "!)</span></span>"
-                                pct_disp = "<span style='color:gray;'>-</span>"
+                                tot_disp = f"<span style='color:red;'><b>{tot_val}</b> <span style='font-size:11px;'>(Exceeds {int(e_fm)}!)</span></span>"
+                                pct_disp = f"<span style='color:gray;'>-</span>"
                             else:
-                                tot_disp = "<b>" + str(tot_val) + "</b>"
-                                pct_disp = "<b>" + str(pct_val) + "%</b>"
+                                tot_disp = f"<b>{tot_val}</b>"
+                                pct_disp = f"<b>{pct_val}%</b>"
                         else:
-                            tot_disp = "<span style='color:gray;'>-</span>"
-                            pct_disp = "<span style='color:gray;'>-</span>"
+                            tot_disp = f"<span style='color:gray;'>-</span>"
+                            pct_disp = f"<span style='color:gray;'>-</span>"
 
-                        bottom_row_html = "<div style='display:flex; justify-content: space-between; background:#fff; padding:10px 15px; border-radius:8px; border:1px solid #dee2e6; margin-top:2px;'><div style='font-size:15px; color:#333;'>Total: " + tot_disp + "</div><div style='font-size:15px; color:#28a745;'>%: " + pct_disp + "</div></div>"
-                        st.markdown(bottom_row_html, unsafe_allow_html=True)
+                        bottom_row = f"""
+                        <div style="display:flex; justify-content: space-between; background:#fff; padding:10px 15px; border-radius:8px; border:1px solid #dee2e6; margin-top:2px;">
+                            <div style="font-size:15px; color:#333;">Total: {tot_disp}</div>
+                            <div style="font-size:15px; color:#28a745;">%: {pct_disp}</div>
+                        </div>
+                        """
+                        st.markdown(bottom_row, unsafe_allow_html=True)
                         
                         st.markdown("</div>", unsafe_allow_html=True)
 
                     st.markdown('</div>', unsafe_allow_html=True)
                     
                     if has_error:
-                        st.error("🚨 Cannot save. One or more students have a Total Mark exceeding the Full Mark (" + str(int(e_fm)) + "). Please fix the errors highlighted in red above.")
+                        st.error(f"🚨 Cannot save. One or more students have a Total Mark exceeding the Full Mark ({int(e_fm)}). Please fix the errors highlighted in red above.")
                     else:
                         if st.button("💾 Save Exam Marks", type="primary"):
                             all_marks = fetch_exam_marks() 

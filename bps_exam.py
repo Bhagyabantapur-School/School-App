@@ -732,6 +732,18 @@ elif st.session_state.user_role == "teacher":
                 st.subheader(f"Entering marks for: {e_sub}")
                 st.info(f"🎯 **Full Marks:** {int(e_fm)} (Read-Only)")
                 
+                # --- OVERWRITE WARNING SYSTEM ---
+                check_all_marks = fetch_exam_marks()
+                if not check_all_marks.empty:
+                    existing_for_alert = check_all_marks[check_all_marks['Exam_ID'] == exam_id]
+                    if not existing_for_alert.empty:
+                        prev_graders = [str(g).strip() for g in existing_for_alert['Graded_By'].unique() if str(g).strip() not in ["", "nan", "None"]]
+                        if prev_graders:
+                            if st.session_state.user_name not in prev_graders:
+                                st.warning(f"🚨 **WARNING:** Marks for this exam have already been entered by **{', '.join(prev_graders)}**. Any changes you save will OVERWRITE their data!")
+                            else:
+                                st.info("✏️ You have previously entered marks for this exam. You can edit them below.")
+                
                 mdm = fetch_mdm_log()
                 if not mdm.empty:
                     if e_class == "CLASS PP":
@@ -866,7 +878,6 @@ elif st.session_state.user_role == "teacher":
                         with c2: 
                             st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} &nbsp;{rank_html}</span></div>", unsafe_allow_html=True)
                         with c3: 
-                            # Removed max_value to prevent hard blocking just the Act input
                             st.number_input("Act", min_value=0.0, key=actual_key, label_visibility="collapsed")
                         with c4: 
                             st.number_input("Ext", min_value=0.0, key=extra_key, label_visibility="collapsed")

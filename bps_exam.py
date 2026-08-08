@@ -648,11 +648,17 @@ if st.session_state.user_role == "admin":
                 else:
                     tot_present = 0
                     
-                entered_count = 0
+                actual_count = 0
+                extra_count = 0
                 graded_by_str = "---"
                 if not marks.empty:
-                    exam_marks = marks[marks['Exam_ID'] == e_id]
-                    entered_count = len(exam_marks[(exam_marks['Actual_Marks'].notna()) & (exam_marks['Actual_Marks'] != "") & (exam_marks['Actual_Marks'] != "nan") & (exam_marks['Actual_Marks'] != "None")])
+                    exam_marks = marks[marks['Exam_ID'] == e_id].copy()
+                    
+                    valid_actual = exam_marks[(exam_marks['Actual_Marks'].notna()) & (exam_marks['Actual_Marks'] != "") & (exam_marks['Actual_Marks'] != "nan") & (exam_marks['Actual_Marks'] != "None")]
+                    actual_count = len(valid_actual)
+                    
+                    exam_marks['Ext_Num'] = pd.to_numeric(exam_marks['Extra_Marks'], errors='coerce').fillna(0)
+                    extra_count = len(exam_marks[exam_marks['Ext_Num'] > 0])
                     
                     g_list = exam_marks['Graded_By'].unique().tolist()
                     g_list = [t for t in g_list if str(t).strip() not in ["", "nan", "None"]]
@@ -660,18 +666,41 @@ if st.session_state.user_role == "admin":
                         graded_by_str = ", ".join([TEACHER_INITIALS.get(t.strip(), t.strip()) for t in g_list])
                         
                 progress_data.append({
-                    "Date": e_date,
-                    "Class": f"{e_class}-{e_sec}",
                     "Subject": e_sub,
+                    "Class": str(e_class) + "-" + str(e_sec),
+                    "Date": e_date,
                     "Allotted": TEACHER_INITIALS.get(allotted_t.strip(), allotted_t.strip()),
                     "Graded By": graded_by_str,
                     "Present": tot_present,
-                    "Entered": entered_count,
-                    "Progress": f"{entered_count} / {tot_present}" if tot_present > 0 else "0 / 0"
+                    "Actual": actual_count,
+                    "Extra": extra_count,
+                    "Progress": str(actual_count) + " / " + str(tot_present) if tot_present > 0 else "0 / 0"
                 })
                 
             prog_df = pd.DataFrame(progress_data)
-            st.dataframe(prog_df, use_container_width=True, hide_index=True)
+            
+            if not prog_df.empty:
+                prog_df['Sub_Cat'] = pd.Categorical(prog_df['Subject'], categories=SUBJECT_OPTIONS, ordered=True)
+                class_order = ["CLASS PP-A", "CLASS I-A", "CLASS II-A", "CLASS III-A", "CLASS IV-A", "CLASS IV-B", "CLASS V-A"]
+                prog_df['Class_Cat'] = pd.Categorical(prog_df['Class'], categories=class_order, ordered=True)
+                
+                prog_df = prog_df.sort_values(['Sub_Cat', 'Class_Cat']).drop(columns=['Sub_Cat', 'Class_Cat']).reset_index(drop=True)
+                
+                def highlight_subjects(row):
+                    try:
+                        sub_idx = SUBJECT_OPTIONS.index(row['Subject'])
+                    except Exception:
+                        sub_idx = 0
+                        
+                    if sub_idx % 2 == 0:
+                        return ['background-color: #ffffff; color: #000000'] * len(row)
+                    else:
+                        return ['background-color: #e9ecef; color: #000000'] * len(row)
+
+                styled_df = prog_df.style.apply(highlight_subjects, axis=1)
+                st.dataframe(styled_df, use_container_width=True, hide_index=True)
+            else:
+                st.dataframe(prog_df, use_container_width=True, hide_index=True)
 
     with tabs[4]:
         st.subheader("📊 View Student Marks")

@@ -492,7 +492,6 @@ if st.session_state.user_role == "teacher":
                                 with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe: 
                                     ros['Photo'] = list(exe.map(get_secure_photo_uri, ros['Thumb_URL'].tolist()))
 
-                            # 🛡️ SPLIT MOVED HERE (After 'Photo' is added!)
                             regular_ros = ros[ros['Historical_Count'] > 0]
                             not_regular_ros = ros[ros['Historical_Count'] == 0]
 
@@ -513,7 +512,7 @@ if st.session_state.user_role == "teacher":
                                         alc += 1
                                     else:
                                         isc = r['Scan_Key'] in st.session_state.scanned_keys
-                                        if st.checkbox("Ate MDM", value=(True or isc), key=f"mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                                        if st.checkbox("Ate MDM", value=isc, key=f"mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
                                 st.divider()
                                 
                             if not not_regular_ros.empty:
@@ -792,7 +791,6 @@ elif st.session_state.user_role == "admin":
                         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe: 
                             ros['Photo'] = list(exe.map(get_secure_photo_uri, ros['Thumb_URL'].tolist()))
 
-                    # 🛡️ SPLIT MOVED HERE (After 'Photo' is added!)
                     regular_ros = ros[ros['Historical_Count'] > 0]
                     not_regular_ros = ros[ros['Historical_Count'] == 0]
 
@@ -813,7 +811,7 @@ elif st.session_state.user_role == "admin":
                                 alc += 1
                             else:
                                 isc = r['Scan_Key'] in st.session_state.admin_scanned_keys
-                                if st.checkbox("Ate MDM", value=(True or isc), key=f"adm_mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                                if st.checkbox("Ate MDM", value=isc, key=f"adm_mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
                         st.divider()
                         
                     if not not_regular_ros.empty:

@@ -453,8 +453,6 @@ if st.session_state.user_role == "teacher":
                                 mdm_day_counts = hist_ml['Roll'].astype(str).str.strip().value_counts().to_dict()
                                 
                             ros['Historical_Count'] = ros['Roll'].astype(str).str.strip().map(lambda x: mdm_day_counts.get(x, 0))
-                            regular_ros = ros[ros['Historical_Count'] > 0]
-                            not_regular_ros = ros[ros['Historical_Count'] == 0]
                             # ---------------------------------
 
                             if 'scanned_keys' not in st.session_state: st.session_state.scanned_keys = []
@@ -491,14 +489,18 @@ if st.session_state.user_role == "teacher":
                             ros['Scan_Key'] = ros['Roll'].astype(str) + "_" + ros['Name'].astype(str)
                             if 'Thumb_URL' not in ros.columns: ros['Thumb_URL'] = ""
                             with st.spinner("Loading profiles..."):
-                                with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe: ros['Photo'] = list(exe.map(get_secure_photo_uri, ros['Thumb_URL'].tolist()))
+                                with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe: 
+                                    ros['Photo'] = list(exe.map(get_secure_photo_uri, ros['Thumb_URL'].tolist()))
+
+                            # 🛡️ SPLIT MOVED HERE (After 'Photo' is added!)
+                            regular_ros = ros[ros['Historical_Count'] > 0]
+                            not_regular_ros = ros[ros['Historical_Count'] == 0]
 
                             st.markdown("### Class Roster (Regular)")
                             cp = st.empty()
                             st.markdown('<div class="roster-container">', unsafe_allow_html=True)
                             sel_mdm, alc = [], 0
                             
-                            # Render Regular Students (Default Check = True)
                             for _, r in regular_ros.iterrows():
                                 c1, c2, c3 = st.columns([1, 4, 2])
                                 with c1: st.image(r['Photo'], width=85) 
@@ -514,7 +516,6 @@ if st.session_state.user_role == "teacher":
                                         if st.checkbox("Ate MDM", value=(True or isc), key=f"mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
                                 st.divider()
                                 
-                            # Render Not Regular Students (Hidden, Default Check = False)
                             if not not_regular_ros.empty:
                                 with st.expander("⚠️ Show Not Regular Students (" + str(len(not_regular_ros)) + " Students)"):
                                     for _, r in not_regular_ros.iterrows():
@@ -754,8 +755,6 @@ elif st.session_state.user_role == "admin":
                         mdm_day_counts = hist_ml['Roll'].astype(str).str.strip().value_counts().to_dict()
                         
                     ros['Historical_Count'] = ros['Roll'].astype(str).str.strip().map(lambda x: mdm_day_counts.get(x, 0))
-                    regular_ros = ros[ros['Historical_Count'] > 0]
-                    not_regular_ros = ros[ros['Historical_Count'] == 0]
                     # ---------------------------------
                     
                     st.write("📸 **Scan Missed ID Cards (or tick manually below):**")
@@ -790,7 +789,12 @@ elif st.session_state.user_role == "admin":
                     ros['Scan_Key'] = ros['Roll'].astype(str) + "_" + ros['Name'].astype(str)
                     if 'Thumb_URL' not in ros.columns: ros['Thumb_URL'] = ""
                     with st.spinner("Loading profiles..."):
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe: ros['Photo'] = list(exe.map(get_secure_photo_uri, ros['Thumb_URL'].tolist()))
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe: 
+                            ros['Photo'] = list(exe.map(get_secure_photo_uri, ros['Thumb_URL'].tolist()))
+
+                    # 🛡️ SPLIT MOVED HERE (After 'Photo' is added!)
+                    regular_ros = ros[ros['Historical_Count'] > 0]
+                    not_regular_ros = ros[ros['Historical_Count'] == 0]
 
                     st.markdown("### Class Roster (Regular)")
                     cp = st.empty()

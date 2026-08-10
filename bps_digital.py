@@ -102,7 +102,7 @@ def fetch_sheet_data(sheet_name):
     except Exception: return pd.DataFrame()
 
 # ==========================================
-# NEW: BPS EXAM ROUTINE ENGINE
+# BPS EXAM ROUTINE ENGINE
 # ==========================================
 @st.cache_data(ttl=300)
 def fetch_exam_schedules():
@@ -124,7 +124,6 @@ def build_exam_day_routine(date_str):
     if today_exams.empty:
         return pd.DataFrame()
         
-    # Discover Next Exam Date to determine Next Day Exam Preparation teacher
     all_dates = schedules['Date'].unique().tolist()
     date_objs = []
     for d in all_dates:
@@ -152,7 +151,6 @@ def build_exam_day_routine(date_str):
         teacher_name = str(row.get('Teacher', ''))
         t_init = TEACHER_INITIALS.get(teacher_name, teacher_name)
         
-        # 1. 11:15 to 12:45 -> Exam Subject
         routine_rows.append({
             "Day": tdy_name,
             "Start_Time": "11:15",
@@ -165,7 +163,6 @@ def build_exam_day_routine(date_str):
             "Is_Exam_Day": True
         })
         
-        # 2. 12:45 to 13:30 -> Next Day Exam Preparation
         next_sub = "📖 Final Revision"
         next_t_init = t_init
         if not next_exams.empty:
@@ -190,7 +187,6 @@ def build_exam_day_routine(date_str):
             "Is_Exam_Day": True
         })
         
-        # 3. 14:20 to 15:30 -> Exam Copies Check (No classes after 14:20)
         routine_rows.append({
             "Day": tdy_name,
             "Start_Time": "14:20",
@@ -222,12 +218,10 @@ def fetch_all_routines():
     return pd.DataFrame(), pd.DataFrame()
 
 def get_active_routine(date_str, day_of_week):
-    # 1. Highest Priority: Check if Today is an EXAM DAY in BPS EXAM Google Sheet
     exam_routine = build_exam_day_routine(date_str)
     if not exam_routine.empty:
         return exam_routine
         
-    # 2. Second Priority: Custom Daily Override in bps_routine
     base, override = fetch_all_routines()
     if not override.empty and 'Date' in override.columns:
         day_ov = override[override['Date'] == date_str].copy()
@@ -236,7 +230,6 @@ def get_active_routine(date_str, day_of_week):
             day_ov['Is_Exam_Day'] = False
             return day_ov
     
-    # 3. Standard Weekly Routine
     if not base.empty and 'Day' in base.columns:
         day_base = base[base['Day'] == day_of_week].copy()
         day_base['Is_Custom'] = False
@@ -452,6 +445,18 @@ if st.session_state.user_role == "teacher":
                             me = ml[(ml['Date'].astype(str) == curr_date_str) & (ml['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else ml['Class'] == tc) & (ml['Section'] == ts)]['Roll'].astype(str).tolist() if not ml.empty else []
                             ros['MDM (Ate)'] = ros['Roll'].astype(str).isin(me)
 
+                            # ----- HISTORICAL DATA CHECK -----
+                            mdm_day_counts = {}
+                            if not ml.empty:
+                                class_cond = ml['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else (ml['Class'] == tc)
+                                hist_ml = ml[class_cond & (ml['Section'] == ts)]
+                                mdm_day_counts = hist_ml['Roll'].astype(str).str.strip().value_counts().to_dict()
+                                
+                            ros['Historical_Count'] = ros['Roll'].astype(str).str.strip().map(lambda x: mdm_day_counts.get(x, 0))
+                            regular_ros = ros[ros['Historical_Count'] > 0]
+                            not_regular_ros = ros[ros['Historical_Count'] == 0]
+                            # ---------------------------------
+
                             if 'scanned_keys' not in st.session_state: st.session_state.scanned_keys = []
                             
                             st.write("📸 **Scan ID Cards (or tick manually below):**")
@@ -488,15 +493,17 @@ if st.session_state.user_role == "teacher":
                             with st.spinner("Loading profiles..."):
                                 with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe: ros['Photo'] = list(exe.map(get_secure_photo_uri, ros['Thumb_URL'].tolist()))
 
-                            st.markdown("### Roster Selection")
+                            st.markdown("### Class Roster (Regular)")
                             cp = st.empty()
                             st.markdown('<div class="roster-container">', unsafe_allow_html=True)
                             sel_mdm, alc = [], 0
-                            for _, r in ros.iterrows():
+                            
+                            # Render Regular Students (Default Check = True)
+                            for _, r in regular_ros.iterrows():
                                 c1, c2, c3 = st.columns([1, 4, 2])
                                 with c1: st.image(r['Photo'], width=85) 
                                 with c2: 
-                                    lbl = "<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>" + str(r['Name']) + "</b><br><span style='font-size:12px; color:gray;'>Roll: " + str(r['Roll']) + " | " + str(r['Class']) + "</span></div>"
+                                    lbl = "<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>" + str(r['Name']) + "</b><br><span style='font-size:12px; color:gray;'>Roll: " + str(r['Roll']) + " | " + str(r['Class']) + "<br>📅 MDM Days: <b>" + str(r['Historical_Count']) + "</b></span></div>"
                                     st.markdown(lbl, unsafe_allow_html=True)
                                 with c3:
                                     if r['MDM (Ate)']:
@@ -504,8 +511,26 @@ if st.session_state.user_role == "teacher":
                                         alc += 1
                                     else:
                                         isc = r['Scan_Key'] in st.session_state.scanned_keys
-                                        if st.checkbox("Ate MDM", value=isc, key=f"mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                                        if st.checkbox("Ate MDM", value=(True or isc), key=f"mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
                                 st.divider()
+                                
+                            # Render Not Regular Students (Hidden, Default Check = False)
+                            if not not_regular_ros.empty:
+                                with st.expander("⚠️ Show Not Regular Students (" + str(len(not_regular_ros)) + " Students)"):
+                                    for _, r in not_regular_ros.iterrows():
+                                        c1, c2, c3 = st.columns([1, 4, 2])
+                                        with c1: st.image(r['Photo'], width=85) 
+                                        with c2: 
+                                            lbl = "<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>" + str(r['Name']) + "</b><br><span style='font-size:12px; color:gray;'>Roll: " + str(r['Roll']) + " | " + str(r['Class']) + "<br>📅 MDM Days: <b>" + str(r['Historical_Count']) + "</b></span></div>"
+                                            st.markdown(lbl, unsafe_allow_html=True)
+                                        with c3:
+                                            if r['MDM (Ate)']:
+                                                st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
+                                                alc += 1
+                                            else:
+                                                isc = r['Scan_Key'] in st.session_state.scanned_keys
+                                                if st.checkbox("Ate MDM", value=isc, key=f"mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                                        st.divider()
                             
                             cp.markdown(f"<div class='floating-counter'>✅ Selected: {len(sel_mdm)} | Done: {alc}</div>", unsafe_allow_html=True)
                             st.markdown(f"<h3 style='text-align:center;'>✅ New Selected: {len(sel_mdm)}</h3>", unsafe_allow_html=True)
@@ -721,6 +746,18 @@ elif st.session_state.user_role == "admin":
                     me = ml[(ml['Date'].astype(str) == curr_date_str) & (ml['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else ml['Class'] == tc) & (ml['Section'] == ts)]['Roll'].astype(str).tolist() if not ml.empty else []
                     ros['MDM (Ate)'] = ros['Roll'].astype(str).isin(me)
                     
+                    # ----- HISTORICAL DATA CHECK -----
+                    mdm_day_counts = {}
+                    if not ml.empty:
+                        class_cond = ml['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else (ml['Class'] == tc)
+                        hist_ml = ml[class_cond & (ml['Section'] == ts)]
+                        mdm_day_counts = hist_ml['Roll'].astype(str).str.strip().value_counts().to_dict()
+                        
+                    ros['Historical_Count'] = ros['Roll'].astype(str).str.strip().map(lambda x: mdm_day_counts.get(x, 0))
+                    regular_ros = ros[ros['Historical_Count'] > 0]
+                    not_regular_ros = ros[ros['Historical_Count'] == 0]
+                    # ---------------------------------
+                    
                     st.write("📸 **Scan Missed ID Cards (or tick manually below):**")
                     qv = qrcode_scanner(key='adm_mdm_qr')
                     
@@ -755,15 +792,16 @@ elif st.session_state.user_role == "admin":
                     with st.spinner("Loading profiles..."):
                         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe: ros['Photo'] = list(exe.map(get_secure_photo_uri, ros['Thumb_URL'].tolist()))
 
-                    st.markdown("### Roster Selection")
+                    st.markdown("### Class Roster (Regular)")
                     cp = st.empty()
                     st.markdown('<div class="roster-container">', unsafe_allow_html=True)
                     sel_mdm, alc = [], 0
-                    for _, r in ros.iterrows():
+                    
+                    for _, r in regular_ros.iterrows():
                         c1, c2, c3 = st.columns([1, 4, 2])
                         with c1: st.image(r['Photo'], width=85) 
                         with c2: 
-                            lbl = "<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>" + str(r['Name']) + "</b><br><span style='font-size:12px; color:gray;'>Roll: " + str(r['Roll']) + " | " + str(r['Class']) + "</span></div>"
+                            lbl = "<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>" + str(r['Name']) + "</b><br><span style='font-size:12px; color:gray;'>Roll: " + str(r['Roll']) + " | " + str(r['Class']) + "<br>📅 MDM Days: <b>" + str(r['Historical_Count']) + "</b></span></div>"
                             st.markdown(lbl, unsafe_allow_html=True)
                         with c3:
                             if r['MDM (Ate)']:
@@ -771,8 +809,25 @@ elif st.session_state.user_role == "admin":
                                 alc += 1
                             else:
                                 isc = r['Scan_Key'] in st.session_state.admin_scanned_keys
-                                if st.checkbox("Ate MDM", value=isc, key=f"adm_mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                                if st.checkbox("Ate MDM", value=(True or isc), key=f"adm_mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
                         st.divider()
+                        
+                    if not not_regular_ros.empty:
+                        with st.expander("⚠️ Show Not Regular Students (" + str(len(not_regular_ros)) + " Students)"):
+                            for _, r in not_regular_ros.iterrows():
+                                c1, c2, c3 = st.columns([1, 4, 2])
+                                with c1: st.image(r['Photo'], width=85) 
+                                with c2: 
+                                    lbl = "<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>" + str(r['Name']) + "</b><br><span style='font-size:12px; color:gray;'>Roll: " + str(r['Roll']) + " | " + str(r['Class']) + "<br>📅 MDM Days: <b>" + str(r['Historical_Count']) + "</b></span></div>"
+                                    st.markdown(lbl, unsafe_allow_html=True)
+                                with c3:
+                                    if r['MDM (Ate)']:
+                                        st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
+                                        alc += 1
+                                    else:
+                                        isc = r['Scan_Key'] in st.session_state.admin_scanned_keys
+                                        if st.checkbox("Ate MDM", value=isc, key=f"adm_mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                                st.divider()
                     
                     cp.markdown(f"<div class='floating-counter'>✅ Selected: {len(sel_mdm)} | Done: {alc}</div>", unsafe_allow_html=True)
                     st.markdown(f"<h3 style='text-align:center;'>✅ New Selected: {len(sel_mdm)}</h3>", unsafe_allow_html=True)

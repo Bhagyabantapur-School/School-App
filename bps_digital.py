@@ -23,54 +23,60 @@ CLASS_OPTIONS = ["Select Class...", "CLASS PP", "CLASS I", "CLASS II", "CLASS II
 ATTENDANCE_OPTIONS = ["Select Class...", "CLASS PP A", "CLASS I A", "CLASS II A", "CLASS III A", "CLASS IV A", "CLASS IV B", "CLASS V A"]
 
 def inject_beep_script():
-    components.html("""
-        <script>
-            const doc = window.parent.document;
-            if (!doc.getElementById("beep-listener-setup")) {
-                doc.body.insertAdjacentHTML('beforeend', '<div id="beep-listener-setup" style="display:none;"></div>');
-                doc.body.addEventListener('change', function(e) {
-                    if (e.target && e.target.type === 'checkbox') {
-                        const AudioContext = window.parent.AudioContext || window.parent.webkitAudioContext;
-                        if (AudioContext) {
-                            const ctx = new AudioContext();
-                            const osc = ctx.createOscillator(), gainNode = ctx.createGain();
-                            osc.type = 'sine'; osc.frequency.setValueAtTime(880, ctx.currentTime); 
-                            gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
-                            gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
-                            osc.connect(gainNode); gainNode.connect(ctx.destination);
-                            osc.start(); osc.stop(ctx.currentTime + 0.1);
-                        }
-                    }
-                });
-            }
-        </script>""", height=0, width=0)
+    js = (
+        "<script>"
+        "const doc = window.parent.document;"
+        "if (!doc.getElementById('beep-listener-setup')) {"
+        "doc.body.insertAdjacentHTML('beforeend', '<div id=\"beep-listener-setup\" style=\"display:none;\"></div>');"
+        "doc.body.addEventListener('change', function(e) {"
+        "if (e.target && e.target.type === 'checkbox') {"
+        "const AudioContext = window.parent.AudioContext || window.parent.webkitAudioContext;"
+        "if (AudioContext) {"
+        "const ctx = new AudioContext();"
+        "const osc = ctx.createOscillator(), gainNode = ctx.createGain();"
+        "osc.type = 'sine'; osc.frequency.setValueAtTime(880, ctx.currentTime);"
+        "gainNode.gain.setValueAtTime(0.1, ctx.currentTime);"
+        "gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);"
+        "osc.connect(gainNode); gainNode.connect(ctx.destination);"
+        "osc.start(); osc.stop(ctx.currentTime + 0.1);"
+        "}}});}"
+        "</script>"
+    )
+    components.html(js, height=0, width=0)
+
 inject_beep_script()
 
 def inject_security_css(user_name):
-    wm = f"{user_name} - CONFIDENTIAL"
-    st.markdown(f"""<style>
-        body {{ user-select: none; -webkit-user-select: none; }}
-        .watermark {{ position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 9999; background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"><text x="50" y="150" fill="rgba(200, 200, 200, 0.25)" font-size="20" transform="rotate(-45 150 150)" font-family="Arial, sans-serif">{wm}</text></svg>'); background-repeat: repeat; }}
-        .block-container {{ padding-top: 1rem; max-width: 800px; overflow-x: hidden; }}
-        .summary-card {{ background-color: #fff; border: 2px solid #007bff; border-radius: 15px; padding: 20px; margin-bottom: 20px; box-shadow: 0px 4px 10px rgba(0,0,0,0.05); }}
-        .stButton>button {{ width: 100%; border-radius: 12px; height: 3.5em; background-color: #007bff; color: white; font-weight: bold; border: none; }}
-        .routine-card {{ background-color: #f8f9fa; padding: 15px; border-radius: 10px; border-left: 5px solid #007bff; margin-bottom: 15px; border-right: 1px solid #ddd; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; display: flex; flex-direction: column; gap: 4px;}}
-        .report-table {{ width: 100%; border-collapse: collapse; }} .report-table td, .report-table th {{ border: 1px solid #ddd; padding: 8px; text-align: center; }} .report-table th {{ background-color: #007bff; color: white; }}
-        .att-badge {{ padding: 8px 12px; border-radius: 8px; font-weight: bold; font-size: 15px; display: block; text-align: center; margin-top: 5px; margin-bottom: 5px;}}
-        .att-wait {{ background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }} .att-done {{ background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }}
-        .floating-counter {{ position: fixed; top: 15px; right: 15px; background: linear-gradient(135deg, #007bff, #0056b3); color: white; padding: 10px 20px; border-radius: 30px; z-index: 999999; font-size: 16px; font-weight: 900; box-shadow: 0px 4px 12px rgba(0,0,0,0.3); border: 2px solid #ffffff; pointer-events: none; transition: all 0.3s ease; }}
-        @media (max-width: 768px) {{
-            .floating-counter {{ top: 10px; right: 10px; font-size: 14px; padding: 8px 16px; }}
-            .roster-container [data-testid="stHorizontalBlock"] {{ display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; align-items: center !important; width: 100% !important; }}
-            .roster-container [data-testid="column"] {{ display: block !important; min-width: 0 !important; margin-top: 0 !important; padding: 0 4px !important; }}
-            .roster-container [data-testid="column"]:nth-child(1) {{ flex: 0 0 55px !important; max-width: 55px !important; width: 55px !important; }}
-            .roster-container [data-testid="column"]:nth-child(2) {{ flex: 1 1 0% !important; max-width: calc(100% - 150px) !important; width: auto !important; }}
-            .roster-container [data-testid="column"]:nth-child(3) {{ flex: 0 0 95px !important; max-width: 95px !important; width: 95px !important; }}
-            .roster-container .stCheckbox p {{ font-size: 13px !important; padding-left: 1.2rem !important; margin-bottom: 0px !important; line-height: 1.2 !important; }}
-            .roster-container .stCheckbox {{ min-height: 1.2rem; }}
-            .header-school-name {{ font-size: 18px !important; }}
-        }}
-    </style><script>document.addEventListener('contextmenu', e => e.preventDefault());</script><div class="watermark"></div>""", unsafe_allow_html=True)
+    wm = str(user_name) + " - CONFIDENTIAL"
+    css = (
+        "<style>"
+        "body { user-select: none; -webkit-user-select: none; }"
+        ".watermark { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 9999; "
+        "background-image: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"300\" height=\"300\" viewBox=\"0 0 300 300\">"
+        "<text x=\"50\" y=\"150\" fill=\"rgba(200, 200, 200, 0.25)\" font-size=\"20\" transform=\"rotate(-45 150 150)\" font-family=\"Arial, sans-serif\">" + wm + "</text></svg>'); "
+        "background-repeat: repeat; }"
+        ".block-container { padding-top: 1rem; max-width: 800px; overflow-x: hidden; }"
+        ".summary-card { background-color: #fff; border: 2px solid #007bff; border-radius: 15px; padding: 20px; margin-bottom: 20px; box-shadow: 0px 4px 10px rgba(0,0,0,0.05); }"
+        ".stButton>button { width: 100%; border-radius: 12px; height: 3.5em; background-color: #007bff; color: white; font-weight: bold; border: none; }"
+        ".routine-card { background-color: #f8f9fa; padding: 15px; border-radius: 10px; border-left: 5px solid #007bff; margin-bottom: 15px; border-right: 1px solid #ddd; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; display: flex; flex-direction: column; gap: 4px;}"
+        ".report-table { width: 100%; border-collapse: collapse; } .report-table td, .report-table th { border: 1px solid #ddd; padding: 8px; text-align: center; } .report-table th { background-color: #007bff; color: white; }"
+        ".att-badge { padding: 8px 12px; border-radius: 8px; font-weight: bold; font-size: 15px; display: block; text-align: center; margin-top: 5px; margin-bottom: 5px;}"
+        ".att-wait { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; } .att-done { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }"
+        ".floating-counter { position: fixed; top: 15px; right: 15px; background: linear-gradient(135deg, #007bff, #0056b3); color: white; padding: 10px 20px; border-radius: 30px; z-index: 999999; font-size: 16px; font-weight: 900; box-shadow: 0px 4px 12px rgba(0,0,0,0.3); border: 2px solid #ffffff; pointer-events: none; transition: all 0.3s ease; }"
+        "@media (max-width: 768px) {"
+        ".floating-counter { top: 10px; right: 10px; font-size: 14px; padding: 8px 16px; }"
+        ".roster-container [data-testid=\"stHorizontalBlock\"] { display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; align-items: center !important; width: 100% !important; }"
+        ".roster-container [data-testid=\"column\"] { display: block !important; min-width: 0 !important; margin-top: 0 !important; padding: 0 4px !important; }"
+        ".roster-container [data-testid=\"column\"]:nth-child(1) { flex: 0 0 55px !important; max-width: 55px !important; width: 55px !important; }"
+        ".roster-container [data-testid=\"column\"]:nth-child(2) { flex: 1 1 0% !important; max-width: calc(100% - 150px) !important; width: auto !important; }"
+        ".roster-container [data-testid=\"column\"]:nth-child(3) { flex: 0 0 95px !important; max-width: 95px !important; width: 95px !important; }"
+        ".roster-container .stCheckbox p { font-size: 13px !important; padding-left: 1.2rem !important; margin-bottom: 0px !important; line-height: 1.2 !important; }"
+        ".roster-container .stCheckbox { min-height: 1.2rem; }"
+        ".header-school-name { font-size: 18px !important; }"
+        "}"
+        "</style><script>document.addEventListener('contextmenu', e => e.preventDefault());</script><div class=\"watermark\"></div>"
+    )
+    st.markdown(css, unsafe_allow_html=True)
 
 @st.cache_resource
 def get_google_credentials(): return Credentials.from_service_account_info(dict(st.secrets["gcp_service_account"]), scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive.readonly"])
@@ -341,21 +347,22 @@ def render_header():
     if os.path.exists("logo.png"):
         with open("logo.png", "rb") as f:
             img_b64 = base64.b64encode(f.read()).decode()
-        st.markdown(f"""
-        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e0e0e0; padding-bottom: 15px; margin-bottom: 20px;">
-            <img src="data:image/png;base64,{img_b64}" style="max-width: 80px; max-height: 80px; object-fit: contain;">
-            <div style="text-align: right;">
-                <h2 class="header-school-name" style="margin: 0; color: #007bff; font-weight: 900; font-size: 24px; line-height: 1.1;">BHAGYABANTAPUR</h2>
-                <h2 class="header-school-name" style="margin: 0; color: #007bff; font-weight: 900; font-size: 20px; line-height: 1.1;">PRIMARY SCHOOL</h2>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        html_str = (
+            "<div style='display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e0e0e0; padding-bottom: 15px; margin-bottom: 20px;'>"
+            "<img src='data:image/png;base64," + img_b64 + "' style='max-width: 80px; max-height: 80px; object-fit: contain;'>"
+            "<div style='text-align: right;'>"
+            "<h2 class='header-school-name' style='margin: 0; color: #007bff; font-weight: 900; font-size: 24px; line-height: 1.1;'>BHAGYABANTAPUR</h2>"
+            "<h2 class='header-school-name' style='margin: 0; color: #007bff; font-weight: 900; font-size: 20px; line-height: 1.1;'>PRIMARY SCHOOL</h2>"
+            "</div></div>"
+        )
+        st.markdown(html_str, unsafe_allow_html=True)
     else:
-        st.markdown(f"""
-        <div style="border-bottom: 2px solid #e0e0e0; padding-bottom: 15px; margin-bottom: 20px; text-align: center;">
-            <h2 style="margin: 0; color: #007bff; font-weight: 900; font-size: 24px;">BHAGYABANTAPUR PRIMARY SCHOOL</h2>
-        </div>
-        """, unsafe_allow_html=True)
+        html_str = (
+            "<div style='border-bottom: 2px solid #e0e0e0; padding-bottom: 15px; margin-bottom: 20px; text-align: center;'>"
+            "<h2 style='margin: 0; color: #007bff; font-weight: 900; font-size: 24px;'>BHAGYABANTAPUR PRIMARY SCHOOL</h2>"
+            "</div>"
+        )
+        st.markdown(html_str, unsafe_allow_html=True)
 
 # -------------------------------
 # EXECUTE MAIN APPLICATION
@@ -488,7 +495,9 @@ if st.session_state.user_role == "teacher":
                             for _, r in ros.iterrows():
                                 c1, c2, c3 = st.columns([1, 4, 2])
                                 with c1: st.image(r['Photo'], width=85) 
-                                with c2: st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} | {r['Class']}</span></div>", unsafe_allow_html=True)
+                                with c2: 
+                                    lbl = "<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>" + str(r['Name']) + "</b><br><span style='font-size:12px; color:gray;'>Roll: " + str(r['Roll']) + " | " + str(r['Class']) + "</span></div>"
+                                    st.markdown(lbl, unsafe_allow_html=True)
                                 with c3:
                                     if r['MDM (Ate)']:
                                         st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
@@ -556,7 +565,8 @@ if st.session_state.user_role == "teacher":
                             sty = "border-left: 5px solid #ffc107; background-color:#fff3cd;"
                             px = "🔄 ASSIGNED: "
                             
-                        st.markdown(f"""<div class="routine-card" style="{sty}"><h3 style="margin:0; color:#333;">{px}{cc['Class']} - {cc.get('Section','')}</h3><p style="margin:2px 0;">{cc['Subject']}</p><p style="color:gray; font-size:13px; margin:0;">Ends {cc['End_Time']}</p></div>""", unsafe_allow_html=True)
+                        c_card = "<div class='routine-card' style='" + sty + "'><h3 style='margin:0; color:#333;'>" + px + str(cc['Class']) + " - " + str(cc.get('Section','')) + "</h3><p style='margin:2px 0;'>" + str(cc['Subject']) + "</p><p style='color:gray; font-size:13px; margin:0;'>Ends " + str(cc['End_Time']) + "</p></div>"
+                        st.markdown(c_card, unsafe_allow_html=True)
                 else: 
                     st.info("☕ No class ongoing.")
                     
@@ -752,7 +762,9 @@ elif st.session_state.user_role == "admin":
                     for _, r in ros.iterrows():
                         c1, c2, c3 = st.columns([1, 4, 2])
                         with c1: st.image(r['Photo'], width=85) 
-                        with c2: st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} | {r['Class']}</span></div>", unsafe_allow_html=True)
+                        with c2: 
+                            lbl = "<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>" + str(r['Name']) + "</b><br><span style='font-size:12px; color:gray;'>Roll: " + str(r['Roll']) + " | " + str(r['Class']) + "</span></div>"
+                            st.markdown(lbl, unsafe_allow_html=True)
                         with c3:
                             if r['MDM (Ate)']:
                                 st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
@@ -788,23 +800,39 @@ elif st.session_state.user_role == "admin":
                 if not ros.empty:
                     me = ml[(ml['Date'].astype(str) == curr_date_str) & (ml['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else ml['Class'] == tc) & (ml['Section'] == ts)]['Roll'].astype(str).tolist() if not ml.empty else []
                     ros['MDM (Ate)'] = ros['Roll'].astype(str).isin(me)
+                    
+                    mdm_day_counts = {}
+                    if not ml.empty:
+                        class_cond = ml['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else (ml['Class'] == tc)
+                        hist_ml = ml[class_cond & (ml['Section'] == ts)]
+                        mdm_day_counts = hist_ml['Roll'].astype(str).str.strip().value_counts().to_dict()
+                    
                     if 'Thumb_URL' not in ros.columns: ros['Thumb_URL'] = ""
                     with st.spinner("Loading profiles..."):
                         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe: ros['Photo'] = list(exe.map(get_secure_photo_uri, ros['Thumb_URL'].tolist()))
+                    
                     st.markdown("### Class Roster")
                     cp = st.empty()
                     st.markdown('<div class="roster-container">', unsafe_allow_html=True)
                     ad, pc = [], 0
                     for _, r in ros.iterrows():
+                        roll_str = str(r['Roll']).strip()
+                        days_attended = mdm_day_counts.get(roll_str, 0)
+                        
+                        default_present = days_attended > 0
+                        
                         c1, c2, c3 = st.columns([1, 4, 2.5])
                         with c1: st.image(r['Photo'], width=85) 
-                        with c2: st.markdown(f"<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>{r['Name']}</b><br><span style='font-size:12px; color:gray;'>Roll: {r['Roll']} | {r['Class']}</span></div>", unsafe_allow_html=True)
+                        with c2: 
+                            label_html = "<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>" + str(r['Name']) + "</b><br><span style='font-size:12px; color:gray;'>Roll: " + str(r['Roll']) + " | " + str(r['Class']) + "<br>📅 MDM Days: <b>" + str(days_attended) + "</b></span></div>"
+                            st.markdown(label_html, unsafe_allow_html=True)
                         with c3:
-                            ip = st.checkbox("Present", value=True, key=f"att_{r['Roll']}_{r['Name']}")
+                            ip = st.checkbox("Present", value=default_present, key=f"att_{r['Roll']}_{r['Name']}")
                             if ip: pc += 1
                             st.checkbox("MDM Entry", value=bool(r['MDM (Ate)']), disabled=True, key=f"mdm_ro_{r['Roll']}_{r['Name']}")
                             ad.append({'Date': curr_date_str, 'Class': r['Class'], 'Section': ts, 'Roll': r['Roll'], 'Name': r['Name'], 'Status': ip})
                         st.divider()
+                    
                     cp.markdown(f"<div class='floating-counter'>✅ Present: {pc}</div>", unsafe_allow_html=True)
                     st.markdown(f"<h3 style='text-align:center;'>✅ Total Present: {pc}</h3>", unsafe_allow_html=True)
                     if st.button(f"Save Attendance"):
@@ -829,7 +857,9 @@ elif st.session_state.user_role == "admin":
                 p = len(ta[ta['Class'].isin(['CLASS PP', 'CLASS LPP'])])
                 i4 = len(ta[ta['Class'].isin(['CLASS I', 'CLASS II', 'CLASS III', 'CLASS IV'])])
                 v = len(ta[ta['Class'] == 'CLASS V'])
-                st.markdown(f"<table class='report-table'><tr><th>Class PP</th><th>I-IV</th><th>Class V</th><th>TOTAL</th></tr><tr><td>{p}</td><td>{i4}</td><td>{v}</td><td><b>{p+i4+v}</b></td></tr></table>", unsafe_allow_html=True)
+                
+                tbl_html = "<table class='report-table'><tr><th>Class PP</th><th>I-IV</th><th>Class V</th><th>TOTAL</th></tr><tr><td>" + str(p) + "</td><td>" + str(i4) + "</td><td>" + str(v) + "</td><td><b>" + str(p+i4+v) + "</b></td></tr></table>"
+                st.markdown(tbl_html, unsafe_allow_html=True)
             else: st.info(f"No attendance for {avd}.")
 
     with tabs[3]: 
@@ -867,7 +897,8 @@ elif st.session_state.user_role == "admin":
                     if is_exam_day: sty = "border-left: 5px solid #6f42c1; background-color:#f3e8ff;"
                     elif is_sub: sty = "border-left: 5px solid #ffc107; background-color:#fff3cd;"
                     
-                    cls[i%2].markdown(f"<div class='routine-card' style='{sty}'><h4 style='margin:0;'>{r['Class']} {r.get('Section', '')}</h4><p style='margin:0; font-weight:bold;'>{tn}</p><p style='margin:0; font-size:12px; color:gray;'>{r['Subject']} | Ends: {r['End_Time']}</p></div>", unsafe_allow_html=True)
+                    c_card = "<div class='routine-card' style='" + sty + "'><h4 style='margin:0;'>" + str(r['Class']) + " " + str(r.get('Section', '')) + "</h4><p style='margin:0; font-weight:bold;'>" + str(tn) + "</p><p style='margin:0; font-size:12px; color:gray;'>" + str(r['Subject']) + " | Ends: " + str(r['End_Time']) + "</p></div>"
+                    cls[i%2].markdown(c_card, unsafe_allow_html=True)
             else: 
                 st.info("☕ No classes ongoing.")
                 

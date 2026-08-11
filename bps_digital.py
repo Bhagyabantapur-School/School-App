@@ -102,6 +102,26 @@ def fetch_sheet_data(sheet_name):
     except Exception: return pd.DataFrame()
 
 # ==========================================
+# SYSTEM SETTINGS ENGINE
+# ==========================================
+def get_mdm_threshold():
+    df = fetch_sheet_data('settings')
+    if not df.empty and 'Key' in df.columns:
+        m = df[df['Key'] == 'MDM_REGULAR_THRESHOLD']
+        if not m.empty: return str(m.iloc[0]['Value'])
+    return "1"
+
+def set_setting(key, value):
+    try: ws = sh.worksheet("settings")
+    except Exception: ws = sh.add_worksheet(title="settings", rows=10, cols=2); ws.append_row(["Key", "Value"])
+    df = fetch_sheet_data('settings')
+    if df.empty or 'Key' not in df.columns: df = pd.DataFrame([{"Key": key, "Value": value}])
+    else:
+        if key in df['Key'].values: df.loc[df['Key'] == key, 'Value'] = value
+        else: df = pd.concat([df, pd.DataFrame([{"Key": key, "Value": value}])], ignore_index=True)
+    overwrite_sheet_df('settings', df)
+
+# ==========================================
 # BPS EXAM ROUTINE ENGINE
 # ==========================================
 @st.cache_data(ttl=300)
@@ -492,8 +512,15 @@ if st.session_state.user_role == "teacher":
                                 with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe: 
                                     ros['Photo'] = list(exe.map(get_secure_photo_uri, ros['Thumb_URL'].tolist()))
 
-                            regular_ros = ros[ros['Historical_Count'] > 0]
-                            not_regular_ros = ros[ros['Historical_Count'] == 0]
+                            # Dynamic Splitting using Threshold
+                            th_val = get_mdm_threshold()
+                            if th_val == "None":
+                                regular_ros = ros.copy()
+                                not_regular_ros = ros.iloc[0:0].copy()
+                            else:
+                                th_num = int(th_val)
+                                regular_ros = ros[ros['Historical_Count'] >= th_num].copy()
+                                not_regular_ros = ros[ros['Historical_Count'] < th_num].copy()
 
                             st.markdown("### Class Roster (Regular)")
                             cp = st.empty()
@@ -625,7 +652,7 @@ if st.session_state.user_role == "teacher":
 # ADMIN VIEW
 # -------------------------------
 elif st.session_state.user_role == "admin":
-    tabs = st.tabs(["📊 Summary", "🍱 MDM Entry", "📝 Attend", "⏳ Live", "🛠️ Routine Maker", "📢 Staff Notice", "📅 Hols"])
+    tabs = st.tabs(["📊 Summary", "🍱 MDM Entry", "📝 Attend", "⏳ Live", "🛠️ Routine Maker", "📢 Staff Notice", "📅 Hols", "⚙️ Settings"])
     
     with tabs[0]: 
         st.subheader(f"MDM Status: {curr_date_str}")
@@ -791,8 +818,14 @@ elif st.session_state.user_role == "admin":
                         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe: 
                             ros['Photo'] = list(exe.map(get_secure_photo_uri, ros['Thumb_URL'].tolist()))
 
-                    regular_ros = ros[ros['Historical_Count'] > 0]
-                    not_regular_ros = ros[ros['Historical_Count'] == 0]
+                    th_val = get_mdm_threshold()
+                    if th_val == "None":
+                        regular_ros = ros.copy()
+                        not_regular_ros = ros.iloc[0:0].copy()
+                    else:
+                        th_num = int(th_val)
+                        regular_ros = ros[ros['Historical_Count'] >= th_num].copy()
+                        not_regular_ros = ros[ros['Historical_Count'] < th_num].copy()
 
                     st.markdown("### Class Roster (Regular)")
                     cp = st.empty()
@@ -868,6 +901,8 @@ elif st.session_state.user_role == "admin":
                     with st.spinner("Loading profiles..."):
                         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe: ros['Photo'] = list(exe.map(get_secure_photo_uri, ros['Thumb_URL'].tolist()))
                     
+                    th_val = get_mdm_threshold()
+
                     st.markdown("### Class Roster")
                     cp = st.empty()
                     st.markdown('<div class="roster-container">', unsafe_allow_html=True)
@@ -876,7 +911,10 @@ elif st.session_state.user_role == "admin":
                         roll_str = str(r['Roll']).strip()
                         days_attended = mdm_day_counts.get(roll_str, 0)
                         
-                        default_present = days_attended > 0
+                        if th_val == "None":
+                            default_present = False
+                        else:
+                            default_present = days_attended >= int(th_val)
                         
                         c1, c2, c3 = st.columns([1, 4, 2.5])
                         with c1: st.image(r['Photo'], width=85) 
@@ -1079,3 +1117,17 @@ elif st.session_state.user_role == "admin":
         hd = get_local_csv('holidays.csv')
         if not hd.empty: st.data_editor(hd, num_rows="dynamic", key="h_edit")
         else: st.info("No data.")
+        
+    with tabs[7]:
+        st.subheader("⚙️ System Settings")
+        st.markdown("Control the **Regular Student** criteria. If a student has attended MDM this many times, they will appear in the Regular list and be checked 'Present' by default.")
+        curr_th = get_mdm_threshold()
+        opts = ["None"] + [str(i) for i in range(21)]
+        idx = opts.index(curr_th) if curr_th in opts else 1
+        new_th = st.selectbox("Minimum MDM Days to be 'Regular'", options=opts, index=idx)
+        
+        if st.button("💾 Save Settings", type="primary"):
+            set_setting("MDM_REGULAR_THRESHOLD", new_th)
+            st.success("Settings saved! Threshold updated.")
+            clear_sheet_cache()
+            st.rerun()

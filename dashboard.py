@@ -42,23 +42,23 @@ with r3_col2:
 with r3_col3:
     if st.button("❤️ Health Hub", use_container_width=True): st.switch_page("health_app.py")
 
-# ROW 4
+# ROW 4 (Routine Group)
 r4_col1, r4_col2, r4_col3 = st.columns(3)
 with r4_col1:
-    if st.button("💾 Backup Tracker", use_container_width=True): st.switch_page("backup_tracker_app.py")
-with r4_col2:
     if st.button("⏱️ Daily Routine", use_container_width=True): st.switch_page("routine_app.py")
-with r4_col3:
+with r4_col2:
     if st.button("🔍 Routine Audit", use_container_width=True): st.switch_page("routine_audit.py")
+with r4_col3:
+    if st.button("✏️ Routine Editor", use_container_width=True): st.switch_page("routine_editor.py")
 
-# ROW 5
+# ROW 5 (SCH WORK Group)
 r5_col1, r5_col2, r5_col3 = st.columns(3)
 with r5_col1:
-    if st.button("✏️ Routine Editor", use_container_width=True): st.switch_page("routine_editor.py")
-with r5_col2:
     if st.button("📦 MDM Returns", use_container_width=True): st.switch_page("mdm_return_log.py")
-with r5_col3:
+with r5_col2:
     if st.button("🎬 Video Manager", use_container_width=True): st.switch_page("bps_ytfb_videos.py")
+with r5_col3:
+    if st.button("🎙️ Speech Mastery", use_container_width=True): st.switch_page("speech_prep_app.py")
 
 # ROW 6
 r6_col1, r6_col2, r6_col3 = st.columns(3)
@@ -76,4 +76,4 @@ with r7_col1:
 with r7_col2:
     if st.button("🔄 App Updater", use_container_width=True): st.switch_page("app_update.py")
 with r7_col3:
-    st.empty() # Placeholder for future apps
+    if st.button("💾 Backup Tracker", use_container_width=True): st.switch_page("backup_tracker_app.py")

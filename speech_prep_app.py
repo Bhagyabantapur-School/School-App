@@ -63,7 +63,22 @@ def log_session_to_sheet(notes="Completed 1-Hour Training Framework"):
 st.title("🎙️ Aug 15 Speech Mastery")
 st.markdown("**Bhagyabantapur Primary School - 1-Minute Delivery Protocol**")
 
-tab_train, tab_event, tab_stage = st.tabs(["⏳ Daily 1-Hr Training", "🌅 Event Day (Aug 15)", "🧠 Stage Coping"])
+tab_speech, tab_train, tab_event, tab_stage = st.tabs(["📜 Speech Text", "⏳ Daily 1-Hr Training", "🌅 Event Day", "🧠 Stage Coping"])
+
+with tab_speech:
+    st.markdown("### 🇮🇳 80th Independence Day Speech")
+    st.markdown("""
+    <div style="font-size: 22px; line-height: 1.8; padding: 25px; background-color: #ffffff; border-radius: 12px; border-left: 6px solid #ff9933; border-right: 6px solid #138808; box-shadow: 0 4px 6px rgba(0,0,0,0.1); color: #222;">
+    "সম্মানিত শিক্ষক-শিক্ষিকাবৃন্দ, উপস্থিত অভিভাবকগণ এবং আমার স্নেহের ছাত্রছাত্রীরা,<br><br>
+    আজ ১৫ই আগস্ট, ২০২৬। আমরা আমাদের মহান মাতৃভূমির ৮০তম স্বাধীনতা দিবস উদযাপন করতে ভাগ্যবন্তপুর প্রাথমিক বিদ্যালয়ের এই প্রাঙ্গণে সমবেত হয়েছি। আজকের এই পবিত্র লগ্নে আমি প্রথমেই গভীর শ্রদ্ধার সঙ্গে স্মরণ করি নেতাজি সুভাষচন্দ্র বসু, ক্ষুদিরাম বসু, মাতঙ্গিনী হাজরা-সহ অগণিত স্বাধীনতা সংগ্রামীদের। তাঁদের চরম আত্মত্যাগ এবং রক্তঝরা সংগ্রামের বিনিময়েই আজ আমরা এই মুক্ত বাতাসে শ্বাস নিচ্ছি।<br><br>
+    এই বিদ্যালয়ের প্রধান শিক্ষক হিসেবে আজ আমার বুক গর্বে ভরে উঠছে। আমাদের লক্ষ্য কেবল বইয়ের পাতায় আটকে থাকা নয়, বরং তোমাদের 'সার্বিক বিকাশ' নিশ্চিত করা। আমার প্রিয় ছাত্রছাত্রীরা, তোমরাই এই স্বাধীন ভারতের আগামী দিনের ভবিষ্যৎ। এই দেশকে আরও সুন্দর করে গড়ার দায়িত্ব তোমাদেরই কাঁধে। তাই আজ এই পতাকার সামনে দাঁড়িয়ে আমরা শপথ নিই— আমরা সৎ, আদর্শবান ও সুনাগরিক হয়ে দেশকে এক উন্নত এবং প্রগতিশীল ভবিষ্যতের দিকে এগিয়ে নিয়ে যাব।<br><br>
+    আসুন, আমরা সকলে মিলে একতার মন্ত্রে দীক্ষিত হই।<br><br>
+    <b style="color: #ff9933;">বন্দে মাতরম!</b><br>
+    <b style="color: #138808;">জয় হিন্দ!</b>"
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("<br><p style='text-align: center; color: #666; font-size: 14px;'><i>Tip: Keep your eyes on an imaginary audience just above your screen while reading this during mirror or camera practice.</i></p>", unsafe_allow_html=True)
 
 with tab_train:
     st.markdown("### Daily 1-Hour Routine (Leading up to Aug 14)")

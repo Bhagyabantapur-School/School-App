@@ -218,10 +218,6 @@ if not c6_df.empty:
     c6_df["Section"] = c6_df["Section"].astype(str).str.strip()
     c6_df["Student_Key"] = "OUTGOING_V_" + c6_df["Section"] + "_" + c6_df["Roll"] + "_" + c6_df["Name"]
 
-completed_keys = set()
-if not prog_df.empty and "Student_Key" in prog_df.columns:
-    completed_keys = set(prog_df["Student_Key"].astype(str).unique())
-
 # ---------------------------------------------------------
 # HELPER: AUTOMATIC DATA ENTRY SESSION CLUSTERING
 # ---------------------------------------------------------
@@ -257,7 +253,7 @@ def analyze_automatic_speed_sessions(df):
     
     for rec in records[1:]:
         gap_seconds = (rec["Timestamp"] - current_cluster[-1]["Timestamp"]).total_seconds()
-        if gap_seconds <= 300.0:  # 5 minutes threshold
+        if gap_seconds <= 300.0:
             current_cluster.append(rec)
         else:
             sessions.append(current_cluster)
@@ -281,7 +277,7 @@ def analyze_automatic_speed_sessions(df):
         dom_class = max(set(classes_in_session), key=classes_in_session.count) if classes_in_session else "General"
         
         summary_rows.append({
-            "Session_ID": f"Session #{idx:02d}", # Fixed sorting with zero padding
+            "Session_ID": f"Session #{idx:02d}",
             "Date": start_t.strftime("%d-%m-%Y"),
             "Class_Group": dom_class,
             "Start_Time": start_t.strftime("%I:%M %p"),
@@ -317,8 +313,12 @@ with tab1:
         
     selected_class = col_cls.selectbox("Select Class Group", classes_list, key="prog_cls")
     
+    completed_keys = set()
+    if not prog_df.empty and "Student_Key" in prog_df.columns:
+        completed_keys = set(prog_df["Student_Key"].astype(str).unique())
+        
     # =========================================================
-    # SPECIAL MODE: OUTGOING CLASS V (LOADED FROM "Class VI" TAB)
+    # SPECIAL MODE: OUTGOING CLASS V
     # =========================================================
     if selected_class == OUTGOING_LABEL:
         if c6_df.empty:
@@ -431,7 +431,7 @@ with tab1:
                     st.rerun()
 
     # =========================================================
-    # STANDARD MODE: ACTIVE CLASSES IN STUDENTS_MASTER
+    # STANDARD MODE: ACTIVE CLASSES
     # =========================================================
     elif selected_class != "Select Class...":
         sec_list = sorted(sm_df[sm_df["Class"] == selected_class]["Section"].unique())
@@ -530,7 +530,7 @@ with tab1:
                         "Student_Key": un_key,
                         "Roll": clean_roll,
                         "Name": un_name.strip().upper(),
-                        "Previous_Class_2025_26": f"{un_prev_cls} (Unlisted)",
+                        "Previous_Class_2025_26": f"{un_prev_cls}",
                         "Previous_Section_2025_26": un_prev_sec,
                         "Progression_Status": prog_status,
                         "Marks_Percent": marks_pct,
@@ -642,147 +642,212 @@ with tab1:
                 st.rerun()
 
 with tab2:
-    st.markdown("### 📊 Class Progression Status Table")
+    # -------------------------------------------------------------------------
+    # MASTER ROSTER COMPILATION (Combines Official DB + Unlisted User Entries)
+    # -------------------------------------------------------------------------
+    all_roster = []
+    prog_lookup = {}
+    if not prog_df.empty and "Student_Key" in prog_df.columns:
+        for _, r in prog_df.iterrows():
+            prog_lookup[str(r["Student_Key"])] = r
+            
+    # 1. Standard Classes (from students_master)
+    if not sm_df.empty:
+        for _, stu in sm_df.iterrows():
+            s_key = stu["Student_Key"]
+            prev_class_str = PREV_CLASS_MAP.get(stu["Class"], "Unknown")
+            if s_key in prog_lookup:
+                p_data = prog_lookup[s_key]
+                all_roster.append({
+                    "Roll": stu["Roll"],
+                    "Name": stu["Name"],
+                    "Prev Class": p_data.get('Previous_Class_2025_26', prev_class_str),
+                    "Current Class": stu['Class'],
+                    "Section": stu['Section'],
+                    "Status": "✅ Done",
+                    "Schooling": p_data.get("Schooling_Status_2026_27", "Studying in Same School"),
+                    "Progression": p_data.get("Progression_Status", ""),
+                    "Marks (%)": p_data.get("Marks_Percent", ""),
+                    "Days Att.": p_data.get("Days_Attended", "")
+                })
+            else:
+                all_roster.append({
+                    "Roll": stu["Roll"],
+                    "Name": stu["Name"],
+                    "Prev Class": prev_class_str,
+                    "Current Class": stu['Class'],
+                    "Section": stu['Section'],
+                    "Status": "❌ Pending",
+                    "Schooling": "Same School (Pending)",
+                    "Progression": "---",
+                    "Marks (%)": "---",
+                    "Days Att.": "---"
+                })
+            
+    # 2. Outgoing Class V (from Class VI Tab)
+    if not c6_df.empty:
+        for _, r in c6_df.iterrows():
+            s_key = r["Student_Key"]
+            sec = r.get("Section", "A")
+            if s_key in prog_lookup:
+                p_data = prog_lookup[s_key]
+                all_roster.append({
+                    "Roll": r["Roll"],
+                    "Name": r["Name"],
+                    "Prev Class": "CLASS V",
+                    "Current Class": str(p_data.get("Promoted_Class_2026_27", "CLASS VI (Upper Primary)")),
+                    "Section": str(p_data.get("Promoted_Section_2026_27", sec)),
+                    "Status": "✅ Done",
+                    "Schooling": p_data.get("Schooling_Status_2026_27", "Left School with TC"),
+                    "Progression": p_data.get("Progression_Status", ""),
+                    "Marks (%)": p_data.get("Marks_Percent", ""),
+                    "Days Att.": p_data.get("Days_Attended", "")
+                })
+            else:
+                all_roster.append({
+                    "Roll": r["Roll"],
+                    "Name": r["Name"],
+                    "Prev Class": "CLASS V",
+                    "Current Class": "CLASS VI (Upper Primary)",
+                    "Section": sec,
+                    "Status": "❌ Pending",
+                    "Schooling": "Left School (Pending)",
+                    "Progression": "---",
+                    "Marks (%)": "---",
+                    "Days Att.": "---"
+                })
+                
+    # 3. Unlisted / New Entries (Dynamically injected into correct current class)
+    if not prog_df.empty and "Student_Key" in prog_df.columns:
+        for _, r in prog_df.iterrows():
+            if str(r["Student_Key"]).startswith("UNLISTED_"):
+                all_roster.append({
+                    "Roll": str(r.get("Roll", "")),
+                    "Name": f"{r.get('Name', '')} (⭐ Unlisted)",
+                    "Prev Class": str(r.get("Previous_Class_2025_26", "")),
+                    "Current Class": str(r.get("Promoted_Class_2026_27", "")).strip(),
+                    "Section": str(r.get("Promoted_Section_2026_27", "A")).strip(),
+                    "Status": "⭐ Unlisted Entry",
+                    "Schooling": str(r.get("Schooling_Status_2026_27", "Studying in Same School")),
+                    "Progression": str(r.get("Progression_Status", "")),
+                    "Marks (%)": str(r.get("Marks_Percent", "")),
+                    "Days Att.": str(r.get("Days_Attended", ""))
+                })
+                
+    df_all = pd.DataFrame(all_roster)
+    
+    # -------------------------------------------------------------------------
+    # NEW FEATURE: OVERALL PROGRESSION SUMMARY TABLES
+    # -------------------------------------------------------------------------
+    if not df_all.empty:
+        st.markdown("### 📈 Overall Progression Summary")
+        
+        df_same = df_all[df_all["Schooling"].str.contains("Same", case=False, na=False)]
+        df_left = df_all[df_all["Schooling"].str.contains("Left", case=False, na=False)]
+        
+        CLASS_ORDER = {"CLASS PP": 0, "CLASS I": 1, "CLASS II": 2, "CLASS III": 3, "CLASS IV": 4, "CLASS V": 5, "CLASS VI (Upper Primary)": 6}
+        
+        def create_summary(df_sub):
+            if df_sub.empty:
+                return pd.DataFrame(columns=["Prev Class", "Current Class", "Section", "Total", "Completed", "Unlisted / New", "Pending"])
+            
+            summary = df_sub.groupby(["Prev Class", "Current Class", "Section"]).apply(
+                lambda g: pd.Series({
+                    "Total": len(g),
+                    "Completed": (g["Status"] == "✅ Done").sum(),
+                    "Unlisted / New": (g["Status"] == "⭐ Unlisted Entry").sum(),
+                    "Pending": (g["Status"] == "❌ Pending").sum()
+                })
+            ).reset_index()
+            
+            summary['Sort_Key'] = summary['Current Class'].apply(lambda x: CLASS_ORDER.get(x, 99))
+            summary = summary.sort_values(by=['Sort_Key', 'Section']).drop(columns=['Sort_Key'])
+            return summary
+
+        sum_same = create_summary(df_same)
+        sum_left = create_summary(df_left)
+        
+        st.markdown("##### 🏫 Studying in Same School")
+        st.dataframe(sum_same, hide_index=True, use_container_width=True)
+        
+        st.markdown("##### 🚪 Left School")
+        st.dataframe(sum_left, hide_index=True, use_container_width=True)
+            
+        st.divider()
+
+    # -------------------------------------------------------------------------
+    # DETAILED FILTERABLE ROSTER
+    # -------------------------------------------------------------------------
+    st.markdown("### 📊 Detailed Class Roster")
+    
     col_f1, col_f2 = st.columns(2)
     flt_options = ["All"] + sorted([c for c in sm_df["Class"].unique() if c])
     if not c6_df.empty:
+        flt_options.append("CLASS VI (Upper Primary)")
         flt_options.append("CLASS V (2025-26 Outgoing)")
     flt_options.append("➕ Unlisted / New Entries (Not in DB)")
         
     flt_class = col_f1.selectbox("Filter Class Group", flt_options, key="flt_cls")
     flt_sec = col_f2.selectbox("Filter Section", ["All", "A", "B", "C"], key="flt_sec")
     
-    prog_lookup = {}
-    if not prog_df.empty and "Student_Key" in prog_df.columns:
-        for _, r in prog_df.iterrows():
-            prog_lookup[str(r["Student_Key"])] = r
-
-    roster_rows = []
-    
-    # 1. Standard Roster from students_master
-    if flt_class not in ["CLASS V (2025-26 Outgoing)", "➕ Unlisted / New Entries (Not in DB)"]:
-        view_df = sm_df.copy()
-        if flt_class != "All":
-            view_df = view_df[view_df["Class"] == flt_class]
-        if flt_sec != "All":
-            view_df = view_df[view_df["Section"] == flt_sec]
-            
-        view_df = view_df.sort_values(by=["Class", "Roll"], ascending=True)
-        
-        for _, stu in view_df.iterrows():
-            s_key = stu["Student_Key"]
-            prev_class_str = PREV_CLASS_MAP.get(stu["Class"], "Unknown")
-            if s_key in prog_lookup:
-                p_data = prog_lookup[s_key]
-                roster_rows.append({
-                    "Roll": stu["Roll"],
-                    "Name": stu["Name"],
-                    "Prev Class (2025-26)": f"{p_data.get('Previous_Class_2025_26', prev_class_str)}",
-                    "Current Class (2026-27)": f"{stu['Class']} - {stu['Section']}",
-                    "Status": "✅ Done",
-                    "Progression": p_data["Progression_Status"],
-                    "Marks (%)": p_data["Marks_Percent"],
-                    "Days Att.": p_data["Days_Attended"],
-                    "Schooling Status": p_data.get("Schooling_Status_2026_27", "Same School")
-                })
-            else:
-                roster_rows.append({
-                    "Roll": stu["Roll"],
-                    "Name": stu["Name"],
-                    "Prev Class (2025-26)": prev_class_str,
-                    "Current Class (2026-27)": f"{stu['Class']} - {stu['Section']}",
-                    "Status": "❌ Pending",
-                    "Progression": "---",
-                    "Marks (%)": "---",
-                    "Days Att.": "---",
-                    "Schooling Status": "---"
-                })
-                
-    # 2. Outgoing Class V Roster from "Class VI" Tab
-    if flt_class in ["All", "CLASS V (2025-26 Outgoing)"] and not c6_df.empty:
-        view_c6 = c6_df.copy()
-        if flt_sec != "All":
-            view_c6 = view_c6[view_c6["Section"] == flt_sec]
-            
-        view_c6 = view_c6.sort_values(by="Roll", ascending=True)
-        for _, r in view_c6.iterrows():
-            s_key = r["Student_Key"]
-            if s_key in prog_lookup:
-                p_data = prog_lookup[s_key]
-                roster_rows.append({
-                    "Roll": r["Roll"],
-                    "Name": r["Name"],
-                    "Prev Class (2025-26)": f"CLASS V - {r.get('Section', 'A')}",
-                    "Current Class (2026-27)": str(p_data.get("Promoted_Class_2026_27", "CLASS VI (Upper Primary)")),
-                    "Status": "✅ Done",
-                    "Progression": p_data["Progression_Status"],
-                    "Marks (%)": p_data["Marks_Percent"],
-                    "Days Att.": p_data["Days_Attended"],
-                    "Schooling Status": p_data.get("Schooling_Status_2026_27", "Left School with TC")
-                })
-            else:
-                roster_rows.append({
-                    "Roll": r["Roll"],
-                    "Name": r["Name"],
-                    "Prev Class (2025-26)": f"CLASS V - {r.get('Section', 'A')}",
-                    "Current Class (2026-27)": "CLASS VI (Upper Primary)",
-                    "Status": "❌ Pending",
-                    "Progression": "---",
-                    "Marks (%)": "---",
-                    "Days Att.": "---",
-                    "Schooling Status": "---"
-                })
-                
-    # 3. Unlisted / Manually Added Students from progression sheet (UPDATED FIX)
-    if not prog_df.empty and "Student_Key" in prog_df.columns:
-        for _, r in prog_df.iterrows():
-            if str(r["Student_Key"]).startswith("UNLISTED_"):
-                r_prom_class = str(r.get("Promoted_Class_2026_27", "")).strip()
-                r_prom_sec = str(r.get("Promoted_Section_2026_27", "A")).strip()
-                
-                show_by_class = (flt_class in ["All", "➕ Unlisted / New Entries (Not in DB)"]) or (r_prom_class == flt_class)
-                show_by_sec = (flt_sec == "All") or (r_prom_sec == flt_sec)
-                
-                if show_by_class and show_by_sec:
-                    roster_rows.append({
-                        "Roll": r.get("Roll", ""),
-                        "Name": f"{r.get('Name', '')} (⭐ Unlisted)",
-                        "Prev Class (2025-26)": str(r.get("Previous_Class_2025_26", "")),
-                        "Current Class (2026-27)": f"{r_prom_class} - {r_prom_sec}",
-                        "Status": "⭐ Unlisted Entry",
-                        "Progression": str(r.get("Progression_Status", "")),
-                        "Marks (%)": str(r.get("Marks_Percent", "")),
-                        "Days Att.": str(r.get("Days_Attended", "")),
-                        "Schooling Status": str(r.get("Schooling_Status_2026_27", "Same School"))
-                    })
-            
-    roster_display = pd.DataFrame(roster_rows)
-    
-    def highlight_progression(row):
-        if row["Status"] == "✅ Done":
-            return ["background-color: #d4edda; color: #155724; font-weight: bold"] * len(row)
-        elif row["Status"] == "⭐ Unlisted Entry":
-            return ["background-color: #fff3cd; color: #856404; font-weight: bold"] * len(row)
-        else:
-            return ["background-color: #f8d7da; color: #721c24"] * len(row)
-            
-    if not roster_display.empty:
-        st.dataframe(
-            roster_display.style.apply(highlight_progression, axis=1),
-            hide_index=True,
-            use_container_width=True
-        )
-        completed_cnt = len(roster_display[roster_display["Status"] == "✅ Done"])
-        unlisted_cnt = len(roster_display[roster_display["Status"] == "⭐ Unlisted Entry"])
-        pending_cnt = len(roster_display[roster_display["Status"] == "❌ Pending"])
-        
-        c_sum1, c_sum2, c_sum3, c_sum4 = st.columns(4)
-        c_sum1.metric("Total Roster", len(roster_display))
-        c_sum2.metric("✅ Completed", completed_cnt)
-        c_sum3.metric("⭐ Unlisted / New", unlisted_cnt)
-        c_sum4.metric("❌ Pending", pending_cnt)
+    if df_all.empty:
+        st.info("No records found in database.")
     else:
-        st.info("No records to display for this filter.")
+        df_filtered = df_all.copy()
+        
+        if flt_class == "CLASS V (2025-26 Outgoing)":
+            df_filtered = df_filtered[df_filtered["Prev Class"] == "CLASS V"]
+        elif flt_class == "➕ Unlisted / New Entries (Not in DB)":
+            df_filtered = df_filtered[df_filtered["Status"] == "⭐ Unlisted Entry"]
+        elif flt_class != "All":
+            # BUG FIX: Filtering by Current Class catches BOTH official students and unlisted students assigned to this class!
+            df_filtered = df_filtered[df_filtered["Current Class"] == flt_class]
+            
+        if flt_sec != "All":
+            df_filtered = df_filtered[df_filtered["Section"] == flt_sec]
+            
+        if df_filtered.empty:
+            st.info("No records to display for this filter.")
+        else:
+            df_filtered['Numeric_Roll'] = pd.to_numeric(df_filtered['Roll'], errors='coerce')
+            df_filtered = df_filtered.sort_values(by=['Numeric_Roll'], na_position='last')
+
+            display_cols = {
+                "Roll": df_filtered["Roll"],
+                "Name": df_filtered["Name"],
+                "Prev Class (2025-26)": df_filtered["Prev Class"],
+                "Current Class (2026-27)": df_filtered["Current Class"] + " - " + df_filtered["Section"],
+                "Status": df_filtered["Status"],
+                "Progression": df_filtered["Progression"],
+                "Marks (%)": df_filtered["Marks (%)"],
+                "Days Att.": df_filtered["Days Att."],
+                "Schooling Status": df_filtered["Schooling"].replace({"Same School (Pending)": "---", "Left School (Pending)": "---"})
+            }
+            roster_display = pd.DataFrame(display_cols)
+            
+            def highlight_progression(row):
+                if row["Status"] == "✅ Done":
+                    return ["background-color: #d4edda; color: #155724; font-weight: bold"] * len(row)
+                elif row["Status"] == "⭐ Unlisted Entry":
+                    return ["background-color: #fff3cd; color: #856404; font-weight: bold"] * len(row)
+                else:
+                    return ["background-color: #f8d7da; color: #721c24"] * len(row)
+            
+            st.dataframe(
+                roster_display.style.apply(highlight_progression, axis=1),
+                hide_index=True,
+                use_container_width=True
+            )
+            
+            completed_cnt = len(roster_display[roster_display["Status"] == "✅ Done"])
+            unlisted_cnt = len(roster_display[roster_display["Status"] == "⭐ Unlisted Entry"])
+            pending_cnt = len(roster_display[roster_display["Status"] == "❌ Pending"])
+            
+            c_sum1, c_sum2, c_sum3, c_sum4 = st.columns(4)
+            c_sum1.metric("Total Roster", len(roster_display))
+            c_sum2.metric("✅ Completed", completed_cnt)
+            c_sum3.metric("⭐ Unlisted / New", unlisted_cnt)
+            c_sum4.metric("❌ Pending", pending_cnt)
 
 with tab3:
     st.markdown("### ⏱️ Automatic Speed & Performance Monitor")

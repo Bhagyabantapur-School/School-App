@@ -281,7 +281,7 @@ def analyze_automatic_speed_sessions(df):
         dom_class = max(set(classes_in_session), key=classes_in_session.count) if classes_in_session else "General"
         
         summary_rows.append({
-            "Session_ID": f"Session #{idx}",
+            "Session_ID": f"Session #{idx:02d}", # Fixed sorting with zero padding
             "Date": start_t.strftime("%d-%m-%Y"),
             "Class_Group": dom_class,
             "Start_Time": start_t.strftime("%I:%M %p"),

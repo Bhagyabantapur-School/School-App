@@ -733,21 +733,27 @@ with tab2:
                     "Schooling Status": "---"
                 })
                 
-    # 3. Unlisted / Manually Added Students from progression sheet
-    if flt_class in ["All", "➕ Unlisted / New Entries (Not in DB)"] and not prog_df.empty and "Student_Key" in prog_df.columns:
+    # 3. Unlisted / Manually Added Students from progression sheet (UPDATED FIX)
+    if not prog_df.empty and "Student_Key" in prog_df.columns:
         for _, r in prog_df.iterrows():
             if str(r["Student_Key"]).startswith("UNLISTED_"):
-                if flt_sec == "All" or str(r.get("Promoted_Section_2026_27", "")) == flt_sec:
+                r_prom_class = str(r.get("Promoted_Class_2026_27", "")).strip()
+                r_prom_sec = str(r.get("Promoted_Section_2026_27", "A")).strip()
+                
+                show_by_class = (flt_class in ["All", "➕ Unlisted / New Entries (Not in DB)"]) or (r_prom_class == flt_class)
+                show_by_sec = (flt_sec == "All") or (r_prom_sec == flt_sec)
+                
+                if show_by_class and show_by_sec:
                     roster_rows.append({
-                        "Roll": r["Roll"],
-                        "Name": f"{r['Name']} (⭐ Unlisted)",
+                        "Roll": r.get("Roll", ""),
+                        "Name": f"{r.get('Name', '')} (⭐ Unlisted)",
                         "Prev Class (2025-26)": str(r.get("Previous_Class_2025_26", "")),
-                        "Current Class (2026-27)": f"{r.get('Promoted_Class_2026_27', '')} - {r.get('Promoted_Section_2026_27', 'A')}",
+                        "Current Class (2026-27)": f"{r_prom_class} - {r_prom_sec}",
                         "Status": "⭐ Unlisted Entry",
-                        "Progression": r["Progression_Status"],
-                        "Marks (%)": r["Marks_Percent"],
-                        "Days Att.": r["Days_Attended"],
-                        "Schooling Status": r.get("Schooling_Status_2026_27", "Same School")
+                        "Progression": str(r.get("Progression_Status", "")),
+                        "Marks (%)": str(r.get("Marks_Percent", "")),
+                        "Days Att.": str(r.get("Days_Attended", "")),
+                        "Schooling Status": str(r.get("Schooling_Status_2026_27", "Same School"))
                     })
             
     roster_display = pd.DataFrame(roster_rows)

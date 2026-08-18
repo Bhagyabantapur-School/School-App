@@ -234,9 +234,18 @@ with tab_entry:
 
     st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
 
+    # Calculate default Sl.No. based on the selected Project
+    default_sl_no = 0
+    if final_project and not df_videos.empty and 'Project' in df_videos.columns and 'Sl.No. of last Video' in df_videos.columns:
+        proj_data = df_videos[df_videos['Project'].astype(str).str.strip() == final_project]
+        if not proj_data.empty:
+            max_sl = pd.to_numeric(proj_data['Sl.No. of last Video'], errors='coerce').max()
+            if pd.notna(max_sl):
+                default_sl_no = int(max_sl)
+
     c_sl, c_vid = st.columns(2)
     with c_sl:
-        sl_no = st.number_input("Sl.No. of last Video", min_value=0, step=1, format="%02d")
+        sl_no = st.number_input("Sl.No. of last Video", min_value=0, value=default_sl_no, step=1, format="%02d")
     with c_vid:
         vids_session = st.number_input("Videos of the session", min_value=0, step=1, format="%02d")
 

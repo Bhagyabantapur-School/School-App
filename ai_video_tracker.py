@@ -65,33 +65,33 @@ log_df = get_routine_log_data()
 st.markdown("### ⏰ Upcoming Accounts")
 
 if not df_videos.empty and 'Next Time' in df_videos.columns and 'Date' in df_videos.columns:
-    # Filter out empty dates/times
     valid_next_times = df_videos[(df_videos['Next Time'].astype(str).str.strip() != '') & (df_videos['Date'].astype(str).str.strip() != '')].copy()
     
     if not valid_next_times.empty:
         def parse_datetime(row):
             try:
-                dt_str = f"{str(row['Date']).strip()} {str(row['Next Time']).strip()}"
-                return IST.localize(datetime.strptime(dt_str, '%Y-%m-%d %H:%M'))
+                nxt = str(row['Next Time']).strip()
+                if len(nxt) > 5:
+                    # Handles the new format where date is stored with the time
+                    return IST.localize(datetime.strptime(nxt, '%Y-%m-%d %H:%M'))
+                else:
+                    # Handles older formatting (HH:MM only)
+                    dt_str = f"{str(row['Date']).strip()} {nxt}"
+                    return IST.localize(datetime.strptime(dt_str, '%Y-%m-%d %H:%M'))
             except Exception:
                 return datetime.min.replace(tzinfo=IST)
                 
-        # Create full datetime objects for accurate comparison
         valid_next_times['DateTimeObj'] = valid_next_times.apply(parse_datetime, axis=1)
         
-        # 1. Filter so ONLY the absolute latest entry per account is retained
+        # Only retain the absolute latest log per account
         latest_per_account = valid_next_times.sort_values('DateTimeObj', ascending=False).drop_duplicates(subset=['Account'], keep='first')
-        
-        # Sort chronologically for the display order
         latest_per_account = latest_per_account.sort_values(by='DateTimeObj')
         
-        # 2. Compact Vertical UI
         html_content = ""
         for _, row in latest_per_account.iterrows():
             dt_obj = row['DateTimeObj']
             acc_name = str(row['Account']).strip()
             
-            # Check if the time has been reached or passed
             if now >= dt_obj:
                 html_content += f"""
                 <div style='padding: 10px 15px; margin-bottom: 8px; background-color: #e8f5e9; border-left: 4px solid #4caf50; border-radius: 6px; color: #1b5e20; font-size: 15px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);'>
@@ -156,7 +156,7 @@ with col_start:
             "YouTube Creator", "TRUE", "TRUE", "6"
         ]
         sheet.append_row(row_data, value_input_option="USER_ENTERED")
-        get_routine_log_data.clear() # Clear cache to refresh state
+        get_routine_log_data.clear() 
         st.toast(f"✅ {next_session_name} Started!")
         time.sleep(1)
         st.rerun()
@@ -170,7 +170,7 @@ with col_finish:
             sheet.update(range_name=f"C{active_row_idx}:D{active_row_idx}", values=[[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
         except TypeError:
             sheet.update(f"C{active_row_idx}:D{active_row_idx}", [[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
-        get_routine_log_data.clear() # Clear cache to refresh state
+        get_routine_log_data.clear() 
         st.toast(f"✅ {active_session_name} Finished and Logged!")
         time.sleep(1)
         st.rerun()
@@ -187,17 +187,20 @@ with tab_view:
         st.write("No data available.")
 
 with tab_entry:
-    st.markdown("**Log New Video Generation Pattern**")
+    st.markdown("**1. Time & Date Settings**")
     
-    c_date, c_ft, c_nt = st.columns(3)
-    with c_date: 
-        entry_date = st.date_input("Date", value=now.date())
+    c_ft, c_nt = st.columns(2)
     with c_ft: 
-        entry_ft = st.time_input("Finished Time", value="now", key="entry_ft")
+        st.markdown("🔻 **Finished Setup**")
+        entry_ft_date = st.date_input("Finished Date", value=now.date(), key="ft_date")
+        entry_ft_time = st.time_input("Finished Time", value="now", key="entry_ft")
     with c_nt: 
-        entry_nt = st.time_input("Next Time", value="now", key="entry_nt")
+        st.markdown("🔜 **Next Setup**")
+        entry_nt_date = st.date_input("Next Date", value=now.date(), key="nt_date")
+        entry_nt_time = st.time_input("Next Time", value="now", key="entry_nt")
 
     st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
+    st.markdown("**2. Account & Session Context**")
     
     available_sessions = []
     if not log_df.empty and 'Activity' in log_df.columns:
@@ -209,7 +212,7 @@ with tab_entry:
     if not available_sessions:
         available_sessions = ["-- No Finished Sessions --"]
     
-    c_acc, c_proj, c_sess = st.columns(3)
+    c_acc, c_sess = st.columns(2)
     with c_sess:
         selected_session = st.selectbox("Link to Session", available_sessions)
         final_session = "" if selected_session == "-- No Finished Sessions --" else selected_session
@@ -222,67 +225,98 @@ with tab_entry:
         custom_account = st.text_input("Or Type New Account Name") if selected_account == "-- Select / Type New --" else ""
         final_account = custom_account.strip() if selected_account == "-- Select / Type New --" else selected_account
         
-    with c_proj:
-        dependent_projects = []
-        if final_account and not df_videos.empty and 'Account' in df_videos.columns and 'Project' in df_videos.columns:
-            dependent_projects = df_videos[df_videos['Account'].astype(str).str.strip() == final_account]['Project'].astype(str).str.strip().dropna().unique().tolist()
-            dependent_projects = [p for p in dependent_projects if p and p != 'nan']
-            
-        selected_project = st.selectbox("Project", ["-- Select / Type New --"] + dependent_projects)
-        custom_project = st.text_input("Or Type New Project Name") if selected_project == "-- Select / Type New --" else ""
-        final_project = custom_project.strip() if selected_project == "-- Select / Type New --" else selected_project
-
     st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
+    st.markdown("**3. Multiple Projects Configuration**")
+    
+    # Initialize the project count in session state
+    if 'proj_count' not in st.session_state:
+        st.session_state.proj_count = 1
 
-    # Calculate default Sl.No. based on the selected Project
-    default_sl_no = 0
-    if final_project and not df_videos.empty and 'Project' in df_videos.columns and 'Sl.No. of last Video' in df_videos.columns:
-        proj_data = df_videos[df_videos['Project'].astype(str).str.strip() == final_project]
-        if not proj_data.empty:
-            max_sl = pd.to_numeric(proj_data['Sl.No. of last Video'], errors='coerce').max()
-            if pd.notna(max_sl):
-                default_sl_no = int(max_sl)
+    dependent_projects = []
+    if final_account and not df_videos.empty and 'Account' in df_videos.columns and 'Project' in df_videos.columns:
+        dependent_projects = df_videos[df_videos['Account'].astype(str).str.strip() == final_account]['Project'].astype(str).str.strip().dropna().unique().tolist()
+        dependent_projects = [p for p in dependent_projects if p and p != 'nan']
 
-    c_sl, c_vid = st.columns(2)
-    with c_sl:
-        sl_no = st.number_input("Sl.No. of last Video", min_value=0, value=default_sl_no, step=1, format="%02d")
-    with c_vid:
-        vids_session = st.number_input("Videos of the session", min_value=0, step=1, format="%02d")
+    projects_data = []
+    for i in range(st.session_state.proj_count):
+        st.markdown(f"**Project Row {i+1}**")
+        c_proj, c_sl, c_vid = st.columns([2, 1, 1])
+        
+        with c_proj:
+            selected_project = st.selectbox("Project Name", ["-- Select / Type New --"] + dependent_projects, key=f"proj_sel_{i}", label_visibility="collapsed")
+            custom_project = st.text_input("New Project", key=f"proj_cust_{i}", placeholder="Type new...") if selected_project == "-- Select / Type New --" else ""
+            final_project = custom_project.strip() if selected_project == "-- Select / Type New --" else selected_project
+            
+        with c_sl:
+            default_sl_no = 0
+            if final_project and not df_videos.empty and 'Project' in df_videos.columns and 'Sl.No. of last Video' in df_videos.columns:
+                proj_data = df_videos[df_videos['Project'].astype(str).str.strip() == final_project]
+                if not proj_data.empty:
+                    max_sl = pd.to_numeric(proj_data['Sl.No. of last Video'], errors='coerce').max()
+                    if pd.notna(max_sl):
+                        default_sl_no = int(max_sl)
+            sl_no = st.number_input("Last Sl.No.", min_value=0, value=default_sl_no, step=1, format="%02d", key=f"sl_{i}")
+            
+        with c_vid:
+            vids_session = st.number_input("Session Videos", min_value=0, step=1, format="%02d", key=f"vid_{i}")
+            
+        projects_data.append({
+            "Project": final_project,
+            "Sl.No": sl_no,
+            "Videos": vids_session
+        })
 
-    submitted = st.button("💾 Save Data to AI Videos", use_container_width=True, type="primary")
+    # Add button to create a new project row dynamically
+    if st.button("➕ Add Another Project"):
+        st.session_state.proj_count += 1
+        st.rerun()
+
+    st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
+    submitted = st.button("💾 Save All Data to AI Videos", use_container_width=True, type="primary")
     
     if submitted:
-        if final_account and final_project:
-            conn = init_connection()
-            sheet = conn.open("AI Videos").sheet1
-            
-            ft_str = entry_ft.strftime('%H:%M')
-            nt_str = entry_nt.strftime('%H:%M')
-            
-            sl_no_str = f"{sl_no:02d}"
-            vids_session_str = f"{vids_session:02d}"
-            
-            row_data = [
-                entry_date.strftime('%Y-%m-%d'),
-                ft_str,
-                nt_str,
-                GS_FORMULA, 
-                final_account,
-                final_project,
-                sl_no_str,
-                vids_session_str,
-                final_session
-            ]
-            
-            sheet.append_row(row_data, value_input_option="USER_ENTERED")
-            get_ai_videos_data.clear() 
-            
-            if final_session:
-                st.success(f"✅ Video Data for {final_session} Logged Successfully!")
-            else:
-                st.success("✅ Video Data Logged Successfully!")
-                
-            time.sleep(1)
-            st.rerun()
+        if not final_account:
+            st.error("⚠️ Please provide an Account name.")
         else:
-            st.error("⚠️ Please provide both an Account and a Project name.")
+            rows_to_append = []
+            ft_str = entry_ft_time.strftime('%H:%M')
+            nt_str = f"{entry_nt_date.strftime('%Y-%m-%d')} {entry_nt_time.strftime('%H:%M')}"
+            
+            for p in projects_data:
+                if p["Project"]:  # Skips rows where the user didn't enter a project
+                    sl_no_str = f"{p['Sl.No']:02d}"
+                    vids_session_str = f"{p['Videos']:02d}"
+                    
+                    row_data = [
+                        entry_ft_date.strftime('%Y-%m-%d'),
+                        ft_str,
+                        nt_str,
+                        GS_FORMULA, 
+                        final_account,
+                        p["Project"],
+                        sl_no_str,
+                        vids_session_str,
+                        final_session
+                    ]
+                    rows_to_append.append(row_data)
+            
+            if rows_to_append:
+                conn = init_connection()
+                sheet = conn.open("AI Videos").sheet1
+                
+                # Append all project rows simultaneously
+                sheet.append_rows(rows_to_append, value_input_option="USER_ENTERED")
+                get_ai_videos_data.clear() 
+                
+                # Reset project row counter back to 1
+                st.session_state.proj_count = 1
+                
+                if final_session:
+                    st.success(f"✅ {len(rows_to_append)} Video Record(s) for {final_session} Logged Successfully!")
+                else:
+                    st.success(f"✅ {len(rows_to_append)} Video Record(s) Logged Successfully!")
+                    
+                time.sleep(1.5)
+                st.rerun()
+            else:
+                st.error("⚠️ Please provide at least one valid Project name.")

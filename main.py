@@ -17,7 +17,7 @@ st.set_page_config(
 # 2. APP DICTIONARIES
 personal_apps = [
     "Live Routine Hub", "Money App", "Location App", "Money Utilities", "Strong Tracker", 
-    "Project App", "Election Duty", "Monthly Tracker", "Money Tracker", 
+    "Project App", "AI Video Tracker", "Election Duty", "Monthly Tracker", "Money Tracker", 
     "Product Inventory", "Health Hub", "Backup Tracker", "Routine Audit", 
     "Routine Editor", "MDM Returns", "Video Manager", "Speech Mastery", "Trace Inventory", 
     "Sleep & Water", "Packing Tracker", "App Updater", "Visual Dashboard"
@@ -152,6 +152,7 @@ location_app = st.Page("location_app.py", title="Location App", icon="📍", def
 money_utilities = st.Page("money_utilities.py", title="Money Utilities", icon="💳", default=is_default("Money Utilities", "Personal Hub")) 
 strong = st.Page("strong.py", title="Strong Tracker", icon="💪", default=is_default("Strong Tracker", "Personal Hub"))
 project = st.Page("project_app.py", title="Project App", icon="🚀", default=is_default("Project App", "Personal Hub"))
+ai_video_tracker = st.Page("ai_video_tracker.py", title="AI Video Tracker", icon="🤖", default=is_default("AI Video Tracker", "Personal Hub"))
 election = st.Page("election_duty.py", title="Election Duty", icon="🗳️", default=is_default("Election Duty", "Personal Hub"))
 monthly = st.Page("monthly_app.py", title="Monthly Tracker", icon="📆", default=is_default("Monthly Tracker", "Personal Hub"))
 money_tracker = st.Page("money_tracker.py", title="Money Tracker", icon="💵", default=is_default("Money Tracker", "Personal Hub"))
@@ -192,7 +193,7 @@ if system_choice == 'Personal Hub':
     pg = st.navigation({
         "MONEY": [money_app, money_utilities, money_tracker, product_inventory],
         "LOCATION": [location_app, packing_tracker],
-        "ROUTINE": [routine_hub, routine_audit, routine_editor, project],
+        "ROUTINE": [routine_hub, routine_audit, routine_editor, project, ai_video_tracker], # <-- Added here
         "HEALTH": [health, sleep_water],
         "SCH WORK": [mdm_return, ytfb_videos, speech_prep],
         "HOME": [trace_app, monthly],

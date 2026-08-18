@@ -184,17 +184,13 @@ with tab_view:
         st.write("No data available.")
 
 with tab_entry:
-    st.markdown("**1. Time & Date Settings**")
+    st.markdown("**1. Session Setup Time**")
     
-    c_ft, c_nt = st.columns(2)
-    with c_ft: 
-        st.markdown("🔻 **Finished Setup**")
+    c_ft_date, c_ft_time = st.columns(2)
+    with c_ft_date: 
         entry_ft_date = st.date_input("Finished Date", value=now.date(), key="ft_date")
+    with c_ft_time:
         entry_ft_time = st.time_input("Finished Time", value="now", key="entry_ft")
-    with c_nt: 
-        st.markdown("🔜 **Next Setup**")
-        entry_nt_date = st.date_input("Next Date", value=now.date(), key="nt_date")
-        entry_nt_time = st.time_input("Next Time", value="now", key="entry_nt")
 
     st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
     st.markdown("**2. Session Context**")
@@ -215,27 +211,29 @@ with tab_entry:
     st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
     st.markdown("**3. Accounts & Projects**")
     
-    # Session state config: Tracks how many projects per account block
-    # E.g. [2, 1] means: Block 1 has 2 projects, Block 2 has 1 project.
     if 'account_blocks' not in st.session_state:
         st.session_state.account_blocks = [1] 
 
     unique_accounts = df_videos['Account'].astype(str).str.strip().dropna().unique().tolist() if not df_videos.empty and 'Account' in df_videos.columns else []
     unique_accounts = [acc for acc in unique_accounts if acc and acc != 'nan'] 
 
-    projects_data = [] # To accumulate valid entries for saving
+    projects_data = []
 
     # Loop through configured account blocks
     for acc_idx, proj_count in enumerate(st.session_state.account_blocks):
         with st.container():
             st.markdown(f"<h5 style='color: #0068c9;'>👤 Account Block {acc_idx + 1}</h5>", unsafe_allow_html=True)
             
-            # --- Account Selection ---
-            c_acc, _ = st.columns([1, 1])
+            # --- Account & Next Time Selection ---
+            c_acc, c_nt_date, c_nt_time = st.columns([2, 1, 1])
             with c_acc:
                 selected_account = st.selectbox("Account", ["-- Select / Type New --"] + unique_accounts, key=f"acc_sel_{acc_idx}")
                 custom_account = st.text_input("New Account Name", key=f"acc_cust_{acc_idx}") if selected_account == "-- Select / Type New --" else ""
                 final_account = custom_account.strip() if selected_account == "-- Select / Type New --" else selected_account
+            with c_nt_date:
+                acc_nt_date = st.date_input("Next Date", value=now.date(), key=f"nt_date_{acc_idx}")
+            with c_nt_time:
+                acc_nt_time = st.time_input("Next Time", value="now", key=f"nt_time_{acc_idx}")
             
             # Dependent projects based on selected Account
             dependent_projects = []
@@ -266,12 +264,13 @@ with tab_entry:
                 with c_vid:
                     vids_session = st.number_input("Session Videos", min_value=0, step=1, format="%02d", key=f"vid_{acc_idx}_{proj_idx}")
                     
-                # Collect the data (We will skip completely empty ones during the save phase)
                 projects_data.append({
                     "Account": final_account,
                     "Project": final_project,
                     "Sl.No": sl_no,
-                    "Videos": vids_session
+                    "Videos": vids_session,
+                    "Next_Date": acc_nt_date,
+                    "Next_Time": acc_nt_time
                 })
             
             # Add Another Project under THIS specific account block
@@ -292,13 +291,14 @@ with tab_entry:
     if submitted:
         rows_to_append = []
         ft_str = entry_ft_time.strftime('%H:%M')
-        nt_str = f"{entry_nt_date.strftime('%Y-%m-%d')} {entry_nt_time.strftime('%H:%M')}"
         
         for p in projects_data:
-            # Only save rows where both Account and Project names have been entered
             if p["Account"] and p["Project"]:  
                 sl_no_str = f"{p['Sl.No']:02d}"
                 vids_session_str = f"{p['Videos']:02d}"
+                
+                # Format account-specific Next Time
+                nt_str = f"{p['Next_Date'].strftime('%Y-%m-%d')} {p['Next_Time'].strftime('%H:%M')}"
                 
                 row_data = [
                     entry_ft_date.strftime('%Y-%m-%d'),
@@ -319,7 +319,6 @@ with tab_entry:
             sheet.append_rows(rows_to_append, value_input_option="USER_ENTERED")
             get_ai_videos_data.clear() 
             
-            # Reset UI completely
             st.session_state.account_blocks = [1]
             
             if final_session:

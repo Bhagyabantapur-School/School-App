@@ -72,10 +72,8 @@ if not df_videos.empty and 'Next Time' in df_videos.columns and 'Date' in df_vid
             try:
                 nxt = str(row['Next Time']).strip()
                 if len(nxt) > 5:
-                    # Handles the new format where date is stored with the time
                     return IST.localize(datetime.strptime(nxt, '%Y-%m-%d %H:%M'))
                 else:
-                    # Handles older formatting (HH:MM only)
                     dt_str = f"{str(row['Date']).strip()} {nxt}"
                     return IST.localize(datetime.strptime(dt_str, '%Y-%m-%d %H:%M'))
             except Exception:
@@ -83,7 +81,6 @@ if not df_videos.empty and 'Next Time' in df_videos.columns and 'Date' in df_vid
                 
         valid_next_times['DateTimeObj'] = valid_next_times.apply(parse_datetime, axis=1)
         
-        # Only retain the absolute latest log per account
         latest_per_account = valid_next_times.sort_values('DateTimeObj', ascending=False).drop_duplicates(subset=['Account'], keep='first')
         latest_per_account = latest_per_account.sort_values(by='DateTimeObj')
         
@@ -200,7 +197,7 @@ with tab_entry:
         entry_nt_time = st.time_input("Next Time", value="now", key="entry_nt")
 
     st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
-    st.markdown("**2. Account & Session Context**")
+    st.markdown("**2. Session Context**")
     
     available_sessions = []
     if not log_df.empty and 'Activity' in log_df.columns:
@@ -212,111 +209,125 @@ with tab_entry:
     if not available_sessions:
         available_sessions = ["-- No Finished Sessions --"]
     
-    c_acc, c_sess = st.columns(2)
-    with c_sess:
-        selected_session = st.selectbox("Link to Session", available_sessions)
-        final_session = "" if selected_session == "-- No Finished Sessions --" else selected_session
+    selected_session = st.selectbox("Link to Session", available_sessions)
+    final_session = "" if selected_session == "-- No Finished Sessions --" else selected_session
+
+    st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
+    st.markdown("**3. Accounts & Projects**")
+    
+    # Session state config: Tracks how many projects per account block
+    # E.g. [2, 1] means: Block 1 has 2 projects, Block 2 has 1 project.
+    if 'account_blocks' not in st.session_state:
+        st.session_state.account_blocks = [1] 
 
     unique_accounts = df_videos['Account'].astype(str).str.strip().dropna().unique().tolist() if not df_videos.empty and 'Account' in df_videos.columns else []
     unique_accounts = [acc for acc in unique_accounts if acc and acc != 'nan'] 
-    
-    with c_acc:
-        selected_account = st.selectbox("Account", ["-- Select / Type New --"] + unique_accounts)
-        custom_account = st.text_input("Or Type New Account Name") if selected_account == "-- Select / Type New --" else ""
-        final_account = custom_account.strip() if selected_account == "-- Select / Type New --" else selected_account
-        
-    st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
-    st.markdown("**3. Multiple Projects Configuration**")
-    
-    # Initialize the project count in session state
-    if 'proj_count' not in st.session_state:
-        st.session_state.proj_count = 1
 
-    dependent_projects = []
-    if final_account and not df_videos.empty and 'Account' in df_videos.columns and 'Project' in df_videos.columns:
-        dependent_projects = df_videos[df_videos['Account'].astype(str).str.strip() == final_account]['Project'].astype(str).str.strip().dropna().unique().tolist()
-        dependent_projects = [p for p in dependent_projects if p and p != 'nan']
+    projects_data = [] # To accumulate valid entries for saving
 
-    projects_data = []
-    for i in range(st.session_state.proj_count):
-        st.markdown(f"**Project Row {i+1}**")
-        c_proj, c_sl, c_vid = st.columns([2, 1, 1])
-        
-        with c_proj:
-            selected_project = st.selectbox("Project Name", ["-- Select / Type New --"] + dependent_projects, key=f"proj_sel_{i}", label_visibility="collapsed")
-            custom_project = st.text_input("New Project", key=f"proj_cust_{i}", placeholder="Type new...") if selected_project == "-- Select / Type New --" else ""
-            final_project = custom_project.strip() if selected_project == "-- Select / Type New --" else selected_project
+    # Loop through configured account blocks
+    for acc_idx, proj_count in enumerate(st.session_state.account_blocks):
+        with st.container():
+            st.markdown(f"<h5 style='color: #0068c9;'>👤 Account Block {acc_idx + 1}</h5>", unsafe_allow_html=True)
             
-        with c_sl:
-            default_sl_no = 0
-            if final_project and not df_videos.empty and 'Project' in df_videos.columns and 'Sl.No. of last Video' in df_videos.columns:
-                proj_data = df_videos[df_videos['Project'].astype(str).str.strip() == final_project]
-                if not proj_data.empty:
-                    max_sl = pd.to_numeric(proj_data['Sl.No. of last Video'], errors='coerce').max()
-                    if pd.notna(max_sl):
-                        default_sl_no = int(max_sl)
-            sl_no = st.number_input("Last Sl.No.", min_value=0, value=default_sl_no, step=1, format="%02d", key=f"sl_{i}")
+            # --- Account Selection ---
+            c_acc, _ = st.columns([1, 1])
+            with c_acc:
+                selected_account = st.selectbox("Account", ["-- Select / Type New --"] + unique_accounts, key=f"acc_sel_{acc_idx}")
+                custom_account = st.text_input("New Account Name", key=f"acc_cust_{acc_idx}") if selected_account == "-- Select / Type New --" else ""
+                final_account = custom_account.strip() if selected_account == "-- Select / Type New --" else selected_account
             
-        with c_vid:
-            vids_session = st.number_input("Session Videos", min_value=0, step=1, format="%02d", key=f"vid_{i}")
-            
-        projects_data.append({
-            "Project": final_project,
-            "Sl.No": sl_no,
-            "Videos": vids_session
-        })
+            # Dependent projects based on selected Account
+            dependent_projects = []
+            if final_account and not df_videos.empty and 'Account' in df_videos.columns and 'Project' in df_videos.columns:
+                dependent_projects = df_videos[df_videos['Account'].astype(str).str.strip() == final_account]['Project'].astype(str).str.strip().dropna().unique().tolist()
+                dependent_projects = [p for p in dependent_projects if p and p != 'nan']
 
-    # Add button to create a new project row dynamically
-    if st.button("➕ Add Another Project"):
-        st.session_state.proj_count += 1
+            # --- Projects Loop ---
+            for proj_idx in range(proj_count):
+                st.markdown(f"**Project {proj_idx + 1}**")
+                c_proj, c_sl, c_vid = st.columns([2, 1, 1])
+                
+                with c_proj:
+                    selected_project = st.selectbox("Project Name", ["-- Select / Type New --"] + dependent_projects, key=f"proj_sel_{acc_idx}_{proj_idx}", label_visibility="collapsed")
+                    custom_project = st.text_input("New Project", key=f"proj_cust_{acc_idx}_{proj_idx}", placeholder="Type new...") if selected_project == "-- Select / Type New --" else ""
+                    final_project = custom_project.strip() if selected_project == "-- Select / Type New --" else selected_project
+                    
+                with c_sl:
+                    default_sl_no = 0
+                    if final_project and not df_videos.empty and 'Project' in df_videos.columns and 'Sl.No. of last Video' in df_videos.columns:
+                        proj_data = df_videos[df_videos['Project'].astype(str).str.strip() == final_project]
+                        if not proj_data.empty:
+                            max_sl = pd.to_numeric(proj_data['Sl.No. of last Video'], errors='coerce').max()
+                            if pd.notna(max_sl):
+                                default_sl_no = int(max_sl)
+                    sl_no = st.number_input("Last Sl.No.", min_value=0, value=default_sl_no, step=1, format="%02d", key=f"sl_{acc_idx}_{proj_idx}")
+                    
+                with c_vid:
+                    vids_session = st.number_input("Session Videos", min_value=0, step=1, format="%02d", key=f"vid_{acc_idx}_{proj_idx}")
+                    
+                # Collect the data (We will skip completely empty ones during the save phase)
+                projects_data.append({
+                    "Account": final_account,
+                    "Project": final_project,
+                    "Sl.No": sl_no,
+                    "Videos": vids_session
+                })
+            
+            # Add Another Project under THIS specific account block
+            if st.button(f"➕ Add Project to Account {acc_idx + 1}", key=f"add_proj_{acc_idx}"):
+                st.session_state.account_blocks[acc_idx] += 1
+                st.rerun()
+                
+            st.markdown("<hr style='margin: 15px 0; border: 0; border-top: 1px dashed #ccc;'>", unsafe_allow_html=True)
+
+    # --- Add Another Account Block ---
+    if st.button("➕ Add Another Account", type="secondary"):
+        st.session_state.account_blocks.append(1)
         st.rerun()
 
-    st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-bottom: 30px;'></div>", unsafe_allow_html=True)
     submitted = st.button("💾 Save All Data to AI Videos", use_container_width=True, type="primary")
     
     if submitted:
-        if not final_account:
-            st.error("⚠️ Please provide an Account name.")
-        else:
-            rows_to_append = []
-            ft_str = entry_ft_time.strftime('%H:%M')
-            nt_str = f"{entry_nt_date.strftime('%Y-%m-%d')} {entry_nt_time.strftime('%H:%M')}"
+        rows_to_append = []
+        ft_str = entry_ft_time.strftime('%H:%M')
+        nt_str = f"{entry_nt_date.strftime('%Y-%m-%d')} {entry_nt_time.strftime('%H:%M')}"
+        
+        for p in projects_data:
+            # Only save rows where both Account and Project names have been entered
+            if p["Account"] and p["Project"]:  
+                sl_no_str = f"{p['Sl.No']:02d}"
+                vids_session_str = f"{p['Videos']:02d}"
+                
+                row_data = [
+                    entry_ft_date.strftime('%Y-%m-%d'),
+                    ft_str,
+                    nt_str,
+                    GS_FORMULA, 
+                    p["Account"],
+                    p["Project"],
+                    sl_no_str,
+                    vids_session_str,
+                    final_session
+                ]
+                rows_to_append.append(row_data)
+        
+        if rows_to_append:
+            conn = init_connection()
+            sheet = conn.open("AI Videos").sheet1
+            sheet.append_rows(rows_to_append, value_input_option="USER_ENTERED")
+            get_ai_videos_data.clear() 
             
-            for p in projects_data:
-                if p["Project"]:  # Skips rows where the user didn't enter a project
-                    sl_no_str = f"{p['Sl.No']:02d}"
-                    vids_session_str = f"{p['Videos']:02d}"
-                    
-                    row_data = [
-                        entry_ft_date.strftime('%Y-%m-%d'),
-                        ft_str,
-                        nt_str,
-                        GS_FORMULA, 
-                        final_account,
-                        p["Project"],
-                        sl_no_str,
-                        vids_session_str,
-                        final_session
-                    ]
-                    rows_to_append.append(row_data)
+            # Reset UI completely
+            st.session_state.account_blocks = [1]
             
-            if rows_to_append:
-                conn = init_connection()
-                sheet = conn.open("AI Videos").sheet1
-                
-                # Append all project rows simultaneously
-                sheet.append_rows(rows_to_append, value_input_option="USER_ENTERED")
-                get_ai_videos_data.clear() 
-                
-                # Reset project row counter back to 1
-                st.session_state.proj_count = 1
-                
-                if final_session:
-                    st.success(f"✅ {len(rows_to_append)} Video Record(s) for {final_session} Logged Successfully!")
-                else:
-                    st.success(f"✅ {len(rows_to_append)} Video Record(s) Logged Successfully!")
-                    
-                time.sleep(1.5)
-                st.rerun()
+            if final_session:
+                st.success(f"✅ {len(rows_to_append)} Record(s) for {final_session} Logged Successfully!")
             else:
-                st.error("⚠️ Please provide at least one valid Project name.")
+                st.success(f"✅ {len(rows_to_append)} Record(s) Logged Successfully!")
+                
+            time.sleep(1.5)
+            st.rerun()
+        else:
+            st.error("⚠️ Please fill out at least one valid Account and Project combination.")

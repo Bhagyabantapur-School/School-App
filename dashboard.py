@@ -77,3 +77,12 @@ with r7_col2:
     if st.button("🔄 App Updater", use_container_width=True): st.switch_page("app_update.py")
 with r7_col3:
     if st.button("💾 Backup Tracker", use_container_width=True): st.switch_page("backup_tracker_app.py")
+
+# ROW 8
+r8_col1, r8_col2, r8_col3 = st.columns(3)
+with r8_col1:
+    if st.button("🤖 AI Video Tracker", use_container_width=True): st.switch_page("ai_video_tracker.py")
+with r8_col2:
+    st.empty() # Placeholder for future apps
+with r8_col3:
+    st.empty() # Placeholder for future apps

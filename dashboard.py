@@ -15,74 +15,70 @@ st.markdown("""
 st.title("🚀 My Personal Dashboard")
 st.write("---")
 
-# ROW 1
-r1_col1, r1_col2, r1_col3 = st.columns(3)
-with r1_col1:
-    if st.button("💰 Money App", use_container_width=True): st.switch_page("money_app.py")
-with r1_col2:
-    if st.button("📍 Location App", use_container_width=True): st.switch_page("location_app.py")
-with r1_col3:
-    if st.button("💳 Money Utilities", use_container_width=True): st.switch_page("money_utilities.py")
+# ==========================================
+# APP DICTIONARY (Categorized Launchpad)
+# ==========================================
+app_groups = {
+    "MONEY": [
+        ("Money App", "money_app.py", "💰"), 
+        ("Money Utilities", "money_utilities.py", "💳"), 
+        ("Money Tracker", "money_tracker.py", "💵"), 
+        ("Product Inventory", "product_inventory.py", "📦")
+    ],
+    "LOCATION": [
+        ("Location App", "location_app.py", "📍"), 
+        ("Packing Tracker", "packing_app.py", "🎒")
+    ],
+    "ROUTINE": [
+        ("Daily Routine", "routine_app.py", "⏱️"), 
+        ("Routine Audit", "routine_audit.py", "🔍"), 
+        ("Routine Editor", "routine_editor.py", "✏️"), 
+        ("Project App", "project_app.py", "🚀"), 
+        ("AI Video Tracker", "ai_video_tracker.py", "🤖")
+    ],
+    "HEALTH": [
+        ("Health Hub", "health_app.py", "❤️"), 
+        ("Sleep & Water", "sleep_water_app.py", "💧")
+    ],
+    "SCH WORK": [
+        ("MDM Returns", "mdm_return_log.py", "📦"), 
+        ("Video Manager", "bps_ytfb_videos.py", "🎬"), 
+        ("Speech Mastery", "speech_prep_app.py", "🎙️")
+    ],
+    "HOME": [
+        ("Trace Inventory", "trace.py", "🏷️"), 
+        ("Monthly Tracker", "monthly_app.py", "📆")
+    ],
+    "HARDWARE": [
+        ("Backup Tracker", "backup_tracker_app.py", "💾")
+    ],
+    "BALANCE": [
+        ("Strong Tracker", "strong.py", "💪")
+    ],
+    "ONES": [
+        ("Election Duty", "election_duty.py", "🗳️"), 
+        ("App Updater", "app_update.py", "🔄")
+    ]
+}
 
-# ROW 2
-r2_col1, r2_col2, r2_col3 = st.columns(3)
-with r2_col1:
-    if st.button("💪 Strong Tracker", use_container_width=True): st.switch_page("strong.py")
-with r2_col2:
-    if st.button("🚀 Project App", use_container_width=True): st.switch_page("project_app.py")
-with r2_col3:
-    if st.button("🗳️ Election Duty", use_container_width=True): st.switch_page("election_duty.py")
-
-# ROW 3
-r3_col1, r3_col2, r3_col3 = st.columns(3)
-with r3_col1:
-    if st.button("📆 Monthly Tracker", use_container_width=True): st.switch_page("monthly_app.py")
-with r3_col2:
-    if st.button("💵 Money Tracker", use_container_width=True): st.switch_page("money_tracker.py")
-with r3_col3:
-    if st.button("❤️ Health Hub", use_container_width=True): st.switch_page("health_app.py")
-
-# ROW 4 (Routine Group)
-r4_col1, r4_col2, r4_col3 = st.columns(3)
-with r4_col1:
-    if st.button("⏱️ Daily Routine", use_container_width=True): st.switch_page("routine_app.py")
-with r4_col2:
-    if st.button("🔍 Routine Audit", use_container_width=True): st.switch_page("routine_audit.py")
-with r4_col3:
-    if st.button("✏️ Routine Editor", use_container_width=True): st.switch_page("routine_editor.py")
-
-# ROW 5 (SCH WORK Group)
-r5_col1, r5_col2, r5_col3 = st.columns(3)
-with r5_col1:
-    if st.button("📦 MDM Returns", use_container_width=True): st.switch_page("mdm_return_log.py")
-with r5_col2:
-    if st.button("🎬 Video Manager", use_container_width=True): st.switch_page("bps_ytfb_videos.py")
-with r5_col3:
-    if st.button("🎙️ Speech Mastery", use_container_width=True): st.switch_page("speech_prep_app.py")
-
-# ROW 6
-r6_col1, r6_col2, r6_col3 = st.columns(3)
-with r6_col1:
-    if st.button("🏷️ Trace Inventory", use_container_width=True): st.switch_page("trace.py")
-with r6_col2:
-    if st.button("💧 Sleep & Water", use_container_width=True): st.switch_page("sleep_water_app.py")
-with r6_col3:
-    if st.button("📦 Product Inventory", use_container_width=True): st.switch_page("product_inventory.py")
-
-# ROW 7
-r7_col1, r7_col2, r7_col3 = st.columns(3)
-with r7_col1:
-    if st.button("🎒 Packing Tracker", use_container_width=True): st.switch_page("packing_app.py")
-with r7_col2:
-    if st.button("🔄 App Updater", use_container_width=True): st.switch_page("app_update.py")
-with r7_col3:
-    if st.button("💾 Backup Tracker", use_container_width=True): st.switch_page("backup_tracker_app.py")
-
-# ROW 8
-r8_col1, r8_col2, r8_col3 = st.columns(3)
-with r8_col1:
-    if st.button("🤖 AI Video Tracker", use_container_width=True): st.switch_page("ai_video_tracker.py")
-with r8_col2:
-    st.empty() # Placeholder for future apps
-with r8_col3:
-    st.empty() # Placeholder for future apps
+# ==========================================
+# DYNAMIC GRID GENERATOR
+# ==========================================
+for group_name, apps in app_groups.items():
+    # Group Header
+    st.markdown(f"<h4 style='color: #0068c9; margin-top: 10px; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px;'>{group_name}</h4>", unsafe_allow_html=True)
+    
+    # 3-Column Grid Builder
+    for i in range(0, len(apps), 3):
+        cols = st.columns(3)
+        for j in range(3):
+            if i + j < len(apps):
+                app_name, file_name, icon = apps[i + j]
+                with cols[j]:
+                    if st.button(f"{icon} {app_name}", key=f"dash_{file_name}", use_container_width=True):
+                        st.switch_page(file_name)
+            else:
+                with cols[j]:
+                    st.empty() # Fills empty columns to keep the grid perfectly aligned
+                    
+    st.markdown("<hr style='margin: 15px 0px; border: 0; border-top: 1px solid #f0f2f6;'>", unsafe_allow_html=True)

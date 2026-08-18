@@ -39,7 +39,6 @@ def get_ai_videos_data():
         st.error(f"Error loading AI Videos sheet: {e}")
         return pd.DataFrame(columns=["Date", "Finished Time", "Next Time", "Time Gap", "Account", "Project", "Sl.No. of last Video", "Videos of the session", "Session"])
 
-# Added @st.cache_data here to prevent API Error 429 (Quota Exceeded)
 @st.cache_data(ttl=300, show_spinner="Fetching Routine Data...")
 def get_routine_log_data():
     conn = init_connection()
@@ -62,30 +61,53 @@ current_time_str = now.strftime('%H:%M')
 df_videos = get_ai_videos_data()
 log_df = get_routine_log_data()
 
-# --- TOP SECTION: Upcoming Schedules ---
-st.markdown("### ⏰ Upcoming Accounts (Sorted by Next Time)")
+# --- TOP SECTION: Upcoming Accounts ---
+st.markdown("### ⏰ Upcoming Accounts")
 
-if not df_videos.empty and 'Next Time' in df_videos.columns:
-    valid_next_times = df_videos[df_videos['Next Time'].astype(str).str.strip() != ''].copy()
+if not df_videos.empty and 'Next Time' in df_videos.columns and 'Date' in df_videos.columns:
+    # Filter out empty dates/times
+    valid_next_times = df_videos[(df_videos['Next Time'].astype(str).str.strip() != '') & (df_videos['Date'].astype(str).str.strip() != '')].copy()
     
     if not valid_next_times.empty:
-        def parse_time(time_str):
-            try: return datetime.strptime(str(time_str).strip(), '%H:%M').time()
-            except: return datetime.max.time()
-            
-        valid_next_times['TimeObj'] = valid_next_times['Next Time'].apply(parse_time)
-        valid_next_times = valid_next_times.sort_values(by='TimeObj')
+        def parse_datetime(row):
+            try:
+                dt_str = f"{str(row['Date']).strip()} {str(row['Next Time']).strip()}"
+                return IST.localize(datetime.strptime(dt_str, '%Y-%m-%d %H:%M'))
+            except Exception:
+                return datetime.min.replace(tzinfo=IST)
+                
+        # Create full datetime objects for accurate comparison
+        valid_next_times['DateTimeObj'] = valid_next_times.apply(parse_datetime, axis=1)
         
-        cols = st.columns(min(len(valid_next_times), 4)) 
-        for idx, (_, row) in enumerate(valid_next_times.head(4).iterrows()):
-            with cols[idx]:
-                st.markdown(f"""
-                <div style="background-color: #f0f2f6; padding: 15px; border-radius: 10px; text-align: center; border-left: 5px solid #0068c9;">
-                    <h5 style="margin:0; color:#333;">{row['Next Time']}</h5>
-                    <p style="margin:0; font-size: 14px; color:#555;"><b>{row['Account']}</b></p>
-                    <p style="margin:0; font-size: 12px; color:#888;">{row['Project']}</p>
+        # 1. Filter so ONLY the absolute latest entry per account is retained
+        latest_per_account = valid_next_times.sort_values('DateTimeObj', ascending=False).drop_duplicates(subset=['Account'], keep='first')
+        
+        # Sort chronologically for the display order
+        latest_per_account = latest_per_account.sort_values(by='DateTimeObj')
+        
+        # 2. Compact Vertical UI
+        html_content = ""
+        for _, row in latest_per_account.iterrows():
+            dt_obj = row['DateTimeObj']
+            acc_name = str(row['Account']).strip()
+            
+            # Check if the time has been reached or passed
+            if now >= dt_obj:
+                html_content += f"""
+                <div style='padding: 10px 15px; margin-bottom: 8px; background-color: #e8f5e9; border-left: 4px solid #4caf50; border-radius: 6px; color: #1b5e20; font-size: 15px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);'>
+                    <b>{acc_name}</b> available now
                 </div>
-                """, unsafe_allow_html=True)
+                """
+            else:
+                date_str = dt_obj.strftime('%b %d')
+                time_str = dt_obj.strftime('%H:%M')
+                html_content += f"""
+                <div style='padding: 10px 15px; margin-bottom: 8px; background-color: #f8f9fa; border-left: 4px solid #0068c9; border-radius: 6px; color: #333; font-size: 15px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);'>
+                    <b>{acc_name}</b> available on {date_str} at {time_str}
+                </div>
+                """
+                
+        st.markdown(html_content, unsafe_allow_html=True)
     else:
         st.info("No upcoming generation times logged yet.")
 else:
@@ -214,10 +236,8 @@ with tab_entry:
 
     c_sl, c_vid = st.columns(2)
     with c_sl:
-        # Added format="%02d" to show leading zero in UI
         sl_no = st.number_input("Sl.No. of last Video", min_value=0, step=1, format="%02d")
     with c_vid:
-        # Added format="%02d" to show leading zero in UI
         vids_session = st.number_input("Videos of the session", min_value=0, step=1, format="%02d")
 
     submitted = st.button("💾 Save Data to AI Videos", use_container_width=True, type="primary")

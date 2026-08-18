@@ -96,28 +96,30 @@ st.markdown("### ⏱️ Session Tracker")
 
 is_running = False
 active_row_idx = None
-active_session_name = "Session 1"
-next_session_name = "Session 1"
 
-if not log_df.empty:
-    # Safely identify all AI Video sessions to calculate the next session number
-    if 'Activity' in log_df.columns:
-        ai_sessions_df = log_df[log_df['Activity'].astype(str).str.upper() == 'AI VIDEOS']
-        
-        if not ai_sessions_df.empty and 'Sub_Activities' in ai_sessions_df.columns:
-            def extract_num(text):
-                nums = re.findall(r'\b\d+\b', str(text))
-                return int(nums[0]) if nums else 0
-                
-            max_num = ai_sessions_df['Sub_Activities'].apply(extract_num).max()
-            next_session_name = f"Session {max_num + 1 if pd.notna(max_num) else 1}"
+# Logic to calculate Session 001, 002, etc.
+def extract_num(text):
+    nums = re.findall(r'\b\d+\b', str(text))
+    return int(nums[0]) if nums else 0
+
+next_num = 1
+active_session_name = ""
+
+if not log_df.empty and 'Activity' in log_df.columns:
+    ai_sessions_df = log_df[log_df['Activity'].astype(str).str.upper() == 'AI VIDEOS']
+    
+    if not ai_sessions_df.empty and 'Sub_Activities' in ai_sessions_df.columns:
+        max_num = ai_sessions_df['Sub_Activities'].apply(extract_num).max()
+        if pd.notna(max_num):
+            next_num = int(max_num) + 1
             
-            # Check for currently running session
-            running_sessions = ai_sessions_df[ai_sessions_df['End_Time'] == 'RUNNING']
-            if not running_sessions.empty:
-                is_running = True
-                active_row_idx = running_sessions.index[0] + 2 
-                active_session_name = str(running_sessions.iloc[0]['Sub_Activities'])
+        running_sessions = ai_sessions_df[ai_sessions_df['End_Time'] == 'RUNNING']
+        if not running_sessions.empty:
+            is_running = True
+            active_row_idx = running_sessions.index[0] + 2 
+            active_session_name = str(running_sessions.iloc[0]['Sub_Activities'])
+
+next_session_name = f"Session {next_num:03d}"
 
 col_start, col_finish = st.columns(2)
 
@@ -160,84 +162,97 @@ with tab_view:
         st.write("No data available.")
 
 with tab_entry:
-    with st.form("ai_video_entry_form", clear_on_submit=True):
-        st.markdown("**Log New Video Generation Pattern**")
-        
-        c_date, c_ft, c_nt = st.columns(3)
-        with c_date: 
-            entry_date = st.date_input("Date", value=now.date())
-        with c_ft: 
-            entry_ft = st.time_input("Finished Time", value=now.time())
-        with c_nt: 
-            entry_nt = st.time_input("Next Time", value=now.time())
+    st.markdown("**Log New Video Generation Pattern**")
+    
+    c_date, c_ft, c_nt = st.columns(3)
+    with c_date: 
+        entry_date = st.date_input("Date", value=now.date())
+    with c_ft: 
+        entry_ft = st.time_input("Finished Time", value="now", key="entry_ft")
+    with c_nt: 
+        entry_nt = st.time_input("Next Time", value="now", key="entry_nt")
 
-        st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
-        
-        # Determine available sessions for dropdown
-        available_sessions = [active_session_name] if is_running else [next_session_name]
-        if not log_df.empty and 'Activity' in log_df.columns:
-            historical = log_df[log_df['Activity'].astype(str).str.upper() == 'AI VIDEOS']
-            if not historical.empty and 'Sub_Activities' in historical.columns:
-                hist_list = historical['Sub_Activities'].dropna().unique().tolist()
-                # Sort numerically descending
-                available_sessions = sorted(list(set(hist_list + available_sessions)), key=lambda x: int(''.join(filter(str.isdigit, str(x))) or 0), reverse=True)
-        
-        c_acc, c_proj, c_sess = st.columns(3)
-        with c_sess:
-            selected_session = st.selectbox("Link to Session", available_sessions)
+    st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
+    
+    # Session link only pulls FINISHED sessions
+    available_sessions = []
+    if not log_df.empty and 'Activity' in log_df.columns:
+        historical = log_df[(log_df['Activity'].astype(str).str.upper() == 'AI VIDEOS') & (log_df['End_Time'] != 'RUNNING')]
+        if not historical.empty and 'Sub_Activities' in historical.columns:
+            hist_list = historical['Sub_Activities'].dropna().unique().tolist()
+            available_sessions = sorted(list(set(hist_list)), key=lambda x: int(''.join(filter(str.isdigit, str(x))) or 0), reverse=True)
+    
+    if not available_sessions:
+        available_sessions = ["-- No Finished Sessions --"]
+    
+    c_acc, c_proj, c_sess = st.columns(3)
+    with c_sess:
+        selected_session = st.selectbox("Link to Session", available_sessions)
+        final_session = "" if selected_session == "-- No Finished Sessions --" else selected_session
 
-        unique_accounts = df_videos['Account'].astype(str).str.strip().dropna().unique().tolist() if not df_videos.empty and 'Account' in df_videos.columns else []
-        unique_accounts = [acc for acc in unique_accounts if acc and acc != 'nan'] 
+    unique_accounts = df_videos['Account'].astype(str).str.strip().dropna().unique().tolist() if not df_videos.empty and 'Account' in df_videos.columns else []
+    unique_accounts = [acc for acc in unique_accounts if acc and acc != 'nan'] 
+    
+    with c_acc:
+        selected_account = st.selectbox("Account", ["-- Select / Type New --"] + unique_accounts)
+        custom_account = st.text_input("Or Type New Account Name") if selected_account == "-- Select / Type New --" else ""
+        final_account = custom_account.strip() if selected_account == "-- Select / Type New --" else selected_account
         
-        with c_acc:
-            selected_account = st.selectbox("Account", ["-- Select / Type New --"] + unique_accounts)
-            custom_account = st.text_input("Or Type New Account Name") if selected_account == "-- Select / Type New --" else ""
-            final_account = custom_account.strip() if selected_account == "-- Select / Type New --" else selected_account
+    with c_proj:
+        dependent_projects = []
+        # Dynamic tracking: only populates if final_account is valid
+        if final_account and not df_videos.empty and 'Account' in df_videos.columns and 'Project' in df_videos.columns:
+            dependent_projects = df_videos[df_videos['Account'].astype(str).str.strip() == final_account]['Project'].astype(str).str.strip().dropna().unique().tolist()
+            dependent_projects = [p for p in dependent_projects if p and p != 'nan']
             
-        with c_proj:
-            dependent_projects = []
-            if final_account and not df_videos.empty and 'Account' in df_videos.columns and 'Project' in df_videos.columns:
-                dependent_projects = df_videos[df_videos['Account'].astype(str).str.strip() == final_account]['Project'].astype(str).str.strip().dropna().unique().tolist()
-                dependent_projects = [p for p in dependent_projects if p and p != 'nan']
-                
-            selected_project = st.selectbox("Project", ["-- Select / Type New --"] + dependent_projects)
-            custom_project = st.text_input("Or Type New Project Name") if selected_project == "-- Select / Type New --" else ""
-            final_project = custom_project.strip() if selected_project == "-- Select / Type New --" else selected_project
+        selected_project = st.selectbox("Project", ["-- Select / Type New --"] + dependent_projects)
+        custom_project = st.text_input("Or Type New Project Name") if selected_project == "-- Select / Type New --" else ""
+        final_project = custom_project.strip() if selected_project == "-- Select / Type New --" else selected_project
 
-        st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
+    st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
 
-        c_sl, c_vid = st.columns(2)
-        with c_sl:
-            sl_no = st.number_input("Sl.No. of last Video", min_value=0, step=1)
-        with c_vid:
-            vids_session = st.number_input("Videos of the session", min_value=0, step=1)
+    c_sl, c_vid = st.columns(2)
+    with c_sl:
+        sl_no = st.number_input("Sl.No. of last Video", min_value=0, step=1)
+    with c_vid:
+        vids_session = st.number_input("Videos of the session", min_value=0, step=1)
 
-        submitted = st.form_submit_button("💾 Save Data to AI Videos", use_container_width=True, type="primary")
-        
-        if submitted:
-            if final_account and final_project:
-                conn = init_connection()
-                sheet = conn.open("AI Videos").sheet1
-                
-                ft_str = entry_ft.strftime('%H:%M')
-                nt_str = entry_nt.strftime('%H:%M')
-                
-                row_data = [
-                    entry_date.strftime('%Y-%m-%d'),
-                    ft_str,
-                    nt_str,
-                    GS_FORMULA, 
-                    final_account,
-                    final_project,
-                    sl_no,
-                    vids_session,
-                    selected_session # Logs the session string in the new column
-                ]
-                
-                sheet.append_row(row_data, value_input_option="USER_ENTERED")
-                get_ai_videos_data.clear() 
-                st.success(f"✅ Video Data for {selected_session} Logged Successfully!")
-                time.sleep(1)
-                st.rerun()
+    # Replaced form submit wrapper with a standard button to enable the interactive cascading dropdowns
+    submitted = st.button("💾 Save Data to AI Videos", use_container_width=True, type="primary")
+    
+    if submitted:
+        if final_account and final_project:
+            conn = init_connection()
+            sheet = conn.open("AI Videos").sheet1
+            
+            ft_str = entry_ft.strftime('%H:%M')
+            nt_str = entry_nt.strftime('%H:%M')
+            
+            # Apply 01, 02 zero-padding formatting
+            sl_no_str = f"{sl_no:02d}"
+            vids_session_str = f"{vids_session:02d}"
+            
+            row_data = [
+                entry_date.strftime('%Y-%m-%d'),
+                ft_str,
+                nt_str,
+                GS_FORMULA, 
+                final_account,
+                final_project,
+                sl_no_str,
+                vids_session_str,
+                final_session
+            ]
+            
+            sheet.append_row(row_data, value_input_option="USER_ENTERED")
+            get_ai_videos_data.clear() 
+            
+            if final_session:
+                st.success(f"✅ Video Data for {final_session} Logged Successfully!")
             else:
-                st.error("⚠️ Please provide both an Account and a Project name.")
+                st.success("✅ Video Data Logged Successfully!")
+                
+            time.sleep(1)
+            st.rerun()
+        else:
+            st.error("⚠️ Please provide both an Account and a Project name.")

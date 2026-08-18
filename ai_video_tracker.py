@@ -5,6 +5,7 @@ import pandas as pd
 from datetime import datetime
 import pytz
 import time
+import re
 
 # --- Constants & Formulas ---
 GS_FORMULA = '=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm"), ""))'
@@ -27,15 +28,16 @@ def get_ai_videos_data():
     try:
         sheet = conn.open("AI Videos").sheet1
         data = sheet.get_all_values()
+        default_cols = ["Date", "Finished Time", "Next Time", "Time Gap", "Account", "Project", "Sl.No. of last Video", "Videos of the session", "Session"]
         if not data:
-            return pd.DataFrame(columns=["Date", "Finished Time", "Next Time", "Time Gap", "Account", "Project", "Sl.No. of last Video", "Videos of the session"])
+            return pd.DataFrame(columns=default_cols)
         
         headers = data[0]
         records = data[1:]
         return pd.DataFrame(records, columns=headers)
     except Exception as e:
         st.error(f"Error loading AI Videos sheet: {e}")
-        return pd.DataFrame(columns=["Date", "Finished Time", "Next Time", "Time Gap", "Account", "Project", "Sl.No. of last Video", "Videos of the session"])
+        return pd.DataFrame(columns=["Date", "Finished Time", "Next Time", "Time Gap", "Account", "Project", "Sl.No. of last Video", "Videos of the session", "Session"])
 
 def get_routine_log_data():
     conn = init_connection()
@@ -56,25 +58,23 @@ today_str = now.strftime('%Y-%m-%d')
 current_time_str = now.strftime('%H:%M')
 
 df_videos = get_ai_videos_data()
+log_df = get_routine_log_data()
 
 # --- TOP SECTION: Upcoming Schedules ---
 st.markdown("### ⏰ Upcoming Accounts (Sorted by Next Time)")
 
-if not df_videos.empty:
-    # Filter for rows that actually have a 'Next Time' entry
-    valid_next_times = df_videos[df_videos['Next Time'].str.strip() != ''].copy()
+if not df_videos.empty and 'Next Time' in df_videos.columns:
+    valid_next_times = df_videos[df_videos['Next Time'].astype(str).str.strip() != ''].copy()
     
     if not valid_next_times.empty:
-        # Convert Next Time to a comparable format for sorting
         def parse_time(time_str):
-            try: return datetime.strptime(time_str.strip(), '%H:%M').time()
+            try: return datetime.strptime(str(time_str).strip(), '%H:%M').time()
             except: return datetime.max.time()
             
         valid_next_times['TimeObj'] = valid_next_times['Next Time'].apply(parse_time)
         valid_next_times = valid_next_times.sort_values(by='TimeObj')
         
-        # Display the upcoming schedules in a row of metric cards
-        cols = st.columns(min(len(valid_next_times), 4)) # Show top 4
+        cols = st.columns(min(len(valid_next_times), 4)) 
         for idx, (_, row) in enumerate(valid_next_times.head(4).iterrows()):
             with cols[idx]:
                 st.markdown(f"""
@@ -93,41 +93,58 @@ st.markdown("---")
 
 # --- ACTIVITY LOGGER (Start/Finish Session) ---
 st.markdown("### ⏱️ Session Tracker")
-log_df = get_routine_log_data()
 
 is_running = False
 active_row_idx = None
+active_session_name = "Session 1"
+next_session_name = "Session 1"
+
 if not log_df.empty:
-    running_sessions = log_df[(log_df['End_Time'] == 'RUNNING') & (log_df['Sub_Activities'] == 'AI VIDEO GENERATION')]
-    if not running_sessions.empty:
-        is_running = True
-        active_row_idx = running_sessions.index[0] + 2 # +2 for header and 0-indexing
+    # Safely identify all AI Video sessions to calculate the next session number
+    if 'Activity' in log_df.columns:
+        ai_sessions_df = log_df[log_df['Activity'].astype(str).str.upper() == 'AI VIDEOS']
+        
+        if not ai_sessions_df.empty and 'Sub_Activities' in ai_sessions_df.columns:
+            def extract_num(text):
+                nums = re.findall(r'\b\d+\b', str(text))
+                return int(nums[0]) if nums else 0
+                
+            max_num = ai_sessions_df['Sub_Activities'].apply(extract_num).max()
+            next_session_name = f"Session {max_num + 1 if pd.notna(max_num) else 1}"
+            
+            # Check for currently running session
+            running_sessions = ai_sessions_df[ai_sessions_df['End_Time'] == 'RUNNING']
+            if not running_sessions.empty:
+                is_running = True
+                active_row_idx = running_sessions.index[0] + 2 
+                active_session_name = str(running_sessions.iloc[0]['Sub_Activities'])
 
 col_start, col_finish = st.columns(2)
 
 with col_start:
-    if st.button("▶️ Start Video Session", use_container_width=True, disabled=is_running, type="primary"):
+    if st.button(f"▶️ Start {next_session_name}", use_container_width=True, disabled=is_running, type="primary"):
         conn = init_connection()
         sheet = conn.open("MY ROUTINE 2026").worksheet("activity_log")
         row_data = [
             today_str, current_time_str, "RUNNING", GS_FORMULA, 
-            "WORK", "AI VIDEO GENERATION", "", "Generating AI Videos", 
+            "AI Videos", next_session_name, "", "Generating AI Videos", 
             "YouTube Creator", "TRUE", "TRUE", "6"
         ]
         sheet.append_row(row_data, value_input_option="USER_ENTERED")
-        st.toast("✅ Session Started!")
+        st.toast(f"✅ {next_session_name} Started!")
         time.sleep(1)
         st.rerun()
 
 with col_finish:
-    if st.button("🛑 Finish Active Session", use_container_width=True, disabled=not is_running):
+    btn_label = f"🛑 Finish {active_session_name}" if is_running else "🛑 Finish Active Session"
+    if st.button(btn_label, use_container_width=True, disabled=not is_running):
         conn = init_connection()
         sheet = conn.open("MY ROUTINE 2026").worksheet("activity_log")
         try:
             sheet.update(range_name=f"C{active_row_idx}:D{active_row_idx}", values=[[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
         except TypeError:
             sheet.update(f"C{active_row_idx}:D{active_row_idx}", [[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
-        st.toast("✅ Session Finished and Logged!")
+        st.toast(f"✅ {active_session_name} Finished and Logged!")
         time.sleep(1)
         st.rerun()
 
@@ -150,29 +167,38 @@ with tab_entry:
         with c_date: 
             entry_date = st.date_input("Date", value=now.date())
         with c_ft: 
-            # Default to current time, user can edit
             entry_ft = st.time_input("Finished Time", value=now.time())
         with c_nt: 
             entry_nt = st.time_input("Next Time", value=now.time())
 
         st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
         
-        # Extract unique accounts for dynamic dropdown
-        unique_accounts = df_videos['Account'].str.strip().dropna().unique().tolist() if not df_videos.empty else []
-        unique_accounts = [acc for acc in unique_accounts if acc] # Remove empty strings
+        # Determine available sessions for dropdown
+        available_sessions = [active_session_name] if is_running else [next_session_name]
+        if not log_df.empty and 'Activity' in log_df.columns:
+            historical = log_df[log_df['Activity'].astype(str).str.upper() == 'AI VIDEOS']
+            if not historical.empty and 'Sub_Activities' in historical.columns:
+                hist_list = historical['Sub_Activities'].dropna().unique().tolist()
+                # Sort numerically descending
+                available_sessions = sorted(list(set(hist_list + available_sessions)), key=lambda x: int(''.join(filter(str.isdigit, str(x))) or 0), reverse=True)
         
-        c_acc, c_proj = st.columns(2)
+        c_acc, c_proj, c_sess = st.columns(3)
+        with c_sess:
+            selected_session = st.selectbox("Link to Session", available_sessions)
+
+        unique_accounts = df_videos['Account'].astype(str).str.strip().dropna().unique().tolist() if not df_videos.empty and 'Account' in df_videos.columns else []
+        unique_accounts = [acc for acc in unique_accounts if acc and acc != 'nan'] 
+        
         with c_acc:
             selected_account = st.selectbox("Account", ["-- Select / Type New --"] + unique_accounts)
             custom_account = st.text_input("Or Type New Account Name") if selected_account == "-- Select / Type New --" else ""
             final_account = custom_account.strip() if selected_account == "-- Select / Type New --" else selected_account
             
         with c_proj:
-            # Filter projects based on selected account
             dependent_projects = []
-            if final_account and not df_videos.empty:
-                dependent_projects = df_videos[df_videos['Account'].str.strip() == final_account]['Project'].str.strip().dropna().unique().tolist()
-                dependent_projects = [p for p in dependent_projects if p]
+            if final_account and not df_videos.empty and 'Account' in df_videos.columns and 'Project' in df_videos.columns:
+                dependent_projects = df_videos[df_videos['Account'].astype(str).str.strip() == final_account]['Project'].astype(str).str.strip().dropna().unique().tolist()
+                dependent_projects = [p for p in dependent_projects if p and p != 'nan']
                 
             selected_project = st.selectbox("Project", ["-- Select / Type New --"] + dependent_projects)
             custom_project = st.text_input("Or Type New Project Name") if selected_project == "-- Select / Type New --" else ""
@@ -193,7 +219,6 @@ with tab_entry:
                 conn = init_connection()
                 sheet = conn.open("AI Videos").sheet1
                 
-                # Format times to HH:MM strings
                 ft_str = entry_ft.strftime('%H:%M')
                 nt_str = entry_nt.strftime('%H:%M')
                 
@@ -201,16 +226,17 @@ with tab_entry:
                     entry_date.strftime('%Y-%m-%d'),
                     ft_str,
                     nt_str,
-                    GS_FORMULA, # Time Gap formula
+                    GS_FORMULA, 
                     final_account,
                     final_project,
                     sl_no,
-                    vids_session
+                    vids_session,
+                    selected_session # Logs the session string in the new column
                 ]
                 
                 sheet.append_row(row_data, value_input_option="USER_ENTERED")
-                get_ai_videos_data.clear() # Clear cache to refresh the view
-                st.success("✅ Video Data Logged Successfully!")
+                get_ai_videos_data.clear() 
+                st.success(f"✅ Video Data for {selected_session} Logged Successfully!")
                 time.sleep(1)
                 st.rerun()
             else:

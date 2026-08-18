@@ -22,7 +22,7 @@ def init_connection():
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
     return gspread.authorize(creds)
 
-@st.cache_data(ttl=60, show_spinner="Fetching Video Data...")
+@st.cache_data(ttl=300, show_spinner="Fetching Video Data...")
 def get_ai_videos_data():
     conn = init_connection()
     try:
@@ -39,6 +39,8 @@ def get_ai_videos_data():
         st.error(f"Error loading AI Videos sheet: {e}")
         return pd.DataFrame(columns=["Date", "Finished Time", "Next Time", "Time Gap", "Account", "Project", "Sl.No. of last Video", "Videos of the session", "Session"])
 
+# Added @st.cache_data here to prevent API Error 429 (Quota Exceeded)
+@st.cache_data(ttl=300, show_spinner="Fetching Routine Data...")
 def get_routine_log_data():
     conn = init_connection()
     try:
@@ -47,7 +49,7 @@ def get_routine_log_data():
         if len(data) > 1:
             return pd.DataFrame(data[1:], columns=data[0])
         return pd.DataFrame(columns=data[0])
-    except:
+    except Exception as e:
         return pd.DataFrame()
 
 # ==========================================
@@ -97,7 +99,6 @@ st.markdown("### ⏱️ Session Tracker")
 is_running = False
 active_row_idx = None
 
-# Logic to calculate Session 001, 002, etc.
 def extract_num(text):
     nums = re.findall(r'\b\d+\b', str(text))
     return int(nums[0]) if nums else 0
@@ -133,6 +134,7 @@ with col_start:
             "YouTube Creator", "TRUE", "TRUE", "6"
         ]
         sheet.append_row(row_data, value_input_option="USER_ENTERED")
+        get_routine_log_data.clear() # Clear cache to refresh state
         st.toast(f"✅ {next_session_name} Started!")
         time.sleep(1)
         st.rerun()
@@ -146,6 +148,7 @@ with col_finish:
             sheet.update(range_name=f"C{active_row_idx}:D{active_row_idx}", values=[[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
         except TypeError:
             sheet.update(f"C{active_row_idx}:D{active_row_idx}", [[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
+        get_routine_log_data.clear() # Clear cache to refresh state
         st.toast(f"✅ {active_session_name} Finished and Logged!")
         time.sleep(1)
         st.rerun()
@@ -174,7 +177,6 @@ with tab_entry:
 
     st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
     
-    # Session link only pulls FINISHED sessions
     available_sessions = []
     if not log_df.empty and 'Activity' in log_df.columns:
         historical = log_df[(log_df['Activity'].astype(str).str.upper() == 'AI VIDEOS') & (log_df['End_Time'] != 'RUNNING')]
@@ -200,7 +202,6 @@ with tab_entry:
         
     with c_proj:
         dependent_projects = []
-        # Dynamic tracking: only populates if final_account is valid
         if final_account and not df_videos.empty and 'Account' in df_videos.columns and 'Project' in df_videos.columns:
             dependent_projects = df_videos[df_videos['Account'].astype(str).str.strip() == final_account]['Project'].astype(str).str.strip().dropna().unique().tolist()
             dependent_projects = [p for p in dependent_projects if p and p != 'nan']
@@ -213,11 +214,12 @@ with tab_entry:
 
     c_sl, c_vid = st.columns(2)
     with c_sl:
-        sl_no = st.number_input("Sl.No. of last Video", min_value=0, step=1)
+        # Added format="%02d" to show leading zero in UI
+        sl_no = st.number_input("Sl.No. of last Video", min_value=0, step=1, format="%02d")
     with c_vid:
-        vids_session = st.number_input("Videos of the session", min_value=0, step=1)
+        # Added format="%02d" to show leading zero in UI
+        vids_session = st.number_input("Videos of the session", min_value=0, step=1, format="%02d")
 
-    # Replaced form submit wrapper with a standard button to enable the interactive cascading dropdowns
     submitted = st.button("💾 Save Data to AI Videos", use_container_width=True, type="primary")
     
     if submitted:
@@ -228,7 +230,6 @@ with tab_entry:
             ft_str = entry_ft.strftime('%H:%M')
             nt_str = entry_nt.strftime('%H:%M')
             
-            # Apply 01, 02 zero-padding formatting
             sl_no_str = f"{sl_no:02d}"
             vids_session_str = f"{vids_session:02d}"
             

@@ -190,7 +190,8 @@ with tab_entry:
     with c_ft_date: 
         entry_ft_date = st.date_input("Finished Date", value=now.date(), key="ft_date")
     with c_ft_time:
-        entry_ft_time = st.time_input("Finished Time", value="now", key="entry_ft")
+        # Use explicitly localized IST time object
+        entry_ft_time = st.time_input("Finished Time", value=now.time(), key="entry_ft")
 
     st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
     st.markdown("**2. Session Context**")
@@ -219,7 +220,6 @@ with tab_entry:
 
     projects_data = []
 
-    # Loop through configured account blocks
     for acc_idx, proj_count in enumerate(st.session_state.account_blocks):
         with st.container():
             st.markdown(f"<h5 style='color: #0068c9;'>👤 Account Block {acc_idx + 1}</h5>", unsafe_allow_html=True)
@@ -233,9 +233,9 @@ with tab_entry:
             with c_nt_date:
                 acc_nt_date = st.date_input("Next Date", value=now.date(), key=f"nt_date_{acc_idx}")
             with c_nt_time:
-                acc_nt_time = st.time_input("Next Time", value="now", key=f"nt_time_{acc_idx}")
+                # Use explicitly localized IST time object
+                acc_nt_time = st.time_input("Next Time", value=now.time(), key=f"nt_time_{acc_idx}")
             
-            # Dependent projects based on selected Account
             dependent_projects = []
             if final_account and not df_videos.empty and 'Account' in df_videos.columns and 'Project' in df_videos.columns:
                 dependent_projects = df_videos[df_videos['Account'].astype(str).str.strip() == final_account]['Project'].astype(str).str.strip().dropna().unique().tolist()
@@ -273,7 +273,6 @@ with tab_entry:
                     "Next_Time": acc_nt_time
                 })
             
-            # Add Another Project under THIS specific account block
             if st.button(f"➕ Add Project to Account {acc_idx + 1}", key=f"add_proj_{acc_idx}"):
                 st.session_state.account_blocks[acc_idx] += 1
                 st.rerun()
@@ -297,7 +296,6 @@ with tab_entry:
                 sl_no_str = f"{p['Sl.No']:02d}"
                 vids_session_str = f"{p['Videos']:02d}"
                 
-                # Format account-specific Next Time
                 nt_str = f"{p['Next_Date'].strftime('%Y-%m-%d')} {p['Next_Time'].strftime('%H:%M')}"
                 
                 row_data = [

@@ -190,7 +190,6 @@ with tab_entry:
     with c_ft_date: 
         entry_ft_date = st.date_input("Finished Date", value=now.date(), key="ft_date")
     with c_ft_time:
-        # Use explicitly localized IST time object
         entry_ft_time = st.time_input("Finished Time", value=now.time(), key="entry_ft")
 
     st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
@@ -233,7 +232,6 @@ with tab_entry:
             with c_nt_date:
                 acc_nt_date = st.date_input("Next Date", value=now.date(), key=f"nt_date_{acc_idx}")
             with c_nt_time:
-                # Use explicitly localized IST time object
                 acc_nt_time = st.time_input("Next Time", value=now.time(), key=f"nt_time_{acc_idx}")
             
             dependent_projects = []
@@ -256,13 +254,16 @@ with tab_entry:
                     if final_project and not df_videos.empty and 'Project' in df_videos.columns and 'Sl.No. of last Video' in df_videos.columns:
                         proj_data = df_videos[df_videos['Project'].astype(str).str.strip() == final_project]
                         if not proj_data.empty:
-                            max_sl = pd.to_numeric(proj_data['Sl.No. of last Video'], errors='coerce').max()
-                            if pd.notna(max_sl):
-                                default_sl_no = int(max_sl)
+                            # Scan the latest history directly by grabbing the last row logged for this project
+                            last_logged_val = proj_data.iloc[-1]['Sl.No. of last Video']
+                            try:
+                                default_sl_no = int(last_logged_val)
+                            except (ValueError, TypeError):
+                                pass
                     sl_no = st.number_input("Last Sl.No.", min_value=0, value=default_sl_no, step=1, format="%02d", key=f"sl_{acc_idx}_{proj_idx}")
                     
                 with c_vid:
-                    vids_session = st.number_input("Session Videos", min_value=0, step=1, format="%02d", key=f"vid_{acc_idx}_{proj_idx}")
+                    vids_session = st.number_input("Session Videos", min_value=0, value=0, step=1, format="%02d", key=f"vid_{acc_idx}_{proj_idx}")
                     
                 projects_data.append({
                     "Account": final_account,

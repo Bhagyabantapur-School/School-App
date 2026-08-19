@@ -223,7 +223,6 @@ with tab_entry:
         with st.container():
             st.markdown(f"<h5 style='color: #0068c9;'>👤 Account Block {acc_idx + 1}</h5>", unsafe_allow_html=True)
             
-            # --- Account & Next Time Selection ---
             c_acc, c_nt_date, c_nt_time = st.columns([2, 1, 1])
             with c_acc:
                 selected_account = st.selectbox("Account", ["-- Select / Type New --"] + unique_accounts, key=f"acc_sel_{acc_idx}")
@@ -254,16 +253,20 @@ with tab_entry:
                     if final_project and not df_videos.empty and 'Project' in df_videos.columns and 'Sl.No. of last Video' in df_videos.columns:
                         proj_data = df_videos[df_videos['Project'].astype(str).str.strip() == final_project]
                         if not proj_data.empty:
-                            # Scan the latest history directly by grabbing the last row logged for this project
                             last_logged_val = proj_data.iloc[-1]['Sl.No. of last Video']
                             try:
                                 default_sl_no = int(last_logged_val)
                             except (ValueError, TypeError):
                                 pass
-                    sl_no = st.number_input("Last Sl.No.", min_value=0, value=default_sl_no, step=1, format="%02d", key=f"sl_{acc_idx}_{proj_idx}")
+                    
+                    # Ensure dynamic key updates when project changes to bypass Streamlit state memory
+                    dynamic_sl_key = f"sl_{acc_idx}_{proj_idx}_{final_project}"
+                    sl_no = st.number_input("Last Sl.No.", min_value=0, value=default_sl_no, step=1, format="%02d", key=dynamic_sl_key)
                     
                 with c_vid:
-                    vids_session = st.number_input("Session Videos", min_value=0, value=0, step=1, format="%02d", key=f"vid_{acc_idx}_{proj_idx}")
+                    # Apply dynamic key here as well for clean resets
+                    dynamic_vid_key = f"vid_{acc_idx}_{proj_idx}_{final_project}"
+                    vids_session = st.number_input("Session Videos", min_value=0, value=0, step=1, format="%02d", key=dynamic_vid_key)
                     
                 projects_data.append({
                     "Account": final_account,

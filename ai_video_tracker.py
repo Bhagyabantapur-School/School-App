@@ -36,7 +36,15 @@ def get_all_data():
             
         data1 = sheet1.get_all_values()
         cols1 = ["Date", "Finished Time", "Next Time", "Time Gap", "Account", "Project", "Sl.No. of last Video", "Videos of the session", "Session"]
-        df_videos = pd.DataFrame(data1[1:], columns=data1[0]) if len(data1) > 1 else pd.DataFrame(columns=cols1)
+        
+        if len(data1) > 1:
+            df_videos = pd.DataFrame(data1[1:], columns=data1[0])
+            # FAIL-SAFE: Inject missing columns if header is outdated
+            for col in cols1:
+                if col not in df_videos.columns:
+                    df_videos[col] = ""
+        else:
+            df_videos = pd.DataFrame(columns=cols1)
 
         # 2. Get/Create Sessions Tab (For ultra-fast local fetching)
         try:
@@ -47,7 +55,15 @@ def get_all_data():
         
         data2 = ws_sessions.get_all_values()
         cols2 = ["Date", "Start_Time", "End_Time", "Duration", "Session_Name"]
-        df_sessions = pd.DataFrame(data2[1:], columns=data2[0]) if len(data2) > 1 else pd.DataFrame(columns=cols2)
+        
+        if len(data2) > 1:
+            df_sessions = pd.DataFrame(data2[1:], columns=data2[0])
+            # FAIL-SAFE: Inject missing columns if header is outdated
+            for col in cols2:
+                if col not in df_sessions.columns:
+                    df_sessions[col] = ""
+        else:
+            df_sessions = pd.DataFrame(columns=cols2)
 
         return df_videos, df_sessions, False
     except Exception as e:

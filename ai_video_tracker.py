@@ -22,33 +22,36 @@ def init_connection():
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
     return gspread.authorize(creds)
 
-@st.cache_data(ttl=300, show_spinner="Fetching Video Data...")
-def get_ai_videos_data():
+@st.cache_data(ttl=300, show_spinner="Fetching Data...")
+def get_all_data():
     conn = init_connection()
     try:
-        sheet = conn.open("AI Videos").sheet1
-        data = sheet.get_all_values()
-        default_cols = ["Date", "Finished Time", "Next Time", "Time Gap", "Account", "Project", "Sl.No. of last Video", "Videos of the session", "Session"]
-        if not data:
-            return pd.DataFrame(columns=default_cols), False
+        ss = conn.open("AI Videos")
         
-        headers = data[0]
-        records = data[1:]
-        return pd.DataFrame(records, columns=headers), False
-    except Exception as e:
-        return pd.DataFrame(), str(e)
+        # 1. Get Video Patterns (Sheet1)
+        try:
+            sheet1 = ss.worksheet("Sheet1")
+        except:
+            sheet1 = ss.sheet1
+            
+        data1 = sheet1.get_all_values()
+        cols1 = ["Date", "Finished Time", "Next Time", "Time Gap", "Account", "Project", "Sl.No. of last Video", "Videos of the session", "Session"]
+        df_videos = pd.DataFrame(data1[1:], columns=data1[0]) if len(data1) > 1 else pd.DataFrame(columns=cols1)
 
-@st.cache_data(ttl=300, show_spinner="Fetching Routine Data...")
-def get_routine_log_data():
-    conn = init_connection()
-    try:
-        sheet = conn.open("MY ROUTINE 2026").worksheet("activity_log")
-        data = sheet.get_all_values()
-        if len(data) > 1:
-            return pd.DataFrame(data[1:], columns=data[0]), False
-        return pd.DataFrame(columns=data[0]), False
+        # 2. Get/Create Sessions Tab (For ultra-fast local fetching)
+        try:
+            ws_sessions = ss.worksheet("Sessions")
+        except gspread.exceptions.WorksheetNotFound:
+            ws_sessions = ss.add_worksheet(title="Sessions", rows="1000", cols="10")
+            ws_sessions.append_row(["Date", "Start_Time", "End_Time", "Duration", "Session_Name"])
+        
+        data2 = ws_sessions.get_all_values()
+        cols2 = ["Date", "Start_Time", "End_Time", "Duration", "Session_Name"]
+        df_sessions = pd.DataFrame(data2[1:], columns=data2[0]) if len(data2) > 1 else pd.DataFrame(columns=cols2)
+
+        return df_videos, df_sessions, False
     except Exception as e:
-        return pd.DataFrame(), str(e)
+        return pd.DataFrame(), pd.DataFrame(), str(e)
 
 # ==========================================
 # Main App Logic
@@ -57,18 +60,16 @@ now = datetime.now(IST)
 today_str = now.strftime('%Y-%m-%d')
 current_time_str = now.strftime('%H:%M')
 
-df_videos, vid_api_error = get_ai_videos_data()
-log_df, log_api_error = get_routine_log_data()
+df_videos, df_sessions, api_error = get_all_data()
 
 # --- FAIL-SAFE TRIGGER ---
-if vid_api_error or log_api_error:
+if api_error:
     st.error("⚠️ **Google Sheets API Limit Reached!**")
-    st.write("The app could not fetch your latest data because Google's read/write quota was temporarily exceeded.")
+    st.write(f"Error Details: {api_error}")
     st.info("**Solution:** Please wait about 60 seconds, then click the button below to retry.")
     
     if st.button("🔄 Retry Connection", type="primary"):
-        get_ai_videos_data.clear()
-        get_routine_log_data.clear()
+        get_all_data.clear()
         st.rerun()
     st.stop()
 
@@ -127,7 +128,7 @@ st.markdown("---")
 st.markdown("### ⏱️ Session Tracker")
 
 is_running = False
-active_row_idx = None
+active_row_idx_sessions = None
 
 def extract_num(text):
     nums = re.findall(r'\b\d+\b', str(text))
@@ -136,19 +137,16 @@ def extract_num(text):
 next_num = 1
 active_session_name = ""
 
-if not log_df.empty and 'Activity' in log_df.columns:
-    ai_sessions_df = log_df[log_df['Activity'].astype(str).str.upper() == 'AI VIDEOS']
-    
-    if not ai_sessions_df.empty and 'Sub_Activities' in ai_sessions_df.columns:
-        max_num = ai_sessions_df['Sub_Activities'].apply(extract_num).max()
-        if pd.notna(max_num):
-            next_num = int(max_num) + 1
-            
-        running_sessions = ai_sessions_df[ai_sessions_df['End_Time'] == 'RUNNING']
-        if not running_sessions.empty:
-            is_running = True
-            active_row_idx = running_sessions.index[0] + 2 
-            active_session_name = str(running_sessions.iloc[0]['Sub_Activities'])
+if not df_sessions.empty and 'Session_Name' in df_sessions.columns:
+    max_num = df_sessions['Session_Name'].apply(extract_num).max()
+    if pd.notna(max_num):
+        next_num = int(max_num) + 1
+        
+    running_sessions = df_sessions[df_sessions['End_Time'] == 'RUNNING']
+    if not running_sessions.empty:
+        is_running = True
+        active_row_idx_sessions = running_sessions.index[0] + 2 
+        active_session_name = str(running_sessions.iloc[0]['Session_Name'])
 
 next_session_name = f"Session {next_num:03d}"
 
@@ -158,14 +156,24 @@ with col_start:
     if st.button(f"▶️ Start {next_session_name}", use_container_width=True, disabled=is_running, type="primary"):
         try:
             conn = init_connection()
-            sheet = conn.open("MY ROUTINE 2026").worksheet("activity_log")
-            row_data = [
+            
+            # Log to MY ROUTINE 2026 (For Master Tracking)
+            routine_sheet = conn.open("MY ROUTINE 2026").worksheet("activity_log")
+            routine_row = [
                 today_str, current_time_str, "RUNNING", GS_FORMULA, 
                 "AI Videos", next_session_name, "", "Generating AI Videos", 
                 "YouTube Creator", "TRUE", "TRUE", "6"
             ]
-            sheet.append_row(row_data, value_input_option="USER_ENTERED")
-            get_routine_log_data.clear() 
+            routine_sheet.append_row(routine_row, value_input_option="USER_ENTERED")
+            
+            # Log to AI Videos Local Sessions Tab (For Fast Fetching)
+            videos_sheet = conn.open("AI Videos").worksheet("Sessions")
+            session_row = [
+                today_str, current_time_str, "RUNNING", GS_FORMULA, next_session_name
+            ]
+            videos_sheet.append_row(session_row, value_input_option="USER_ENTERED")
+
+            get_all_data.clear() 
             st.toast(f"✅ {next_session_name} Started!")
             time.sleep(1)
             st.rerun()
@@ -177,12 +185,29 @@ with col_finish:
     if st.button(btn_label, use_container_width=True, disabled=not is_running):
         try:
             conn = init_connection()
-            sheet = conn.open("MY ROUTINE 2026").worksheet("activity_log")
+            
+            # Update Local AI Videos Sessions Tab
+            ws_sessions = conn.open("AI Videos").worksheet("Sessions")
             try:
-                sheet.update(range_name=f"C{active_row_idx}:D{active_row_idx}", values=[[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
+                ws_sessions.update(range_name=f"C{active_row_idx_sessions}:D{active_row_idx_sessions}", values=[[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
             except TypeError:
-                sheet.update(f"C{active_row_idx}:D{active_row_idx}", [[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
-            get_routine_log_data.clear() 
+                ws_sessions.update(f"C{active_row_idx_sessions}:D{active_row_idx_sessions}", [[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
+            
+            # Update Master MY ROUTINE 2026 Tab
+            ws_routine = conn.open("MY ROUTINE 2026").worksheet("activity_log")
+            routine_data = ws_routine.get_all_values()
+            routine_df = pd.DataFrame(routine_data[1:], columns=routine_data[0]) if len(routine_data) > 1 else pd.DataFrame()
+            
+            if not routine_df.empty and 'Activity' in routine_df.columns:
+                running_routine = routine_df[(routine_df['End_Time'] == 'RUNNING') & (routine_df['Sub_Activities'].astype(str).str.strip() == active_session_name)]
+                if not running_routine.empty:
+                    routine_row_idx = running_routine.index[0] + 2
+                    try:
+                        ws_routine.update(range_name=f"C{routine_row_idx}:D{routine_row_idx}", values=[[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
+                    except TypeError:
+                        ws_routine.update(f"C{routine_row_idx}:D{routine_row_idx}", [[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
+
+            get_all_data.clear() 
             st.toast(f"✅ {active_session_name} Finished and Logged!")
             time.sleep(1)
             st.rerun()
@@ -204,7 +229,6 @@ with tab_summary:
     st.markdown("### 📊 Generation Report")
     
     if not df_videos.empty and 'Date' in df_videos.columns:
-        # Extract unique dates specifically where videos have been created
         unique_dates = df_videos['Date'].dropna().astype(str).str.strip().unique().tolist()
         unique_dates = sorted([d for d in unique_dates if d and d != 'nan'], reverse=True)
         
@@ -214,13 +238,11 @@ with tab_summary:
             default_idx = unique_dates.index(today_str) if today_str in unique_dates else 0
             selected_date = st.selectbox("🗓️ Select Date", unique_dates, index=default_idx)
             
-            # Filter Data for Selected Date
             day_vids = df_videos[df_videos['Date'].astype(str).str.strip() == selected_date]
             
             day_logs = pd.DataFrame()
-            if not log_df.empty and 'Date' in log_df.columns:
-                day_logs = log_df[(log_df['Date'].astype(str).str.strip() == selected_date) & 
-                                  (log_df['Activity'].astype(str).str.upper() == 'AI VIDEOS')]
+            if not df_sessions.empty and 'Date' in df_sessions.columns:
+                day_logs = df_sessions[df_sessions['Date'].astype(str).str.strip() == selected_date]
             
             sessions = day_vids['Session'].astype(str).str.strip().unique().tolist()
             
@@ -230,16 +252,14 @@ with tab_summary:
             for sess in sessions:
                 sess_name = sess if (sess and sess != 'nan' and sess != '-- No Finished Sessions --') else "Unlinked Session"
                 
-                # Videos created in this session
                 sess_vids_df = day_vids[day_vids['Session'].astype(str).str.strip() == sess]
                 sess_vids_count = pd.to_numeric(sess_vids_df['Videos of the session'], errors='coerce').fillna(0).sum()
                 total_day_vids += sess_vids_count
                 
-                # Fetch Time and Duration from activity log
                 time_str = "N/A"
                 dur_str = "0:00"
                 if sess_name != "Unlinked Session" and not day_logs.empty:
-                    match_log = day_logs[day_logs['Sub_Activities'].astype(str).str.strip() == sess_name]
+                    match_log = day_logs[day_logs['Session_Name'].astype(str).str.strip() == sess_name]
                     if not match_log.empty:
                         row = match_log.iloc[0]
                         time_str = f"{row.get('Start_Time', '??')} - {row.get('End_Time', '??')}"
@@ -265,7 +285,6 @@ with tab_summary:
                 
             st.markdown("<hr style='margin: 15px 0;'>", unsafe_allow_html=True)
             
-            # Formatted Bottom Totals
             tot_h, tot_m = divmod(total_day_mins, 60)
             tot_dur_str = f"{tot_h}h {tot_m}m" if tot_h > 0 else f"{tot_m}m"
             
@@ -293,10 +312,10 @@ with tab_entry:
     st.markdown("**2. Session Context**")
     
     available_sessions = []
-    if not log_df.empty and 'Activity' in log_df.columns:
-        historical = log_df[(log_df['Activity'].astype(str).str.upper() == 'AI VIDEOS') & (log_df['End_Time'] != 'RUNNING')]
-        if not historical.empty and 'Sub_Activities' in historical.columns:
-            hist_list = historical['Sub_Activities'].dropna().unique().tolist()
+    if not df_sessions.empty and 'Session_Name' in df_sessions.columns:
+        historical = df_sessions[df_sessions['End_Time'] != 'RUNNING']
+        if not historical.empty:
+            hist_list = historical['Session_Name'].dropna().unique().tolist()
             available_sessions = sorted(list(set(hist_list)), key=lambda x: int(''.join(filter(str.isdigit, str(x))) or 0), reverse=True)
     
     if not available_sessions:
@@ -413,7 +432,7 @@ with tab_entry:
                 conn = init_connection()
                 sheet = conn.open("AI Videos").sheet1
                 sheet.append_rows(rows_to_append, value_input_option="USER_ENTERED")
-                get_ai_videos_data.clear() 
+                get_all_data.clear() 
                 
                 st.session_state.account_blocks = [1]
                 

@@ -36,7 +36,7 @@ def get_ai_videos_data():
         records = data[1:]
         return pd.DataFrame(records, columns=headers), False
     except Exception as e:
-        return pd.DataFrame(), str(e) # Returns the error to trigger the fail-safe
+        return pd.DataFrame(), str(e)
 
 @st.cache_data(ttl=300, show_spinner="Fetching Routine Data...")
 def get_routine_log_data():
@@ -48,7 +48,7 @@ def get_routine_log_data():
             return pd.DataFrame(data[1:], columns=data[0]), False
         return pd.DataFrame(columns=data[0]), False
     except Exception as e:
-        return pd.DataFrame(), str(e) # Returns the error to trigger the fail-safe
+        return pd.DataFrame(), str(e)
 
 # ==========================================
 # Main App Logic
@@ -57,22 +57,20 @@ now = datetime.now(IST)
 today_str = now.strftime('%Y-%m-%d')
 current_time_str = now.strftime('%H:%M')
 
-# Fetch data and unpack error flags
 df_videos, vid_api_error = get_ai_videos_data()
 log_df, log_api_error = get_routine_log_data()
 
 # --- FAIL-SAFE TRIGGER ---
-# If Google API fails, stop the app completely to prevent "Session 001" reset bugs.
 if vid_api_error or log_api_error:
     st.error("⚠️ **Google Sheets API Limit Reached!**")
-    st.write("The app could not fetch your latest data because Google's read/write quota was temporarily exceeded. This happens when the routine hub refreshes too many times at once.")
+    st.write("The app could not fetch your latest data because Google's read/write quota was temporarily exceeded.")
     st.info("**Solution:** Please wait about 60 seconds, then click the button below to retry.")
     
     if st.button("🔄 Retry Connection", type="primary"):
         get_ai_videos_data.clear()
         get_routine_log_data.clear()
         st.rerun()
-    st.stop() # Halts execution here so bad data doesn't render below!
+    st.stop()
 
 # --- TOP SECTION: Upcoming Accounts ---
 st.markdown("### ⏰ Upcoming Accounts")
@@ -194,13 +192,91 @@ with col_finish:
 st.markdown("---")
 
 # --- DATA ENTRY & VIEW TABS ---
-tab_view, tab_entry = st.tabs(["📊 Session Data", "📝 New Data Entry"])
+tab_view, tab_summary, tab_entry = st.tabs(["📊 Session Data", "📅 Daily Summary", "📝 New Data Entry"])
 
 with tab_view:
     if not df_videos.empty:
         st.dataframe(df_videos, use_container_width=True, hide_index=True)
     else:
         st.write("No data available.")
+
+with tab_summary:
+    st.markdown("### 📊 Generation Report")
+    
+    if not df_videos.empty and 'Date' in df_videos.columns:
+        # Extract unique dates specifically where videos have been created
+        unique_dates = df_videos['Date'].dropna().astype(str).str.strip().unique().tolist()
+        unique_dates = sorted([d for d in unique_dates if d and d != 'nan'], reverse=True)
+        
+        if not unique_dates:
+            st.info("No dates with video logs found.")
+        else:
+            default_idx = unique_dates.index(today_str) if today_str in unique_dates else 0
+            selected_date = st.selectbox("🗓️ Select Date", unique_dates, index=default_idx)
+            
+            # Filter Data for Selected Date
+            day_vids = df_videos[df_videos['Date'].astype(str).str.strip() == selected_date]
+            
+            day_logs = pd.DataFrame()
+            if not log_df.empty and 'Date' in log_df.columns:
+                day_logs = log_df[(log_df['Date'].astype(str).str.strip() == selected_date) & 
+                                  (log_df['Activity'].astype(str).str.upper() == 'AI VIDEOS')]
+            
+            sessions = day_vids['Session'].astype(str).str.strip().unique().tolist()
+            
+            total_day_vids = 0
+            total_day_mins = 0
+            
+            for sess in sessions:
+                sess_name = sess if (sess and sess != 'nan' and sess != '-- No Finished Sessions --') else "Unlinked Session"
+                
+                # Videos created in this session
+                sess_vids_df = day_vids[day_vids['Session'].astype(str).str.strip() == sess]
+                sess_vids_count = pd.to_numeric(sess_vids_df['Videos of the session'], errors='coerce').fillna(0).sum()
+                total_day_vids += sess_vids_count
+                
+                # Fetch Time and Duration from activity log
+                time_str = "N/A"
+                dur_str = "0:00"
+                if sess_name != "Unlinked Session" and not day_logs.empty:
+                    match_log = day_logs[day_logs['Sub_Activities'].astype(str).str.strip() == sess_name]
+                    if not match_log.empty:
+                        row = match_log.iloc[0]
+                        time_str = f"{row.get('Start_Time', '??')} - {row.get('End_Time', '??')}"
+                        dur_str = str(row.get('Duration', '0:00')).strip()
+                        
+                if dur_str != "RUNNING" and dur_str != "N/A" and ":" in dur_str:
+                    try:
+                        h, m = dur_str.split(":")
+                        total_day_mins += int(h) * 60 + int(m)
+                    except: pass
+                    
+                st.markdown(f"""
+                <div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 5px solid #ff4b4b; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);'>
+                    <div style='display: flex; justify-content: space-between; align-items: center;'>
+                        <b style='font-size: 16px;'>{sess_name}</b>
+                        <span style='color: #0068c9; font-weight: bold; font-size: 15px;'>🎬 {int(sess_vids_count)} Videos</span>
+                    </div>
+                    <div style='font-size: 14px; color: #555; margin-top: 5px;'>
+                        ⏱️ Time: {time_str} &nbsp;|&nbsp; ⏳ Duration: {dur_str}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+            st.markdown("<hr style='margin: 15px 0;'>", unsafe_allow_html=True)
+            
+            # Formatted Bottom Totals
+            tot_h, tot_m = divmod(total_day_mins, 60)
+            tot_dur_str = f"{tot_h}h {tot_m}m" if tot_h > 0 else f"{tot_m}m"
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown(f"<div style='text-align: center; padding: 15px; background-color: #e3f2fd; border-radius: 8px;'><h3 style='margin:0; color: #0068c9;'>{tot_dur_str}</h3><p style='margin:0; font-size:14px; color:#555;'>Total Time Used</p></div>", unsafe_allow_html=True)
+            with c2:
+                st.markdown(f"<div style='text-align: center; padding: 15px; background-color: #ffebee; border-radius: 8px;'><h3 style='margin:0; color: #ff4b4b;'>{int(total_day_vids)}</h3><p style='margin:0; font-size:14px; color:#555;'>Total Videos Created</p></div>", unsafe_allow_html=True)
+
+    else:
+        st.info("No video data logged yet.")
 
 with tab_entry:
     st.markdown("**1. Session Setup Time**")

@@ -35,18 +35,17 @@ def get_all_data():
             sheet1 = ss.sheet1
             
         data1 = sheet1.get_all_values()
-        cols1 = ["Date", "Finished Time", "Next Time", "Time Gap", "Account", "Project", "Sl.No. of last Video", "Videos of the session", "Session"]
+        if data1: data1[0] = [str(x).strip() for x in data1[0]] # Strip invisible spaces
         
+        cols1 = ["Date", "Finished Time", "Next Time", "Time Gap", "Account", "Project", "Sl.No. of last Video", "Videos of the session", "Session"]
         if len(data1) > 1:
             df_videos = pd.DataFrame(data1[1:], columns=data1[0])
-            # FAIL-SAFE: Inject missing columns if header is outdated
             for col in cols1:
-                if col not in df_videos.columns:
-                    df_videos[col] = ""
+                if col not in df_videos.columns: df_videos[col] = ""
         else:
             df_videos = pd.DataFrame(columns=cols1)
 
-        # 2. Get/Create Sessions Tab (For ultra-fast local fetching)
+        # 2. Get Sessions Tab (Local AI Videos Tracker)
         try:
             ws_sessions = ss.worksheet("Sessions")
         except gspread.exceptions.WorksheetNotFound:
@@ -54,20 +53,28 @@ def get_all_data():
             ws_sessions.append_row(["Date", "Start_Time", "End_Time", "Duration", "Session_Name"])
         
         data2 = ws_sessions.get_all_values()
-        cols2 = ["Date", "Start_Time", "End_Time", "Duration", "Session_Name"]
+        if data2: data2[0] = [str(x).strip() for x in data2[0]]
         
+        cols2 = ["Date", "Start_Time", "End_Time", "Duration", "Session_Name"]
         if len(data2) > 1:
             df_sessions = pd.DataFrame(data2[1:], columns=data2[0])
-            # FAIL-SAFE: Inject missing columns if header is outdated
             for col in cols2:
-                if col not in df_sessions.columns:
-                    df_sessions[col] = ""
+                if col not in df_sessions.columns: df_sessions[col] = ""
         else:
             df_sessions = pd.DataFrame(columns=cols2)
 
-        return df_videos, df_sessions, False
+        # 3. Get Routine Log (Fallback for old sessions)
+        try:
+            routine_sheet = conn.open("MY ROUTINE 2026").worksheet("activity_log")
+            data3 = routine_sheet.get_all_values()
+            if data3: data3[0] = [str(x).strip() for x in data3[0]]
+            df_routine = pd.DataFrame(data3[1:], columns=data3[0]) if len(data3) > 1 else pd.DataFrame()
+        except:
+            df_routine = pd.DataFrame()
+
+        return df_videos, df_sessions, df_routine, False
     except Exception as e:
-        return pd.DataFrame(), pd.DataFrame(), str(e)
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), str(e)
 
 # ==========================================
 # Main App Logic
@@ -76,7 +83,7 @@ now = datetime.now(IST)
 today_str = now.strftime('%Y-%m-%d')
 current_time_str = now.strftime('%H:%M')
 
-df_videos, df_sessions, api_error = get_all_data()
+df_videos, df_sessions, df_routine, api_error = get_all_data()
 
 # --- FAIL-SAFE TRIGGER ---
 if api_error:
@@ -145,24 +152,42 @@ st.markdown("### ⏱️ Session Tracker")
 
 is_running = False
 active_row_idx_sessions = None
+active_row_idx_routine = None
+active_session_name = ""
 
 def extract_num(text):
     nums = re.findall(r'\b\d+\b', str(text))
     return int(nums[0]) if nums else 0
 
-next_num = 1
-active_session_name = ""
+all_sess_names = []
+if not df_routine.empty and 'Activity' in df_routine.columns:
+    ai_rout = df_routine[df_routine['Activity'].astype(str).str.upper() == 'AI VIDEOS']
+    if not ai_rout.empty and 'Sub_Activities' in ai_rout.columns:
+        all_sess_names.extend(ai_rout['Sub_Activities'].dropna().tolist())
 
 if not df_sessions.empty and 'Session_Name' in df_sessions.columns:
-    max_num = df_sessions['Session_Name'].apply(extract_num).max()
-    if pd.notna(max_num):
-        next_num = int(max_num) + 1
-        
+    all_sess_names.extend(df_sessions['Session_Name'].dropna().tolist())
+
+next_num = 1
+if all_sess_names:
+    nums = [extract_num(x) for x in all_sess_names]
+    if nums: next_num = max(nums) + 1
+
+# Check if currently running in df_sessions
+if not df_sessions.empty and 'Session_Name' in df_sessions.columns:
     running_sessions = df_sessions[df_sessions['End_Time'] == 'RUNNING']
     if not running_sessions.empty:
         is_running = True
         active_row_idx_sessions = running_sessions.index[0] + 2 
         active_session_name = str(running_sessions.iloc[0]['Session_Name'])
+
+# Check if currently running in df_routine
+if not df_routine.empty and 'Activity' in df_routine.columns:
+    running_routine = df_routine[(df_routine['End_Time'] == 'RUNNING') & (df_routine['Activity'].astype(str).str.upper() == 'AI VIDEOS')]
+    if not running_routine.empty:
+        is_running = True
+        active_row_idx_routine = running_routine.index[0] + 2 
+        if not active_session_name: active_session_name = str(running_routine.iloc[0]['Sub_Activities'])
 
 next_session_name = f"Session {next_num:03d}"
 
@@ -173,20 +198,12 @@ with col_start:
         try:
             conn = init_connection()
             
-            # Log to MY ROUTINE 2026 (For Master Tracking)
             routine_sheet = conn.open("MY ROUTINE 2026").worksheet("activity_log")
-            routine_row = [
-                today_str, current_time_str, "RUNNING", GS_FORMULA, 
-                "AI Videos", next_session_name, "", "Generating AI Videos", 
-                "YouTube Creator", "TRUE", "TRUE", "6"
-            ]
+            routine_row = [today_str, current_time_str, "RUNNING", GS_FORMULA, "AI Videos", next_session_name, "", "Generating AI Videos", "YouTube Creator", "TRUE", "TRUE", "6"]
             routine_sheet.append_row(routine_row, value_input_option="USER_ENTERED")
             
-            # Log to AI Videos Local Sessions Tab (For Fast Fetching)
             videos_sheet = conn.open("AI Videos").worksheet("Sessions")
-            session_row = [
-                today_str, current_time_str, "RUNNING", GS_FORMULA, next_session_name
-            ]
+            session_row = [today_str, current_time_str, "RUNNING", GS_FORMULA, next_session_name]
             videos_sheet.append_row(session_row, value_input_option="USER_ENTERED")
 
             get_all_data.clear() 
@@ -202,26 +219,15 @@ with col_finish:
         try:
             conn = init_connection()
             
-            # Update Local AI Videos Sessions Tab
-            ws_sessions = conn.open("AI Videos").worksheet("Sessions")
-            try:
-                ws_sessions.update(range_name=f"C{active_row_idx_sessions}:D{active_row_idx_sessions}", values=[[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
-            except TypeError:
-                ws_sessions.update(f"C{active_row_idx_sessions}:D{active_row_idx_sessions}", [[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
+            if active_row_idx_sessions:
+                ws_sessions = conn.open("AI Videos").worksheet("Sessions")
+                try: ws_sessions.update(range_name=f"C{active_row_idx_sessions}:D{active_row_idx_sessions}", values=[[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
+                except TypeError: ws_sessions.update(f"C{active_row_idx_sessions}:D{active_row_idx_sessions}", [[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
             
-            # Update Master MY ROUTINE 2026 Tab
-            ws_routine = conn.open("MY ROUTINE 2026").worksheet("activity_log")
-            routine_data = ws_routine.get_all_values()
-            routine_df = pd.DataFrame(routine_data[1:], columns=routine_data[0]) if len(routine_data) > 1 else pd.DataFrame()
-            
-            if not routine_df.empty and 'Activity' in routine_df.columns:
-                running_routine = routine_df[(routine_df['End_Time'] == 'RUNNING') & (routine_df['Sub_Activities'].astype(str).str.strip() == active_session_name)]
-                if not running_routine.empty:
-                    routine_row_idx = running_routine.index[0] + 2
-                    try:
-                        ws_routine.update(range_name=f"C{routine_row_idx}:D{routine_row_idx}", values=[[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
-                    except TypeError:
-                        ws_routine.update(f"C{routine_row_idx}:D{routine_row_idx}", [[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
+            if active_row_idx_routine:
+                ws_routine = conn.open("MY ROUTINE 2026").worksheet("activity_log")
+                try: ws_routine.update(range_name=f"C{active_row_idx_routine}:D{active_row_idx_routine}", values=[[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
+                except TypeError: ws_routine.update(f"C{active_row_idx_routine}:D{active_row_idx_routine}", [[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
 
             get_all_data.clear() 
             st.toast(f"✅ {active_session_name} Finished and Logged!")
@@ -256,9 +262,14 @@ with tab_summary:
             
             day_vids = df_videos[df_videos['Date'].astype(str).str.strip() == selected_date]
             
-            day_logs = pd.DataFrame()
+            day_logs_sessions = pd.DataFrame()
             if not df_sessions.empty and 'Date' in df_sessions.columns:
-                day_logs = df_sessions[df_sessions['Date'].astype(str).str.strip() == selected_date]
+                day_logs_sessions = df_sessions[df_sessions['Date'].astype(str).str.strip() == selected_date]
+                
+            day_logs_routine = pd.DataFrame()
+            if not df_routine.empty and 'Date' in df_routine.columns:
+                day_logs_routine = df_routine[(df_routine['Date'].astype(str).str.strip() == selected_date) & 
+                                              (df_routine['Activity'].astype(str).str.upper() == 'AI VIDEOS')]
             
             sessions = day_vids['Session'].astype(str).str.strip().unique().tolist()
             
@@ -274,10 +285,17 @@ with tab_summary:
                 
                 time_str = "N/A"
                 dur_str = "0:00"
-                if sess_name != "Unlinked Session" and not day_logs.empty:
-                    match_log = day_logs[day_logs['Session_Name'].astype(str).str.strip() == sess_name]
+                
+                if sess_name != "Unlinked Session":
+                    match_log = pd.DataFrame()
+                    if not day_logs_sessions.empty:
+                        match_log = day_logs_sessions[day_logs_sessions['Session_Name'].astype(str).str.strip() == sess_name]
+                    
+                    if match_log.empty and not day_logs_routine.empty:
+                        match_log = day_logs_routine[day_logs_routine['Sub_Activities'].astype(str).str.strip() == sess_name]
+                        
                     if not match_log.empty:
-                        row = match_log.iloc[0]
+                        row = match_log.iloc[-1] 
                         time_str = f"{row.get('Start_Time', '??')} - {row.get('End_Time', '??')}"
                         dur_str = str(row.get('Duration', '0:00')).strip()
                         
@@ -328,13 +346,20 @@ with tab_entry:
     st.markdown("**2. Session Context**")
     
     available_sessions = []
-    if not df_sessions.empty and 'Session_Name' in df_sessions.columns:
-        historical = df_sessions[df_sessions['End_Time'] != 'RUNNING']
-        if not historical.empty:
-            hist_list = historical['Session_Name'].dropna().unique().tolist()
-            available_sessions = sorted(list(set(hist_list)), key=lambda x: int(''.join(filter(str.isdigit, str(x))) or 0), reverse=True)
     
-    if not available_sessions:
+    if not df_routine.empty and 'Activity' in df_routine.columns:
+        hist_rout = df_routine[(df_routine['Activity'].astype(str).str.upper() == 'AI VIDEOS') & (df_routine['End_Time'] != 'RUNNING')]
+        if not hist_rout.empty and 'Sub_Activities' in hist_rout.columns:
+            available_sessions.extend(hist_rout['Sub_Activities'].dropna().unique().tolist())
+            
+    if not df_sessions.empty and 'Session_Name' in df_sessions.columns:
+        hist_sess = df_sessions[df_sessions['End_Time'] != 'RUNNING']
+        if not hist_sess.empty:
+            available_sessions.extend(hist_sess['Session_Name'].dropna().unique().tolist())
+
+    if available_sessions:
+        available_sessions = sorted(list(set(available_sessions)), key=lambda x: int(''.join(filter(str.isdigit, str(x))) or 0), reverse=True)
+    else:
         available_sessions = ["-- No Finished Sessions --"]
     
     selected_session = st.selectbox("Link to Session", available_sessions)

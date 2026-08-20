@@ -30,14 +30,13 @@ def get_ai_videos_data():
         data = sheet.get_all_values()
         default_cols = ["Date", "Finished Time", "Next Time", "Time Gap", "Account", "Project", "Sl.No. of last Video", "Videos of the session", "Session"]
         if not data:
-            return pd.DataFrame(columns=default_cols)
+            return pd.DataFrame(columns=default_cols), False
         
         headers = data[0]
         records = data[1:]
-        return pd.DataFrame(records, columns=headers)
+        return pd.DataFrame(records, columns=headers), False
     except Exception as e:
-        st.error(f"Error loading AI Videos sheet: {e}")
-        return pd.DataFrame(columns=["Date", "Finished Time", "Next Time", "Time Gap", "Account", "Project", "Sl.No. of last Video", "Videos of the session", "Session"])
+        return pd.DataFrame(), str(e) # Returns the error to trigger the fail-safe
 
 @st.cache_data(ttl=300, show_spinner="Fetching Routine Data...")
 def get_routine_log_data():
@@ -46,10 +45,10 @@ def get_routine_log_data():
         sheet = conn.open("MY ROUTINE 2026").worksheet("activity_log")
         data = sheet.get_all_values()
         if len(data) > 1:
-            return pd.DataFrame(data[1:], columns=data[0])
-        return pd.DataFrame(columns=data[0])
+            return pd.DataFrame(data[1:], columns=data[0]), False
+        return pd.DataFrame(columns=data[0]), False
     except Exception as e:
-        return pd.DataFrame()
+        return pd.DataFrame(), str(e) # Returns the error to trigger the fail-safe
 
 # ==========================================
 # Main App Logic
@@ -58,8 +57,22 @@ now = datetime.now(IST)
 today_str = now.strftime('%Y-%m-%d')
 current_time_str = now.strftime('%H:%M')
 
-df_videos = get_ai_videos_data()
-log_df = get_routine_log_data()
+# Fetch data and unpack error flags
+df_videos, vid_api_error = get_ai_videos_data()
+log_df, log_api_error = get_routine_log_data()
+
+# --- FAIL-SAFE TRIGGER ---
+# If Google API fails, stop the app completely to prevent "Session 001" reset bugs.
+if vid_api_error or log_api_error:
+    st.error("⚠️ **Google Sheets API Limit Reached!**")
+    st.write("The app could not fetch your latest data because Google's read/write quota was temporarily exceeded. This happens when the routine hub refreshes too many times at once.")
+    st.info("**Solution:** Please wait about 60 seconds, then click the button below to retry.")
+    
+    if st.button("🔄 Retry Connection", type="primary"):
+        get_ai_videos_data.clear()
+        get_routine_log_data.clear()
+        st.rerun()
+    st.stop() # Halts execution here so bad data doesn't render below!
 
 # --- TOP SECTION: Upcoming Accounts ---
 st.markdown("### ⏰ Upcoming Accounts")
@@ -145,32 +158,38 @@ col_start, col_finish = st.columns(2)
 
 with col_start:
     if st.button(f"▶️ Start {next_session_name}", use_container_width=True, disabled=is_running, type="primary"):
-        conn = init_connection()
-        sheet = conn.open("MY ROUTINE 2026").worksheet("activity_log")
-        row_data = [
-            today_str, current_time_str, "RUNNING", GS_FORMULA, 
-            "AI Videos", next_session_name, "", "Generating AI Videos", 
-            "YouTube Creator", "TRUE", "TRUE", "6"
-        ]
-        sheet.append_row(row_data, value_input_option="USER_ENTERED")
-        get_routine_log_data.clear() 
-        st.toast(f"✅ {next_session_name} Started!")
-        time.sleep(1)
-        st.rerun()
+        try:
+            conn = init_connection()
+            sheet = conn.open("MY ROUTINE 2026").worksheet("activity_log")
+            row_data = [
+                today_str, current_time_str, "RUNNING", GS_FORMULA, 
+                "AI Videos", next_session_name, "", "Generating AI Videos", 
+                "YouTube Creator", "TRUE", "TRUE", "6"
+            ]
+            sheet.append_row(row_data, value_input_option="USER_ENTERED")
+            get_routine_log_data.clear() 
+            st.toast(f"✅ {next_session_name} Started!")
+            time.sleep(1)
+            st.rerun()
+        except Exception as e:
+            st.error(f"⚠️ API Error while starting session: {e}")
 
 with col_finish:
     btn_label = f"🛑 Finish {active_session_name}" if is_running else "🛑 Finish Active Session"
     if st.button(btn_label, use_container_width=True, disabled=not is_running):
-        conn = init_connection()
-        sheet = conn.open("MY ROUTINE 2026").worksheet("activity_log")
         try:
-            sheet.update(range_name=f"C{active_row_idx}:D{active_row_idx}", values=[[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
-        except TypeError:
-            sheet.update(f"C{active_row_idx}:D{active_row_idx}", [[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
-        get_routine_log_data.clear() 
-        st.toast(f"✅ {active_session_name} Finished and Logged!")
-        time.sleep(1)
-        st.rerun()
+            conn = init_connection()
+            sheet = conn.open("MY ROUTINE 2026").worksheet("activity_log")
+            try:
+                sheet.update(range_name=f"C{active_row_idx}:D{active_row_idx}", values=[[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
+            except TypeError:
+                sheet.update(f"C{active_row_idx}:D{active_row_idx}", [[current_time_str, GS_FORMULA]], value_input_option="USER_ENTERED")
+            get_routine_log_data.clear() 
+            st.toast(f"✅ {active_session_name} Finished and Logged!")
+            time.sleep(1)
+            st.rerun()
+        except Exception as e:
+            st.error(f"⚠️ API Error while finishing session: {e}")
 
 st.markdown("---")
 
@@ -186,11 +205,13 @@ with tab_view:
 with tab_entry:
     st.markdown("**1. Session Setup Time**")
     
+    current_ist_time = now.time()
+    
     c_ft_date, c_ft_time = st.columns(2)
     with c_ft_date: 
         entry_ft_date = st.date_input("Finished Date", value=now.date(), key="ft_date")
     with c_ft_time:
-        entry_ft_time = st.time_input("Finished Time", value=now.time(), key="entry_ft")
+        entry_ft_time = st.time_input("Finished Time", value=current_ist_time, key="entry_ft")
 
     st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
     st.markdown("**2. Session Context**")
@@ -231,14 +252,13 @@ with tab_entry:
             with c_nt_date:
                 acc_nt_date = st.date_input("Next Date", value=now.date(), key=f"nt_date_{acc_idx}")
             with c_nt_time:
-                acc_nt_time = st.time_input("Next Time", value=now.time(), key=f"nt_time_{acc_idx}")
+                acc_nt_time = st.time_input("Next Time", value=current_ist_time, key=f"nt_time_{acc_idx}")
             
             dependent_projects = []
             if final_account and not df_videos.empty and 'Account' in df_videos.columns and 'Project' in df_videos.columns:
                 dependent_projects = df_videos[df_videos['Account'].astype(str).str.strip() == final_account]['Project'].astype(str).str.strip().dropna().unique().tolist()
                 dependent_projects = [p for p in dependent_projects if p and p != 'nan']
 
-            # --- Projects Loop ---
             for proj_idx in range(proj_count):
                 st.markdown(f"**Project {proj_idx + 1}**")
                 c_proj, c_sl, c_vid = st.columns([2, 1, 1])
@@ -259,12 +279,10 @@ with tab_entry:
                             except (ValueError, TypeError):
                                 pass
                     
-                    # Ensure dynamic key updates when project changes to bypass Streamlit state memory
                     dynamic_sl_key = f"sl_{acc_idx}_{proj_idx}_{final_project}"
                     sl_no = st.number_input("Last Sl.No.", min_value=0, value=default_sl_no, step=1, format="%02d", key=dynamic_sl_key)
                     
                 with c_vid:
-                    # Apply dynamic key here as well for clean resets
                     dynamic_vid_key = f"vid_{acc_idx}_{proj_idx}_{final_project}"
                     vids_session = st.number_input("Session Videos", min_value=0, value=0, step=1, format="%02d", key=dynamic_vid_key)
                     
@@ -283,7 +301,6 @@ with tab_entry:
                 
             st.markdown("<hr style='margin: 15px 0; border: 0; border-top: 1px dashed #ccc;'>", unsafe_allow_html=True)
 
-    # --- Add Another Account Block ---
     if st.button("➕ Add Another Account", type="secondary"):
         st.session_state.account_blocks.append(1)
         st.rerun()
@@ -292,43 +309,46 @@ with tab_entry:
     submitted = st.button("💾 Save All Data to AI Videos", use_container_width=True, type="primary")
     
     if submitted:
-        rows_to_append = []
-        ft_str = entry_ft_time.strftime('%H:%M')
-        
-        for p in projects_data:
-            if p["Account"] and p["Project"]:  
-                sl_no_str = f"{p['Sl.No']:02d}"
-                vids_session_str = f"{p['Videos']:02d}"
-                
-                nt_str = f"{p['Next_Date'].strftime('%Y-%m-%d')} {p['Next_Time'].strftime('%H:%M')}"
-                
-                row_data = [
-                    entry_ft_date.strftime('%Y-%m-%d'),
-                    ft_str,
-                    nt_str,
-                    GS_FORMULA, 
-                    p["Account"],
-                    p["Project"],
-                    sl_no_str,
-                    vids_session_str,
-                    final_session
-                ]
-                rows_to_append.append(row_data)
-        
-        if rows_to_append:
-            conn = init_connection()
-            sheet = conn.open("AI Videos").sheet1
-            sheet.append_rows(rows_to_append, value_input_option="USER_ENTERED")
-            get_ai_videos_data.clear() 
+        try:
+            rows_to_append = []
+            ft_str = entry_ft_time.strftime('%H:%M')
             
-            st.session_state.account_blocks = [1]
+            for p in projects_data:
+                if p["Account"] and p["Project"]:  
+                    sl_no_str = f"{p['Sl.No']:02d}"
+                    vids_session_str = f"{p['Videos']:02d}"
+                    
+                    nt_str = f"{p['Next_Date'].strftime('%Y-%m-%d')} {p['Next_Time'].strftime('%H:%M')}"
+                    
+                    row_data = [
+                        entry_ft_date.strftime('%Y-%m-%d'),
+                        ft_str,
+                        nt_str,
+                        GS_FORMULA, 
+                        p["Account"],
+                        p["Project"],
+                        sl_no_str,
+                        vids_session_str,
+                        final_session
+                    ]
+                    rows_to_append.append(row_data)
             
-            if final_session:
-                st.success(f"✅ {len(rows_to_append)} Record(s) for {final_session} Logged Successfully!")
+            if rows_to_append:
+                conn = init_connection()
+                sheet = conn.open("AI Videos").sheet1
+                sheet.append_rows(rows_to_append, value_input_option="USER_ENTERED")
+                get_ai_videos_data.clear() 
+                
+                st.session_state.account_blocks = [1]
+                
+                if final_session:
+                    st.success(f"✅ {len(rows_to_append)} Record(s) for {final_session} Logged Successfully!")
+                else:
+                    st.success(f"✅ {len(rows_to_append)} Record(s) Logged Successfully!")
+                    
+                time.sleep(1.5)
+                st.rerun()
             else:
-                st.success(f"✅ {len(rows_to_append)} Record(s) Logged Successfully!")
-                
-            time.sleep(1.5)
-            st.rerun()
-        else:
-            st.error("⚠️ Please fill out at least one valid Account and Project combination.")
+                st.error("⚠️ Please fill out at least one valid Account and Project combination.")
+        except Exception as e:
+            st.error(f"⚠️ API Error while saving data: {e}")

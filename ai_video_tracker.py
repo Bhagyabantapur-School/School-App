@@ -35,7 +35,7 @@ def get_all_data():
             sheet1 = ss.sheet1
             
         data1 = sheet1.get_all_values()
-        if data1: data1[0] = [str(x).strip() for x in data1[0]] # Strip invisible spaces
+        if data1: data1[0] = [str(x).strip() for x in data1[0]] 
         
         cols1 = ["Date", "Finished Time", "Next Time", "Time Gap", "Account", "Project", "Sl.No. of last Video", "Videos of the session", "Session"]
         if len(data1) > 1:
@@ -173,7 +173,6 @@ if all_sess_names:
     nums = [extract_num(x) for x in all_sess_names]
     if nums: next_num = max(nums) + 1
 
-# Check if currently running in df_sessions
 if not df_sessions.empty and 'Session_Name' in df_sessions.columns:
     running_sessions = df_sessions[df_sessions['End_Time'] == 'RUNNING']
     if not running_sessions.empty:
@@ -181,7 +180,6 @@ if not df_sessions.empty and 'Session_Name' in df_sessions.columns:
         active_row_idx_sessions = running_sessions.index[0] + 2 
         active_session_name = str(running_sessions.iloc[0]['Session_Name'])
 
-# Check if currently running in df_routine
 if not df_routine.empty and 'Activity' in df_routine.columns:
     running_routine = df_routine[(df_routine['End_Time'] == 'RUNNING') & (df_routine['Activity'].astype(str).str.upper() == 'AI VIDEOS')]
     if not running_routine.empty:
@@ -404,23 +402,29 @@ with tab_entry:
                     custom_project = st.text_input("New Project", key=f"proj_cust_{acc_idx}_{proj_idx}", placeholder="Type new...") if selected_project == "-- Select / Type New --" else ""
                     final_project = custom_project.strip() if selected_project == "-- Select / Type New --" else selected_project
                     
+                dynamic_vid_key = f"vid_{acc_idx}_{proj_idx}_{final_project}"
+                # Grab real-time user input for Session Videos
+                current_vids = st.session_state.get(dynamic_vid_key, 0)
+                
+                historical_sl_no = 0
+                if final_project and not df_videos.empty and 'Project' in df_videos.columns and 'Sl.No. of last Video' in df_videos.columns:
+                    proj_data = df_videos[df_videos['Project'].astype(str).str.strip() == final_project]
+                    if not proj_data.empty:
+                        last_logged_val = proj_data.iloc[-1]['Sl.No. of last Video']
+                        try:
+                            historical_sl_no = int(last_logged_val)
+                        except (ValueError, TypeError):
+                            pass
+                
+                # Auto-increment calculation
+                auto_sl_no = historical_sl_no + current_vids
+                
                 with c_sl:
-                    default_sl_no = 0
-                    if final_project and not df_videos.empty and 'Project' in df_videos.columns and 'Sl.No. of last Video' in df_videos.columns:
-                        proj_data = df_videos[df_videos['Project'].astype(str).str.strip() == final_project]
-                        if not proj_data.empty:
-                            last_logged_val = proj_data.iloc[-1]['Sl.No. of last Video']
-                            try:
-                                default_sl_no = int(last_logged_val)
-                            except (ValueError, TypeError):
-                                pass
-                    
                     dynamic_sl_key = f"sl_{acc_idx}_{proj_idx}_{final_project}"
-                    sl_no = st.number_input("Last Sl.No.", min_value=0, value=default_sl_no, step=1, format="%02d", key=dynamic_sl_key)
+                    sl_no = st.number_input("Last Sl.No.", min_value=0, value=auto_sl_no, step=1, format="%02d", key=dynamic_sl_key)
                     
                 with c_vid:
-                    dynamic_vid_key = f"vid_{acc_idx}_{proj_idx}_{final_project}"
-                    vids_session = st.number_input("Session Videos", min_value=0, value=0, step=1, format="%02d", key=dynamic_vid_key)
+                    vids_session = st.number_input("Session Videos", min_value=0, step=1, format="%02d", key=dynamic_vid_key)
                     
                 projects_data.append({
                     "Account": final_account,

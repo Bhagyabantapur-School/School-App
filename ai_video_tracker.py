@@ -403,7 +403,8 @@ with tab_entry:
                     final_project = custom_project.strip() if selected_project == "-- Select / Type New --" else selected_project
                     
                 dynamic_vid_key = f"vid_{acc_idx}_{proj_idx}_{final_project}"
-                # Grab real-time user input for Session Videos
+                
+                # Fetch real-time input from the session state to allow instant calculation
                 current_vids = st.session_state.get(dynamic_vid_key, 0)
                 
                 historical_sl_no = 0
@@ -416,11 +417,12 @@ with tab_entry:
                         except (ValueError, TypeError):
                             pass
                 
-                # Auto-increment calculation
+                # The auto-calculation for the Sl.No.
                 auto_sl_no = historical_sl_no + current_vids
                 
                 with c_sl:
-                    dynamic_sl_key = f"sl_{acc_idx}_{proj_idx}_{final_project}"
+                    # Dynamically append the current_vids to the key to break Streamlit's state memory
+                    dynamic_sl_key = f"sl_{acc_idx}_{proj_idx}_{final_project}_v{current_vids}"
                     sl_no = st.number_input("Last Sl.No.", min_value=0, value=auto_sl_no, step=1, format="%02d", key=dynamic_sl_key)
                     
                 with c_vid:

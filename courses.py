@@ -22,26 +22,25 @@ def get_ist_now():
 def init_connection():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
-    client = gspread.authorize(creds)
-    return client.open("sk_money_location")
+    # Returning the main client so we can open multiple different files
+    gc = gspread.authorize(creds)
+    return gc
 
 try:
-    sh = init_connection()
+    gc = init_connection()
 except Exception as e:
-    st.error(f"Could not connect to Google Sheets. Error: {e}")
+    st.error(f"Could not connect to Google APIs. Error: {e}")
     st.stop()
 
 @st.cache_data(ttl=60)
-def load_money_data():
-    # Helper to clear cache when auto-syncing payments
-    try: return pd.DataFrame(sh.worksheet("MONEY_DATA").get_all_records())
-    except: return pd.DataFrame()
+def clear_money_cache():
+    return True
 
 # ==========================================
 # APP LAYOUT
 # ==========================================
 st.title("🎓 Course & Learning Tracker")
-st.write("Track your workshops, app logins, and automatically sync payments.")
+st.write("Track your workshops and automatically sync payments to your main ledger.")
 
 with st.expander("📝 Add New Course / Workshop", expanded=True):
     c1, c2 = st.columns(2)
@@ -52,7 +51,6 @@ with st.expander("📝 Add New Course / Workshop", expanded=True):
         provider = st.text_input("Provider / Platform", placeholder="e.g., be10x")
         finance_type = st.radio("Finance Type", ["Paid", "Free"])
 
-    # Only show the cost input if the course is Paid
     cost = 0.0
     if finance_type == "Paid":
         cost = st.number_input("Course Fee (₹)", min_value=0.0, step=50.0, format="%.2f")
@@ -70,39 +68,45 @@ with st.expander("📝 Add New Course / Workshop", expanded=True):
                 date_logged = get_ist_now().strftime("%d-%m-%Y")
                 time_logged = get_ist_now().strftime("%H:%M")
                 
-                # 1. Log the details to COURSE_LOG tab
-                try: 
-                    course_ws = sh.worksheet("COURSE_LOG")
-                except gspread.exceptions.WorksheetNotFound:
-                    course_ws = sh.add_worksheet(title="COURSE_LOG", rows="100", cols="8")
-                    course_ws.append_row(["Date_Logged", "Course_Name", "Provider", "Type", "Finance", "Cost_INR", "Schedule", "Login_Details"])
+                # 1. Connect to the NEW separate Google Sheet file: "COURSE_LOG"
+                try:
+                    course_sh = gc.open("COURSE_LOG")
+                    course_ws = course_sh.sheet1 # Uses the first default tab (Sheet1)
+                    
+                    # Check if headers exist, if not add them automatically
+                    if not course_ws.get_all_values():
+                        course_ws.append_row(["Date_Logged", "Course_Name", "Provider", "Type", "Finance", "Cost_INR", "Schedule", "Login_Details"])
+                        
+                except gspread.exceptions.SpreadsheetNotFound:
+                    st.error("⚠️ Could not find 'COURSE_LOG'. Please make sure you created the file in Google Drive and shared it with your service account email!")
+                    st.stop()
                 
+                # Add data to COURSE_LOG file
                 course_ws.append_row([
                     date_logged, course_name, provider, course_type, finance_type, cost, schedule_date, login_details
                 ])
                 
-                # 2. AUTOMATICALLY sync with Main MONEY_DATA if it is a Paid course
+                # 2. AUTOMATICALLY sync with main "sk_money_location" if it is Paid
                 if finance_type == "Paid" and cost > 0:
-                    money_ws = sh.worksheet("MONEY_DATA")
+                    money_sh = gc.open("sk_money_location")
+                    money_ws = money_sh.worksheet("MONEY_DATA")
                     
-                    # Dynamically set Entity based on Type (PERS for Personal, WORK for School/Teaching)
                     entity = "PERS" if course_type == "Personal" else "WORK"
                     
-                    # Money leaves MB account (OUT)
                     money_row = [
                         date_logged, time_logged, "", cost, "MB", "Salary", 
                         entity, "EDUCATION", "Course/Workshop", course_name, "", provider, "Auto-logged Course Fee"
                     ]
                     
                     money_ws.append_row(money_row)
-                    load_money_data.clear() # Clears cache in the main app
+                    clear_money_cache.clear() 
                     
-                    st.success(f"✅ Course saved and ₹{cost} payment synced to Money Tracker!")
+                    st.success(f"✅ Course saved to COURSE_LOG and ₹{cost} payment synced to sk_money_location!")
                 else:
-                    st.success("✅ Free course details saved successfully!")
+                    st.success("✅ Free course details saved to COURSE_LOG successfully!")
                     
                 st.balloons()
             except Exception as e:
-                st.error(f"Error saving to Google Sheets: {e}")
+                st.error(f"Error saving data: {e}")
         else:
             st.warning("⚠️ Please provide at least the Course Name and Provider.")

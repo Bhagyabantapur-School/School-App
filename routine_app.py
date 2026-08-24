@@ -260,7 +260,7 @@ try:
     app_groups = {
         "MONEY": [("Money App", "money_app.py", "💰"), ("Money Utilities", "money_utilities.py", "💳"), ("Money Tracker", "money_tracker.py", "💵"), ("Product Inventory", "product_inventory.py", "📦")],
         "LOCATION": [("Location App", "location_app.py", "📍"), ("Packing Tracker", "packing_app.py", "🎒")],
-        "ROUTINE": [("Live Routine Hub", "routine_app.py", "⏱️"), ("Routine Audit", "routine_audit.py", "🔍"), ("Routine Editor", "routine_editor.py", "✏️"), ("Project App", "project_app.py", "🚀"), ("AI Video Tracker", "ai_video_tracker.py", "🎬")],
+        "ROUTINE": [("Live Routine Hub", "routine_app.py", "⏱️"), ("Routine Audit", "routine_audit.py", "🔍"), ("Routine Editor", "routine_editor.py", "✏️"), ("Project App", "project_app.py", "🚀"), ("AI Video Tracker", "ai_video_tracker.py", "🎬"), ("Courses", "courses.py", "📚")],
         "HEALTH": [("Health Hub", "health_app.py", "❤️"), ("Sleep & Water", "sleep_water_app.py", "💧")],
         "SCH WORK": [("MDM Returns", "mdm_return_log.py", "📦"), ("Video Manager", "bps_ytfb_videos.py", "🎬"), ("Speech Mastery", "speech_prep_app.py", "🎙️")],
         "HOME": [("Trace Inventory", "trace.py", "🏷️"), ("Monthly Tracker", "monthly_app.py", "📆")],

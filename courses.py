@@ -65,7 +65,7 @@ def clear_money_cache():
 # APP LAYOUT
 # ==========================================
 st.title("🎓 Course & Learning Tracker")
-st.write("Track your workshops and automatically sync payments to your main ledger.")
+st.write("Track your workshops, update your progress, and manage learning expenses.")
 
 # ------------------------------------------
 # SECTION 1: DATA ENTRY FORM
@@ -96,7 +96,6 @@ with st.expander("📝 Add New Course / Workshop", expanded=False):
                 account_opts = ["MB", "AXIS Bank", "A. Cash"] 
             account_sel = st.selectbox("Paid From Account", account_opts)
         with pc3:
-            # Defaults to whatever is typed in the Provider box
             to_from = st.text_input("Paid To (TO_FROM)", value=provider, placeholder="e.g., be10x")
         st.divider()
 
@@ -119,15 +118,20 @@ with st.expander("📝 Add New Course / Workshop", expanded=False):
                     course_ws = course_sh.sheet1
                     
                     if not course_ws.get_all_values():
-                        course_ws.append_row(["Date_Logged", "Course_Name", "Provider", "Type", "Finance", "Cost_INR", "Account", "To_From", "Schedule", "Login_Details"])
+                        course_ws.append_row(["Date_Logged", "Course_Name", "Provider", "Type", "Finance", "Cost_INR", "Account", "To_From", "Schedule", "Login_Details", "Status"])
                         
                 except gspread.exceptions.SpreadsheetNotFound:
-                    st.error("⚠️ Could not find 'COURSE_LOG'. Please make sure you created the file in Google Drive and shared it with your service account email!")
+                    st.error("⚠️ Could not find 'COURSE_LOG'. Please make sure it's created and shared!")
                     st.stop()
                 
-                # Add data to COURSE_LOG file
+                # Dynamically ensure the Status header exists for older sheets
+                headers = course_ws.row_values(1)
+                if "Status" not in headers:
+                    course_ws.update_cell(1, len(headers) + 1, "Status")
+                
+                # Add data to COURSE_LOG file (with default 'Not Started' status)
                 course_ws.append_row([
-                    date_logged, course_name, provider, course_type, finance_type, cost, account_sel, to_from, schedule_date, login_details
+                    date_logged, course_name, provider, course_type, finance_type, cost, account_sel, to_from, schedule_date, login_details, "Not Started"
                 ])
                 
                 # 2. AUTOMATICALLY sync with main "sk_money_location" (SMART MAPPING)
@@ -137,10 +141,8 @@ with st.expander("📝 Add New Course / Workshop", expanded=False):
                     
                     entity = "PERS" if course_type == "Personal" else "WORK"
                     
-                    # Read the headers of your MONEY_DATA tab
                     raw_headers = money_ws.row_values(1)
                     clean_headers = [str(h).strip().upper() for h in raw_headers]
-                    
                     money_row = [""] * len(raw_headers)
                     
                     def fill_col(possible_names, value):
@@ -150,7 +152,6 @@ with st.expander("📝 Add New Course / Workshop", expanded=False):
                                 money_row[clean_headers.index(clean_name)] = value
                                 return 
                     
-                    # Precisely mapping every single value based on column names
                     fill_col(["DATE"], date_logged)
                     fill_col(["TIME"], time_logged)
                     fill_col(["IN"], "")
@@ -165,7 +166,6 @@ with st.expander("📝 Add New Course / Workshop", expanded=False):
                     fill_col(["LOCATION"], "HOME") 
                     fill_col(["REMARK", "REMARKS"], "Auto-logged Course Fee")
                     
-                    # Append the perfectly mapped row
                     money_ws.append_row(money_row)
                     clear_money_cache.clear() 
                     
@@ -173,9 +173,9 @@ with st.expander("📝 Add New Course / Workshop", expanded=False):
                 else:
                     st.success("✅ Free course details saved to COURSE_LOG successfully!")
                 
-                # Refresh the course library dashboard instantly
+                # Refresh the course library instantly
                 load_courses.clear()
-                st.balloons()
+                st.rerun()
             except Exception as e:
                 st.error(f"Error saving data: {e}")
         else:
@@ -193,16 +193,29 @@ df_courses = load_courses()
 if df_courses.empty:
     st.info("No courses logged yet. Fill out the form above to add your first workshop!")
 else:
-    # Reverse the dataframe so the newest added courses appear at the top
+    # 1. Capture the exact Google Sheet row number (Index 0 is Row 2 in GSheets)
+    df_courses['gsheet_row'] = df_courses.index + 2
+    
+    # 2. Reverse the dataframe so newest entries are at the top
     df_courses = df_courses.iloc[::-1].reset_index(drop=True)
     
     for index, row in df_courses.iterrows():
-        # Handle cases where data might be missing safely
         c_name = row.get("Course_Name", "Unknown Course")
         c_prov = row.get("Provider", "Unknown Provider")
         
-        # Create a beautiful expander title
-        expander_title = f"{c_name} | 🏫 {c_prov}"
+        # Determine Status and corresponding Icon
+        current_status = row.get("Status", "Not Started")
+        if pd.isna(current_status) or str(current_status).strip() == "":
+            current_status = "Not Started"
+            
+        if current_status == "Completed":
+            status_icon = "🟢"
+        elif current_status == "In Progress":
+            status_icon = "🟡"
+        else:
+            status_icon = "⚪"
+            
+        expander_title = f"{status_icon} {c_name} | 🏫 {c_prov}"
         
         with st.expander(expander_title):
             # Top row metrics
@@ -210,26 +223,59 @@ else:
             mc1.metric("Category", row.get("Type", "-"))
             
             finance = str(row.get("Finance", "-"))
-            mc2.metric("Finance Type", finance)
+            mc2.metric("Finance", finance)
             
-            # Format the cost metric nicely
             cost_val = row.get("Cost_INR", 0)
             if finance.upper() == "FREE" or cost_val == 0 or cost_val == "":
                 mc3.metric("Cost", "Free 🎉")
             else:
                 mc3.metric("Cost", f"₹{cost_val}")
             
-            # Additional details nicely formatted
+            # Details
             st.markdown(f"**🗓️ Schedule:** {row.get('Schedule', 'Not specified')}")
             
-            # Show payment footprint if it was paid
             if finance.upper() == "PAID":
                 st.caption(f"💳 *Paid from {row.get('Account', '-')} to {row.get('To_From', '-')} on {row.get('Date_Logged', '-')}*")
             
-            # Login and Access details highlighted in a blue info box
-            st.markdown("**🔑 Login & Access Details:**")
+            # Login Details
             access_info = str(row.get("Login_Details", "")).strip()
             if access_info:
-                st.info(access_info)
-            else:
-                st.warning("No access details saved for this course.")
+                st.info(f"**🔑 Login & Access:**\n\n{access_info}")
+            
+            # --- PROGRESS UPDATER ---
+            st.divider()
+            sc1, sc2 = st.columns([2, 1])
+            with sc1:
+                status_opts = ["Not Started", "In Progress", "Completed"]
+                default_idx = status_opts.index(current_status) if current_status in status_opts else 0
+                
+                new_status = st.selectbox(
+                    "Update Progress:", 
+                    status_opts, 
+                    index=default_idx, 
+                    key=f"status_sel_{row['gsheet_row']}",
+                    label_visibility="collapsed"
+                )
+            with sc2:
+                # When this button is clicked, it targets the exact row in Google Sheets and updates it
+                if st.button("🔄 Update Status", key=f"save_status_{row['gsheet_row']}", use_container_width=True):
+                    try:
+                        course_sh = gc.open("COURSE_LOG")
+                        course_ws = course_sh.sheet1
+                        
+                        # Find exactly which column is the "Status" column
+                        headers = course_ws.row_values(1)
+                        if "Status" not in headers:
+                            course_ws.update_cell(1, len(headers) + 1, "Status")
+                            col_idx = len(headers) + 1
+                        else:
+                            col_idx = headers.index("Status") + 1
+                            
+                        # Update the specific cell in Google Sheets
+                        course_ws.update_cell(row['gsheet_row'], col_idx, new_status)
+                        
+                        st.success("✅ Progress updated!")
+                        load_courses.clear() # Clear cache to fetch fresh data
+                        st.rerun() # Instantly refresh the page to show the new badge
+                    except Exception as e:
+                        st.error(f"Failed to update progress: {e}")

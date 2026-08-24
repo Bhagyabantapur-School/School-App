@@ -101,13 +101,12 @@ with st.expander("📝 Add New Course / Workshop", expanded=True):
                 date_logged = get_ist_now().strftime("%d-%m-%Y")
                 time_logged = get_ist_now().strftime("%H:%M")
                 
-                # 1. Connect to the NEW separate Google Sheet file: "COURSE_LOG"
+                # 1. Connect to the separate Google Sheet file: "COURSE_LOG"
                 try:
                     course_sh = gc.open("COURSE_LOG")
                     course_ws = course_sh.sheet1
                     
                     if not course_ws.get_all_values():
-                        # Expanded headers for the course database
                         course_ws.append_row(["Date_Logged", "Course_Name", "Provider", "Type", "Finance", "Cost_INR", "Account", "To_From", "Schedule", "Login_Details"])
                         
                 except gspread.exceptions.SpreadsheetNotFound:
@@ -119,7 +118,7 @@ with st.expander("📝 Add New Course / Workshop", expanded=True):
                     date_logged, course_name, provider, course_type, finance_type, cost, account_sel, to_from, schedule_date, login_details
                 ])
                 
-                # 2. AUTOMATICALLY sync with main "sk_money_location" (BULLETPROOF MAPPING)
+                # 2. AUTOMATICALLY sync with main "sk_money_location" (SMART MAPPING)
                 if finance_type == "Paid" and cost > 0:
                     money_sh = gc.open("sk_money_location")
                     money_ws = money_sh.worksheet("MONEY_DATA")
@@ -128,21 +127,19 @@ with st.expander("📝 Add New Course / Workshop", expanded=True):
                     
                     # Read the headers of your MONEY_DATA tab
                     raw_headers = money_ws.row_values(1)
-                    
-                    # Clean the headers: removes hidden spaces and makes them uppercase for matching
                     clean_headers = [str(h).strip().upper() for h in raw_headers]
                     
                     # Create an empty row matching the exact length of your columns
                     money_row = [""] * len(raw_headers)
                     
-                    # Upgraded helper function: checks for variations and ignores hidden spaces
                     def fill_col(possible_names, value):
                         for name in possible_names:
                             clean_name = name.strip().upper()
                             if clean_name in clean_headers:
                                 money_row[clean_headers.index(clean_name)] = value
-                                return # Stop looking once we find a match
+                                return 
                     
+                    # Precisely mapping every single value based on column names
                     fill_col(["DATE"], date_logged)
                     fill_col(["TIME"], time_logged)
                     fill_col(["IN"], "")
@@ -154,8 +151,11 @@ with st.expander("📝 Add New Course / Workshop", expanded=True):
                     fill_col(["SUB CATEGORY", "SUB-CATEGORY", "SUBCATEGORY"], "Course/Workshop")
                     fill_col(["PARTICULARS"], course_name)
                     
-                    # This will now catch "TO_FROM", "TO/FROM", or even "TO_FROM " with hidden spaces!
+                    # Perfectly targets your TO_FROM column now
                     fill_col(["TO_FROM", "TO/FROM", "TO / FROM", "TO FROM"], to_from) 
+                    
+                    # Explicitly targets your Location column
+                    fill_col(["LOCATION"], "HOME") 
                     
                     fill_col(["REMARK", "REMARKS"], "Auto-logged Course Fee")
                     

@@ -34,7 +34,8 @@ app_groups = {
         ("Routine Audit", "routine_audit.py", "🔍"), 
         ("Routine Editor", "routine_editor.py", "✏️"), 
         ("Project App", "project_app.py", "🚀"), 
-        ("AI Video Tracker", "ai_video_tracker.py", "🤖")
+        ("AI Video Tracker", "ai_video_tracker.py", "🤖"),
+        ("Courses", "courses.py", "🎓") # <-- Added here
     ],
     "HEALTH": [
         ("Health Hub", "health_app.py", "❤️"), 

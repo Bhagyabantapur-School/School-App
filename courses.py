@@ -40,6 +40,15 @@ def load_config():
     except Exception as e:
         return pd.DataFrame()
 
+# Fetch Course Data for the Library Dashboard
+@st.cache_data(ttl=60)
+def load_courses():
+    try:
+        course_sh = gc.open("COURSE_LOG")
+        return pd.DataFrame(course_sh.sheet1.get_all_records())
+    except Exception:
+        return pd.DataFrame()
+
 config_df = load_config()
 
 def get_list(column_name):
@@ -58,7 +67,10 @@ def clear_money_cache():
 st.title("🎓 Course & Learning Tracker")
 st.write("Track your workshops and automatically sync payments to your main ledger.")
 
-with st.expander("📝 Add New Course / Workshop", expanded=True):
+# ------------------------------------------
+# SECTION 1: DATA ENTRY FORM
+# ------------------------------------------
+with st.expander("📝 Add New Course / Workshop", expanded=False):
     c1, c2 = st.columns(2)
     with c1:
         course_name = st.text_input("Course / Workshop Name", placeholder="e.g., AI Tools Workshop")
@@ -129,7 +141,6 @@ with st.expander("📝 Add New Course / Workshop", expanded=True):
                     raw_headers = money_ws.row_values(1)
                     clean_headers = [str(h).strip().upper() for h in raw_headers]
                     
-                    # Create an empty row matching the exact length of your columns
                     money_row = [""] * len(raw_headers)
                     
                     def fill_col(possible_names, value):
@@ -150,13 +161,8 @@ with st.expander("📝 Add New Course / Workshop", expanded=True):
                     fill_col(["CATEGORY"], "EDUCATION")
                     fill_col(["SUB CATEGORY", "SUB-CATEGORY", "SUBCATEGORY"], "Course/Workshop")
                     fill_col(["PARTICULARS"], course_name)
-                    
-                    # Perfectly targets your TO_FROM column now
                     fill_col(["TO_FROM", "TO/FROM", "TO / FROM", "TO FROM"], to_from) 
-                    
-                    # Explicitly targets your Location column
                     fill_col(["LOCATION"], "HOME") 
-                    
                     fill_col(["REMARK", "REMARKS"], "Auto-logged Course Fee")
                     
                     # Append the perfectly mapped row
@@ -166,9 +172,64 @@ with st.expander("📝 Add New Course / Workshop", expanded=True):
                     st.success(f"✅ Course saved to COURSE_LOG and ₹{cost} synced perfectly to main ledger!")
                 else:
                     st.success("✅ Free course details saved to COURSE_LOG successfully!")
-                    
+                
+                # Refresh the course library dashboard instantly
+                load_courses.clear()
                 st.balloons()
             except Exception as e:
                 st.error(f"Error saving data: {e}")
         else:
             st.warning("⚠️ Please provide at least the Course Name and Provider.")
+
+
+# ------------------------------------------
+# SECTION 2: MY COURSE LIBRARY DASHBOARD
+# ------------------------------------------
+st.divider()
+st.subheader("📚 My Course Library")
+
+df_courses = load_courses()
+
+if df_courses.empty:
+    st.info("No courses logged yet. Fill out the form above to add your first workshop!")
+else:
+    # Reverse the dataframe so the newest added courses appear at the top
+    df_courses = df_courses.iloc[::-1].reset_index(drop=True)
+    
+    for index, row in df_courses.iterrows():
+        # Handle cases where data might be missing safely
+        c_name = row.get("Course_Name", "Unknown Course")
+        c_prov = row.get("Provider", "Unknown Provider")
+        
+        # Create a beautiful expander title
+        expander_title = f"{c_name} | 🏫 {c_prov}"
+        
+        with st.expander(expander_title):
+            # Top row metrics
+            mc1, mc2, mc3 = st.columns(3)
+            mc1.metric("Category", row.get("Type", "-"))
+            
+            finance = str(row.get("Finance", "-"))
+            mc2.metric("Finance Type", finance)
+            
+            # Format the cost metric nicely
+            cost_val = row.get("Cost_INR", 0)
+            if finance.upper() == "FREE" or cost_val == 0 or cost_val == "":
+                mc3.metric("Cost", "Free 🎉")
+            else:
+                mc3.metric("Cost", f"₹{cost_val}")
+            
+            # Additional details nicely formatted
+            st.markdown(f"**🗓️ Schedule:** {row.get('Schedule', 'Not specified')}")
+            
+            # Show payment footprint if it was paid
+            if finance.upper() == "PAID":
+                st.caption(f"💳 *Paid from {row.get('Account', '-')} to {row.get('To_From', '-')} on {row.get('Date_Logged', '-')}*")
+            
+            # Login and Access details highlighted in a blue info box
+            st.markdown("**🔑 Login & Access Details:**")
+            access_info = str(row.get("Login_Details", "")).strip()
+            if access_info:
+                st.info(access_info)
+            else:
+                st.warning("No access details saved for this course.")

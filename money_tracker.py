@@ -14,10 +14,10 @@ st.write("---")
 # Configuration & Setup
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="Money Tracker Visualizer", page_icon="📊", layout="wide")
-st.title("📊 Money Tracker: Fund Allocation Visualization")
+st.title("📊 Money Tracker & Analytics")
 
 # -----------------------------------------------------------------------------
-# Live Google Sheets Connection (Auto-Creates Tab if Missing)
+# Live Google Sheets Connections
 # -----------------------------------------------------------------------------
 @st.cache_resource
 def init_connection():
@@ -27,111 +27,168 @@ def init_connection():
     return gc
 
 @st.cache_data(ttl=60) 
-def load_sheet_data():
+def load_funds_data():
     try:
         gc = init_connection()
         sh = gc.open("sk_money_location")
-        
-        # Try to open FundsData, if it doesn't exist, create it!
         try:
             ws = sh.worksheet("FundsData")
         except gspread.exceptions.WorksheetNotFound:
-            ws = sh.add_worksheet(title="FundsData", rows="100", cols="4")
-            ws.append_row(["Account", "Fund_Type", "Amount", "Purpose"])
-            return pd.DataFrame() # Returns empty so the app doesn't crash on first load
+            return pd.DataFrame() # Return empty if it doesn't exist yet
             
         df = pd.DataFrame(ws.get_all_records())
-        
-        # Ensure the 'Amount' column is treated as numbers
         if 'Amount' in df.columns:
             df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
-            
         return df
     except Exception as e:
-        st.error(f"Error fetching live data: {e}")
         return pd.DataFrame()
 
-df = load_sheet_data()
+@st.cache_data(ttl=60)
+def load_money_data():
+    try:
+        gc = init_connection()
+        sh = gc.open("sk_money_location")
+        df = pd.DataFrame(sh.worksheet("MONEY_DATA").get_all_records())
+        
+        # Clean numeric columns to ensure they graph properly
+        for col in ['In', 'Out']:
+            if col in df.columns:
+                # Replaces empty strings or spaces with 0, converts to float
+                df[col] = pd.to_numeric(df[col].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
+        return df
+    except Exception as e:
+        st.error(f"Error fetching MONEY_DATA: {e}")
+        return pd.DataFrame()
 
-# Stop the app gracefully if the sheet was just created or is empty
-if df.empty:
-    st.info("✨ **I just automatically created the 'FundsData' tab in your Google Sheet!**")
-    st.warning("Go to your 'sk_money_location' Google Sheet, open the new 'FundsData' tab, and add a few rows of data so I have something to graph!")
-    st.stop()
+df_funds = load_funds_data()
+df_money = load_money_data()
 
 # -----------------------------------------------------------------------------
-# Sidebar & Account Selection
+# Sidebar & Global Filters
 # -----------------------------------------------------------------------------
 st.sidebar.header("Tracker Controls")
-if 'Account' in df.columns:
-    accounts = df['Account'].dropna().unique().tolist()
-    selected_account = st.sidebar.selectbox("Select Account", ["All Accounts"] + accounts)
-else:
-    st.error("⚠️ Column 'Account' is missing from the Google Sheet.")
-    st.stop()
+
+# Combine all unique accounts from both sheets so the dropdown is complete
+accounts_set = set()
+if not df_funds.empty and 'Account' in df_funds.columns:
+    accounts_set.update(df_funds['Account'].dropna().unique().tolist())
+if not df_money.empty and 'Account' in df_money.columns:
+    accounts_set.update(df_money['Account'].dropna().unique().tolist())
+
+# Clean up empty strings from the account list
+accounts_list = [acc for acc in list(accounts_set) if str(acc).strip() != ""]
+
+selected_account = st.sidebar.selectbox("Filter by Account", ["All Accounts"] + sorted(accounts_list))
 
 # -----------------------------------------------------------------------------
-# Data Processing
+# Apply Global Filters to Data
 # -----------------------------------------------------------------------------
 if selected_account != "All Accounts":
-    filtered_df = df[df['Account'] == selected_account]
-else:
-    filtered_df = df
+    if not df_funds.empty:
+        df_funds = df_funds[df_funds['Account'] == selected_account]
+    if not df_money.empty:
+        df_money = df_money[df_money['Account'] == selected_account]
 
-if 'Fund_Type' in filtered_df.columns and 'Amount' in filtered_df.columns:
-    fund_totals = filtered_df.groupby('Fund_Type')['Amount'].sum().reset_index()
-    total_amount = fund_totals['Amount'].sum()
+# -----------------------------------------------------------------------------
+# Dashboard Layout (Tabs)
+# -----------------------------------------------------------------------------
+tab1, tab2 = st.tabs(["💼 Fund Allocation", "📈 Category Breakdown"])
 
-    if total_amount > 0:
-        fund_totals['Percentage'] = (fund_totals['Amount'] / total_amount) * 100
+# ==========================================
+# TAB 1: FUND ALLOCATION
+# ==========================================
+with tab1:
+    if df_funds.empty:
+        st.info("✨ **No fund data found.** Ensure you have added rows to your 'FundsData' tab in Google Sheets.")
     else:
-        fund_totals['Percentage'] = 0
-else:
-    st.error("⚠️ Columns 'Fund_Type' and/or 'Amount' are missing.")
-    st.stop()
+        if 'Fund_Type' in df_funds.columns and 'Amount' in df_funds.columns:
+            fund_totals = df_funds.groupby('Fund_Type')['Amount'].sum().reset_index()
+            total_amount = fund_totals['Amount'].sum()
 
-# -----------------------------------------------------------------------------
-# Dashboard Display
-# -----------------------------------------------------------------------------
-st.subheader(f"Account Overview: {selected_account}")
+            if total_amount > 0:
+                fund_totals['Percentage'] = (fund_totals['Amount'] / total_amount) * 100
+                
+                breakdown_texts = []
+                for _, row in fund_totals.iterrows():
+                    breakdown_texts.append(f"**{row['Fund_Type']}**: ₹{row['Amount']:.2f} ({row['Percentage']:.0f}%)")
+                
+                st.info(f"**Account Selection:** {selected_account}  \n**Total:** ₹{total_amount:.2f}  \n" + " | ".join(breakdown_texts))
 
-if total_amount > 0:
-    breakdown_texts = []
-    for _, row in fund_totals.iterrows():
-        breakdown_texts.append(f"**{row['Fund_Type']}**: ₹{row['Amount']:.2f} ({row['Percentage']:.0f}%)")
-    
-    st.info(f"In **{selected_account}** account have: " + ", ".join(breakdown_texts))
+                st.divider()
+                col1, col2 = st.columns(2)
 
-    st.divider()
-    col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("#### Fund Distribution")
+                    fig_pie = px.pie(
+                        fund_totals, values='Amount', names='Fund_Type', hole=0.4,
+                        color_discrete_sequence=px.colors.qualitative.Pastel
+                    )
+                    fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+                    st.plotly_chart(fig_pie, use_container_width=True)
 
-    with col1:
-        st.markdown(f"#### Fund Distribution in {selected_account}")
-        fig_pie = px.pie(
-            fund_totals, 
-            values='Amount', 
-            names='Fund_Type', 
-            hole=0.4,
-            color='Fund_Type',
-            color_discrete_sequence=px.colors.qualitative.Pastel
-        )
-        fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-        st.plotly_chart(fig_pie, use_container_width=True)
+                with col2:
+                    st.markdown("#### Fund Spending Purpose")
+                    if 'Purpose' in df_funds.columns:
+                        purpose_totals = df_funds.groupby(['Fund_Type', 'Purpose'])['Amount'].sum().reset_index()
+                        fig_bar = px.bar(
+                            purpose_totals, x='Fund_Type', y='Amount', color='Purpose',
+                            text_auto='.2f', color_discrete_sequence=px.colors.qualitative.Set2
+                        )
+                        st.plotly_chart(fig_bar, use_container_width=True)
+            else:
+                st.warning(f"No funds currently tracked for: {selected_account}.")
 
-    with col2:
-        st.markdown(f"#### Fund Spending Purpose")
-        if 'Purpose' in filtered_df.columns:
-            purpose_totals = filtered_df.groupby(['Fund_Type', 'Purpose'])['Amount'].sum().reset_index()
-            fig_bar = px.bar(
-                purpose_totals, 
-                x='Fund_Type', 
-                y='Amount',
-                color='Purpose',
-                text_auto='.2f',
-                color_discrete_sequence=px.colors.qualitative.Set2
-            )
-            st.plotly_chart(fig_bar, use_container_width=True)
+# ==========================================
+# TAB 2: CATEGORY BREAKDOWN
+# ==========================================
+with tab2:
+    if df_money.empty:
+        st.info("No transaction history found in your MONEY_DATA tab.")
+    else:
+        st.subheader(f"Expense Analytics: {selected_account}")
+        
+        # Filter to only show outgoing money (Expenses)
+        if 'Out' in df_money.columns and 'Category' in df_money.columns:
+            expenses = df_money[df_money['Out'] > 0].copy()
+            
+            if not expenses.empty:
+                # Clean up empty categories to display as "Uncategorized"
+                expenses['Category'] = expenses['Category'].replace(r'^\s*$', 'Uncategorized', regex=True).fillna('Uncategorized')
+                
+                if 'Sub Category' in expenses.columns:
+                    expenses['Sub Category'] = expenses['Sub Category'].replace(r'^\s*$', 'Uncategorized', regex=True).fillna('Uncategorized')
+                else:
+                    expenses['Sub Category'] = 'Uncategorized'
+                
+                # Group the data
+                cat_sub_totals = expenses.groupby(['Category', 'Sub Category'])['Out'].sum().reset_index()
+                
+                # Create the interactive Sunburst chart
+                st.markdown("#### Expense Hierarchy (Click on a Category to Zoom In!)")
+                fig_sunburst = px.sunburst(
+                    cat_sub_totals,
+                    path=['Category', 'Sub Category'],
+                    values='Out',
+                    color='Category',
+                    color_discrete_sequence=px.colors.qualitative.Prism
+                )
+                fig_sunburst.update_traces(textinfo="label+percent parent+value")
+                st.plotly_chart(fig_sunburst, use_container_width=True)
+                
+                # Show the clean data table
+                st.divider()
+                st.markdown("#### Detailed Category Summary")
+                
+                # Format the table nicely
+                display_table = cat_sub_totals.sort_values(by='Out', ascending=False)
+                display_table = display_table.rename(columns={"Out": "Total Spent (₹)"})
+                st.dataframe(
+                    display_table, 
+                    use_container_width=True, 
+                    hide_index=True,
+                    column_config={"Total Spent (₹)": st.column_config.NumberColumn(format="₹%.2f")}
+                )
+            else:
+                st.info(f"No outgoing expenses recorded for: {selected_account}.")
         else:
-            st.warning("Column 'Purpose' is missing from the Google Sheet, cannot render Bar Chart.")
-else:
-    st.warning(f"No funds currently tracked in the {selected_account} account.")
+            st.error("Missing required columns ('Out' or 'Category') in MONEY_DATA tab.")

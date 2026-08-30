@@ -510,16 +510,7 @@ if st.session_state.user_role == "teacher":
                                                 sk = f"{ar}_{an}"
                                                 if sk not in st.session_state.scanned_keys: 
                                                     st.session_state.scanned_keys.append(sk)
-                                                    
-                                                    # Instant dual-sync to Cloud (MDM + Attendance)
-                                                    curr_time_str = now.strftime("%H:%M")
-                                                    mdm_data = pd.DataFrame([{'Date': curr_date_str, 'Teacher': t_name_select, 'Class': tc, 'Section': ts, 'Roll': ar, 'Name': an, 'Time': curr_time_str}])
-                                                    append_sheet_df('mdm_log', mdm_data)
-                                                    
-                                                    att_data = pd.DataFrame([{'Date': curr_date_str, 'Class': tc, 'Section': ts, 'Roll': ar, 'Name': an, 'Status': True}])
-                                                    append_sheet_df('student_attendance_master', att_data)
-                                                    
-                                                    st.session_state.scan_msg = f"✅ {an} logged & synced to Cloud!"
+                                                    st.session_state.scan_msg = f"✅ Scanned: {an}. Click 'Submit MDM Data' when done."
                                                     should_rerun = True
                                         else: st.error(f"❌ MISMATCH: {sn} is NOT in {tc} {ts}!")
                                 else: st.warning("⚠️ Invalid ID Card Format.")
@@ -553,11 +544,15 @@ if st.session_state.user_role == "teacher":
                                     lbl = "<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>" + str(r['Name']) + "</b><br><span style='font-size:12px; color:gray;'>Roll: " + str(r['Roll']) + " | " + str(r['Class']) + "<br>📅 MDM Days: <b>" + str(r['Historical_Count']) + "</b></span></div>"
                                     st.markdown(lbl, unsafe_allow_html=True)
                                 with c3:
-                                    if r['MDM (Ate)'] or (r['Scan_Key'] in st.session_state.scanned_keys):
+                                    if r['MDM (Ate)']:
                                         st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                         alc += 1
+                                    elif r['Scan_Key'] in st.session_state.scanned_keys:
+                                        st.markdown("<span style='color:#007bff; font-weight:bold;'>✅ Scanned</span>", unsafe_allow_html=True)
+                                        sel_mdm.append(r)
                                     else:
-                                        if st.checkbox("Ate MDM", value=False, key=f"mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                                        if st.checkbox("Ate MDM", value=False, key=f"mdm_{r['Roll']}_{r['Name']}"): 
+                                            sel_mdm.append(r)
                                 st.divider()
                                 
                             if not not_regular_ros.empty:
@@ -569,20 +564,40 @@ if st.session_state.user_role == "teacher":
                                             lbl = "<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>" + str(r['Name']) + "</b><br><span style='font-size:12px; color:gray;'>Roll: " + str(r['Roll']) + " | " + str(r['Class']) + "<br>📅 MDM Days: <b>" + str(r['Historical_Count']) + "</b></span></div>"
                                             st.markdown(lbl, unsafe_allow_html=True)
                                         with c3:
-                                            if r['MDM (Ate)'] or (r['Scan_Key'] in st.session_state.scanned_keys):
+                                            if r['MDM (Ate)']:
                                                 st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                                 alc += 1
+                                            elif r['Scan_Key'] in st.session_state.scanned_keys:
+                                                st.markdown("<span style='color:#007bff; font-weight:bold;'>✅ Scanned</span>", unsafe_allow_html=True)
+                                                sel_mdm.append(r)
                                             else:
-                                                if st.checkbox("Ate MDM", value=False, key=f"mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                                                if st.checkbox("Ate MDM", value=False, key=f"mdm_{r['Roll']}_{r['Name']}"): 
+                                                    sel_mdm.append(r)
                                         st.divider()
                             
                             cp.markdown(f"<div class='floating-counter'>✅ Selected: {len(sel_mdm)} | Done: {alc}</div>", unsafe_allow_html=True)
                             st.markdown(f"<h3 style='text-align:center;'>✅ New Selected: {len(sel_mdm)}</h3>", unsafe_allow_html=True)
+                            
                             if st.button("Submit MDM Data"):
                                 if sel_mdm:
                                     nr = [{'Date': curr_date_str, 'Teacher': t_name_select, 'Class': x['Class'], 'Section': ts, 'Roll': x['Roll'], 'Name': x['Name'], 'Time': now.strftime("%H:%M")} for x in sel_mdm]
                                     append_sheet_df('mdm_log', pd.DataFrame(nr))
-                                    st.session_state.scanned_keys = []; st.success(f"Submitted {len(nr)} to Cloud DB!"); st.rerun()
+                                    
+                                    # Safe Attendance Sync (prevents duplicates)
+                                    al = fetch_sheet_data('student_attendance_master')
+                                    existing_att_rolls = []
+                                    if not al.empty and 'Date' in al.columns:
+                                        class_cond = al['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else (al['Class'] == tc)
+                                        curr_al = al[(al['Date'].astype(str) == curr_date_str) & class_cond & (al['Section'] == ts) & (al['Status'] == True)]
+                                        existing_att_rolls = curr_al['Roll'].astype(str).tolist()
+                                        
+                                    att_nr = [{'Date': curr_date_str, 'Class': x['Class'], 'Section': ts, 'Roll': x['Roll'], 'Name': x['Name'], 'Status': True} for x in sel_mdm if str(x['Roll']) not in existing_att_rolls]
+                                    if att_nr:
+                                        append_sheet_df('student_attendance_master', pd.DataFrame(att_nr))
+                                    
+                                    st.session_state.scanned_keys = []
+                                    st.success(f"Submitted {len(nr)} to Cloud DB!")
+                                    st.rerun()
                                 else: st.warning("No new students selected.")
                             st.markdown('</div>', unsafe_allow_html=True)
                             
@@ -822,16 +837,7 @@ elif st.session_state.user_role == "admin":
                                         sk = f"{ar}_{an}"
                                         if sk not in st.session_state.admin_scanned_keys: 
                                             st.session_state.admin_scanned_keys.append(sk)
-                                            
-                                            # Instant dual-sync to Cloud (MDM + Attendance)
-                                            curr_time_str = now.strftime("%H:%M")
-                                            mdm_data = pd.DataFrame([{'Date': curr_date_str, 'Teacher': f"{st.session_state.user_name} (Admin)", 'Class': tc, 'Section': ts, 'Roll': ar, 'Name': an, 'Time': curr_time_str}])
-                                            append_sheet_df('mdm_log', mdm_data)
-                                            
-                                            att_data = pd.DataFrame([{'Date': curr_date_str, 'Class': tc, 'Section': ts, 'Roll': ar, 'Name': an, 'Status': True}])
-                                            append_sheet_df('student_attendance_master', att_data)
-                                            
-                                            st.session_state.admin_scan_msg = f"✅ {an} logged & synced to Cloud!"
+                                            st.session_state.admin_scan_msg = f"✅ Scanned: {an}. Click 'Submit Admin MDM Data' when done."
                                             should_rerun = True
                                 else: st.error(f"❌ MISMATCH: {sn} is NOT in {tc} {ts}!")
                         else: st.warning("⚠️ Invalid ID Card Format.")
@@ -864,11 +870,15 @@ elif st.session_state.user_role == "admin":
                             lbl = "<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>" + str(r['Name']) + "</b><br><span style='font-size:12px; color:gray;'>Roll: " + str(r['Roll']) + " | " + str(r['Class']) + "<br>📅 MDM Days: <b>" + str(r['Historical_Count']) + "</b></span></div>"
                             st.markdown(lbl, unsafe_allow_html=True)
                         with c3:
-                            if r['MDM (Ate)'] or (r['Scan_Key'] in st.session_state.admin_scanned_keys):
+                            if r['MDM (Ate)']:
                                 st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                 alc += 1
+                            elif r['Scan_Key'] in st.session_state.admin_scanned_keys:
+                                st.markdown("<span style='color:#007bff; font-weight:bold;'>✅ Scanned</span>", unsafe_allow_html=True)
+                                sel_mdm.append(r)
                             else:
-                                if st.checkbox("Ate MDM", value=False, key=f"adm_mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                                if st.checkbox("Ate MDM", value=False, key=f"adm_mdm_{r['Roll']}_{r['Name']}"): 
+                                    sel_mdm.append(r)
                         st.divider()
                         
                     if not not_regular_ros.empty:
@@ -880,20 +890,40 @@ elif st.session_state.user_role == "admin":
                                     lbl = "<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>" + str(r['Name']) + "</b><br><span style='font-size:12px; color:gray;'>Roll: " + str(r['Roll']) + " | " + str(r['Class']) + "<br>📅 MDM Days: <b>" + str(r['Historical_Count']) + "</b></span></div>"
                                     st.markdown(lbl, unsafe_allow_html=True)
                                 with c3:
-                                    if r['MDM (Ate)'] or (r['Scan_Key'] in st.session_state.admin_scanned_keys):
+                                    if r['MDM (Ate)']:
                                         st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                         alc += 1
+                                    elif r['Scan_Key'] in st.session_state.admin_scanned_keys:
+                                        st.markdown("<span style='color:#007bff; font-weight:bold;'>✅ Scanned</span>", unsafe_allow_html=True)
+                                        sel_mdm.append(r)
                                     else:
-                                        if st.checkbox("Ate MDM", value=False, key=f"adm_mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                                        if st.checkbox("Ate MDM", value=False, key=f"adm_mdm_{r['Roll']}_{r['Name']}"): 
+                                            sel_mdm.append(r)
                                 st.divider()
                     
                     cp.markdown(f"<div class='floating-counter'>✅ Selected: {len(sel_mdm)} | Done: {alc}</div>", unsafe_allow_html=True)
                     st.markdown(f"<h3 style='text-align:center;'>✅ New Selected: {len(sel_mdm)}</h3>", unsafe_allow_html=True)
+                    
                     if st.button("Submit Admin MDM Data"):
                         if sel_mdm:
                             nr = [{'Date': curr_date_str, 'Teacher': f"{st.session_state.user_name} (Admin)", 'Class': x['Class'], 'Section': ts, 'Roll': x['Roll'], 'Name': x['Name'], 'Time': now.strftime("%H:%M")} for x in sel_mdm]
                             append_sheet_df('mdm_log', pd.DataFrame(nr))
-                            st.session_state.admin_scanned_keys = []; st.success(f"Added {len(nr)} late entries to Cloud DB!"); st.rerun()
+                            
+                            # Safe Attendance Sync (prevents duplicates)
+                            al = fetch_sheet_data('student_attendance_master')
+                            existing_att_rolls = []
+                            if not al.empty and 'Date' in al.columns:
+                                class_cond = al['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else (al['Class'] == tc)
+                                curr_al = al[(al['Date'].astype(str) == curr_date_str) & class_cond & (al['Section'] == ts) & (al['Status'] == True)]
+                                existing_att_rolls = curr_al['Roll'].astype(str).tolist()
+                                
+                            att_nr = [{'Date': curr_date_str, 'Class': x['Class'], 'Section': ts, 'Roll': x['Roll'], 'Name': x['Name'], 'Status': True} for x in sel_mdm if str(x['Roll']) not in existing_att_rolls]
+                            if att_nr:
+                                append_sheet_df('student_attendance_master', pd.DataFrame(att_nr))
+                            
+                            st.session_state.admin_scanned_keys = []
+                            st.success(f"Added {len(nr)} late entries to Cloud DB!")
+                            st.rerun()
                         else: st.warning("No new students selected.")
                     st.markdown('</div>', unsafe_allow_html=True)
                 else: st.warning("No students found.")

@@ -226,10 +226,16 @@ def generate_pdf(students_list, photo_dict, progress_bar=None):
         if os.path.exists('logo.png'): 
             pdf.image('logo.png', x=x+68.5, y=y+1, w=16, h=16)
             
-        pdf.set_font("Arial", 'B', 8.5); pdf.set_text_color(255, 255, 255)
-        pdf.set_xy(x+2, y+1.5); pdf.cell(66, 5, "BHAGYABANTAPUR PRIMARY SCHOOL", 0, 1, 'C')
+        # --- MODIFIED HEADER TEXT POSITIONS ---
         pdf.set_font("Arial", '', 6)
-        pdf.set_xy(x+2, y+6.5); pdf.cell(66, 3, "Mob: 7908390822  |  ID CARD - SESSION 2026", 0, 1, 'C')
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_xy(x+2, y+2) 
+        pdf.cell(66, 3, "Mob: 7908390822  |  ID CARD - SESSION 2026", 0, 1, 'C')
+        
+        pdf.set_font("Arial", 'B', 8.5)
+        pdf.set_xy(x+2, y+6) 
+        pdf.cell(66, 5, "BHAGYABANTAPUR PRIMARY SCHOOL", 0, 1, 'C')
+        # --------------------------------------
         
         # Photo
         photo_x, photo_y, photo_w, photo_h = x+3, y+14, 18, 22

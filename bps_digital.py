@@ -516,9 +516,14 @@ if st.session_state.user_role == "teacher":
                                             if str(ar) in me:
                                                 st.warning(f"⚠️ {an} is already marked for MDM today!")
                                             else:
-                                                sk = f"{ar}_{an}"
+                                                sk = f"{str(ar).strip()}_{str(an).strip()}"
                                                 if sk not in st.session_state.scanned_keys: 
                                                     st.session_state.scanned_keys.append(sk)
+                                                    
+                                                    # Programmatically tick the checkbox via Session State
+                                                    chk_key = f"mdm_{str(ar).strip()}_{str(an).strip()}"
+                                                    st.session_state[chk_key] = True 
+                                                    
                                                     st.session_state.scan_msg = f"✅ Scanned: {an}. Click 'Submit MDM Data' when done."
                                                     should_rerun = True
                                         else: st.error(f"❌ MISMATCH: {sn} is NOT in {tc} {ts}!")
@@ -557,10 +562,11 @@ if st.session_state.user_role == "teacher":
                                         st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                         alc += 1
                                     else:
-                                        # Fix: Force Streamlit to treat this as a brand new pre-checked widget when scanned
-                                        is_scanned = r['Scan_Key'] in st.session_state.scanned_keys
-                                        chk_key = f"mdm_{str(r['Roll']).strip()}_{str(r['Name']).strip()}" + ("_scanned" if is_scanned else "")
-                                        if st.checkbox("Ate MDM", value=is_scanned, key=chk_key): 
+                                        chk_key = f"mdm_{str(r['Roll']).strip()}_{str(r['Name']).strip()}"
+                                        if chk_key not in st.session_state:
+                                            st.session_state[chk_key] = False
+                                        
+                                        if st.checkbox("Ate MDM", key=chk_key): 
                                             sel_mdm.append(r)
                                 st.divider()
                                 
@@ -577,9 +583,11 @@ if st.session_state.user_role == "teacher":
                                                 st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                                 alc += 1
                                             else:
-                                                is_scanned = r['Scan_Key'] in st.session_state.scanned_keys
-                                                chk_key = f"mdm_{str(r['Roll']).strip()}_{str(r['Name']).strip()}" + ("_scanned" if is_scanned else "")
-                                                if st.checkbox("Ate MDM", value=is_scanned, key=chk_key): 
+                                                chk_key = f"mdm_{str(r['Roll']).strip()}_{str(r['Name']).strip()}"
+                                                if chk_key not in st.session_state:
+                                                    st.session_state[chk_key] = False
+                                                
+                                                if st.checkbox("Ate MDM", key=chk_key): 
                                                     sel_mdm.append(r)
                                         st.divider()
                             
@@ -603,6 +611,12 @@ if st.session_state.user_role == "teacher":
                                     if att_nr:
                                         append_sheet_df('student_attendance_master', pd.DataFrame(att_nr))
                                     
+                                    # Memory Cleanup
+                                    for x in sel_mdm:
+                                        chk_key = f"mdm_{str(x['Roll']).strip()}_{str(x['Name']).strip()}"
+                                        if chk_key in st.session_state:
+                                            del st.session_state[chk_key]
+
                                     st.session_state.scanned_keys = []
                                     st.success(f"Submitted {len(nr)} to Cloud DB!")
                                     st.rerun()
@@ -844,9 +858,14 @@ elif st.session_state.user_role == "admin":
                                     if str(ar) in me:
                                         st.warning(f"⚠️ {an} is already marked for MDM today!")
                                     else:
-                                        sk = f"{ar}_{an}"
+                                        sk = f"{str(ar).strip()}_{str(an).strip()}"
                                         if sk not in st.session_state.admin_scanned_keys: 
                                             st.session_state.admin_scanned_keys.append(sk)
+                                            
+                                            # Programmatically tick the checkbox via Session State!
+                                            chk_key = f"adm_mdm_{str(ar).strip()}_{str(an).strip()}"
+                                            st.session_state[chk_key] = True 
+                                            
                                             st.session_state.admin_scan_msg = f"✅ Scanned: {an}. Click 'Submit Admin MDM Data' when done."
                                             should_rerun = True
                                 else: st.error(f"❌ MISMATCH: {sn} is NOT in {tc} {ts}!")
@@ -884,9 +903,11 @@ elif st.session_state.user_role == "admin":
                                 st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                 alc += 1
                             else:
-                                is_scanned = r['Scan_Key'] in st.session_state.admin_scanned_keys
-                                chk_key = f"adm_mdm_{str(r['Roll']).strip()}_{str(r['Name']).strip()}" + ("_scanned" if is_scanned else "")
-                                if st.checkbox("Ate MDM", value=is_scanned, key=chk_key): 
+                                chk_key = f"adm_mdm_{str(r['Roll']).strip()}_{str(r['Name']).strip()}"
+                                if chk_key not in st.session_state:
+                                    st.session_state[chk_key] = False
+                                
+                                if st.checkbox("Ate MDM", key=chk_key): 
                                     sel_mdm.append(r)
                         st.divider()
                         
@@ -903,9 +924,11 @@ elif st.session_state.user_role == "admin":
                                         st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                         alc += 1
                                     else:
-                                        is_scanned = r['Scan_Key'] in st.session_state.admin_scanned_keys
-                                        chk_key = f"adm_mdm_{str(r['Roll']).strip()}_{str(r['Name']).strip()}" + ("_scanned" if is_scanned else "")
-                                        if st.checkbox("Ate MDM", value=is_scanned, key=chk_key): 
+                                        chk_key = f"adm_mdm_{str(r['Roll']).strip()}_{str(r['Name']).strip()}"
+                                        if chk_key not in st.session_state:
+                                            st.session_state[chk_key] = False
+                                        
+                                        if st.checkbox("Ate MDM", key=chk_key): 
                                             sel_mdm.append(r)
                                 st.divider()
                     
@@ -929,6 +952,12 @@ elif st.session_state.user_role == "admin":
                             if att_nr:
                                 append_sheet_df('student_attendance_master', pd.DataFrame(att_nr))
                             
+                            # Memory Cleanup
+                            for x in sel_mdm:
+                                chk_key = f"adm_mdm_{str(x['Roll']).strip()}_{str(x['Name']).strip()}"
+                                if chk_key in st.session_state:
+                                    del st.session_state[chk_key]
+
                             st.session_state.admin_scanned_keys = []
                             st.success(f"Added {len(nr)} late entries to Cloud DB!")
                             st.rerun()

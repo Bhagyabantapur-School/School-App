@@ -356,6 +356,18 @@ def parse_time_safe(t_str):
         except Exception: continue
     return None
 
+def parse_qr_data(qr_string):
+    try:
+        data = {}
+        parts = qr_string.split('|')
+        for part in parts:
+            if ':' in part:
+                key, value = part.split(':', 1)
+                data[key.strip()] = value.strip()
+        return data
+    except:
+        return None
+
 def render_header():
     if os.path.exists("logo.png"):
         with open("logo.png", "rb") as f:
@@ -486,9 +498,9 @@ if st.session_state.user_role == "teacher":
 
                             if qv:
                                 should_rerun = False
-                                try:
-                                    qd = {p.split(':')[0].strip(): p.split(':')[1].strip() for p in qv.split('|') if ':' in p}
-                                    sr, sn = str(qd.get('Roll', '')), str(qd.get('Name', ''))
+                                data = parse_qr_data(qv)
+                                if data:
+                                    sr, sn = str(data.get('Roll', '')), str(data.get('Name', 'Unknown'))
                                     if sr and sn:
                                         match_df = ros[(ros['Roll'].astype(str).str.strip() == sr) & (ros['Name'].astype(str).str.strip() == sn)]
                                         if not match_df.empty:
@@ -499,11 +511,19 @@ if st.session_state.user_role == "teacher":
                                                 sk = f"{ar}_{an}"
                                                 if sk not in st.session_state.scanned_keys: 
                                                     st.session_state.scanned_keys.append(sk)
-                                                    st.session_state[f"mdm_{ar}_{an}"] = True 
-                                                    st.session_state.scan_msg = f"✅ Scanned Successfully: {an}"
+                                                    
+                                                    # Instant dual-sync to Cloud (MDM + Attendance)
+                                                    curr_time_str = now.strftime("%H:%M")
+                                                    mdm_data = pd.DataFrame([{'Date': curr_date_str, 'Teacher': t_name_select, 'Class': tc, 'Section': ts, 'Roll': ar, 'Name': an, 'Time': curr_time_str}])
+                                                    append_sheet_df('mdm_log', mdm_data)
+                                                    
+                                                    att_data = pd.DataFrame([{'Date': curr_date_str, 'Class': tc, 'Section': ts, 'Roll': ar, 'Name': an, 'Status': True}])
+                                                    append_sheet_df('student_attendance_master', att_data)
+                                                    
+                                                    st.session_state.scan_msg = f"✅ {an} logged & synced to Cloud!"
                                                     should_rerun = True
                                         else: st.error(f"❌ MISMATCH: {sn} is NOT in {tc} {ts}!")
-                                except Exception: st.warning("⚠️ Invalid ID Card.")
+                                else: st.warning("⚠️ Invalid ID Card Format.")
                                 if should_rerun: st.rerun()
 
                             ros['Scan_Key'] = ros['Roll'].astype(str) + "_" + ros['Name'].astype(str)
@@ -792,9 +812,9 @@ elif st.session_state.user_role == "admin":
                         
                     if qv:
                         should_rerun = False
-                        try:
-                            qd = {p.split(':')[0].strip(): p.split(':')[1].strip() for p in qv.split('|') if ':' in p}
-                            sr, sn = str(qd.get('Roll', '')), str(qd.get('Name', ''))
+                        data = parse_qr_data(qv)
+                        if data:
+                            sr, sn = str(data.get('Roll', '')), str(data.get('Name', 'Unknown'))
                             if sr and sn:
                                 match_df = ros[(ros['Roll'].astype(str).str.strip() == sr) & (ros['Name'].astype(str).str.strip() == sn)]
                                 if not match_df.empty:
@@ -805,11 +825,19 @@ elif st.session_state.user_role == "admin":
                                         sk = f"{ar}_{an}"
                                         if sk not in st.session_state.admin_scanned_keys: 
                                             st.session_state.admin_scanned_keys.append(sk)
-                                            st.session_state[f"adm_mdm_{ar}_{an}"] = True 
-                                            st.session_state.admin_scan_msg = f"✅ Scanned Successfully: {an}"
+                                            
+                                            # Instant dual-sync to Cloud (MDM + Attendance)
+                                            curr_time_str = now.strftime("%H:%M")
+                                            mdm_data = pd.DataFrame([{'Date': curr_date_str, 'Teacher': f"{st.session_state.user_name} (Admin)", 'Class': tc, 'Section': ts, 'Roll': ar, 'Name': an, 'Time': curr_time_str}])
+                                            append_sheet_df('mdm_log', mdm_data)
+                                            
+                                            att_data = pd.DataFrame([{'Date': curr_date_str, 'Class': tc, 'Section': ts, 'Roll': ar, 'Name': an, 'Status': True}])
+                                            append_sheet_df('student_attendance_master', att_data)
+                                            
+                                            st.session_state.admin_scan_msg = f"✅ {an} logged & synced to Cloud!"
                                             should_rerun = True
                                 else: st.error(f"❌ MISMATCH: {sn} is NOT in {tc} {ts}!")
-                        except Exception: st.warning("⚠️ Invalid ID Card.")
+                        else: st.warning("⚠️ Invalid ID Card Format.")
                         if should_rerun: st.rerun()
 
                     ros['Scan_Key'] = ros['Roll'].astype(str) + "_" + ros['Name'].astype(str)

@@ -369,6 +369,15 @@ def parse_qr_data(qr_string):
     except:
         return None
 
+def highlight_past_holidays(row):
+    try:
+        h_date = datetime.strptime(str(row['Date']).strip(), "%d-%m-%Y").date()
+        if h_date < now.date():
+            return ['background-color: #e2e3e5; color: #888888;'] * len(row)
+    except Exception:
+        pass
+    return [''] * len(row)
+
 def render_header():
     if os.path.exists("logo.png"):
         with open("logo.png", "rb") as f:
@@ -677,8 +686,10 @@ if st.session_state.user_role == "teacher":
         with at_tabs[3]:
             st.subheader("🗓️ School Holiday List")
             hd = get_local_csv('holidays.csv')
-            if not hd.empty: st.table(hd)
-            else: st.info("No holiday data available.")
+            if not hd.empty: 
+                st.dataframe(hd.style.apply(highlight_past_holidays, axis=1), hide_index=True, use_container_width=True)
+            else: 
+                st.info("No holiday data available.")
 
 # -------------------------------
 # ADMIN VIEW
@@ -1168,8 +1179,10 @@ elif st.session_state.user_role == "admin":
     with tabs[6]: 
         st.subheader("🗓️ School Holiday List")
         hd = get_local_csv('holidays.csv')
-        if not hd.empty: st.data_editor(hd, num_rows="dynamic", key="h_edit")
-        else: st.info("No data.")
+        if not hd.empty: 
+            st.data_editor(hd.style.apply(highlight_past_holidays, axis=1), hide_index=True, num_rows="dynamic", key="h_edit", use_container_width=True)
+        else: 
+            st.info("No data.")
         
     with tabs[7]:
         st.subheader("⚙️ System Settings")

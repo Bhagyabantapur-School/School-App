@@ -494,24 +494,27 @@ with tabs[1]:
             student_name = data.get('Name', 'Unknown')
             student_class = data.get('Class', 'Unknown')
             student_section = data.get('Section', 'A') # Defaulting to A if not found
+            student_father = data.get('Father', '') # Extra matching parameter
             
-            # Fetch the Master Sheet to cross-reference and find the student's Roll number
+            # Fetch the Master Sheet to cross-reference and find the exact student
             m_df = fetch_sheet_data("students_master")
             
-            # Match the student based on Name, Class, and Section since Roll is no longer in QR
+            # Exact Match using Name, Class, Section, and Father to avoid duplicate conflicts
             s_match = m_df[
                 (m_df['Name'] == student_name) & 
                 (m_df['Class'].astype(str) == str(student_class)) & 
-                (m_df['Section'].astype(str) == str(student_section))
+                (m_df['Section'].astype(str) == str(student_section)) &
+                (m_df['Father'].astype(str) == str(student_father))
             ]
             
-            # Retrieve the roll number, or default to Unknown if they somehow aren't in the DB
+            # Retrieve the roll number based on exact match, or default to Unknown
             student_roll = str(s_match.iloc[0]['Roll']) if not s_match.empty else "Unknown"
 
             # Check if already scanned today
             existing = st.session_state['attendance_log'][
                 (st.session_state['attendance_log']['Name'] == student_name) & 
-                (st.session_state['attendance_log']['Class'] == student_class)
+                (st.session_state['attendance_log']['Class'] == student_class) &
+                (st.session_state['attendance_log']['Roll'] == student_roll)
             ]
             
             if not existing.empty:

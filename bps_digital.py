@@ -684,7 +684,7 @@ if st.session_state.user_role == "teacher":
                 st.dataframe(ml[~ml['Type'].isin(['Half Day', 'On Duty', 'School Work', 'Census 2027', 'Class Shift / Internal Duty'])][['Date', 'Type', 'Substitute']], hide_index=True)
 
         with at_tabs[3]:
-            st.subheader("🗓️ School Holiday List")
+            st.subheader("🗓️ School Holiday")
             hd = get_local_csv('holidays.csv')
             if not hd.empty: 
                 st.dataframe(hd.style.apply(highlight_past_holidays, axis=1), hide_index=True, use_container_width=True)
@@ -1177,7 +1177,7 @@ elif st.session_state.user_role == "admin":
         if st.button("Publish to Cloud"): publish_notice(n); st.success("Published!")
 
     with tabs[6]: 
-        st.subheader("🗓️ School Holiday List")
+        st.subheader("🗓️ School Holiday")
         hd = get_local_csv('holidays.csv')
         if not hd.empty: 
             st.data_editor(hd.style.apply(highlight_past_holidays, axis=1), hide_index=True, num_rows="dynamic", key="h_edit", use_container_width=True)

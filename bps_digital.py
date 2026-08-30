@@ -13,6 +13,7 @@ if 'authenticated' not in st.session_state or not st.session_state.authenticated
 
 # Re-initialize states strictly used by bps_digital.py
 if 'scan_msg' not in st.session_state: st.session_state.scan_msg = None
+if 'scanned_keys' not in st.session_state: st.session_state.scanned_keys = []
 if 'admin_scanned_keys' not in st.session_state: st.session_state.admin_scanned_keys = []
 if 'admin_scan_msg' not in st.session_state: st.session_state.admin_scan_msg = None
 
@@ -486,8 +487,6 @@ if st.session_state.user_role == "teacher":
                                 
                             ros['Historical_Count'] = ros['Roll'].astype(str).str.strip().map(lambda x: mdm_day_counts.get(x, 0))
                             # ---------------------------------
-
-                            if 'scanned_keys' not in st.session_state: st.session_state.scanned_keys = []
                             
                             st.write("📸 **Scan ID Cards (or tick manually below):**")
                             qv = qrcode_scanner(key='at_qr')
@@ -554,12 +553,11 @@ if st.session_state.user_role == "teacher":
                                     lbl = "<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>" + str(r['Name']) + "</b><br><span style='font-size:12px; color:gray;'>Roll: " + str(r['Roll']) + " | " + str(r['Class']) + "<br>📅 MDM Days: <b>" + str(r['Historical_Count']) + "</b></span></div>"
                                     st.markdown(lbl, unsafe_allow_html=True)
                                 with c3:
-                                    if r['MDM (Ate)']:
+                                    if r['MDM (Ate)'] or (r['Scan_Key'] in st.session_state.scanned_keys):
                                         st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                         alc += 1
                                     else:
-                                        isc = r['Scan_Key'] in st.session_state.scanned_keys
-                                        if st.checkbox("Ate MDM", value=isc, key=f"mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                                        if st.checkbox("Ate MDM", value=False, key=f"mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
                                 st.divider()
                                 
                             if not not_regular_ros.empty:
@@ -571,12 +569,11 @@ if st.session_state.user_role == "teacher":
                                             lbl = "<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>" + str(r['Name']) + "</b><br><span style='font-size:12px; color:gray;'>Roll: " + str(r['Roll']) + " | " + str(r['Class']) + "<br>📅 MDM Days: <b>" + str(r['Historical_Count']) + "</b></span></div>"
                                             st.markdown(lbl, unsafe_allow_html=True)
                                         with c3:
-                                            if r['MDM (Ate)']:
+                                            if r['MDM (Ate)'] or (r['Scan_Key'] in st.session_state.scanned_keys):
                                                 st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                                 alc += 1
                                             else:
-                                                isc = r['Scan_Key'] in st.session_state.scanned_keys
-                                                if st.checkbox("Ate MDM", value=isc, key=f"mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                                                if st.checkbox("Ate MDM", value=False, key=f"mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
                                         st.divider()
                             
                             cp.markdown(f"<div class='floating-counter'>✅ Selected: {len(sel_mdm)} | Done: {alc}</div>", unsafe_allow_html=True)
@@ -867,12 +864,11 @@ elif st.session_state.user_role == "admin":
                             lbl = "<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>" + str(r['Name']) + "</b><br><span style='font-size:12px; color:gray;'>Roll: " + str(r['Roll']) + " | " + str(r['Class']) + "<br>📅 MDM Days: <b>" + str(r['Historical_Count']) + "</b></span></div>"
                             st.markdown(lbl, unsafe_allow_html=True)
                         with c3:
-                            if r['MDM (Ate)']:
+                            if r['MDM (Ate)'] or (r['Scan_Key'] in st.session_state.admin_scanned_keys):
                                 st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                 alc += 1
                             else:
-                                isc = r['Scan_Key'] in st.session_state.admin_scanned_keys
-                                if st.checkbox("Ate MDM", value=isc, key=f"adm_mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                                if st.checkbox("Ate MDM", value=False, key=f"adm_mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
                         st.divider()
                         
                     if not not_regular_ros.empty:
@@ -884,12 +880,11 @@ elif st.session_state.user_role == "admin":
                                     lbl = "<div style='line-height:1.2; font-size:14px; margin-top:2px;'><b>" + str(r['Name']) + "</b><br><span style='font-size:12px; color:gray;'>Roll: " + str(r['Roll']) + " | " + str(r['Class']) + "<br>📅 MDM Days: <b>" + str(r['Historical_Count']) + "</b></span></div>"
                                     st.markdown(lbl, unsafe_allow_html=True)
                                 with c3:
-                                    if r['MDM (Ate)']:
+                                    if r['MDM (Ate)'] or (r['Scan_Key'] in st.session_state.admin_scanned_keys):
                                         st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                         alc += 1
                                     else:
-                                        isc = r['Scan_Key'] in st.session_state.admin_scanned_keys
-                                        if st.checkbox("Ate MDM", value=isc, key=f"adm_mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
+                                        if st.checkbox("Ate MDM", value=False, key=f"adm_mdm_{r['Roll']}_{r['Name']}"): sel_mdm.append(r)
                                 st.divider()
                     
                     cp.markdown(f"<div class='floating-counter'>✅ Selected: {len(sel_mdm)} | Done: {alc}</div>", unsafe_allow_html=True)

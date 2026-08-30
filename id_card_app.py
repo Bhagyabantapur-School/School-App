@@ -226,7 +226,7 @@ def generate_pdf(students_list, photo_dict, progress_bar=None):
         if os.path.exists('logo.png'): 
             pdf.image('logo.png', x=x+68.5, y=y+1, w=16, h=16)
             
-        # --- MODIFIED HEADER TEXT POSITIONS ---
+        # Header Text
         pdf.set_font("Arial", '', 6)
         pdf.set_text_color(255, 255, 255)
         pdf.set_xy(x+2, y+2) 
@@ -235,7 +235,6 @@ def generate_pdf(students_list, photo_dict, progress_bar=None):
         pdf.set_font("Arial", 'B', 8.5)
         pdf.set_xy(x+2, y+6) 
         pdf.cell(66, 5, "BHAGYABANTAPUR PRIMARY SCHOOL", 0, 1, 'C')
-        # --------------------------------------
         
         # Photo
         photo_x, photo_y, photo_w, photo_h = x+3, y+14, 18, 22
@@ -270,8 +269,8 @@ def generate_pdf(students_list, photo_dict, progress_bar=None):
         pdf.set_xy(detail_x, curr_y); pdf.set_font("Arial", 'B', 7)
         pdf.cell(44, line_h, f"Mob: {student.get('Mobile', '')}", 0, 1)
 
-        # QR Code
-        qr_data = f"Name:{student.get('Name', '')}|Roll:{student.get('Roll', '')}|Mob:{student.get('Mobile', '')}"
+        # Updated QR Code (Name, Class, Section, DOB, Father)
+        qr_data = f"Name:{student.get('Name', '')}|Class:{student.get('Class', '')}|Section:{student.get('Section', 'A')}|DOB:{student.get('DOB', '')}|Father:{student.get('Father', '')}"
         qr = qrcode.make(qr_data); qr_path = tempfile.mktemp(suffix=".png"); qr.save(qr_path)
         pdf.image(qr_path, x=x+4.5, y=y+37, w=15, h=15)
         
@@ -493,15 +492,26 @@ with tabs[1]:
         data = parse_qr_data(qr_code)
         if data:
             student_name = data.get('Name', 'Unknown')
-            student_roll = data.get('Roll', 'Unknown')
+            student_class = data.get('Class', 'Unknown')
+            student_section = data.get('Section', 'A') # Defaulting to A if not found
             
+            # Fetch the Master Sheet to cross-reference and find the student's Roll number
             m_df = fetch_sheet_data("students_master")
-            s_match = m_df[(m_df['Name'] == student_name) & (m_df['Roll'].astype(str) == str(student_roll))]
-            student_class = s_match.iloc[0]['Class'] if not s_match.empty else "Unknown"
+            
+            # Match the student based on Name, Class, and Section since Roll is no longer in QR
+            s_match = m_df[
+                (m_df['Name'] == student_name) & 
+                (m_df['Class'].astype(str) == str(student_class)) & 
+                (m_df['Section'].astype(str) == str(student_section))
+            ]
+            
+            # Retrieve the roll number, or default to Unknown if they somehow aren't in the DB
+            student_roll = str(s_match.iloc[0]['Roll']) if not s_match.empty else "Unknown"
 
+            # Check if already scanned today
             existing = st.session_state['attendance_log'][
                 (st.session_state['attendance_log']['Name'] == student_name) & 
-                (st.session_state['attendance_log']['Roll'] == student_roll)
+                (st.session_state['attendance_log']['Class'] == student_class)
             ]
             
             if not existing.empty:
@@ -518,13 +528,13 @@ with tabs[1]:
                 
                 mdm_data = pd.DataFrame([{
                     'Date': curr_date_str, 'Teacher': 'Scanned via ID App', 
-                    'Class': student_class, 'Section': 'A', 'Roll': student_roll, 
+                    'Class': student_class, 'Section': student_section, 'Roll': student_roll, 
                     'Name': student_name, 'Time': curr_time_str
                 }])
                 append_sheet_df('mdm_log', mdm_data)
 
                 att_data = pd.DataFrame([{
-                    'Date': curr_date_str, 'Class': student_class, 'Section': 'A', 
+                    'Date': curr_date_str, 'Class': student_class, 'Section': student_section, 
                     'Roll': student_roll, 'Name': student_name, 'Status': True
                 }])
                 append_sheet_df('student_attendance_master', att_data)

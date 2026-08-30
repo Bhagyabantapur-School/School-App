@@ -561,8 +561,7 @@ if st.session_state.user_role == "teacher":
                                         st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                         alc += 1
                                     else:
-                                        # Use standard checkbox, allowing session state (from scanner) to control it
-                                        if st.checkbox("Ate MDM", value=False, key=f"mdm_{r['Roll']}_{r['Name']}"): 
+                                        if st.checkbox("Ate MDM", key=f"mdm_{r['Roll']}_{r['Name']}"): 
                                             sel_mdm.append(r)
                                 st.divider()
                                 
@@ -579,7 +578,7 @@ if st.session_state.user_role == "teacher":
                                                 st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                                 alc += 1
                                             else:
-                                                if st.checkbox("Ate MDM", value=False, key=f"mdm_{r['Roll']}_{r['Name']}"): 
+                                                if st.checkbox("Ate MDM", key=f"mdm_{r['Roll']}_{r['Name']}"): 
                                                     sel_mdm.append(r)
                                         st.divider()
                             
@@ -894,7 +893,7 @@ elif st.session_state.user_role == "admin":
                                 st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                 alc += 1
                             else:
-                                if st.checkbox("Ate MDM", value=False, key=f"adm_mdm_{r['Roll']}_{r['Name']}"): 
+                                if st.checkbox("Ate MDM", key=f"adm_mdm_{r['Roll']}_{r['Name']}"): 
                                     sel_mdm.append(r)
                         st.divider()
                         
@@ -911,7 +910,7 @@ elif st.session_state.user_role == "admin":
                                         st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                         alc += 1
                                     else:
-                                        if st.checkbox("Ate MDM", value=False, key=f"adm_mdm_{r['Roll']}_{r['Name']}"): 
+                                        if st.checkbox("Ate MDM", key=f"adm_mdm_{r['Roll']}_{r['Name']}"): 
                                             sel_mdm.append(r)
                                 st.divider()
                     

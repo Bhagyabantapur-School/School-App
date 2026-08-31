@@ -13,6 +13,8 @@ if 'authenticated' not in st.session_state or not st.session_state.authenticated
 
 # Re-initialize states strictly used by bps_digital.py
 if 'scan_msg' not in st.session_state: st.session_state.scan_msg = None
+if 'scanned_keys' not in st.session_state: st.session_state.scanned_keys = []
+if 'admin_scanned_keys' not in st.session_state: st.session_state.admin_scanned_keys = []
 if 'admin_scan_msg' not in st.session_state: st.session_state.admin_scan_msg = None
 
 TEACHER_INITIALS = {"SUKHAMAY KISKU": "SK", "TAPASI RANA": "TR", "SUJATA BISWAS ROTHA": "SBR", "ROHINI SINGH": "RS", "UDAY NARAYAN JANA": "UNJ", "BIMAL KUMAR PATRA": "BKP", "SUSMITA PAUL": "SP", "TAPAN KUMAR MANDAL": "TKM", "MANJUMA KHATUN": "MK"}
@@ -363,6 +365,10 @@ def parse_qr_data(qr_string):
             if ':' in part:
                 key, value = part.split(':', 1)
                 data[key.strip()] = value.strip()
+        # Fallback for plain names without prefixes
+        if not data and qr_string:
+            if ':' not in qr_string and '|' not in qr_string:
+                data['Name'] = qr_string.strip()
         return data
     except:
         return None
@@ -507,39 +513,34 @@ if st.session_state.user_role == "teacher":
                                 data = parse_qr_data(qv)
                                 if data:
                                     sr = str(data.get('Roll', '')).strip().replace('.0', '')
-                                    sn = str(data.get('Name', 'Unknown')).strip()
-                                    if sr and sn:
-                                        match_df = ros[(ros['Roll'].astype(str).str.strip().replace('.0', '') == sr) & (ros['Name'].astype(str).str.strip() == sn)]
+                                    sn = str(data.get('Name', '')).strip()
+                                    
+                                    if sn:
+                                        ros_names_upper = ros['Name'].astype(str).str.strip().str.upper()
+                                        if sr:
+                                            ros_rolls = ros['Roll'].astype(str).str.strip().replace('.0', '')
+                                            match_df = ros[(ros_rolls == sr) & (ros_names_upper == sn.upper())]
+                                        else:
+                                            match_df = ros[ros_names_upper == sn.upper()]
+                                            
                                         if not match_df.empty:
                                             ar = str(match_df.iloc[0]['Roll']).strip().replace('.0', '')
                                             an = str(match_df.iloc[0]['Name']).strip()
-                                            if ar in me:
+                                            if str(ar) in me:
                                                 st.warning(f"⚠️ {an} is already marked for MDM today!")
                                             else:
-                                                # DIRECT CLOUD ENTRY FOR SCANNED CARDS
-                                                curr_time_str = now.strftime("%H:%M")
-                                                
-                                                # 1. MDM Log
-                                                mdm_data = pd.DataFrame([{'Date': curr_date_str, 'Teacher': t_name_select, 'Class': tc, 'Section': ts, 'Roll': ar, 'Name': an, 'Time': curr_time_str}])
-                                                append_sheet_df('mdm_log', mdm_data)
-                                                
-                                                # 2. Attendance Master (Avoid Duplicates)
-                                                al = fetch_sheet_data('student_attendance_master')
-                                                already_present = False
-                                                if not al.empty and 'Date' in al.columns:
-                                                    class_cond = al['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else (al['Class'] == tc)
-                                                    curr_al = al[(al['Date'].astype(str) == curr_date_str) & class_cond & (al['Section'] == ts) & (al['Status'] == True)]
-                                                    if ar in curr_al['Roll'].astype(str).tolist():
-                                                        already_present = True
-                                                        
-                                                if not already_present:
-                                                    att_data = pd.DataFrame([{'Date': curr_date_str, 'Class': tc, 'Section': ts, 'Roll': ar, 'Name': an, 'Status': True}])
-                                                    append_sheet_df('student_attendance_master', att_data)
-
-                                                st.session_state.scan_msg = f"✅ Scanned: {an} has been instantly logged to the Cloud!"
-                                                should_rerun = True
+                                                chk_key = f"mdm_{ar}_{an}"
+                                                if chk_key not in st.session_state.scanned_keys: 
+                                                    st.session_state.scanned_keys.append(chk_key)
+                                                    
+                                                    # Tick the checkbox via Session State!
+                                                    st.session_state[chk_key] = True 
+                                                    
+                                                    st.session_state.scan_msg = f"✅ Scanned: {an}. Click 'Submit MDM Data' when done."
+                                                    should_rerun = True
                                         else: st.error(f"❌ MISMATCH: {sn} is NOT in {tc} {ts}!")
-                                else: st.warning("⚠️ Invalid ID Card Format.")
+                                    else: st.warning("⚠️ Invalid ID Card Format. Name missing.")
+                                else: st.warning("⚠️ Could not read QR Code.")
                                 if should_rerun: st.rerun()
 
                             ros['Scan_Key'] = ros['Roll'].astype(str) + "_" + ros['Name'].astype(str)
@@ -574,9 +575,9 @@ if st.session_state.user_role == "teacher":
                                         st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                         alc += 1
                                     else:
-                                        roll_c = str(r['Roll']).strip().replace('.0', '')
-                                        name_c = str(r['Name']).strip()
-                                        chk_key = f"mdm_{roll_c}_{name_c}"
+                                        chk_key = f"mdm_{str(r['Roll']).strip().replace('.0', '')}_{str(r['Name']).strip()}"
+                                        if chk_key not in st.session_state:
+                                            st.session_state[chk_key] = False
                                         
                                         if st.checkbox("Ate MDM", key=chk_key): 
                                             sel_mdm.append(r)
@@ -595,9 +596,9 @@ if st.session_state.user_role == "teacher":
                                                 st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                                 alc += 1
                                             else:
-                                                roll_c = str(r['Roll']).strip().replace('.0', '')
-                                                name_c = str(r['Name']).strip()
-                                                chk_key = f"mdm_{roll_c}_{name_c}"
+                                                chk_key = f"mdm_{str(r['Roll']).strip().replace('.0', '')}_{str(r['Name']).strip()}"
+                                                if chk_key not in st.session_state:
+                                                    st.session_state[chk_key] = False
                                                 
                                                 if st.checkbox("Ate MDM", key=chk_key): 
                                                     sel_mdm.append(r)
@@ -623,14 +624,13 @@ if st.session_state.user_role == "teacher":
                                     if att_nr:
                                         append_sheet_df('student_attendance_master', pd.DataFrame(att_nr))
                                     
-                                    # Memory Cleanup for manual checks
+                                    # Memory Cleanup
                                     for x in sel_mdm:
-                                        roll_c = str(x['Roll']).strip().replace('.0', '')
-                                        name_c = str(x['Name']).strip()
-                                        chk_key = f"mdm_{roll_c}_{name_c}"
+                                        chk_key = f"mdm_{str(x['Roll']).strip().replace('.0', '')}_{str(x['Name']).strip()}"
                                         if chk_key in st.session_state:
                                             del st.session_state[chk_key]
 
+                                    st.session_state.scanned_keys = []
                                     st.success(f"Submitted {len(nr)} to Cloud DB!")
                                     st.rerun()
                                 else: st.warning("No new students selected.")
@@ -864,39 +864,34 @@ elif st.session_state.user_role == "admin":
                         data = parse_qr_data(qv)
                         if data:
                             sr = str(data.get('Roll', '')).strip().replace('.0', '')
-                            sn = str(data.get('Name', 'Unknown')).strip()
-                            if sr and sn:
-                                match_df = ros[(ros['Roll'].astype(str).str.strip().replace('.0', '') == sr) & (ros['Name'].astype(str).str.strip() == sn)]
+                            sn = str(data.get('Name', '')).strip()
+                            
+                            if sn:
+                                ros_names_upper = ros['Name'].astype(str).str.strip().str.upper()
+                                if sr:
+                                    ros_rolls = ros['Roll'].astype(str).str.strip().replace('.0', '')
+                                    match_df = ros[(ros_rolls == sr) & (ros_names_upper == sn.upper())]
+                                else:
+                                    match_df = ros[ros_names_upper == sn.upper()]
+                                    
                                 if not match_df.empty:
                                     ar = str(match_df.iloc[0]['Roll']).strip().replace('.0', '')
                                     an = str(match_df.iloc[0]['Name']).strip()
-                                    if ar in me:
+                                    if str(ar) in me:
                                         st.warning(f"⚠️ {an} is already marked for MDM today!")
                                     else:
-                                        # DIRECT CLOUD ENTRY FOR SCANNED CARDS
-                                        curr_time_str = now.strftime("%H:%M")
-                                        
-                                        # 1. MDM Log
-                                        mdm_data = pd.DataFrame([{'Date': curr_date_str, 'Teacher': f"{st.session_state.user_name} (Admin)", 'Class': tc, 'Section': ts, 'Roll': ar, 'Name': an, 'Time': curr_time_str}])
-                                        append_sheet_df('mdm_log', mdm_data)
-                                        
-                                        # 2. Attendance Master (Avoid Duplicates)
-                                        al = fetch_sheet_data('student_attendance_master')
-                                        already_present = False
-                                        if not al.empty and 'Date' in al.columns:
-                                            class_cond = al['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else (al['Class'] == tc)
-                                            curr_al = al[(al['Date'].astype(str) == curr_date_str) & class_cond & (al['Section'] == ts) & (al['Status'] == True)]
-                                            if ar in curr_al['Roll'].astype(str).tolist():
-                                                already_present = True
-                                                
-                                        if not already_present:
-                                            att_data = pd.DataFrame([{'Date': curr_date_str, 'Class': tc, 'Section': ts, 'Roll': ar, 'Name': an, 'Status': True}])
-                                            append_sheet_df('student_attendance_master', att_data)
-
-                                        st.session_state.admin_scan_msg = f"✅ Scanned: {an} has been instantly logged to the Cloud!"
-                                        should_rerun = True
+                                        chk_key = f"adm_mdm_{ar}_{an}"
+                                        if chk_key not in st.session_state.admin_scanned_keys: 
+                                            st.session_state.admin_scanned_keys.append(chk_key)
+                                            
+                                            # Tick the checkbox via Session State!
+                                            st.session_state[chk_key] = True 
+                                            
+                                            st.session_state.admin_scan_msg = f"✅ Scanned: {an}. Click 'Submit Admin MDM Data' when done."
+                                            should_rerun = True
                                 else: st.error(f"❌ MISMATCH: {sn} is NOT in {tc} {ts}!")
-                        else: st.warning("⚠️ Invalid ID Card Format.")
+                            else: st.warning("⚠️ Invalid ID Card Format. Name missing.")
+                        else: st.warning("⚠️ Could not read QR Code.")
                         if should_rerun: st.rerun()
 
                     ros['Scan_Key'] = ros['Roll'].astype(str) + "_" + ros['Name'].astype(str)
@@ -930,9 +925,9 @@ elif st.session_state.user_role == "admin":
                                 st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                 alc += 1
                             else:
-                                roll_c = str(r['Roll']).strip().replace('.0', '')
-                                name_c = str(r['Name']).strip()
-                                chk_key = f"adm_mdm_{roll_c}_{name_c}"
+                                chk_key = f"adm_mdm_{str(r['Roll']).strip().replace('.0', '')}_{str(r['Name']).strip()}"
+                                if chk_key not in st.session_state:
+                                    st.session_state[chk_key] = False
                                 
                                 if st.checkbox("Ate MDM", key=chk_key): 
                                     sel_mdm.append(r)
@@ -951,9 +946,9 @@ elif st.session_state.user_role == "admin":
                                         st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                         alc += 1
                                     else:
-                                        roll_c = str(r['Roll']).strip().replace('.0', '')
-                                        name_c = str(r['Name']).strip()
-                                        chk_key = f"adm_mdm_{roll_c}_{name_c}"
+                                        chk_key = f"adm_mdm_{str(r['Roll']).strip().replace('.0', '')}_{str(r['Name']).strip()}"
+                                        if chk_key not in st.session_state:
+                                            st.session_state[chk_key] = False
                                         
                                         if st.checkbox("Ate MDM", key=chk_key): 
                                             sel_mdm.append(r)
@@ -987,6 +982,7 @@ elif st.session_state.user_role == "admin":
                                 if chk_key in st.session_state:
                                     del st.session_state[chk_key]
 
+                            st.session_state.admin_scanned_keys = []
                             st.success(f"Added {len(nr)} late entries to Cloud DB!")
                             st.rerun()
                         else: st.warning("No new students selected.")

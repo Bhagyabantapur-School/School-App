@@ -546,7 +546,11 @@ if st.session_state.user_role == "teacher":
                                                 chk_key = f"mdm_{ar}_{an}"
                                                 if chk_key not in st.session_state.scanned_keys: 
                                                     st.session_state.scanned_keys.append(chk_key)
-                                                    st.session_state.scan_msg = f"✅ Scanned: {an}. Scan next or Click 'Submit MDM Data' when done."
+                                                    
+                                                    # Force Streamlit Checkbox state to instantly update
+                                                    st.session_state[chk_key] = True 
+                                                    
+                                                    st.session_state.scan_msg = f"✅ Scanned: {an}. Click 'Submit MDM Data' when done."
                                                     should_rerun = True
                                         else: st.error(f"❌ MISMATCH: {sn} is NOT in {tc} {ts}!")
                                     else: st.warning("⚠️ Invalid ID Card Format. Name missing.")
@@ -587,12 +591,11 @@ if st.session_state.user_role == "teacher":
                                     else:
                                         chk_key = f"mdm_{str(r['Roll']).strip().replace('.0', '')}_{str(r['Name']).strip()}"
                                         
-                                        # Force Streamlit Checkbox state to perfectly match our Master List
+                                        # Ensure Streamlit memory matches our Master List explicitly on render
                                         st.session_state[chk_key] = (chk_key in st.session_state.scanned_keys)
                                         
                                         st.checkbox("Ate MDM", key=chk_key, on_change=t_toggle, args=(chk_key,))
                                         
-                                        # If they are safely in our Master List, queue them for upload
                                         if chk_key in st.session_state.scanned_keys:
                                             sel_mdm.append(r)
                                 st.divider()
@@ -612,12 +615,11 @@ if st.session_state.user_role == "teacher":
                                             else:
                                                 chk_key = f"mdm_{str(r['Roll']).strip().replace('.0', '')}_{str(r['Name']).strip()}"
                                                 
-                                                # Force Streamlit Checkbox state to perfectly match our Master List
+                                                # Ensure Streamlit memory matches our Master List explicitly on render
                                                 st.session_state[chk_key] = (chk_key in st.session_state.scanned_keys)
                                                 
                                                 st.checkbox("Ate MDM", key=chk_key, on_change=t_toggle, args=(chk_key,))
                                                 
-                                                # If they are safely in our Master List, queue them for upload
                                                 if chk_key in st.session_state.scanned_keys:
                                                     sel_mdm.append(r)
                                         st.divider()
@@ -630,17 +632,13 @@ if st.session_state.user_role == "teacher":
                                     nr = [{'Date': curr_date_str, 'Teacher': t_name_select, 'Class': x['Class'], 'Section': ts, 'Roll': x['Roll'], 'Name': x['Name'], 'Time': now.strftime("%H:%M")} for x in sel_mdm]
                                     append_sheet_df('mdm_log', pd.DataFrame(nr))
                                     
-                                    # Safe Attendance Sync (prevents duplicates)
-                                    al = fetch_sheet_data('student_attendance_master')
-                                    existing_att_rolls = []
-                                    if not al.empty and 'Date' in al.columns:
-                                        class_cond = al['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else (al['Class'] == tc)
-                                        curr_al = al[(al['Date'].astype(str) == curr_date_str) & class_cond & (al['Section'] == ts) & (al['Status'] == True)]
-                                        existing_att_rolls = curr_al['Roll'].astype(str).tolist()
-                                        
-                                    att_nr = [{'Date': curr_date_str, 'Class': x['Class'], 'Section': ts, 'Roll': x['Roll'], 'Name': x['Name'], 'Status': True} for x in sel_mdm if str(x['Roll']) not in existing_att_rolls]
-                                    if att_nr:
-                                        append_sheet_df('student_attendance_master', pd.DataFrame(att_nr))
+                                    # Memory Cleanup for manual checks
+                                    for x in sel_mdm:
+                                        roll_c = str(x['Roll']).strip().replace('.0', '')
+                                        name_c = str(x['Name']).strip()
+                                        chk_key = f"mdm_{roll_c}_{name_c}"
+                                        if chk_key in st.session_state:
+                                            del st.session_state[chk_key]
 
                                     st.session_state.scanned_keys = []
                                     st.success(f"Submitted {len(nr)} to Cloud DB!")
@@ -939,12 +937,11 @@ elif st.session_state.user_role == "admin":
                             else:
                                 chk_key = f"adm_mdm_{str(r['Roll']).strip().replace('.0', '')}_{str(r['Name']).strip()}"
                                 
-                                # Force Streamlit Checkbox state to perfectly match our Master List
+                                # Ensure Streamlit memory matches our Master List explicitly on render
                                 st.session_state[chk_key] = (chk_key in st.session_state.admin_scanned_keys)
                                 
                                 st.checkbox("Ate MDM", key=chk_key, on_change=a_toggle, args=(chk_key,))
                                 
-                                # If they are safely in our Master List, queue them for upload
                                 if chk_key in st.session_state.admin_scanned_keys:
                                     sel_mdm.append(r)
                         st.divider()
@@ -964,12 +961,11 @@ elif st.session_state.user_role == "admin":
                                     else:
                                         chk_key = f"adm_mdm_{str(r['Roll']).strip().replace('.0', '')}_{str(r['Name']).strip()}"
                                         
-                                        # Force Streamlit Checkbox state to perfectly match our Master List
+                                        # Ensure Streamlit memory matches our Master List explicitly on render
                                         st.session_state[chk_key] = (chk_key in st.session_state.admin_scanned_keys)
                                         
                                         st.checkbox("Ate MDM", key=chk_key, on_change=a_toggle, args=(chk_key,))
                                         
-                                        # If they are safely in our Master List, queue them for upload
                                         if chk_key in st.session_state.admin_scanned_keys:
                                             sel_mdm.append(r)
                                         st.divider()
@@ -982,18 +978,14 @@ elif st.session_state.user_role == "admin":
                             nr = [{'Date': curr_date_str, 'Teacher': f"{st.session_state.user_name} (Admin)", 'Class': x['Class'], 'Section': ts, 'Roll': x['Roll'], 'Name': x['Name'], 'Time': now.strftime("%H:%M")} for x in sel_mdm]
                             append_sheet_df('mdm_log', pd.DataFrame(nr))
                             
-                            # Safe Attendance Sync (prevents duplicates)
-                            al = fetch_sheet_data('student_attendance_master')
-                            existing_att_rolls = []
-                            if not al.empty and 'Date' in al.columns:
-                                class_cond = al['Class'].isin(['CLASS PP', 'CLASS LPP']) if tc == 'CLASS PP' else (al['Class'] == tc)
-                                curr_al = al[(al['Date'].astype(str) == curr_date_str) & class_cond & (al['Section'] == ts) & (al['Status'] == True)]
-                                existing_att_rolls = curr_al['Roll'].astype(str).tolist()
-                                
-                            att_nr = [{'Date': curr_date_str, 'Class': x['Class'], 'Section': ts, 'Roll': x['Roll'], 'Name': x['Name'], 'Status': True} for x in sel_mdm if str(x['Roll']) not in existing_att_rolls]
-                            if att_nr:
-                                append_sheet_df('student_attendance_master', pd.DataFrame(att_nr))
-                            
+                            # Memory Cleanup for manual checks
+                            for x in sel_mdm:
+                                roll_c = str(x['Roll']).strip().replace('.0', '')
+                                name_c = str(x['Name']).strip()
+                                chk_key = f"adm_mdm_{roll_c}_{name_c}"
+                                if chk_key in st.session_state:
+                                    del st.session_state[chk_key]
+
                             st.session_state.admin_scanned_keys = []
                             st.success(f"Added {len(nr)} late entries to Cloud DB!")
                             st.rerun()

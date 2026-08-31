@@ -30,7 +30,6 @@ def a_toggle(k):
     else:
         if k in st.session_state.admin_scanned_keys: st.session_state.admin_scanned_keys.remove(k)
 
-
 TEACHER_INITIALS = {"SUKHAMAY KISKU": "SK", "TAPASI RANA": "TR", "SUJATA BISWAS ROTHA": "SBR", "ROHINI SINGH": "RS", "UDAY NARAYAN JANA": "UNJ", "BIMAL KUMAR PATRA": "BKP", "SUSMITA PAUL": "SP", "TAPAN KUMAR MANDAL": "TKM", "MANJUMA KHATUN": "MK"}
 INV_TEACHER_INITIALS = {v: k for k, v in TEACHER_INITIALS.items()}
 TEACHER_LIST = list(TEACHER_INITIALS.keys())
@@ -371,22 +370,6 @@ def parse_time_safe(t_str):
         except Exception: continue
     return None
 
-def parse_qr_data(qr_string):
-    try:
-        data = {}
-        parts = qr_string.split('|')
-        for part in parts:
-            if ':' in part:
-                key, value = part.split(':', 1)
-                data[key.strip()] = value.strip()
-        # Fallback for plain names without prefixes
-        if not data and qr_string:
-            if ':' not in qr_string and '|' not in qr_string:
-                data['Name'] = qr_string.strip()
-        return data
-    except:
-        return None
-
 def highlight_past_holidays(row):
     try:
         h_date = datetime.strptime(str(row['Date']).strip(), "%d-%m-%Y").date()
@@ -524,37 +507,28 @@ if st.session_state.user_role == "teacher":
 
                             if qv:
                                 should_rerun = False
-                                data = parse_qr_data(qv)
-                                if data:
-                                    sr = str(data.get('Roll', '')).strip().replace('.0', '')
-                                    sn = str(data.get('Name', '')).strip()
+                                scanned_code = str(qv).strip().upper()
+                                
+                                # Match the scanned BPS Code against the roster
+                                match_df = ros[ros['BPS Code'].astype(str).str.strip().str.upper() == scanned_code]
+                                
+                                if not match_df.empty:
+                                    ar = str(match_df.iloc[0]['Roll']).strip().replace('.0', '')
+                                    an = str(match_df.iloc[0]['Name']).strip()
                                     
-                                    if sn:
-                                        ros_names_upper = ros['Name'].astype(str).str.strip().str.upper()
-                                        if sr:
-                                            ros_rolls = ros['Roll'].astype(str).str.strip().replace('.0', '')
-                                            match_df = ros[(ros_rolls == sr) & (ros_names_upper == sn.upper())]
-                                        else:
-                                            match_df = ros[ros_names_upper == sn.upper()]
+                                    if str(ar) in me:
+                                        st.warning(f"⚠️ {an} is already marked for MDM today!")
+                                    else:
+                                        chk_key = f"mdm_{ar}_{an}"
+                                        if chk_key not in st.session_state.scanned_keys: 
+                                            st.session_state.scanned_keys.append(chk_key)
+                                            st.session_state[chk_key] = True 
                                             
-                                        if not match_df.empty:
-                                            ar = str(match_df.iloc[0]['Roll']).strip().replace('.0', '')
-                                            an = str(match_df.iloc[0]['Name']).strip()
-                                            if str(ar) in me:
-                                                st.warning(f"⚠️ {an} is already marked for MDM today!")
-                                            else:
-                                                chk_key = f"mdm_{ar}_{an}"
-                                                if chk_key not in st.session_state.scanned_keys: 
-                                                    st.session_state.scanned_keys.append(chk_key)
-                                                    
-                                                    # Force Streamlit Checkbox state to instantly update
-                                                    st.session_state[chk_key] = True 
-                                                    
-                                                    st.session_state.scan_msg = f"✅ Scanned: {an}. Click 'Submit MDM Data' when done."
-                                                    should_rerun = True
-                                        else: st.error(f"❌ MISMATCH: {sn} is NOT in {tc} {ts}!")
-                                    else: st.warning("⚠️ Invalid ID Card Format. Name missing.")
-                                else: st.warning("⚠️ Could not read QR Code.")
+                                            st.session_state.scan_msg = f"✅ Scanned: {an}. Click 'Submit MDM Data' when done."
+                                            should_rerun = True
+                                else: 
+                                    st.error(f"❌ MISMATCH: Code {scanned_code} is NOT in {tc} {ts}!")
+                                    
                                 if should_rerun: st.rerun()
 
                             ros['Scan_Key'] = ros['Roll'].astype(str) + "_" + ros['Name'].astype(str)
@@ -871,37 +845,28 @@ elif st.session_state.user_role == "admin":
                         
                     if qv:
                         should_rerun = False
-                        data = parse_qr_data(qv)
-                        if data:
-                            sr = str(data.get('Roll', '')).strip().replace('.0', '')
-                            sn = str(data.get('Name', '')).strip()
+                        scanned_code = str(qv).strip().upper()
+                        
+                        # Match the scanned BPS Code against the roster
+                        match_df = ros[ros['BPS Code'].astype(str).str.strip().str.upper() == scanned_code]
+                        
+                        if not match_df.empty:
+                            ar = str(match_df.iloc[0]['Roll']).strip().replace('.0', '')
+                            an = str(match_df.iloc[0]['Name']).strip()
                             
-                            if sn:
-                                ros_names_upper = ros['Name'].astype(str).str.strip().str.upper()
-                                if sr:
-                                    ros_rolls = ros['Roll'].astype(str).str.strip().replace('.0', '')
-                                    match_df = ros[(ros_rolls == sr) & (ros_names_upper == sn.upper())]
-                                else:
-                                    match_df = ros[ros_names_upper == sn.upper()]
+                            if str(ar) in me:
+                                st.warning(f"⚠️ {an} is already marked for MDM today!")
+                            else:
+                                chk_key = f"adm_mdm_{ar}_{an}"
+                                if chk_key not in st.session_state.admin_scanned_keys: 
+                                    st.session_state.admin_scanned_keys.append(chk_key)
+                                    st.session_state[chk_key] = True 
                                     
-                                if not match_df.empty:
-                                    ar = str(match_df.iloc[0]['Roll']).strip().replace('.0', '')
-                                    an = str(match_df.iloc[0]['Name']).strip()
-                                    if str(ar) in me:
-                                        st.warning(f"⚠️ {an} is already marked for MDM today!")
-                                    else:
-                                        chk_key = f"adm_mdm_{ar}_{an}"
-                                        if chk_key not in st.session_state.admin_scanned_keys: 
-                                            st.session_state.admin_scanned_keys.append(chk_key)
-                                            
-                                            # Tick the checkbox via Session State!
-                                            st.session_state[chk_key] = True 
-                                            
-                                            st.session_state.admin_scan_msg = f"✅ Scanned: {an}. Scan next or Click 'Submit Admin MDM Data' when done."
-                                            should_rerun = True
-                                else: st.error(f"❌ MISMATCH: {sn} is NOT in {tc} {ts}!")
-                            else: st.warning("⚠️ Invalid ID Card Format. Name missing.")
-                        else: st.warning("⚠️ Could not read QR Code.")
+                                    st.session_state.admin_scan_msg = f"✅ Scanned: {an}. Scan next or Click 'Submit Admin MDM Data' when done."
+                                    should_rerun = True
+                        else: 
+                            st.error(f"❌ MISMATCH: Code {scanned_code} is NOT in {tc} {ts}!")
+                            
                         if should_rerun: st.rerun()
 
                     ros['Scan_Key'] = ros['Roll'].astype(str) + "_" + ros['Name'].astype(str)

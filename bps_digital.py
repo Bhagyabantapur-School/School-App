@@ -505,32 +505,29 @@ if st.session_state.user_role == "teacher":
                                 st.session_state.scan_msg = None
 
                             if qv:
-                                should_rerun = False
                                 data = parse_qr_data(qv)
                                 if data:
-                                    sr, sn = str(data.get('Roll', '')), str(data.get('Name', 'Unknown'))
+                                    sr = str(data.get('Roll', '')).strip().replace('.0', '')
+                                    sn = str(data.get('Name', 'Unknown')).strip()
                                     if sr and sn:
-                                        match_df = ros[(ros['Roll'].astype(str).str.strip() == sr) & (ros['Name'].astype(str).str.strip() == sn)]
+                                        match_df = ros[(ros['Roll'].astype(str).str.strip().replace('.0', '') == sr) & (ros['Name'].astype(str).str.strip() == sn)]
                                         if not match_df.empty:
-                                            ar, an = match_df.iloc[0]['Roll'], match_df.iloc[0]['Name']
-                                            if str(ar) in me:
+                                            ar = str(match_df.iloc[0]['Roll']).strip().replace('.0', '')
+                                            an = str(match_df.iloc[0]['Name']).strip()
+                                            if ar in me:
                                                 st.warning(f"⚠️ {an} is already marked for MDM today!")
                                             else:
-                                                sk = f"{str(ar).strip()}_{str(an).strip()}"
-                                                if sk not in st.session_state.scanned_keys: 
-                                                    st.session_state.scanned_keys.append(sk)
+                                                chk_key = f"mdm_chk_{ar}_{an}"
+                                                if chk_key not in st.session_state.scanned_keys: 
+                                                    st.session_state.scanned_keys.append(chk_key)
                                                     
-                                                    # Programmatically tick the checkbox via Session State
-                                                    chk_key = f"mdm_{str(ar).strip()}_{str(an).strip()}"
+                                                    # Force Streamlit memory to check the box
                                                     st.session_state[chk_key] = True 
                                                     
                                                     st.session_state.scan_msg = f"✅ Scanned: {an}. Click 'Submit MDM Data' when done."
-                                                    should_rerun = True
                                         else: st.error(f"❌ MISMATCH: {sn} is NOT in {tc} {ts}!")
                                 else: st.warning("⚠️ Invalid ID Card Format.")
-                                if should_rerun: st.rerun()
 
-                            ros['Scan_Key'] = ros['Roll'].astype(str) + "_" + ros['Name'].astype(str)
                             if 'Thumb_URL' not in ros.columns: ros['Thumb_URL'] = ""
                             with st.spinner("Loading profiles..."):
                                 with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe: 
@@ -562,7 +559,10 @@ if st.session_state.user_role == "teacher":
                                         st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                         alc += 1
                                     else:
-                                        chk_key = f"mdm_{str(r['Roll']).strip()}_{str(r['Name']).strip()}"
+                                        roll_c = str(r['Roll']).strip().replace('.0', '')
+                                        name_c = str(r['Name']).strip()
+                                        chk_key = f"mdm_chk_{roll_c}_{name_c}"
+                                        
                                         if chk_key not in st.session_state:
                                             st.session_state[chk_key] = False
                                         
@@ -583,7 +583,10 @@ if st.session_state.user_role == "teacher":
                                                 st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                                 alc += 1
                                             else:
-                                                chk_key = f"mdm_{str(r['Roll']).strip()}_{str(r['Name']).strip()}"
+                                                roll_c = str(r['Roll']).strip().replace('.0', '')
+                                                name_c = str(r['Name']).strip()
+                                                chk_key = f"mdm_chk_{roll_c}_{name_c}"
+                                                
                                                 if chk_key not in st.session_state:
                                                     st.session_state[chk_key] = False
                                                 
@@ -613,7 +616,9 @@ if st.session_state.user_role == "teacher":
                                     
                                     # Memory Cleanup
                                     for x in sel_mdm:
-                                        chk_key = f"mdm_{str(x['Roll']).strip()}_{str(x['Name']).strip()}"
+                                        roll_c = str(x['Roll']).strip().replace('.0', '')
+                                        name_c = str(x['Name']).strip()
+                                        chk_key = f"mdm_chk_{roll_c}_{name_c}"
                                         if chk_key in st.session_state:
                                             del st.session_state[chk_key]
 
@@ -847,30 +852,28 @@ elif st.session_state.user_role == "admin":
                         st.session_state.admin_scan_msg = None
                         
                     if qv:
-                        should_rerun = False
                         data = parse_qr_data(qv)
                         if data:
-                            sr, sn = str(data.get('Roll', '')), str(data.get('Name', 'Unknown'))
+                            sr = str(data.get('Roll', '')).strip().replace('.0', '')
+                            sn = str(data.get('Name', 'Unknown')).strip()
                             if sr and sn:
-                                match_df = ros[(ros['Roll'].astype(str).str.strip() == sr) & (ros['Name'].astype(str).str.strip() == sn)]
+                                match_df = ros[(ros['Roll'].astype(str).str.strip().replace('.0', '') == sr) & (ros['Name'].astype(str).str.strip() == sn)]
                                 if not match_df.empty:
-                                    ar, an = match_df.iloc[0]['Roll'], match_df.iloc[0]['Name']
-                                    if str(ar) in me:
+                                    ar = str(match_df.iloc[0]['Roll']).strip().replace('.0', '')
+                                    an = str(match_df.iloc[0]['Name']).strip()
+                                    if ar in me:
                                         st.warning(f"⚠️ {an} is already marked for MDM today!")
                                     else:
-                                        sk = f"{str(ar).strip()}_{str(an).strip()}"
-                                        if sk not in st.session_state.admin_scanned_keys: 
-                                            st.session_state.admin_scanned_keys.append(sk)
+                                        chk_key = f"adm_chk_{ar}_{an}"
+                                        if chk_key not in st.session_state.admin_scanned_keys: 
+                                            st.session_state.admin_scanned_keys.append(chk_key)
                                             
-                                            # Programmatically tick the checkbox via Session State!
-                                            chk_key = f"adm_mdm_{str(ar).strip()}_{str(an).strip()}"
+                                            # Force Streamlit memory to check the box
                                             st.session_state[chk_key] = True 
                                             
                                             st.session_state.admin_scan_msg = f"✅ Scanned: {an}. Click 'Submit Admin MDM Data' when done."
-                                            should_rerun = True
                                 else: st.error(f"❌ MISMATCH: {sn} is NOT in {tc} {ts}!")
                         else: st.warning("⚠️ Invalid ID Card Format.")
-                        if should_rerun: st.rerun()
 
                     ros['Scan_Key'] = ros['Roll'].astype(str) + "_" + ros['Name'].astype(str)
                     if 'Thumb_URL' not in ros.columns: ros['Thumb_URL'] = ""
@@ -903,7 +906,10 @@ elif st.session_state.user_role == "admin":
                                 st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                 alc += 1
                             else:
-                                chk_key = f"adm_mdm_{str(r['Roll']).strip()}_{str(r['Name']).strip()}"
+                                roll_c = str(r['Roll']).strip().replace('.0', '')
+                                name_c = str(r['Name']).strip()
+                                chk_key = f"adm_chk_{roll_c}_{name_c}"
+                                
                                 if chk_key not in st.session_state:
                                     st.session_state[chk_key] = False
                                 
@@ -924,13 +930,16 @@ elif st.session_state.user_role == "admin":
                                         st.markdown("<span style='color:#28a745; font-weight:bold;'>✅ Done</span>", unsafe_allow_html=True)
                                         alc += 1
                                     else:
-                                        chk_key = f"adm_mdm_{str(r['Roll']).strip()}_{str(r['Name']).strip()}"
+                                        roll_c = str(r['Roll']).strip().replace('.0', '')
+                                        name_c = str(r['Name']).strip()
+                                        chk_key = f"adm_chk_{roll_c}_{name_c}"
+                                        
                                         if chk_key not in st.session_state:
                                             st.session_state[chk_key] = False
                                         
                                         if st.checkbox("Ate MDM", key=chk_key): 
                                             sel_mdm.append(r)
-                                st.divider()
+                                        st.divider()
                     
                     cp.markdown(f"<div class='floating-counter'>✅ Selected: {len(sel_mdm)} | Done: {alc}</div>", unsafe_allow_html=True)
                     st.markdown(f"<h3 style='text-align:center;'>✅ New Selected: {len(sel_mdm)}</h3>", unsafe_allow_html=True)
@@ -954,7 +963,9 @@ elif st.session_state.user_role == "admin":
                             
                             # Memory Cleanup
                             for x in sel_mdm:
-                                chk_key = f"adm_mdm_{str(x['Roll']).strip()}_{str(x['Name']).strip()}"
+                                roll_c = str(x['Roll']).strip().replace('.0', '')
+                                name_c = str(x['Name']).strip()
+                                chk_key = f"adm_chk_{roll_c}_{name_c}"
                                 if chk_key in st.session_state:
                                     del st.session_state[chk_key]
 

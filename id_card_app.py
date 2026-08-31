@@ -176,18 +176,6 @@ def reset_generated_status():
     except Exception as e:
         st.error(f"Error resetting database: {e}")
 
-def parse_qr_data(qr_string):
-    try:
-        data = {}
-        parts = qr_string.split('|')
-        for part in parts:
-            if ':' in part:
-                key, value = part.split(':', 1)
-                data[key.strip()] = value.strip()
-        return data
-    except:
-        return None
-
 # --- 4. PDF GENERATORS ---
 
 def generate_pdf(students_list, photo_dict, progress_bar=None):
@@ -269,8 +257,8 @@ def generate_pdf(students_list, photo_dict, progress_bar=None):
         pdf.set_xy(detail_x, curr_y); pdf.set_font("Arial", 'B', 7)
         pdf.cell(44, line_h, f"Mob: {student.get('Mobile', '')}", 0, 1)
 
-        # Updated QR Code (Name, Class, Section, DOB, Father)
-        qr_data = f"Name:{student.get('Name', '')}|Class:{student.get('Class', '')}|Section:{student.get('Section', 'A')}|DOB:{student.get('DOB', '')}|Father:{student.get('Father', '')}"
+        # Updated QR Code (BPS Code only)
+        qr_data = str(student.get('BPS Code', '')).strip()
         qr = qrcode.make(qr_data); qr_path = tempfile.mktemp(suffix=".png"); qr.save(qr_path)
         pdf.image(qr_path, x=x+4.5, y=y+37, w=15, h=15)
         
@@ -489,26 +477,17 @@ with tabs[1]:
     qr_code = qrcode_scanner(key='mdm_scanner')
     
     if qr_code:
-        data = parse_qr_data(qr_code)
-        if data:
-            student_name = data.get('Name', 'Unknown')
-            student_class = data.get('Class', 'Unknown')
-            student_section = data.get('Section', 'A') # Defaulting to A if not found
-            student_father = data.get('Father', '') # Extra matching parameter
-            
-            # Fetch the Master Sheet to cross-reference and find the exact student
-            m_df = fetch_sheet_data("students_master")
-            
-            # Exact Match using Name, Class, Section, and Father to avoid duplicate conflicts
-            s_match = m_df[
-                (m_df['Name'] == student_name) & 
-                (m_df['Class'].astype(str) == str(student_class)) & 
-                (m_df['Section'].astype(str) == str(student_section)) &
-                (m_df['Father'].astype(str) == str(student_father))
-            ]
-            
-            # Retrieve the roll number based on exact match, or default to Unknown
-            student_roll = str(s_match.iloc[0]['Roll']) if not s_match.empty else "Unknown"
+        scanned_code = str(qr_code).strip().upper()
+        m_df = fetch_sheet_data("students_master")
+        
+        # Exact Match using only the new BPS Code
+        s_match = m_df[m_df['BPS Code'].astype(str).str.strip().str.upper() == scanned_code]
+        
+        if not s_match.empty:
+            student_name = str(s_match.iloc[0]['Name']).strip()
+            student_class = str(s_match.iloc[0]['Class']).strip()
+            student_section = str(s_match.iloc[0].get('Section', 'A')).strip()
+            student_roll = str(s_match.iloc[0]['Roll']).strip()
 
             # Check if already scanned today
             existing = st.session_state['attendance_log'][
@@ -544,7 +523,7 @@ with tabs[1]:
 
                 st.success(f"✅ **{student_name}** logged & synced to Cloud!")
         else:
-            st.error("Invalid QR Code Format. Please scan a valid BPS ID Card.")
+            st.error("Invalid QR Code or BPS Code not found in database. Please scan a valid BPS ID Card.")
 
     st.divider()
     st.markdown("### 📋 Today's Local Scans")

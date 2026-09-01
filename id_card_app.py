@@ -11,6 +11,8 @@ import math
 from fpdf import FPDF
 import tempfile
 from datetime import datetime
+import base64
+import concurrent.futures
 
 # --- IMPORTS FOR GOOGLE SHEETS & DRIVE API ---
 import gspread
@@ -71,6 +73,16 @@ def extract_drive_id(url):
     if pd.isna(url) or not isinstance(url, str) or "drive.google.com" not in url: return None
     if "/d/" in url:
         return url.split("/d/")[1].split("/")[0]
+    return None
+
+def get_secure_photo_b64(url):
+    if pd.isna(url) or not isinstance(url, str) or url.strip() == "": 
+        return None
+    did = extract_drive_id(url)
+    if did:
+        b = fetch_secure_image_bytes(did)
+        if b: 
+            return f"data:image/jpeg;base64,{base64.b64encode(b).decode()}"
     return None
 
 @st.cache_data(ttl=60) 
@@ -353,7 +365,8 @@ with col_refresh:
 
 st.divider()
 
-tabs = st.tabs(["🖨️ ID Generator", "📸 Scanner", "📂 Database Explorer", "📋 Pending Photos Today"])
+# ✨ ADDED 5TH TAB HERE ✨
+tabs = st.tabs(["🖨️ ID Generator", "📸 Scanner", "📂 Database Explorer", "📋 Pending Photos Today", "✂️ Shop Tracking"])
 
 # ==========================================
 # TAB 1: ID GENERATOR
@@ -746,3 +759,94 @@ with tabs[3]:
             st.info(f"No MDM/Attendance logs found for today ({today_str}).")
     else:
         st.warning("No MDM data found in the database. Scan students first.")
+
+# ==========================================
+# TAB 5: SHOP & LAMINATION TRACKING
+# ==========================================
+with tabs[4]:
+    st.subheader("✂️ Shop & Lamination Tracking")
+    st.write("Track the physical ID cards as they are sent to the shop for lamination and ribbons.")
+    
+    df_m_shop = fetch_sheet_data("students_master")
+    df_id_log_shop = fetch_sheet_data("id_card_log")
+    
+    if not df_m_shop.empty and not df_id_log_shop.empty:
+        df_m_shop['Key'] = df_m_shop['Class'].astype(str) + "_" + df_m_shop['Roll'].astype(str)
+        df_id_log_shop['Key'] = df_id_log_shop['Class'].astype(str) + "_" + df_id_log_shop['Roll'].astype(str)
+        
+        # We want the LATEST action for each student to know exactly where they are in the pipeline
+        latest_log = df_id_log_shop.drop_duplicates(subset=['Key'], keep='last')
+        
+        # Merge Master Data with Latest Action
+        track_df = pd.merge(df_m_shop, latest_log[['Key', 'Action']], on='Key', how='left')
+        track_df['Action'] = track_df['Action'].fillna('None')
+        
+        # Dropdown to filter which phase of the shop pipeline you want to look at
+        view_filter = st.selectbox("Select Pipeline Stage:", [
+            "1. Ready to Send to Shop (Cards Generated)",
+            "2. Currently At Shop (Pending Return)",
+            "3. Received from Shop (Ready to Distribute)"
+        ])
+        
+        # Determine data and target actions based on what the user is looking at
+        if "1." in view_filter:
+            filtered_df = track_df[track_df['Action'] == 'Generated'].copy()
+            target_action = "Sent to Shop"
+            btn_text = "📤 Mark Selected as 'Sent to Shop'"
+        elif "2." in view_filter:
+            filtered_df = track_df[track_df['Action'] == 'Sent to Shop'].copy()
+            target_action = "Received from Shop"
+            btn_text = "📥 Mark Selected as 'Received from Shop'"
+        else:
+            filtered_df = track_df[track_df['Action'] == 'Received from Shop'].copy()
+            target_action = "Distributed"
+            btn_text = "🎁 Mark Selected as 'Distributed'"
+            
+        if not filtered_df.empty:
+            st.write(f"Showing **{len(filtered_df)}** students in this stage.")
+            
+            # Resolve Photo URL (Prioritize Thumb_URL if it exists)
+            if 'Thumb_URL' in filtered_df.columns:
+                filtered_df['Image_Target'] = filtered_df['Thumb_URL'].fillna(filtered_df.get('Photo_URL', ''))
+            else:
+                filtered_df['Image_Target'] = filtered_df.get('Photo_URL', '')
+                
+            # Load images as Base64 strings quickly using concurrent threading
+            with st.spinner("Loading stamp size photos..."):
+                with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe:
+                    filtered_df['Photo'] = list(exe.map(get_secure_photo_b64, filtered_df['Image_Target'].tolist()))
+            
+            filtered_df.insert(0, "Select", False)
+            
+            show_cols = ['Select', 'Photo', 'Name', 'Class', 'Roll', 'BPS Code']
+            
+            # Ensure columns exist to prevent errors
+            for c in show_cols:
+                if c not in filtered_df.columns:
+                    filtered_df[c] = ""
+                    
+            # Render interactive table with Image Column
+            ed_df = st.data_editor(
+                filtered_df[show_cols],
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Select": st.column_config.CheckboxColumn("Select", default=False),
+                    "Photo": st.column_config.ImageColumn("Stamp Size Photo", width="medium")
+                },
+                disabled=['Photo', 'Name', 'Class', 'Roll', 'BPS Code'],
+                key=f"shop_grid_{view_filter[:2]}" # Dynamic key to force re-render when switching views
+            )
+            
+            selected = filtered_df.loc[ed_df[ed_df['Select'] == True].index]
+            
+            # Update Button Logic
+            if not selected.empty:
+                if st.button(btn_text, type="primary"):
+                    batch_log_action("id_card_log", selected, target_action)
+                    st.success(f"✅ Successfully logged {len(selected)} students as '{target_action}'!")
+                    st.rerun()
+        else:
+            st.success("No students found in this stage. Check the other dropdown options.")
+    else:
+        st.info("No ID card log data available. Generate IDs first.")

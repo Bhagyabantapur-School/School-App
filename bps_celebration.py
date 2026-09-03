@@ -54,11 +54,11 @@ def get_google_credentials():
     )
 
 @st.cache_resource
-def init_db_sheet():
+def init_celeb_sheet():
     try: 
-        return gspread.authorize(get_google_credentials()).open("BPS_Database")
+        return gspread.authorize(get_google_credentials()).open("BPS_CELEBRATION")
     except Exception: 
-        st.error("⚠️ BPS_Database not found!")
+        st.error("⚠️ BPS_CELEBRATION Google Sheet not found! Please check the name and ensure it is shared with the service account.")
         st.stop()
 
 def ensure_worksheet(sh, title, headers):
@@ -78,7 +78,7 @@ def refresh_event_data():
 # ==========================================
 @st.cache_data(ttl=300)
 def fetch_programs():
-    sh = init_db_sheet()
+    sh = init_celeb_sheet()
     ws = ensure_worksheet(sh, "event_programs", ["Prog_ID", "Event_Name", "Date", "Start_Time", "Status", "Created_By"])
     records = ws.get_all_records()
     if not records:
@@ -87,7 +87,7 @@ def fetch_programs():
 
 @st.cache_data(ttl=300)
 def fetch_performances():
-    sh = init_db_sheet()
+    sh = init_celeb_sheet()
     ws = ensure_worksheet(sh, "event_performances", ["Perf_ID", "Prog_ID", "Order_No", "Perf_Type", "Perf_Name", "Class", "Section", "Choreographer", "Duration_Mins", "YouTube_Link"])
     records = ws.get_all_records()
     if not records:
@@ -98,7 +98,7 @@ def fetch_performances():
     return df
 
 def overwrite_sheet(sheet_name, df, headers):
-    sh = init_db_sheet()
+    sh = init_celeb_sheet()
     ws = ensure_worksheet(sh, sheet_name, headers)
     ws.clear()
     if not df.empty:

@@ -41,6 +41,7 @@ def inject_security_css(user_name):
         ".song-card:hover { transform: translateY(-3px); box-shadow: 0 6px 12px rgba(0,0,0,0.15); }"
         ".yt-btn { display: inline-block; background-color: #ff0000; color: white !important; padding: 8px 15px; border-radius: 5px; text-decoration: none; font-weight: bold; margin-top: 10px; font-size: 14px; }"
         ".yt-btn:hover { background-color: #cc0000; }"
+        ".local-warning { background-color: #fff3cd; border-left: 5px solid #ffc107; padding: 10px; border-radius: 5px; margin-bottom: 15px; }"
         "</style><div class=\"watermark\"></div>"
     )
     st.markdown(css, unsafe_allow_html=True)
@@ -102,7 +103,6 @@ def fetch_performances():
         return pd.DataFrame(columns=PERF_HEADERS)
     
     df = pd.DataFrame(records)
-    # Ensure missing new columns default to blank strings
     for col in PERF_HEADERS:
         if col not in df.columns:
             if col == "Live_Status": df[col] = "Pending"
@@ -110,7 +110,6 @@ def fetch_performances():
             else: df[col] = ""
             
     df['Order_No'] = pd.to_numeric(df['Order_No'], errors='coerce').fillna(99).astype(int)
-    # Ensure NaN values in string columns become blank
     df.fillna("", inplace=True)
     return df
 
@@ -332,7 +331,6 @@ with tabs[2]:
         prog_id_claim = prog_options[sel_prog_claim]
         
         all_perfs = fetch_performances()
-        # Filter for Acts that are TBD (Class) AND assigned to either current user or "TBD"
         available_acts = all_perfs[(all_perfs['Prog_ID'] == prog_id_claim) & 
                                    (all_perfs['Class'] == "TBD") & 
                                    (all_perfs['Cancel_Reason'] == "") &
@@ -427,8 +425,6 @@ with tabs[3]:
         if event_perfs.empty:
             st.info("No performances have been registered for this event yet.")
         else:
-            event_perfs = event_perfs.sort_values('Order_No')
-            
             # Active performances calculation
             active_event_perfs = event_perfs[event_perfs['Cancel_Reason'] == ""]
             total_mins = pd.to_numeric(active_event_perfs['Duration_Mins'], errors='coerce').sum()
@@ -445,9 +441,19 @@ with tabs[3]:
             st.markdown(kpi_html, unsafe_allow_html=True)
             st.write("")
             
-            # ADMIN VIEW (Edit Order + Delete)
+            def highlight_pl_row(s):
+                is_canceled = str(s.get('Cancel_Reason', '')) != ""
+                is_done = str(s.get('Live_Status', '')) == 'Done'
+                if is_canceled:
+                    return ['background-color: #f8d7da; color: #dc3545;' for _ in s]
+                elif is_done:
+                    return ['background-color: #d4edda; color: #155724;' for _ in s]
+                return ['' for _ in s]
+                
+            # ===============================================
+            # ADMIN VIEW: Interactive Reorder & Delete
+            # ===============================================
             if current_user_role == "admin":
-                # Check for Canceled Acts
                 canceled_acts = event_perfs[event_perfs['Cancel_Reason'] != ""]
                 if not canceled_acts.empty:
                     st.error("⚠️ **CANCELED PERFORMANCES AWAITING REMOVAL**")
@@ -456,52 +462,91 @@ with tabs[3]:
                     st.write("")
                 
                 st.markdown("##### ↕️ Arrange Performance Order")
-                st.caption("Double-click a cell in the **Order No.** column to type a new number. Then click Save.")
+                st.caption("🖱️ **Click directly on any performance row below** to select it, then use the Up/Down arrows to move it.")
+
+                # State tracking for order manipulation
+                if 'current_pl_prog' not in st.session_state or st.session_state.current_pl_prog != view_prog_id:
+                    st.session_state.current_pl_prog = view_prog_id
+                    event_perfs = event_perfs.sort_values('Order_No').reset_index(drop=True)
+                    event_perfs['Order_No'] = range(1, len(event_perfs) + 1) # Force strict sequential integers
+                    st.session_state.local_pl_df = event_perfs.copy()
+                    st.session_state.unsaved_pl = False
+
+                local_df = st.session_state.local_pl_df
+
+                edit_cols = ["Order_No", "Perf_Type", "Perf_Name", "Class", "Choreographer", "Duration_Mins", "Live_Status", "Cancel_Reason"]
+                disp_df = local_df[edit_cols].copy()
                 
-                edit_cols = ["Order_No", "Perf_Type", "Perf_Name", "Class", "Choreographer", "Duration_Mins", "Live_Status", "Perf_ID"]
-                disp_df = event_perfs[edit_cols].copy()
-                
-                edited_pl = st.data_editor(
-                    disp_df,
+                selection_event = st.dataframe(
+                    disp_df.style.apply(highlight_pl_row, axis=1),
                     hide_index=True,
                     use_container_width=True,
-                    column_config={
-                        "Perf_ID": None, 
-                        "Order_No": st.column_config.NumberColumn("Order No.", min_value=1, step=1, required=True),
-                        "Perf_Type": st.column_config.TextColumn("Type", disabled=True),
-                        "Perf_Name": st.column_config.TextColumn("Act / Song", disabled=True),
-                        "Class": st.column_config.TextColumn("Class", disabled=True),
-                        "Choreographer": st.column_config.TextColumn("Guide", disabled=True),
-                        "Duration_Mins": st.column_config.NumberColumn("Mins", disabled=True),
-                        "Live_Status": st.column_config.TextColumn("Status", disabled=True)
-                    }
+                    selection_mode="single-row",
+                    on_select="rerun",
+                    key="pl_grid_selection",
+                    column_config={"Cancel_Reason": None} # Hide raw reason column from grid
                 )
                 
+                sel_idx = None
+                if selection_event.selection.rows:
+                    sel_idx = selection_event.selection.rows[0]
+                
+                col_up, col_dn, _ = st.columns([2, 2, 6])
+                with col_up:
+                    if st.button("⬆️ Move Up", disabled=(sel_idx is None or sel_idx == 0), use_container_width=True):
+                        idx1, idx2 = sel_idx, sel_idx - 1
+                        local_df.loc[idx1, 'Order_No'], local_df.loc[idx2, 'Order_No'] = local_df.loc[idx2, 'Order_No'], local_df.loc[idx1, 'Order_No']
+                        local_df = local_df.sort_values('Order_No').reset_index(drop=True)
+                        st.session_state.local_pl_df = local_df
+                        st.session_state.unsaved_pl = True
+                        st.rerun()
+                with col_dn:
+                    if st.button("⬇️ Move Down", disabled=(sel_idx is None or sel_idx == len(local_df)-1), use_container_width=True):
+                        idx1, idx2 = sel_idx, sel_idx + 1
+                        local_df.loc[idx1, 'Order_No'], local_df.loc[idx2, 'Order_No'] = local_df.loc[idx2, 'Order_No'], local_df.loc[idx1, 'Order_No']
+                        local_df = local_df.sort_values('Order_No').reset_index(drop=True)
+                        st.session_state.local_pl_df = local_df
+                        st.session_state.unsaved_pl = True
+                        st.rerun()
+
+                if st.session_state.get('unsaved_pl', False):
+                    st.markdown("<div class='local-warning'>⚠️ <b>Sequence modified locally!</b> Click save below to update Google Sheets.</div>", unsafe_allow_html=True)
+
                 col_s1, col_s2 = st.columns([1, 1])
                 with col_s1:
                     if st.button("💾 Save New Playlist Order", type="primary", use_container_width=True):
-                        for _, r in edited_pl.iterrows():
+                        for _, r in local_df.iterrows():
                             all_perfs.loc[all_perfs['Perf_ID'] == r['Perf_ID'], 'Order_No'] = r['Order_No']
                         overwrite_sheet("event_performances", all_perfs, PERF_HEADERS)
                         log_audit("Reordered Playlist", f"For event: {view_prog.split(' (')[0]}")
+                        st.session_state.unsaved_pl = False
                         st.success("Playlist order successfully updated!")
                         st.rerun()
                 
                 with col_s2:
-                    del_id = st.selectbox("Remove a Performance Forever", ["Select to remove..."] + event_perfs['Perf_Name'].tolist())
+                    del_id = st.selectbox("Remove a Performance Forever", ["Select to remove..."] + local_df['Perf_Name'].tolist())
                     if del_id != "Select to remove..." and st.button("🗑️ Delete Selected from Database"):
-                        target_pid = event_perfs[event_perfs['Perf_Name'] == del_id].iloc[0]['Perf_ID']
+                        target_pid = local_df[local_df['Perf_Name'] == del_id].iloc[0]['Perf_ID']
                         all_perfs = all_perfs[all_perfs['Perf_ID'] != target_pid]
                         overwrite_sheet("event_performances", all_perfs, PERF_HEADERS)
                         log_audit("Deleted Performance", f"{del_id} from {view_prog.split(' (')[0]}")
+                        st.session_state.current_pl_prog = None # force reset of local dataframe
                         st.success("Performance removed.")
                         st.rerun()
                         
-            # TEACHER VIEW (View Data + Cancel Action)
+            # ===============================================
+            # TEACHER VIEW: View Data + Cancel Action
+            # ===============================================
             else:
                 st.markdown("##### 📜 Official Playlist")
-                disp_df = event_perfs[["Order_No", "Perf_Type", "Perf_Name", "Class", "Choreographer", "Duration_Mins", "Live_Status"]].copy()
-                st.dataframe(disp_df, hide_index=True, use_container_width=True)
+                event_perfs = event_perfs.sort_values('Order_No')
+                disp_df = event_perfs[["Order_No", "Perf_Type", "Perf_Name", "Class", "Choreographer", "Duration_Mins", "Live_Status", "Cancel_Reason"]].copy()
+                st.dataframe(
+                    disp_df.style.apply(highlight_pl_row, axis=1), 
+                    hide_index=True, 
+                    use_container_width=True,
+                    column_config={"Cancel_Reason": None}
+                )
                 
                 st.divider()
                 st.markdown("##### 🚫 Cancel Performance")

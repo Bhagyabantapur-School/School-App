@@ -34,6 +34,10 @@ def inject_security_css(user_name):
         ".stButton>button { border-radius: 8px; font-weight: bold; }"
         ".header-card { background-color: #f8f9fa; padding: 15px; border-radius: 10px; border-left: 5px solid #ff4b4b; margin-bottom: 15px; }"
         ".kpi-card { background: linear-gradient(135deg, #ffebee, #ffcdd2); padding: 15px; border-radius: 10px; text-align: center; border: 1px solid #ef9a9a; }"
+        ".song-card { background: white; padding: 15px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 15px; transition: transform 0.2s; }"
+        ".song-card:hover { transform: translateY(-3px); box-shadow: 0 6px 12px rgba(0,0,0,0.15); }"
+        ".yt-btn { display: inline-block; background-color: #ff0000; color: white !important; padding: 8px 15px; border-radius: 5px; text-decoration: none; font-weight: bold; margin-top: 10px; font-size: 14px; }"
+        ".yt-btn:hover { background-color: #cc0000; }"
         "</style><div class=\"watermark\"></div>"
     )
     st.markdown(css, unsafe_allow_html=True)
@@ -114,13 +118,60 @@ def overwrite_sheet(sheet_name, df, headers):
 st.markdown("<h2>🎊 BPS Celebration & Event Manager</h2>", unsafe_allow_html=True)
 st.sidebar.button("🔄 Sync Event Data", on_click=refresh_event_data, use_container_width=True)
 
-tabs = st.tabs(["🎭 Submit Performance", "📋 Event Playlist Manager", "📅 Manage Events (Admin)"])
+tabs = st.tabs(["🎵 Explore Songs", "🎭 Claim Performance", "📋 Event Playlist Manager", "📅 Manage Events (Admin)"])
 
 # ---------------------------------------------------------
-# TAB 1: TEACHER PERFORMANCE SUBMISSION
+# TAB 1: EXPLORE SONGS & ACTS (BEAUTIFUL GALLERY)
 # ---------------------------------------------------------
 with tabs[0]:
-    st.markdown("<div class='header-card'><h4>🎭 Claim & Register Your Act</h4><p style='margin:0; font-size:14px;'>Select a song/act curated by the Head Teacher and assign your class to it.</p></div>", unsafe_allow_html=True)
+    st.markdown("<div class='header-card' style='border-left-color: #e83e8c;'><h4>🎵 Explore Songs & Acts</h4><p style='margin:0; font-size:14px;'>Listen to the songs curated by the Head Teacher and choose the perfect one for your class!</p></div>", unsafe_allow_html=True)
+    
+    programs = fetch_programs()
+    active_progs = programs[programs['Status'] != 'Completed'] if not programs.empty else pd.DataFrame()
+    
+    if active_progs.empty:
+        st.info("No upcoming celebrations found. Please wait for the Admin to schedule one.")
+    else:
+        prog_options = {f"{r['Event_Name']} ({r['Date']})": r['Prog_ID'] for _, r in active_progs.iterrows()}
+        sel_prog = st.selectbox("Select Celebration Event to Explore", list(prog_options.keys()), key="explore_prog")
+        prog_id = prog_options[sel_prog]
+        
+        event_name_clean = sel_prog.split(' (')[0]
+        st.markdown(f"### 🎊 {event_name_clean} - Act Gallery")
+        
+        all_perfs = fetch_performances()
+        event_perfs = all_perfs[all_perfs['Prog_ID'] == prog_id] if not all_perfs.empty else pd.DataFrame()
+        
+        if event_perfs.empty:
+            st.warning("No songs or acts have been added to this event yet. Check back later!")
+        else:
+            cols = st.columns(2)
+            for i, (_, row) in enumerate(event_perfs.iterrows()):
+                with cols[i % 2]:
+                    # Design the Card based on Availability
+                    is_available = row['Choreographer'] == "TBD"
+                    status_color = "#28a745" if is_available else "#dc3545"
+                    status_text = "🟢 AVAILABLE TO CLAIM" if is_available else f"🔴 CLAIMED BY: {row['Choreographer']} ({row['Class']})"
+                    
+                    yt_link = str(row['YouTube_Link']).strip()
+                    yt_html = ""
+                    if yt_link.startswith("http"):
+                        yt_html = f"<a href='{yt_link}' target='_blank' class='yt-btn'>▶️ Listen on YouTube</a>"
+                    
+                    card_html = f"""
+                    <div class="song-card" style="border-left: 6px solid {status_color};">
+                        <h4 style="margin: 0 0 5px 0; color: #333;">{row['Perf_Name']}</h4>
+                        <p style="margin: 0; font-size: 13px; font-weight: bold; color: {status_color};">{status_text}</p>
+                        {yt_html}
+                    </div>
+                    """
+                    st.markdown(card_html, unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# TAB 2: TEACHER PERFORMANCE SUBMISSION
+# ---------------------------------------------------------
+with tabs[1]:
+    st.markdown("<div class='header-card'><h4>🎭 Claim & Register Your Act</h4><p style='margin:0; font-size:14px;'>Found a song you like in the Explore tab? Select it here to assign your class to it!</p></div>", unsafe_allow_html=True)
     
     programs = fetch_programs()
     active_progs = programs[programs['Status'] != 'Completed'] if not programs.empty else pd.DataFrame()
@@ -130,20 +181,16 @@ with tabs[0]:
     else:
         prog_options = {f"{r['Event_Name']} ({r['Date']})": r['Prog_ID'] for _, r in active_progs.iterrows()}
         
-        # Step 1: Select Event outside the form so the available acts table updates dynamically
-        sel_prog = st.selectbox("1. Select Celebration Event *", list(prog_options.keys()))
-        prog_id = prog_options[sel_prog]
+        # Select Event outside the form so the available acts table updates dynamically
+        sel_prog_claim = st.selectbox("1. Select Celebration Event *", list(prog_options.keys()), key="claim_prog")
+        prog_id_claim = prog_options[sel_prog_claim]
         
         all_perfs = fetch_performances()
-        available_acts = all_perfs[(all_perfs['Prog_ID'] == prog_id) & (all_perfs['Choreographer'] == "TBD")] if not all_perfs.empty else pd.DataFrame()
+        available_acts = all_perfs[(all_perfs['Prog_ID'] == prog_id_claim) & (all_perfs['Choreographer'] == "TBD")] if not all_perfs.empty else pd.DataFrame()
         
         if available_acts.empty:
-            st.warning("⚠️ No available acts for this event. The Head Teacher must add songs/acts to the pool first, or all acts have already been claimed.")
+            st.warning("⚠️ No available acts for this event. All curated acts have already been claimed by other teachers!")
         else:
-            st.markdown("##### 📌 Available Songs / Acts curated by Admin")
-            disp_avail = available_acts[['Perf_Name', 'YouTube_Link']].copy()
-            st.dataframe(disp_avail, hide_index=True, use_container_width=True, column_config={"YouTube_Link": st.column_config.LinkColumn("YT Link")})
-            
             with st.form("perf_form"):
                 act_dict = {f"{r['Perf_Name']}": r['Perf_ID'] for _, r in available_acts.iterrows()}
                 selected_act_name = st.selectbox("2. Select Act to Claim *", list(act_dict.keys()))
@@ -172,9 +219,9 @@ with tabs[0]:
                     st.rerun()
 
 # ---------------------------------------------------------
-# TAB 2: PLAYLIST & SEQUENCE MANAGER
+# TAB 3: PLAYLIST & SEQUENCE MANAGER
 # ---------------------------------------------------------
-with tabs[1]:
+with tabs[2]:
     st.markdown("<div class='header-card'><h4>📋 Event Playlist Manager</h4><p style='margin:0; font-size:14px;'>Review all acts and edit the <b>Order No.</b> to arrange the sequence of performances.</p></div>", unsafe_allow_html=True)
     
     programs = fetch_programs()
@@ -235,7 +282,6 @@ with tabs[1]:
             col_s1, col_s2 = st.columns([1, 1])
             with col_s1:
                 if st.button("💾 Save New Playlist Order", type="primary", use_container_width=True):
-                    # Update master dataframe with new order numbers
                     for _, r in edited_pl.iterrows():
                         all_perfs.loc[all_perfs['Perf_ID'] == r['Perf_ID'], 'Order_No'] = r['Order_No']
                     
@@ -253,9 +299,9 @@ with tabs[1]:
                     st.rerun()
 
 # ---------------------------------------------------------
-# TAB 3: ADMIN EVENT CREATION
+# TAB 4: ADMIN EVENT CREATION
 # ---------------------------------------------------------
-with tabs[2]:
+with tabs[3]:
     if current_user_role == "admin":
         st.markdown("<div class='header-card' style='border-left: 5px solid #17a2b8;'><h4>📅 Create New Celebration</h4><p style='margin:0; font-size:14px;'>Schedule an upcoming school event first, then add specific songs/acts for teachers to claim.</p></div>", unsafe_allow_html=True)
         

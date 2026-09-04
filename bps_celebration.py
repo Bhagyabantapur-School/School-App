@@ -19,7 +19,6 @@ CLASS_OPTIONS = ["CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CL
 SECTIONS = ["A", "B", "C", "All Sections"]
 PERFORMANCE_TYPES = ["Dance 💃", "Drama / Play 🎭", "Recitation 🎙️", "Chorus Song 🎵", "Solo Song 🎤", "Speech 🗣️", "Yoga / Drill 🧘‍♂️", "Other"]
 
-# Updated headers to support Cancellation tracking
 PERF_HEADERS = ["Perf_ID", "Prog_ID", "Order_No", "Perf_Type", "Perf_Name", "Class", "Section", "Choreographer", "Duration_Mins", "YouTube_Link", "Live_Status", "Completed_At", "Cancel_Reason", "Canceled_By"]
 AUDIT_HEADERS = ["Timestamp", "User", "Action", "Details"]
 
@@ -381,7 +380,6 @@ with tabs[2]:
                         st.rerun()
 
         else:
-            # We don't use st.form here so the text_input can dynamically update based on the selectbox choice
             act_dict = {f"{r['Perf_Name']} (Assigned to: {r['Choreographer']})": r['Perf_ID'] for _, r in available_acts.iterrows()}
             selected_act_label = st.selectbox("2. Select Act to Claim *", list(act_dict.keys()))
             
@@ -512,14 +510,23 @@ with tabs[3]:
                     cancel_name = st.selectbox("Select a Performance to Cancel", ["Select to cancel..."] + active_event_perfs['Perf_Name'].tolist())
                     cancel_reason = st.selectbox("Reason for Cancellation", ["Students Absent", "Not Prepared", "Time Constraints", "Technical Issue", "Other"])
                     
+                    custom_reason = ""
+                    if cancel_reason == "Other":
+                        custom_reason = st.text_input("Please specify the exact reason *", placeholder="Type your reason here...")
+                    
                     if st.button("Submit Cancellation"):
                         if cancel_name != "Select to cancel...":
-                            target_pid = active_event_perfs[active_event_perfs['Perf_Name'] == cancel_name].iloc[0]['Perf_ID']
-                            all_perfs.loc[all_perfs['Perf_ID'] == target_pid, ['Cancel_Reason', 'Canceled_By']] = [cancel_reason, current_user_name]
-                            overwrite_sheet("event_performances", all_perfs, PERF_HEADERS)
-                            log_audit("Canceled Performance", f"{cancel_name} canceled by {current_user_name}")
-                            st.success("Performance cancellation submitted to Head Teacher.")
-                            st.rerun()
+                            final_reason = custom_reason.strip() if cancel_reason == "Other" else cancel_reason
+                            
+                            if cancel_reason == "Other" and not final_reason:
+                                st.error("Please specify a reason for cancellation.")
+                            else:
+                                target_pid = active_event_perfs[active_event_perfs['Perf_Name'] == cancel_name].iloc[0]['Perf_ID']
+                                all_perfs.loc[all_perfs['Perf_ID'] == target_pid, ['Cancel_Reason', 'Canceled_By']] = [final_reason, current_user_name]
+                                overwrite_sheet("event_performances", all_perfs, PERF_HEADERS)
+                                log_audit("Canceled Performance", f"{cancel_name} canceled by {current_user_name}")
+                                st.success("Performance cancellation submitted to Head Teacher.")
+                                st.rerun()
                         else:
                             st.warning("Please select a valid performance.")
 

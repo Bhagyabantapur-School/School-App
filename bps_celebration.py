@@ -19,7 +19,8 @@ CLASS_OPTIONS = ["CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CL
 SECTIONS = ["A", "B", "C", "All Sections"]
 PERFORMANCE_TYPES = ["Dance 💃", "Drama / Play 🎭", "Recitation 🎙️", "Chorus Song 🎵", "Solo Song 🎤", "Speech 🗣️", "Yoga / Drill 🧘‍♂️", "Other"]
 
-PERF_HEADERS = ["Perf_ID", "Prog_ID", "Order_No", "Perf_Type", "Perf_Name", "Class", "Section", "Choreographer", "Duration_Mins", "YouTube_Link", "Live_Status"]
+PERF_HEADERS = ["Perf_ID", "Prog_ID", "Order_No", "Perf_Type", "Perf_Name", "Class", "Section", "Choreographer", "Duration_Mins", "YouTube_Link", "Live_Status", "Completed_At"]
+AUDIT_HEADERS = ["Timestamp", "User", "Action", "Details"]
 
 # Safely inherit user details from app.py
 current_user_name = st.session_state.get('user_name', 'Teacher')
@@ -74,6 +75,7 @@ def ensure_worksheet(sh, title, headers):
 def refresh_event_data():
     fetch_programs.clear()
     fetch_performances.clear()
+    fetch_audit_log.clear()
 
 # ==========================================
 # DATA FETCHING & SAVING
@@ -104,6 +106,25 @@ def fetch_performances():
     df['Order_No'] = pd.to_numeric(df['Order_No'], errors='coerce').fillna(99).astype(int)
     return df
 
+@st.cache_data(ttl=300)
+def fetch_audit_log():
+    sh = init_celeb_sheet()
+    ws = ensure_worksheet(sh, "event_audit_log", AUDIT_HEADERS)
+    records = ws.get_all_records()
+    if not records:
+        return pd.DataFrame(columns=AUDIT_HEADERS)
+    return pd.DataFrame(records)
+
+def log_audit(action, details):
+    try:
+        sh = init_celeb_sheet()
+        ws = ensure_worksheet(sh, "event_audit_log", AUDIT_HEADERS)
+        timestamp = datetime.now(IST).strftime("%d-%m-%Y %I:%M:%S %p")
+        ws.append_row([timestamp, current_user_name, action, details])
+        fetch_audit_log.clear()
+    except Exception:
+        pass # Fail silently so app doesn't break if logging fails
+
 def overwrite_sheet(sheet_name, df, headers):
     sh = init_celeb_sheet()
     ws = ensure_worksheet(sh, sheet_name, headers)
@@ -115,12 +136,18 @@ def overwrite_sheet(sheet_name, df, headers):
     refresh_event_data()
 
 # ==========================================
-# MAIN UI
+# MAIN UI & DYNAMIC TABS
 # ==========================================
 st.markdown("<h2>🎊 BPS Celebration & Event Manager</h2>", unsafe_allow_html=True)
 st.sidebar.button("🔄 Sync Event Data", on_click=refresh_event_data, use_container_width=True)
 
-tabs = st.tabs(["🔴 Live Controller", "🎭 Claim Performance", "📋 Playlist Manager", "📅 Manage Events (Admin)"])
+# Determine visible tabs based on role
+if current_user_role == "admin":
+    tab_titles = ["🔴 Live Controller", "🎭 Claim Performance", "📋 Playlist Manager", "📅 Manage Events", "📝 Audit Log"]
+else:
+    tab_titles = ["🔴 Live Controller", "🎭 Claim Performance", "📋 Playlist Manager"]
+
+tabs = st.tabs(tab_titles)
 
 # ---------------------------------------------------------
 # TAB 1: LIVE PROGRAM CONTROLLER
@@ -137,8 +164,19 @@ with tabs[0]:
         prog_id = prog_options[sel_prog]
         
         event_name_clean = sel_prog.split(' (')[0]
+        ev_info = active_progs[active_progs['Prog_ID'] == prog_id].iloc[0]
         
-        st.markdown(f"<div style='background: linear-gradient(135deg, #1e3c72, #2a5298); padding: 20px; border-radius: 15px; text-align: center; color: white; margin-bottom: 25px; box-shadow: 0 4px 10px rgba(0,0,0,0.2);'><h1 style='margin:0; font-size: 32px;'>🎉 {event_name_clean} 🎉</h1><p style='margin:5px 0 0 0; font-size: 16px; opacity: 0.9;'>🔴 LIVE PROGRAM DASHBOARD</p></div>", unsafe_allow_html=True)
+        # Determine if the event has officially started
+        current_dt = datetime.now(IST)
+        try:
+            ev_dt_str = f"{ev_info['Date']} {ev_info['Start_Time']}"
+            ev_dt = datetime.strptime(ev_dt_str, "%d-%m-%Y %I:%M %p")
+            ev_dt = IST.localize(ev_dt)
+            is_event_started = current_dt >= ev_dt
+        except Exception:
+            is_event_started = True # Fallback to True if parsing fails
+        
+        st.markdown(f"<div style='background: linear-gradient(135deg, #1e3c72, #2a5298); padding: 15px; border-radius: 10px; text-align: center; color: white; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'><h2 style='margin:0; font-size: 26px;'>🎉 {event_name_clean}</h2><p style='margin:2px 0 0 0; font-size: 14px; opacity: 0.9;'>🔴 LIVE PROGRAM DASHBOARD</p></div>", unsafe_allow_html=True)
         
         all_perfs = fetch_performances()
         event_perfs = all_perfs[all_perfs['Prog_ID'] == prog_id] if not all_perfs.empty else pd.DataFrame()
@@ -146,7 +184,6 @@ with tabs[0]:
         if event_perfs.empty:
             st.warning("No performances have been added to this event yet.")
         else:
-            # Sort perfectly by Order No
             event_perfs = event_perfs.sort_values('Order_No')
             
             for _, row in event_perfs.iterrows():
@@ -154,27 +191,28 @@ with tabs[0]:
                 
                 bg_color = "#eafaf1" if is_done else "#ffffff"
                 border_color = "#28a745" if is_done else "#007bff"
-                opacity = "0.6" if is_done else "1.0"
+                opacity = "0.7" if is_done else "1.0"
                 
                 yt_link = str(row['YouTube_Link']).strip()
                 yt_html = ""
                 if yt_link.startswith("http"):
-                    yt_html = f"<a href='{yt_link}' target='_blank' style='display:inline-block; background-color:#ff0000; color:white !important; padding:8px 15px; border-radius:5px; text-decoration:none; font-weight:bold; font-size:14px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);'>▶️ Play Track</a>"
+                    yt_html = f"<a href='{yt_link}' target='_blank' style='display:inline-block; background-color:#ff0000; color:white !important; padding:4px 8px; border-radius:4px; text-decoration:none; font-weight:bold; font-size:12px; box-shadow: 0 1px 2px rgba(0,0,0,0.2);'>▶️ Track</a>"
                 
                 sec_str = f"({row.get('Section','')})" if row.get('Section') and row.get('Section') != "TBD" else ""
+                comp_time_str = f" | 🕒 {row.get('Completed_At', '')}" if is_done and row.get('Completed_At') else ""
                 
-                c1, c2 = st.columns([4, 1.5])
+                c1, c2 = st.columns([5, 1.5])
                 
                 with c1:
                     card_html = f"""
-                    <div style="background-color: {bg_color}; border-left: 6px solid {border_color}; padding: 15px; border-radius: 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); margin-bottom: 5px; opacity: {opacity}; transition: all 0.3s;">
+                    <div style="background-color: {bg_color}; border-left: 5px solid {border_color}; padding: 10px 12px; border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); margin-bottom: 5px; opacity: {opacity}; transition: all 0.2s;">
                         <div style="display:flex; justify-content:space-between; align-items:center;">
                             <div>
-                                <h3 style="margin:0; color:#333; font-size: 20px;">
+                                <h4 style="margin:0; color:#333; font-size: 16px;">
                                     <span style="color:{border_color};">#{row['Order_No']}</span> - {row['Perf_Name']}
-                                </h3>
-                                <p style="margin:5px 0 0 0; color:#555; font-size:15px;">
-                                    <b>Type:</b> {row['Perf_Type']} | <b>Class:</b> {row['Class']} {sec_str} | <b>Guide:</b> {row['Choreographer']}
+                                </h4>
+                                <p style="margin:2px 0 0 0; color:#555; font-size:13px;">
+                                    {row['Perf_Type']} | {row['Class']} {sec_str} | {row['Choreographer']} {comp_time_str}
                                 </p>
                             </div>
                             <div>{yt_html}</div>
@@ -184,22 +222,30 @@ with tabs[0]:
                     st.markdown(card_html, unsafe_allow_html=True)
                 
                 with c2:
-                    st.write("") # Vertical spacing
-                    st.write("")
-                    chk = st.checkbox("✅ Mark Completed", value=is_done, key=f"live_chk_{row['Perf_ID']}")
-                    if chk != is_done:
-                        new_status = 'Done' if chk else 'Pending'
-                        all_perfs.loc[all_perfs['Perf_ID'] == row['Perf_ID'], 'Live_Status'] = new_status
-                        overwrite_sheet("event_performances", all_perfs, PERF_HEADERS)
-                        st.rerun()
+                    st.write("") # Vertical alignment
+                    if is_event_started:
+                        chk = st.checkbox("✅ Done", value=is_done, key=f"live_chk_{row['Perf_ID']}")
+                        if chk != is_done:
+                            new_status = 'Done' if chk else 'Pending'
+                            comp_timestamp = current_dt.strftime("%I:%M %p") if chk else ""
+                            
+                            all_perfs.loc[all_perfs['Perf_ID'] == row['Perf_ID'], 'Live_Status'] = new_status
+                            all_perfs.loc[all_perfs['Perf_ID'] == row['Perf_ID'], 'Completed_At'] = comp_timestamp
+                            overwrite_sheet("event_performances", all_perfs, PERF_HEADERS)
+                            
+                            action_txt = "Marked Completed" if chk else "Marked Pending"
+                            log_audit(action_txt, f"{row['Perf_Name']} in {event_name_clean}")
+                            st.rerun()
+                    else:
+                        st.markdown(f"<div style='margin-top:10px; font-size:13px; color:#e67e22; font-weight:bold;'>⏳ Starts at {ev_info['Start_Time']}</div>", unsafe_allow_html=True)
                         
-                st.write("")
+            st.write("")
 
 # ---------------------------------------------------------
 # TAB 2: TEACHER PERFORMANCE SUBMISSION
 # ---------------------------------------------------------
 with tabs[1]:
-    st.markdown("<div class='header-card'><h4>🎭 Claim & Register Your Act</h4><p style='margin:0; font-size:14px;'>Found a song you like in the Live Controller? Select it here to assign your class to it!</p></div>", unsafe_allow_html=True)
+    st.markdown("<div class='header-card'><h4>🎭 Claim & Register Your Act</h4><p style='margin:0; font-size:14px;'>Found a song you like? Select it here to assign your class to it!</p></div>", unsafe_allow_html=True)
     
     programs = fetch_programs()
     active_progs = programs[programs['Status'] != 'Completed'] if not programs.empty else pd.DataFrame()
@@ -216,7 +262,7 @@ with tabs[1]:
         available_acts = all_perfs[(all_perfs['Prog_ID'] == prog_id_claim) & (all_perfs['Choreographer'] == "TBD")] if not all_perfs.empty else pd.DataFrame()
         
         if available_acts.empty:
-            st.warning("⚠️ No available acts for this event. All curated acts have already been claimed by other teachers! You can add your own custom act below.")
+            st.warning("⚠️ No available curated acts. You can add your own custom act below.")
             
             with st.form("custom_perf_form"):
                 st.markdown("##### ✨ Submit a Custom Act")
@@ -246,10 +292,11 @@ with tabs[1]:
                             "Perf_ID": new_id, "Prog_ID": prog_id_claim, "Order_No": 99, 
                             "Perf_Type": perf_type, "Perf_Name": perf_name.strip(),
                             "Class": cls_sel, "Section": sec_sel, "Choreographer": choreo,
-                            "Duration_Mins": dur, "YouTube_Link": yt_link.strip(), "Live_Status": "Pending"
+                            "Duration_Mins": dur, "YouTube_Link": yt_link.strip(), "Live_Status": "Pending", "Completed_At": ""
                         }
                         updated_perfs = pd.concat([all_perfs, pd.DataFrame([new_act])], ignore_index=True)
                         overwrite_sheet("event_performances", updated_perfs, PERF_HEADERS)
+                        log_audit("Added Custom Act", f"{perf_name.strip()} for {cls_sel}")
                         st.success(f"Custom Performance '{perf_name}' successfully added!")
                         st.rerun()
 
@@ -275,6 +322,7 @@ with tabs[1]:
                     target_id = act_dict[selected_act_name]
                     all_perfs.loc[all_perfs['Perf_ID'] == target_id, ['Perf_Type', 'Class', 'Section', 'Choreographer', 'Duration_Mins', 'Live_Status']] = [perf_type, cls_sel, sec_sel, choreo, dur, "Pending"]
                     overwrite_sheet("event_performances", all_perfs, PERF_HEADERS)
+                    log_audit("Claimed Curated Act", f"{selected_act_name} for {cls_sel}")
                     st.success(f"Successfully claimed '{selected_act_name}' for {cls_sel}!")
                     st.rerun()
 
@@ -307,7 +355,7 @@ with tabs[2]:
             unclaimed_count = len(event_perfs[event_perfs['Choreographer'] == "TBD"])
             kpi_html = f"""
             <div class='kpi-card'>
-                <h3>⏱️ Total Program Duration: {hrs} Hours {mins} Mins</h3>
+                <h3>⏱️ Estimated Duration: {hrs} Hours {mins} Mins</h3>
                 <p style='margin:0; color:#555;'>({len(event_perfs)} Acts Total | <b>{unclaimed_count} Unclaimed by Teachers</b>)</p>
             </div>
             """
@@ -342,6 +390,7 @@ with tabs[2]:
                     for _, r in edited_pl.iterrows():
                         all_perfs.loc[all_perfs['Perf_ID'] == r['Perf_ID'], 'Order_No'] = r['Order_No']
                     overwrite_sheet("event_performances", all_perfs, PERF_HEADERS)
+                    log_audit("Reordered Playlist", f"For event: {view_prog.split(' (')[0]}")
                     st.success("Playlist order successfully updated!")
                     st.rerun()
             
@@ -351,14 +400,15 @@ with tabs[2]:
                     target_pid = event_perfs[event_perfs['Perf_Name'] == del_id].iloc[0]['Perf_ID']
                     all_perfs = all_perfs[all_perfs['Perf_ID'] != target_pid]
                     overwrite_sheet("event_performances", all_perfs, PERF_HEADERS)
+                    log_audit("Deleted Performance", f"{del_id} from {view_prog.split(' (')[0]}")
                     st.success("Performance removed.")
                     st.rerun()
 
 # ---------------------------------------------------------
-# TAB 4: ADMIN EVENT CREATION
+# TAB 4 & 5: ADMIN TABS (HIDDEN FROM TEACHERS)
 # ---------------------------------------------------------
-with tabs[3]:
-    if current_user_role == "admin":
+if current_user_role == "admin":
+    with tabs[3]:
         st.markdown("<div class='header-card' style='border-left: 5px solid #17a2b8;'><h4>📅 Create New Celebration</h4><p style='margin:0; font-size:14px;'>Schedule an upcoming school event first, then add specific songs/acts for teachers to claim.</p></div>", unsafe_allow_html=True)
         
         with st.form("create_event"):
@@ -384,6 +434,7 @@ with tabs[3]:
                     programs = fetch_programs()
                     updated_progs = pd.concat([programs, pd.DataFrame([new_ev])], ignore_index=True)
                     overwrite_sheet("event_programs", updated_progs, ["Prog_ID", "Event_Name", "Date", "Start_Time", "Status", "Created_By"])
+                    log_audit("Scheduled Event", ev_name.strip())
                     st.success(f"Event '{ev_name}' created successfully!")
                     st.rerun()
                     
@@ -419,11 +470,13 @@ with tabs[3]:
                             "Choreographer": "TBD",
                             "Duration_Mins": 0,
                             "YouTube_Link": yt_link.strip(),
-                            "Live_Status": "Pending"
+                            "Live_Status": "Pending",
+                            "Completed_At": ""
                         }
                         curr_perfs = fetch_performances()
                         updated_perfs = pd.concat([curr_perfs, pd.DataFrame([new_act])], ignore_index=True)
                         overwrite_sheet("event_performances", updated_perfs, PERF_HEADERS)
+                        log_audit("Added Curated Act to Pool", f"{act_name.strip()} in {sel_prog_admin.split(' (')[0]}")
                         st.success(f"Act '{act_name}' added to the pool!")
                         st.rerun()
         else:
@@ -438,7 +491,22 @@ with tabs[3]:
             if mk_comp != "Select..." and st.button("✔️ Mark Completed"):
                 programs.loc[programs['Event_Name'] == mk_comp, 'Status'] = 'Completed'
                 overwrite_sheet("event_programs", programs, ["Prog_ID", "Event_Name", "Date", "Start_Time", "Status", "Created_By"])
+                log_audit("Completed Event", f"Closed out {mk_comp}")
                 st.success(f"{mk_comp} moved to Completed history.")
                 st.rerun()
-    else:
-        st.warning("Only the Head Teacher (Admin) can schedule new celebration events.")
+                
+    with tabs[4]:
+        st.markdown("### 📝 System Audit Log")
+        st.caption("See a live ledger of who modified what within the Celebration module.")
+        
+        audit_data = fetch_audit_log()
+        
+        if audit_data.empty:
+            st.info("No modifications have been logged yet.")
+        else:
+            # Sort newest first
+            audit_data = audit_data.iloc[::-1]
+            st.dataframe(audit_data, hide_index=True, use_container_width=True)
+            if st.button("🗑️ Clear Audit Log"):
+                overwrite_sheet("event_audit_log", pd.DataFrame(columns=AUDIT_HEADERS), AUDIT_HEADERS)
+                st.rerun()

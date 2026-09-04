@@ -192,7 +192,7 @@ with tabs[0]:
             mins = (time_diff.seconds % 3600) // 60
             
             if days > 0:
-                status_badge = f"⏳ Starts in: {days} Days, {hours} Hours"
+                status_badge = f"⏳ Starts in: {days} Days, {hours} Hours, {mins} Mins"
             elif hours > 0:
                 status_badge = f"⏳ Starts in: {hours} Hours, {mins} Mins"
             else:
@@ -395,7 +395,9 @@ with tabs[2]:
         if event_perfs.empty:
             st.info("No performances have been registered for this event yet.")
         else:
-            event_perfs = event_perfs.sort_values('Order_No')
+            # Normalize internal Order_No sequentially from 1 to N so math works perfectly
+            event_perfs = event_perfs.sort_values('Order_No').reset_index(drop=True)
+            event_perfs['Order_No'] = range(1, len(event_perfs) + 1)
             
             # Active performances calculation
             active_event_perfs = event_perfs[event_perfs['Cancel_Reason'] == ""]
@@ -428,14 +430,12 @@ with tabs[2]:
             with st.expander("⚙️ Arrange Performance Order", expanded=False):
                 st.caption("Choose your preferred method to reorder the playlist. Be sure to click **Save** when done.")
                 
-                arr_tab1, arr_tab2 = st.tabs(["↕️ Quick Move (Arrows)", "🔢 Manual Numbering"])
+                arr_tab1, arr_tab2 = st.tabs(["↕️ Quick Move (Arrows)", "🔢 Smart Numbering"])
                 
                 # Initialize Local State for Quick Move
                 if 'local_pl_df' not in st.session_state or st.session_state.get('current_pl_prog') != view_prog_id or len(event_perfs) != len(st.session_state.local_pl_df):
                     st.session_state.current_pl_prog = view_prog_id
-                    temp_df = event_perfs.sort_values('Order_No').reset_index(drop=True)
-                    temp_df['Order_No'] = range(1, len(temp_df) + 1)
-                    st.session_state.local_pl_df = temp_df.copy()
+                    st.session_state.local_pl_df = event_perfs.copy()
                     st.session_state.unsaved_pl = False
                     
                 local_df = st.session_state.local_pl_df
@@ -486,13 +486,13 @@ with tabs[2]:
                         st.markdown("<div class='local-warning'>⚠️ <b>Sequence modified locally!</b> Click Save above to update Google Sheets.</div>", unsafe_allow_html=True)
                 
                 with arr_tab2:
-                    st.caption("Change the order numbers in the text boxes below. Ensure there are no duplicate numbers, then click Save.")
+                    st.caption("💡 **Smart Reorder:** Edit a number below. The app will automatically shift the rest of the performances out of the way!")
                     with st.form("reorder_form"):
                         new_orders = {}
                         for _, r in event_perfs.iterrows():
-                            c1, c2 = st.columns([1, 8])
+                            c1, c2 = st.columns([1.5, 8.5])
                             with c1:
-                                val = st.number_input("Order", value=int(r['Order_No']), min_value=1, step=1, key=f"ord_{r['Perf_ID']}", label_visibility="collapsed")
+                                val = st.number_input("Order", value=int(r['Order_No']), min_value=1, max_value=len(event_perfs), step=1, key=f"ord_{r['Perf_ID']}", label_visibility="collapsed")
                                 new_orders[r['Perf_ID']] = val
                             with c2:
                                 status_badge = ""
@@ -504,18 +504,37 @@ with tabs[2]:
                                 st.markdown(f"<div style='padding-top:6px; font-size:15px;'><b>{r['Perf_Name']}</b> {status_badge} — <i>{r['Choreographer']} ({r['Class']})</i></div>", unsafe_allow_html=True)
                         
                         st.write("")
-                        if st.form_submit_button("💾 Save Manual Numbering", type="primary"):
-                            order_values = list(new_orders.values())
-                            if len(order_values) != len(set(order_values)):
-                                st.error("❌ Duplicate order numbers detected! Please ensure each performance has a unique number.")
+                        if st.form_submit_button("💾 Save Smart Numbering", type="primary"):
+                            changes = []
+                            for pid, new_val in new_orders.items():
+                                old_val = event_perfs.loc[event_perfs['Perf_ID'] == pid, 'Order_No'].iloc[0]
+                                if new_val != old_val:
+                                    changes.append((pid, old_val, new_val))
+                            
+                            if len(changes) == 0:
+                                st.warning("No order changes were made.")
                             else:
-                                for pid, ord_val in new_orders.items():
-                                    all_perfs.loc[all_perfs['Perf_ID'] == pid, 'Order_No'] = ord_val
+                                if len(changes) == 1:
+                                    # Perfect Smart Shift Logic
+                                    pid, old_val, new_val = changes[0]
+                                    if new_val > old_val:
+                                        event_perfs.loc[(event_perfs['Order_No'] > old_val) & (event_perfs['Order_No'] <= new_val), 'Order_No'] -= 1
+                                    elif new_val < old_val:
+                                        event_perfs.loc[(event_perfs['Order_No'] >= new_val) & (event_perfs['Order_No'] < old_val), 'Order_No'] += 1
+                                    event_perfs.loc[event_perfs['Perf_ID'] == pid, 'Order_No'] = new_val
+                                else:
+                                    # Fallback if they changed multiple numbers at once
+                                    event_perfs['New_Order'] = event_perfs['Perf_ID'].map(new_orders)
+                                    event_perfs = event_perfs.sort_values(['New_Order', 'Order_No'])
+                                    event_perfs['Order_No'] = range(1, len(event_perfs) + 1)
+                                
+                                for _, r in event_perfs.iterrows():
+                                    all_perfs.loc[all_perfs['Perf_ID'] == r['Perf_ID'], 'Order_No'] = r['Order_No']
                                 
                                 overwrite_sheet("event_performances", all_perfs, PERF_HEADERS)
-                                log_audit("Reordered Playlist (Manual)", f"For event: {view_prog.split(' (')[0]}")
+                                log_audit("Reordered Playlist (Smart Numbering)", f"For event: {view_prog.split(' (')[0]}")
                                 st.session_state.current_pl_prog = None # force reset of local dataframe for arrows
-                                st.success("Playlist order successfully updated!")
+                                st.success("Playlist smoothly reordered and saved!")
                                 st.rerun()
 
             st.divider()

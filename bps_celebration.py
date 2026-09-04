@@ -149,16 +149,71 @@ st.markdown("<h2>🎊 BPS Celebration & Event Manager</h2>", unsafe_allow_html=T
 st.sidebar.button("🔄 Sync Event Data", on_click=refresh_event_data, use_container_width=True)
 
 if current_user_role == "admin":
-    tab_titles = ["🔴 Live Controller", "🎭 Claim Performance", "📋 Playlist Manager", "📅 Manage Events", "📝 Audit Log"]
+    tab_titles = ["🎵 Explore Songs", "🔴 Live Controller", "🎭 Claim Performance", "📋 Playlist Manager", "📅 Manage Events", "📝 Audit Log"]
 else:
-    tab_titles = ["🔴 Live Controller", "🎭 Claim Performance", "📋 Playlist Manager"]
+    tab_titles = ["🎵 Explore Songs", "🔴 Live Controller", "🎭 Claim Performance", "📋 Playlist Manager"]
 
 tabs = st.tabs(tab_titles)
 
 # ---------------------------------------------------------
-# TAB 1: LIVE PROGRAM CONTROLLER
+# TAB 1: EXPLORE SONGS & ACTS
 # ---------------------------------------------------------
 with tabs[0]:
+    st.markdown("<div class='header-card' style='border-left-color: #e83e8c;'><h4>🎵 Explore Songs & Acts</h4><p style='margin:0; font-size:14px;'>Listen to the songs curated by the Head Teacher and choose the perfect one for your class!</p></div>", unsafe_allow_html=True)
+    
+    programs = fetch_programs()
+    active_progs = programs[programs['Status'] != 'Completed'] if not programs.empty else pd.DataFrame()
+    
+    if active_progs.empty:
+        st.info("No upcoming celebrations found. Please wait for the Admin to schedule one.")
+    else:
+        prog_options = {f"{r['Event_Name']} ({r['Date']})": r['Prog_ID'] for _, r in active_progs.iterrows()}
+        sel_prog = st.selectbox("Select Celebration Event to Explore", list(prog_options.keys()), key="explore_prog")
+        prog_id = prog_options[sel_prog]
+        
+        event_name_clean = sel_prog.split(' (')[0]
+        st.markdown(f"### 🎊 {event_name_clean} - Act Gallery")
+        
+        all_perfs = fetch_performances()
+        event_perfs = all_perfs[all_perfs['Prog_ID'] == prog_id] if not all_perfs.empty else pd.DataFrame()
+        
+        if event_perfs.empty:
+            st.warning("No songs or acts have been added to this event yet. Check back later!")
+        else:
+            cols = st.columns(2)
+            for i, (_, row) in enumerate(event_perfs.iterrows()):
+                with cols[i % 2]:
+                    is_available = row['Class'] == "TBD"
+                    is_canceled = str(row.get('Cancel_Reason', '')) != ""
+                    
+                    if is_canceled:
+                        status_color = "#6c757d"
+                        status_text = f"🚫 CANCELED by {row['Canceled_By']}"
+                    elif is_available:
+                        status_color = "#28a745"
+                        status_text = f"🟢 AVAILABLE TO CLAIM (Assigned: {row['Choreographer']})"
+                    else:
+                        status_color = "#dc3545"
+                        status_text = f"🔴 CLAIMED BY: {row['Choreographer']} ({row['Class']})"
+                    
+                    yt_link = str(row['YouTube_Link']).strip()
+                    yt_html = ""
+                    if yt_link.startswith("http"):
+                        yt_html = f"<a href='{yt_link}' target='_blank' class='yt-btn'>▶️ Listen on YouTube</a>"
+                    
+                    card_html = f"""
+                    <div class="song-card" style="border-left: 6px solid {status_color};">
+                        <h4 style="margin: 0 0 5px 0; color: #333;">{row['Perf_Name']}</h4>
+                        <p style="margin: 0; font-size: 13px; font-weight: bold; color: {status_color};">{status_text}</p>
+                        {yt_html}
+                    </div>
+                    """
+                    st.markdown(card_html, unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# TAB 2: LIVE PROGRAM CONTROLLER
+# ---------------------------------------------------------
+with tabs[1]:
     programs = fetch_programs()
     active_progs = programs[programs['Status'] != 'Completed'] if not programs.empty else pd.DataFrame()
     
@@ -259,9 +314,9 @@ with tabs[0]:
             st.write("")
 
 # ---------------------------------------------------------
-# TAB 2: TEACHER PERFORMANCE SUBMISSION
+# TAB 3: TEACHER PERFORMANCE SUBMISSION
 # ---------------------------------------------------------
-with tabs[1]:
+with tabs[2]:
     st.markdown("<div class='header-card'><h4>🎭 Claim & Register Your Act</h4><p style='margin:0; font-size:14px;'>Complete the registration for the song/act assigned to you by the Head Teacher.</p></div>", unsafe_allow_html=True)
     
     programs = fetch_programs()
@@ -352,9 +407,9 @@ with tabs[1]:
                     st.rerun()
 
 # ---------------------------------------------------------
-# TAB 3: PLAYLIST & SEQUENCE MANAGER
+# TAB 4: PLAYLIST & SEQUENCE MANAGER
 # ---------------------------------------------------------
-with tabs[2]:
+with tabs[3]:
     st.markdown("<div class='header-card'><h4>📋 Event Playlist Manager</h4><p style='margin:0; font-size:14px;'>Review all acts and manage the event playlist.</p></div>", unsafe_allow_html=True)
     
     programs = fetch_programs()
@@ -373,7 +428,6 @@ with tabs[2]:
         else:
             event_perfs = event_perfs.sort_values('Order_No')
             
-            # Active performances calculation
             active_event_perfs = event_perfs[event_perfs['Cancel_Reason'] == ""]
             total_mins = pd.to_numeric(active_event_perfs['Duration_Mins'], errors='coerce').sum()
             hrs = int(total_mins // 60)
@@ -388,7 +442,7 @@ with tabs[2]:
             """
             st.markdown(kpi_html, unsafe_allow_html=True)
             st.write("")
-
+            
             def highlight_pl_row(s):
                 is_canceled = str(s.get('Cancel_Reason', '')) != ""
                 is_done = str(s.get('Live_Status', '')) == 'Done'
@@ -401,39 +455,99 @@ with tabs[2]:
             # ===============================================
             # PLAYLIST REORDERING (AVAILABLE TO ALL USERS)
             # ===============================================
-            with st.expander("🔢 Arrange Performance Order", expanded=False):
-                st.caption("Change the order numbers in the text boxes below. Ensure there are no duplicate numbers, then click Save.")
+            with st.expander("⚙️ Arrange Performance Order", expanded=False):
+                st.caption("Choose your preferred method to reorder the playlist. Be sure to click **Save** when done.")
                 
-                with st.form("reorder_form"):
-                    new_orders = {}
-                    for _, r in event_perfs.iterrows():
-                        c1, c2 = st.columns([1, 8])
-                        with c1:
-                            val = st.number_input("Order", value=int(r['Order_No']), min_value=1, step=1, key=f"ord_{r['Perf_ID']}", label_visibility="collapsed")
-                            new_orders[r['Perf_ID']] = val
-                        with c2:
-                            status_badge = ""
-                            if r['Cancel_Reason']:
-                                status_badge = "🚫 <span style='color:red;'>[CANCELED]</span>"
-                            elif r['Live_Status'] == "Done":
-                                status_badge = "✅ <span style='color:green;'>[DONE]</span>"
-                                
-                            st.markdown(f"<div style='padding-top:6px; font-size:15px;'><b>{r['Perf_Name']}</b> {status_badge} — <i>{r['Choreographer']} ({r['Class']})</i></div>", unsafe_allow_html=True)
+                arr_tab1, arr_tab2 = st.tabs(["↕️ Quick Move (Arrows)", "🔢 Manual Numbering"])
+                
+                # Initialize Local State for Quick Move
+                if 'local_pl_df' not in st.session_state or st.session_state.get('current_pl_prog') != view_prog_id or len(event_perfs) != len(st.session_state.local_pl_df):
+                    st.session_state.current_pl_prog = view_prog_id
+                    temp_df = event_perfs.sort_values('Order_No').reset_index(drop=True)
+                    temp_df['Order_No'] = range(1, len(temp_df) + 1)
+                    st.session_state.local_pl_df = temp_df.copy()
+                    st.session_state.unsaved_pl = False
                     
-                    st.write("")
-                    if st.form_submit_button("💾 Save Playlist Order", type="primary"):
-                        order_values = list(new_orders.values())
-                        if len(order_values) != len(set(order_values)):
-                            st.error("❌ Duplicate order numbers detected! Please ensure each performance has a unique number.")
-                        else:
-                            for pid, ord_val in new_orders.items():
-                                all_perfs.loc[all_perfs['Perf_ID'] == pid, 'Order_No'] = ord_val
-                            
+                local_df = st.session_state.local_pl_df
+                
+                with arr_tab1:
+                    st.caption("🖱️ **Click a row** to select it, then use the Up/Down arrows to move it. Click Save when finished.")
+                    disp_df = local_df[["Order_No", "Perf_Type", "Perf_Name", "Class", "Choreographer", "Duration_Mins", "Live_Status"]].copy()
+                    
+                    selection_event = st.dataframe(
+                        disp_df,
+                        hide_index=True,
+                        use_container_width=True,
+                        selection_mode="single-row",
+                        on_select="rerun",
+                        key="pl_grid_selection"
+                    )
+                    
+                    sel_idx = None
+                    if selection_event.selection.rows:
+                        sel_idx = selection_event.selection.rows[0]
+                    
+                    col_up, col_dn, col_save1 = st.columns([2, 2, 4])
+                    with col_up:
+                        if st.button("⬆️ Move Up", disabled=(sel_idx is None or sel_idx == 0), use_container_width=True, key="btn_up"):
+                            idx1, idx2 = sel_idx, sel_idx - 1
+                            local_df.loc[idx1, 'Order_No'], local_df.loc[idx2, 'Order_No'] = local_df.loc[idx2, 'Order_No'], local_df.loc[idx1, 'Order_No']
+                            st.session_state.local_pl_df = local_df.sort_values('Order_No').reset_index(drop=True)
+                            st.session_state.unsaved_pl = True
+                            st.rerun()
+                    with col_dn:
+                        if st.button("⬇️ Move Down", disabled=(sel_idx is None or sel_idx == len(local_df)-1), use_container_width=True, key="btn_dn"):
+                            idx1, idx2 = sel_idx, sel_idx + 1
+                            local_df.loc[idx1, 'Order_No'], local_df.loc[idx2, 'Order_No'] = local_df.loc[idx2, 'Order_No'], local_df.loc[idx1, 'Order_No']
+                            st.session_state.local_pl_df = local_df.sort_values('Order_No').reset_index(drop=True)
+                            st.session_state.unsaved_pl = True
+                            st.rerun()
+                    with col_save1:
+                        if st.button("💾 Save Arrow Changes", type="primary", use_container_width=True, disabled=not st.session_state.get('unsaved_pl', False)):
+                            for _, r in st.session_state.local_pl_df.iterrows():
+                                all_perfs.loc[all_perfs['Perf_ID'] == r['Perf_ID'], 'Order_No'] = r['Order_No']
                             overwrite_sheet("event_performances", all_perfs, PERF_HEADERS)
-                            log_audit("Reordered Playlist", f"For event: {view_prog.split(' (')[0]}")
+                            log_audit("Reordered Playlist (Arrows)", f"For event: {view_prog.split(' (')[0]}")
+                            st.session_state.unsaved_pl = False
                             st.success("Playlist order successfully updated!")
                             st.rerun()
-            
+                            
+                    if st.session_state.get('unsaved_pl', False):
+                        st.markdown("<div class='local-warning'>⚠️ <b>Sequence modified locally!</b> Click Save above to update Google Sheets.</div>", unsafe_allow_html=True)
+                
+                with arr_tab2:
+                    st.caption("Change the order numbers in the text boxes below. Ensure there are no duplicate numbers, then click Save.")
+                    with st.form("reorder_form"):
+                        new_orders = {}
+                        for _, r in event_perfs.iterrows():
+                            c1, c2 = st.columns([1, 8])
+                            with c1:
+                                val = st.number_input("Order", value=int(r['Order_No']), min_value=1, step=1, key=f"ord_{r['Perf_ID']}", label_visibility="collapsed")
+                                new_orders[r['Perf_ID']] = val
+                            with c2:
+                                status_badge = ""
+                                if r['Cancel_Reason']:
+                                    status_badge = "🚫 <span style='color:red;'>[CANCELED]</span>"
+                                elif r['Live_Status'] == "Done":
+                                    status_badge = "✅ <span style='color:green;'>[DONE]</span>"
+                                    
+                                st.markdown(f"<div style='padding-top:6px; font-size:15px;'><b>{r['Perf_Name']}</b> {status_badge} — <i>{r['Choreographer']} ({r['Class']})</i></div>", unsafe_allow_html=True)
+                        
+                        st.write("")
+                        if st.form_submit_button("💾 Save Manual Numbering", type="primary"):
+                            order_values = list(new_orders.values())
+                            if len(order_values) != len(set(order_values)):
+                                st.error("❌ Duplicate order numbers detected! Please ensure each performance has a unique number.")
+                            else:
+                                for pid, ord_val in new_orders.items():
+                                    all_perfs.loc[all_perfs['Perf_ID'] == pid, 'Order_No'] = ord_val
+                                
+                                overwrite_sheet("event_performances", all_perfs, PERF_HEADERS)
+                                log_audit("Reordered Playlist (Manual)", f"For event: {view_prog.split(' (')[0]}")
+                                st.session_state.current_pl_prog = None # force reset of local dataframe for arrows
+                                st.success("Playlist order successfully updated!")
+                                st.rerun()
+
             st.divider()
 
             # ===============================================
@@ -463,6 +577,7 @@ with tabs[2]:
                     all_perfs = all_perfs[all_perfs['Perf_ID'] != target_pid]
                     overwrite_sheet("event_performances", all_perfs, PERF_HEADERS)
                     log_audit("Deleted Performance", f"{del_id} from {view_prog.split(' (')[0]}")
+                    st.session_state.current_pl_prog = None
                     st.success("Performance removed.")
                     st.rerun()
                         
@@ -507,10 +622,10 @@ with tabs[2]:
                             st.warning("Please select a valid performance.")
 
 # ---------------------------------------------------------
-# TAB 4 & 5: ADMIN TABS (HIDDEN FROM TEACHERS)
+# TAB 5 & 6: ADMIN TABS (HIDDEN FROM TEACHERS)
 # ---------------------------------------------------------
 if current_user_role == "admin":
-    with tabs[3]:
+    with tabs[4]:
         st.markdown("<div class='header-card' style='border-left: 5px solid #17a2b8;'><h4>📅 Create New Celebration</h4><p style='margin:0; font-size:14px;'>Schedule an upcoming school event first, then add specific songs/acts for teachers to claim.</p></div>", unsafe_allow_html=True)
         
         with st.form("create_event"):
@@ -600,7 +715,7 @@ if current_user_role == "admin":
                 st.success(f"{mk_comp} moved to Completed history.")
                 st.rerun()
                 
-    with tabs[4]:
+    with tabs[5]:
         st.markdown("### 📝 System Audit Log")
         st.caption("See a live ledger of who modified what within the Celebration module.")
         

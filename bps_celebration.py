@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, time
 import pytz
 import gspread
-from gspread.exceptions import WorksheetNotFound
+from gspread.exceptions import WorksheetNotFound, APIError
 from google.oauth2.service_account import Credentials
 
 IST = pytz.timezone('Asia/Kolkata')
@@ -41,7 +41,7 @@ def inject_security_css(user_name):
 inject_security_css(current_user_name)
 
 # ==========================================
-# GOOGLE SHEETS CONNECTORS
+# GOOGLE SHEETS CONNECTORS (BYPASSING NAME SEARCH)
 # ==========================================
 @st.cache_resource
 def get_google_credentials():
@@ -53,9 +53,13 @@ def get_google_credentials():
 @st.cache_resource
 def init_celeb_sheet():
     try: 
-        return gspread.authorize(get_google_credentials()).open("BPS_CELEBRATION")
-    except Exception: 
-        st.error("⚠️ BPS_CELEBRATION Google Sheet not found! Please check the name and ensure it is shared with the service account email.")
+        # Using the exact unique ID extracted from your uploaded file!
+        return gspread.authorize(get_google_credentials()).open_by_key("1TXs2o0OnpPz1nr_AnhzrwR_OA3FsAss9gwGvbB6LHQo")
+    except APIError:
+        st.error("⚠️ The Service Account does not have permission! Please ensure your Service Account email is added as an 'Editor' to the BPS_CELEBRATION sheet.")
+        st.stop()
+    except Exception as e: 
+        st.error(f"⚠️ Connection Error: {e}")
         st.stop()
 
 def ensure_worksheet(sh, title, headers):
@@ -138,7 +142,6 @@ with tabs[0]:
             sec_sel = c4.selectbox("Section", SECTIONS)
             
             c5, c6 = st.columns(2)
-            # Default to logged-in user if they are a teacher
             def_idx = TEACHER_LIST.index(current_user_name) if current_user_name in TEACHER_LIST else 0
             choreo = c5.selectbox("Choreographer / Guiding Teacher *", TEACHER_LIST, index=def_idx)
             dur = c6.number_input("Estimated Duration (Minutes) *", min_value=1, max_value=45, value=5, step=1)
@@ -157,7 +160,7 @@ with tabs[0]:
                     new_act = {
                         "Perf_ID": new_id,
                         "Prog_ID": prog_id,
-                        "Order_No": 99, # Default to bottom of list
+                        "Order_No": 99, 
                         "Perf_Type": perf_type,
                         "Perf_Name": perf_name.strip(),
                         "Class": cls_sel,
@@ -193,10 +196,8 @@ with tabs[1]:
         if event_perfs.empty:
             st.info("No performances have been registered for this event yet.")
         else:
-            # Sort by Order_No
             event_perfs = event_perfs.sort_values('Order_No')
             
-            # Calculate Total Time
             total_mins = pd.to_numeric(event_perfs['Duration_Mins'], errors='coerce').sum()
             hrs = int(total_mins // 60)
             mins = int(total_mins % 60)
@@ -207,7 +208,6 @@ with tabs[1]:
             st.markdown("##### ↕️ Arrange Performance Order")
             st.caption("Double-click a cell in the **Order No.** column to type a new number. Then click Save to reorder the list.")
             
-            # Setup Editor
             edit_cols = ["Order_No", "Perf_Type", "Perf_Name", "Class", "Choreographer", "Duration_Mins", "YouTube_Link", "Perf_ID"]
             disp_df = event_perfs[edit_cols].copy()
             
@@ -216,7 +216,7 @@ with tabs[1]:
                 hide_index=True,
                 use_container_width=True,
                 column_config={
-                    "Perf_ID": None, # Hide ID
+                    "Perf_ID": None, 
                     "Order_No": st.column_config.NumberColumn("Order No.", min_value=1, step=1, required=True),
                     "Perf_Type": st.column_config.TextColumn("Type", disabled=True),
                     "Perf_Name": st.column_config.TextColumn("Act / Song", disabled=True),
@@ -230,7 +230,6 @@ with tabs[1]:
             col_s1, col_s2 = st.columns([1, 1])
             with col_s1:
                 if st.button("💾 Save New Playlist Order", type="primary", use_container_width=True):
-                    # Update master dataframe with new order numbers
                     for _, r in edited_pl.iterrows():
                         all_perfs.loc[all_perfs['Perf_ID'] == r['Perf_ID'], 'Order_No'] = r['Order_No']
                     

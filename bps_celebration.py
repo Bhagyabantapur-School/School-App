@@ -147,14 +147,16 @@ st.markdown("<h2>🎊 BPS Celebration & Event Manager</h2>", unsafe_allow_html=T
 st.sidebar.button("🔄 Sync Event Data", on_click=refresh_event_data, use_container_width=True)
 
 if current_user_role == "admin":
+    # 5 Tabs for Admin
     tab_titles = ["🔴 Live Controller", "🎭 Claim Performance", "📋 Playlist Manager", "📅 Manage Events", "📝 Audit Log"]
 else:
+    # 3 Tabs for Teachers
     tab_titles = ["🔴 Live Controller", "🎭 Claim Performance", "📋 Playlist Manager"]
 
 tabs = st.tabs(tab_titles)
 
 # ---------------------------------------------------------
-# TAB 1: LIVE PROGRAM CONTROLLER
+# TAB 1: LIVE PROGRAM CONTROLLER (tabs[0])
 # ---------------------------------------------------------
 with tabs[0]:
     programs = fetch_programs()
@@ -281,7 +283,7 @@ with tabs[0]:
             st.write("")
 
 # ---------------------------------------------------------
-# TAB 2: TEACHER PERFORMANCE SUBMISSION
+# TAB 2: TEACHER PERFORMANCE SUBMISSION (tabs[1])
 # ---------------------------------------------------------
 with tabs[1]:
     st.markdown("<div class='header-card'><h4>🎭 Claim & Register Your Act</h4><p style='margin:0; font-size:14px;'>Complete the registration for the song/act assigned to you by the Head Teacher.</p></div>", unsafe_allow_html=True)
@@ -374,7 +376,7 @@ with tabs[1]:
                     st.rerun()
 
 # ---------------------------------------------------------
-# TAB 3: PLAYLIST & SEQUENCE MANAGER
+# TAB 3: PLAYLIST & SEQUENCE MANAGER (tabs[2])
 # ---------------------------------------------------------
 with tabs[2]:
     st.markdown("<div class='header-card'><h4>📋 Event Playlist Manager</h4><p style='margin:0; font-size:14px;'>Review all acts and manage the event playlist.</p></div>", unsafe_allow_html=True)
@@ -593,7 +595,7 @@ with tabs[2]:
 # TAB 4 & 5: ADMIN TABS (HIDDEN FROM TEACHERS)
 # ---------------------------------------------------------
 if current_user_role == "admin":
-    with tabs[3]:
+    with tabs[3]: # tabs[3] is Manage Events
         st.markdown("<div class='header-card' style='border-left: 5px solid #17a2b8;'><h4>📅 Create New Celebration</h4><p style='margin:0; font-size:14px;'>Schedule an upcoming school event first, then add specific songs/acts for teachers to claim.</p></div>", unsafe_allow_html=True)
         
         with st.form("create_event"):
@@ -683,7 +685,7 @@ if current_user_role == "admin":
                 st.success(f"{mk_comp} moved to Completed history.")
                 st.rerun()
                 
-    with tabs[5]:
+    with tabs[4]: # tabs[4] is Audit Log
         st.markdown("### 📝 System Audit Log")
         st.caption("See a live ledger of who modified what within the Celebration module.")
         

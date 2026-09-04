@@ -147,11 +147,11 @@ st.markdown("<h2>🎊 BPS Celebration & Event Manager</h2>", unsafe_allow_html=T
 st.sidebar.button("🔄 Sync Event Data", on_click=refresh_event_data, use_container_width=True)
 
 if current_user_role == "admin":
-    # 4 Tabs for Admin
-    tab_titles = ["🔴 Live Controller", "🎭 Claim Performance", "📋 Playlist Manager", "📅 Manage Events", "📝 Audit Log"]
+    # 6 Tabs for Admin
+    tab_titles = ["🔴 Live Controller", "🎭 Claim Performance", "📋 Playlist Manager", "📅 Manage Events", "📝 Audit Log", "📖 Tutorial"]
 else:
-    # 3 Tabs for Teachers
-    tab_titles = ["🔴 Live Controller", "🎭 Claim Performance", "📋 Playlist Manager"]
+    # 4 Tabs for Teachers
+    tab_titles = ["🔴 Live Controller", "🎭 Claim Performance", "📋 Playlist Manager", "📖 Tutorial"]
 
 tabs = st.tabs(tab_titles)
 
@@ -616,7 +616,7 @@ with tabs[2]:
 # TAB 4 & 5: ADMIN TABS (HIDDEN FROM TEACHERS)
 # ---------------------------------------------------------
 if current_user_role == "admin":
-    with tabs[3]: # tabs[3] is Manage Events
+    with tabs[3]: # Manage Events
         st.markdown("<div class='header-card' style='border-left: 5px solid #17a2b8;'><h4>📅 Create New Celebration</h4><p style='margin:0; font-size:14px;'>Schedule an upcoming school event first, then add specific songs/acts for teachers to claim.</p></div>", unsafe_allow_html=True)
         
         with st.form("create_event"):
@@ -706,7 +706,7 @@ if current_user_role == "admin":
                 st.success(f"{mk_comp} moved to Completed history.")
                 st.rerun()
                 
-    with tabs[4]: # tabs[4] is Audit Log
+    with tabs[4]: # Audit Log
         st.markdown("### 📝 System Audit Log")
         st.caption("See a live ledger of who modified what within the Celebration module.")
         
@@ -720,3 +720,57 @@ if current_user_role == "admin":
             if st.button("🗑️ Clear Audit Log"):
                 overwrite_sheet("event_audit_log", pd.DataFrame(columns=AUDIT_HEADERS), AUDIT_HEADERS)
                 st.rerun()
+
+# ---------------------------------------------------------
+# NEW TAB: TUTORIAL (Visible to everyone as the LAST tab)
+# ---------------------------------------------------------
+tutorial_tab = tabs[5] if current_user_role == "admin" else tabs[3]
+
+with tutorial_tab:
+    st.markdown("### 📖 অ্যাপ ব্যবহারের নিয়মাবলি (Tutorial)")
+    st.caption("Celebrations অ্যাপটি কীভাবে সহজে ব্যবহার করবেন, তা ধাপে ধাপে নিচে আলোচনা করা হলো।")
+    
+    with st.expander("🎭 কীভাবে পারফরম্যান্স যোগ করবেন? (How to Claim Performance)"):
+        st.markdown("""
+        আমাদের স্কুলের যেকোনো সাংস্কৃতিক অনুষ্ঠান বা উদযাপনকে আরও সুশৃঙ্খলভাবে পরিচালনা করার জন্য আমি আমাদের পোর্টালে এই অ্যাপ যুক্ত করেছি। আপনারা নিচের ধাপগুলো অনুসরণ করে খুব সহজেই আপনাদের ক্লাসের পারফরম্যান্স রেজিস্টার করতে পারবেন:
+        
+        **১.** প্রথমে *'🎭 Claim Performance'* ট্যাবে যান এবং নির্দিষ্ট অনুষ্ঠানটি (যেমন- Teachers' Day) সিলেক্ট করুন।
+        
+        **২.** সেখানে হোয়াটসঅ্যাপ গ্রুপে আপনাদের পাঠানো গানের বা অনুষ্ঠানের তালিকাটি দেখতে পাবেন। সেখান থেকে আপনারা নিজেদের পারফরম্যান্সটি বেছে নিন। (কেউ চাইলে *'Custom Act'* অপশন থেকে নতুন কোনো পারফরম্যান্সও সরাসরি যোগ করতে পারেন)।
+        
+        **৩.** এরপর Class, Section এবং আনুমানিক সময় (Duration) দিয়ে *'Submit'* বাটনে ক্লিক করুন। গাইডিং টিচার হিসেবে আপনাদের নাম স্বয়ংক্রিয়ভাবে সেভ হয়ে যাবে।
+        """)
+        
+    with st.expander("🚫 পারফরম্যান্স বাতিল করার নিয়ম (How to Cancel Performance)"):
+        st.markdown("""
+        অনিবার্য কোনো কারণে যদি আপনার ক্লাসের পারফরম্যান্স বাতিল করতে হয়, তবে নিচের নিয়মাবলি অনুসরণ করুন:
+        
+        **১. অনুষ্ঠানের তালিকা দেখা:** 
+        অ্যাপে ঢুকে *'📋 Playlist Manager'* ট্যাবে যান এবং নির্দিষ্ট ইভেন্টটি সিলেক্ট করুন। এখানে অনুষ্ঠানের মোট আনুমানিক সময় এবং পারফরম্যান্সের অফিশিয়াল লিস্ট ক্রমানুসারে দেখতে পাবেন।
+
+        **২. পারফরম্যান্স বাতিল (Cancel) করা:** 
+        পৃষ্ঠার একদম নিচে **"🚫 Cancel Performance"** অংশে যান।
+
+        **৩. কারণ (Reason) নির্বাচন:** 
+        ড্রপডাউন থেকে আপনার পারফরম্যান্সটি সিলেক্ট করুন এবং বাতিলের সঠিক কারণটি বেছে নিন (যেমন: Students Absent, Not Prepared ইত্যাদি)। 
+
+        **৪. নতুন কারণ লেখা (Other):** 
+        যদি আপনার বাতিলের কারণটি নির্দিষ্ট লিস্টে না থাকে, তবে ড্রপডাউন থেকে **"Other"** সিলেক্ট করুন। এরপর নিচের বক্সে আপনার সঠিক কারণটি টাইপ করে **'Submit Cancellation'** বাটনে ক্লিক করুন।
+        """)
+        
+    with st.expander("⚙️ পারফরম্যান্সের ক্রম বা Order সাজানোর নিয়ম (How to Arrange Order)"):
+        st.markdown("""
+        *🎊 Celebrations* অ্যাপের **'📋 Playlist Manager'** থেকে আপনাদের পারফরম্যান্সের ক্রম (Sequence/Order) কীভাবে সাজাবেন, তা নিচে দেওয়া হলো। 
+        
+        প্রথমে অ্যাপের 'Playlist Manager' ট্যাবে যান এবং নির্দিষ্ট ইভেন্টটি সিলেক্ট করে **"⚙️ Arrange Performance Order"** অংশে ক্লিক করুন। এখানে আপনারা আপনাদের সুবিধামতো নিচের দুটি পদ্ধতির যেকোনো একটি ব্যবহার করে পারফরম্যান্স ওপর-নিচ করতে পারবেন:
+
+        **পদ্ধতি ১: ↕️ Quick Move (Arrows)**
+        * লিস্টের যেকোনো পারফরম্যান্সের ওপর ক্লিক করে সেটি সিলেক্ট করুন।
+        * এরপর **"⬆️ Move Up"** বা **"⬇️ Move Down"** বাটনে ক্লিক করে সেটিকে আপনার কাঙ্ক্ষিত স্থানে নিয়ে যান।
+        * শেষে অবশ্যই **'💾 Save Arrow Changes'** বাটনে ক্লিক করে সেভ করবেন।
+
+        **পদ্ধতি ২: 🔢 Smart Numbering**
+        * এই ট্যাবে গিয়ে আপনার পারফরম্যান্সের পাশের বক্সে সরাসরি আপনার পছন্দের ক্রমিক নম্বরটি (Order Number) টাইপ করুন।
+        * এই সিস্টেমটি এতটাই স্মার্ট যে, আপনি একটি নম্বর পরিবর্তন করলে বাকি পারফরম্যান্সগুলো স্বয়ংক্রিয়ভাবে নিজেদের জায়গা ঠিক করে নেবে।
+        * কাজ শেষ হলে নিচে থাকা **'💾 Save Smart Numbering'** বাটনে ক্লিক করতে ভুলবেন না।
+        """)

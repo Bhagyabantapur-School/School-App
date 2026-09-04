@@ -236,7 +236,13 @@ with tabs[1]:
         except Exception:
             is_event_started = True 
         
-        st.markdown(f"<div style='background: linear-gradient(135deg, #1e3c72, #2a5298); padding: 15px; border-radius: 10px; text-align: center; color: white; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'><h2 style='margin:0; font-size: 26px;'>🎉 {event_name_clean}</h2><p style='margin:2px 0 0 0; font-size: 14px; opacity: 0.9;'>🔴 LIVE PROGRAM DASHBOARD</p></div>", unsafe_allow_html=True)
+        st.markdown(f"""
+        <div style='background: linear-gradient(135deg, #1e3c72, #2a5298); padding: 15px; border-radius: 10px; text-align: center; color: white; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'>
+            <h2 style='margin:0; font-size: 26px;'>🎉 {event_name_clean}</h2>
+            <p style='margin:5px 0 5px 0; font-size: 15px; font-weight: 500; color: #e3f2fd;'>📅 {ev_info['Date']} &nbsp;|&nbsp; ⏰ {ev_info['Start_Time']}</p>
+            <p style='margin:0; font-size: 13px; opacity: 0.8; font-weight: bold; letter-spacing: 1px;'>🔴 LIVE PROGRAM DASHBOARD</p>
+        </div>
+        """, unsafe_allow_html=True)
         
         all_perfs = fetch_performances()
         event_perfs = all_perfs[all_perfs['Prog_ID'] == prog_id] if not all_perfs.empty else pd.DataFrame()
@@ -428,6 +434,7 @@ with tabs[3]:
         else:
             event_perfs = event_perfs.sort_values('Order_No')
             
+            # Active performances calculation
             active_event_perfs = event_perfs[event_perfs['Cancel_Reason'] == ""]
             total_mins = pd.to_numeric(active_event_perfs['Duration_Mins'], errors='coerce').sum()
             hrs = int(total_mins // 60)

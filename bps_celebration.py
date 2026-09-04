@@ -286,7 +286,7 @@ with tabs[0]:
 # TAB 2: TEACHER PERFORMANCE SUBMISSION (tabs[1])
 # ---------------------------------------------------------
 with tabs[1]:
-    st.markdown("<div class='header-card'><h4>🎭 Claim & Register Your Act</h4><p style='margin:0; font-size:14px;'>Complete the registration for the song/act assigned to you by the Head Teacher.</p></div>", unsafe_allow_html=True)
+    st.markdown("<div class='header-card'><h4>🎭 Claim & Register Your Act</h4><p style='margin:0; font-size:14px;'>Complete the registration for the song/act assigned to you by the Head Teacher, or submit a custom one.</p></div>", unsafe_allow_html=True)
     
     programs = fetch_programs()
     active_progs = programs[programs['Status'] != 'Completed'] if not programs.empty else pd.DataFrame()
@@ -306,11 +306,41 @@ with tabs[1]:
                                    (all_perfs['Cancel_Reason'] == "") &
                                    (all_perfs['Choreographer'].isin(["TBD", current_user_name]))] if not all_perfs.empty else pd.DataFrame()
         
-        if available_acts.empty:
-            st.warning("⚠️ You currently have no unassigned curated acts for this event. You can add a custom act below.")
+        if not available_acts.empty:
+            st.markdown("##### 📌 Claim an Assigned Act")
+            act_dict = {f"{r['Perf_Name']} (Assigned to: {r['Choreographer']})": r['Perf_ID'] for _, r in available_acts.iterrows()}
+            selected_act_label = st.selectbox("2. Select Act to Claim *", list(act_dict.keys()))
             
+            if selected_act_label:
+                target_id = act_dict[selected_act_label]
+                target_act = available_acts[available_acts['Perf_ID'] == target_id].iloc[0]
+                
+                c1, c2 = st.columns(2)
+                perf_type_claim = c1.selectbox("Performance Type *", PERFORMANCE_TYPES, key="pt_claim")
+                cls_sel_claim = c2.selectbox("Participating Class *", CLASS_OPTIONS, key="pc_claim")
+                
+                c3, c4 = st.columns(2)
+                sec_sel_claim = c3.selectbox("Section", SECTIONS, key="sec_claim")
+                with c4:
+                    st.text_input("Choreographer (Read Only)", value=target_act['Choreographer'], disabled=True, key="ch_claim")
+                
+                dur_claim = st.number_input("Estimated Duration (Minutes) *", min_value=1, max_value=45, value=5, step=1, key="dur_claim")
+                
+                if st.button("✅ Claim & Submit Performance", use_container_width=True):
+                    choreo_val = current_user_name if target_act['Choreographer'] == "TBD" else target_act['Choreographer']
+                    all_perfs.loc[all_perfs['Perf_ID'] == target_id, ['Perf_Type', 'Class', 'Section', 'Choreographer', 'Duration_Mins', 'Live_Status']] = [perf_type_claim, cls_sel_claim, sec_sel_claim, choreo_val, dur_claim, "Pending"]
+                    overwrite_sheet("event_performances", all_perfs, PERF_HEADERS)
+                    log_audit("Claimed Curated Act", f"{target_act['Perf_Name']} for {cls_sel_claim}")
+                    st.success(f"Successfully claimed '{target_act['Perf_Name']}' for {cls_sel_claim}!")
+                    st.rerun()
+            st.divider()
+        else:
+            st.success("✅ All curated acts have been successfully claimed for this event!")
+            st.write("")
+
+        st.markdown("##### ✨ Or Submit a Custom Act")
+        with st.expander("Click here if your song/act is not in the curated list"):
             with st.form("custom_perf_form"):
-                st.markdown("##### ✨ Submit a Custom Act")
                 c1, c2 = st.columns(2)
                 perf_type = c1.selectbox("Performance Type *", PERFORMANCE_TYPES)
                 perf_name = c2.text_input("Name of Song / Drama / Act *", placeholder="e.g., Alo Amar Alo")
@@ -346,34 +376,6 @@ with tabs[1]:
                         log_audit("Added Custom Act", f"{perf_name.strip()} for {cls_sel}")
                         st.success(f"Custom Performance '{perf_name}' successfully added!")
                         st.rerun()
-
-        else:
-            act_dict = {f"{r['Perf_Name']} (Assigned to: {r['Choreographer']})": r['Perf_ID'] for _, r in available_acts.iterrows()}
-            selected_act_label = st.selectbox("2. Select Act to Claim *", list(act_dict.keys()))
-            
-            if selected_act_label:
-                target_id = act_dict[selected_act_label]
-                target_act = available_acts[available_acts['Perf_ID'] == target_id].iloc[0]
-                
-                c1, c2 = st.columns(2)
-                perf_type = c1.selectbox("Performance Type *", PERFORMANCE_TYPES)
-                cls_sel = c2.selectbox("Participating Class *", CLASS_OPTIONS)
-                
-                c3, c4 = st.columns(2)
-                sec_sel = c3.selectbox("Section", SECTIONS)
-                with c4:
-                    st.text_input("Choreographer (Read Only)", value=target_act['Choreographer'], disabled=True)
-                
-                dur = st.number_input("Estimated Duration (Minutes) *", min_value=1, max_value=45, value=5, step=1)
-                
-                if st.button("✅ Claim & Submit Performance", use_container_width=True):
-                    choreo_val = current_user_name if target_act['Choreographer'] == "TBD" else target_act['Choreographer']
-                    
-                    all_perfs.loc[all_perfs['Perf_ID'] == target_id, ['Perf_Type', 'Class', 'Section', 'Choreographer', 'Duration_Mins', 'Live_Status']] = [perf_type, cls_sel, sec_sel, choreo_val, dur, "Pending"]
-                    overwrite_sheet("event_performances", all_perfs, PERF_HEADERS)
-                    log_audit("Claimed Curated Act", f"{target_act['Perf_Name']} for {cls_sel}")
-                    st.success(f"Successfully claimed '{target_act['Perf_Name']}' for {cls_sel}!")
-                    st.rerun()
 
 # ---------------------------------------------------------
 # TAB 3: PLAYLIST & SEQUENCE MANAGER (tabs[2])

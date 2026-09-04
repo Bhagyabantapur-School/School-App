@@ -120,60 +120,55 @@ tabs = st.tabs(["🎭 Submit Performance", "📋 Event Playlist Manager", "📅 
 # TAB 1: TEACHER PERFORMANCE SUBMISSION
 # ---------------------------------------------------------
 with tabs[0]:
-    st.markdown("<div class='header-card'><h4>🎭 Register Your Act</h4><p style='margin:0; font-size:14px;'>Fill out the details for your class performance below.</p></div>", unsafe_allow_html=True)
+    st.markdown("<div class='header-card'><h4>🎭 Claim & Register Your Act</h4><p style='margin:0; font-size:14px;'>Select a song/act curated by the Head Teacher and assign your class to it.</p></div>", unsafe_allow_html=True)
     
     programs = fetch_programs()
     active_progs = programs[programs['Status'] != 'Completed'] if not programs.empty else pd.DataFrame()
     
     if active_progs.empty:
-        st.info("There are currently no upcoming celebrations scheduled. The Admin must create an event first.")
+        st.info("There are currently no upcoming celebrations scheduled.")
     else:
         prog_options = {f"{r['Event_Name']} ({r['Date']})": r['Prog_ID'] for _, r in active_progs.iterrows()}
         
-        with st.form("perf_form"):
-            sel_prog = st.selectbox("Select Celebration Event *", list(prog_options.keys()))
+        # Step 1: Select Event outside the form so the available acts table updates dynamically
+        sel_prog = st.selectbox("1. Select Celebration Event *", list(prog_options.keys()))
+        prog_id = prog_options[sel_prog]
+        
+        all_perfs = fetch_performances()
+        available_acts = all_perfs[(all_perfs['Prog_ID'] == prog_id) & (all_perfs['Choreographer'] == "TBD")] if not all_perfs.empty else pd.DataFrame()
+        
+        if available_acts.empty:
+            st.warning("⚠️ No available acts for this event. The Head Teacher must add songs/acts to the pool first, or all acts have already been claimed.")
+        else:
+            st.markdown("##### 📌 Available Songs / Acts curated by Admin")
+            disp_avail = available_acts[['Perf_Name', 'YouTube_Link']].copy()
+            st.dataframe(disp_avail, hide_index=True, use_container_width=True, column_config={"YouTube_Link": st.column_config.LinkColumn("YT Link")})
             
-            c1, c2 = st.columns(2)
-            perf_type = c1.selectbox("Performance Type *", PERFORMANCE_TYPES)
-            perf_name = c2.text_input("Name of Song / Drama / Act *", placeholder="e.g., Alo Amar Alo")
-            
-            c3, c4 = st.columns(2)
-            cls_sel = c3.selectbox("Participating Class *", CLASS_OPTIONS)
-            sec_sel = c4.selectbox("Section", SECTIONS)
-            
-            c5, c6 = st.columns(2)
-            def_idx = TEACHER_LIST.index(current_user_name) if current_user_name in TEACHER_LIST else 0
-            choreo = c5.selectbox("Choreographer / Guiding Teacher *", TEACHER_LIST, index=def_idx)
-            dur = c6.number_input("Estimated Duration (Minutes) *", min_value=1, max_value=45, value=5, step=1)
-            
-            yt_link = st.text_input("YouTube Track / Reference Link (Optional)", placeholder="Paste YouTube link here...")
-            
-            submit_act = st.form_submit_button("✅ Submit Performance to Playlist", use_container_width=True)
-            
-            if submit_act:
-                if not perf_name.strip():
-                    st.error("Please provide a name for the performance!")
-                else:
-                    prog_id = prog_options[sel_prog]
-                    new_id = uuid.uuid4().hex[:8]
+            with st.form("perf_form"):
+                act_dict = {f"{r['Perf_Name']}": r['Perf_ID'] for _, r in available_acts.iterrows()}
+                selected_act_name = st.selectbox("2. Select Act to Claim *", list(act_dict.keys()))
+                
+                c1, c2 = st.columns(2)
+                perf_type = c1.selectbox("Performance Type *", PERFORMANCE_TYPES)
+                cls_sel = c2.selectbox("Participating Class *", CLASS_OPTIONS)
+                
+                c3, c4 = st.columns(2)
+                sec_sel = c3.selectbox("Section", SECTIONS)
+                def_idx = TEACHER_LIST.index(current_user_name) if current_user_name in TEACHER_LIST else 0
+                choreo = c4.selectbox("Choreographer / Guiding Teacher *", TEACHER_LIST, index=def_idx)
+                
+                dur = st.number_input("Estimated Duration (Minutes) *", min_value=1, max_value=45, value=5, step=1)
+                
+                submit_act = st.form_submit_button("✅ Claim & Submit Performance", use_container_width=True)
+                
+                if submit_act:
+                    target_id = act_dict[selected_act_name]
                     
-                    new_act = {
-                        "Perf_ID": new_id,
-                        "Prog_ID": prog_id,
-                        "Order_No": 99, 
-                        "Perf_Type": perf_type,
-                        "Perf_Name": perf_name.strip(),
-                        "Class": cls_sel,
-                        "Section": sec_sel,
-                        "Choreographer": choreo,
-                        "Duration_Mins": dur,
-                        "YouTube_Link": yt_link.strip()
-                    }
+                    # Update the specific row in the master dataframe
+                    all_perfs.loc[all_perfs['Perf_ID'] == target_id, ['Perf_Type', 'Class', 'Section', 'Choreographer', 'Duration_Mins']] = [perf_type, cls_sel, sec_sel, choreo, dur]
                     
-                    curr_perfs = fetch_performances()
-                    updated_perfs = pd.concat([curr_perfs, pd.DataFrame([new_act])], ignore_index=True)
-                    overwrite_sheet("event_performances", updated_perfs, ["Perf_ID", "Prog_ID", "Order_No", "Perf_Type", "Perf_Name", "Class", "Section", "Choreographer", "Duration_Mins", "YouTube_Link"])
-                    st.success(f"Performance '{perf_name}' successfully added to {sel_prog}!")
+                    overwrite_sheet("event_performances", all_perfs, ["Perf_ID", "Prog_ID", "Order_No", "Perf_Type", "Perf_Name", "Class", "Section", "Choreographer", "Duration_Mins", "YouTube_Link"])
+                    st.success(f"Successfully claimed '{selected_act_name}' for {cls_sel}!")
                     st.rerun()
 
 # ---------------------------------------------------------
@@ -196,18 +191,28 @@ with tabs[1]:
         if event_perfs.empty:
             st.info("No performances have been registered for this event yet.")
         else:
+            # Sort by Order_No
             event_perfs = event_perfs.sort_values('Order_No')
             
+            # Calculate Total Time
             total_mins = pd.to_numeric(event_perfs['Duration_Mins'], errors='coerce').sum()
             hrs = int(total_mins // 60)
             mins = int(total_mins % 60)
             
-            st.markdown(f"<div class='kpi-card'><h3>⏱️ Total Program Duration: {hrs} Hours {mins} Mins</h3><p style='margin:0; color:#555;'>({len(event_perfs)} Performances Registered)</p></div>", unsafe_allow_html=True)
+            unclaimed_count = len(event_perfs[event_perfs['Choreographer'] == "TBD"])
+            kpi_html = f"""
+            <div class='kpi-card'>
+                <h3>⏱️ Total Program Duration: {hrs} Hours {mins} Mins</h3>
+                <p style='margin:0; color:#555;'>({len(event_perfs)} Acts Total | <b>{unclaimed_count} Unclaimed by Teachers</b>)</p>
+            </div>
+            """
+            st.markdown(kpi_html, unsafe_allow_html=True)
             st.write("")
             
             st.markdown("##### ↕️ Arrange Performance Order")
             st.caption("Double-click a cell in the **Order No.** column to type a new number. Then click Save to reorder the list.")
             
+            # Setup Editor
             edit_cols = ["Order_No", "Perf_Type", "Perf_Name", "Class", "Choreographer", "Duration_Mins", "YouTube_Link", "Perf_ID"]
             disp_df = event_perfs[edit_cols].copy()
             
@@ -216,7 +221,7 @@ with tabs[1]:
                 hide_index=True,
                 use_container_width=True,
                 column_config={
-                    "Perf_ID": None, 
+                    "Perf_ID": None, # Hide ID
                     "Order_No": st.column_config.NumberColumn("Order No.", min_value=1, step=1, required=True),
                     "Perf_Type": st.column_config.TextColumn("Type", disabled=True),
                     "Perf_Name": st.column_config.TextColumn("Act / Song", disabled=True),
@@ -230,6 +235,7 @@ with tabs[1]:
             col_s1, col_s2 = st.columns([1, 1])
             with col_s1:
                 if st.button("💾 Save New Playlist Order", type="primary", use_container_width=True):
+                    # Update master dataframe with new order numbers
                     for _, r in edited_pl.iterrows():
                         all_perfs.loc[all_perfs['Perf_ID'] == r['Perf_ID'], 'Order_No'] = r['Order_No']
                     
@@ -251,7 +257,7 @@ with tabs[1]:
 # ---------------------------------------------------------
 with tabs[2]:
     if current_user_role == "admin":
-        st.markdown("<div class='header-card' style='border-left: 5px solid #17a2b8;'><h4>📅 Create New Celebration</h4><p style='margin:0; font-size:14px;'>Schedule an upcoming school event to allow teachers to start submitting their acts.</p></div>", unsafe_allow_html=True)
+        st.markdown("<div class='header-card' style='border-left: 5px solid #17a2b8;'><h4>📅 Create New Celebration</h4><p style='margin:0; font-size:14px;'>Schedule an upcoming school event first, then add specific songs/acts for teachers to claim.</p></div>", unsafe_allow_html=True)
         
         with st.form("create_event"):
             ev_name = st.text_input("Celebration Name *", placeholder="e.g., Independence Day 2026")
@@ -280,8 +286,48 @@ with tabs[2]:
                     st.rerun()
                     
         st.divider()
-        st.markdown("##### 📌 Existing Events")
+        
+        st.markdown("##### 🎵 Curate Songs / Acts for an Event")
+        st.caption("Add the specific songs or drama topics here. Teachers will then log in and 'claim' them for their classes.")
+        
         programs = fetch_programs()
+        active_progs_admin = programs[programs['Status'] != 'Completed'] if not programs.empty else pd.DataFrame()
+        
+        if not active_progs_admin.empty:
+            prog_opts_admin = {f"{r['Event_Name']} ({r['Date']})": r['Prog_ID'] for _, r in active_progs_admin.iterrows()}
+            with st.form("add_act_form"):
+                sel_prog_admin = st.selectbox("Select Celebration Event *", list(prog_opts_admin.keys()))
+                act_name = st.text_input("Name of Song / Drama / Act *", placeholder="e.g., Alo Amar Alo (Rabindra Sangeet)")
+                yt_link = st.text_input("YouTube Track / Reference Link (Optional)", placeholder="Paste YouTube link here...")
+                
+                add_act_btn = st.form_submit_button("➕ Add Act to Event Pool")
+                
+                if add_act_btn:
+                    if not act_name.strip():
+                        st.error("Please enter the Act Name.")
+                    else:
+                        new_act = {
+                            "Perf_ID": uuid.uuid4().hex[:8],
+                            "Prog_ID": prog_opts_admin[sel_prog_admin],
+                            "Order_No": 99, 
+                            "Perf_Type": "TBD",
+                            "Perf_Name": act_name.strip(),
+                            "Class": "TBD",
+                            "Section": "TBD",
+                            "Choreographer": "TBD",
+                            "Duration_Mins": 0,
+                            "YouTube_Link": yt_link.strip()
+                        }
+                        curr_perfs = fetch_performances()
+                        updated_perfs = pd.concat([curr_perfs, pd.DataFrame([new_act])], ignore_index=True)
+                        overwrite_sheet("event_performances", updated_perfs, ["Perf_ID", "Prog_ID", "Order_No", "Perf_Type", "Perf_Name", "Class", "Section", "Choreographer", "Duration_Mins", "YouTube_Link"])
+                        st.success(f"Act '{act_name}' added to the pool!")
+                        st.rerun()
+        else:
+            st.info("Create an event above before adding songs/acts.")
+
+        st.divider()
+        st.markdown("##### 📌 Event History Management")
         if not programs.empty:
             st.dataframe(programs[['Event_Name', 'Date', 'Start_Time', 'Status']], hide_index=True, use_container_width=True)
             
@@ -291,7 +337,5 @@ with tabs[2]:
                 overwrite_sheet("event_programs", programs, ["Prog_ID", "Event_Name", "Date", "Start_Time", "Status", "Created_By"])
                 st.success(f"{mk_comp} moved to Completed history.")
                 st.rerun()
-        else:
-            st.info("No events scheduled.")
     else:
         st.warning("Only the Head Teacher (Admin) can schedule new celebration events.")

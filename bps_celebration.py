@@ -147,7 +147,7 @@ st.markdown("<h2>🎊 BPS Celebration & Event Manager</h2>", unsafe_allow_html=T
 st.sidebar.button("🔄 Sync Event Data", on_click=refresh_event_data, use_container_width=True)
 
 if current_user_role == "admin":
-    # 5 Tabs for Admin
+    # 4 Tabs for Admin
     tab_titles = ["🔴 Live Controller", "🎭 Claim Performance", "📋 Playlist Manager", "📅 Manage Events", "📝 Audit Log"]
 else:
     # 3 Tabs for Teachers

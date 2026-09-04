@@ -19,6 +19,8 @@ CLASS_OPTIONS = ["CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CL
 SECTIONS = ["A", "B", "C", "All Sections"]
 PERFORMANCE_TYPES = ["Dance 💃", "Drama / Play 🎭", "Recitation 🎙️", "Chorus Song 🎵", "Solo Song 🎤", "Speech 🗣️", "Yoga / Drill 🧘‍♂️", "Other"]
 
+PERF_HEADERS = ["Perf_ID", "Prog_ID", "Order_No", "Perf_Type", "Perf_Name", "Class", "Section", "Choreographer", "Duration_Mins", "YouTube_Link", "Live_Status"]
+
 # Safely inherit user details from app.py
 current_user_name = st.session_state.get('user_name', 'Teacher')
 current_user_role = st.session_state.get('user_role', 'teacher')
@@ -34,10 +36,6 @@ def inject_security_css(user_name):
         ".stButton>button { border-radius: 8px; font-weight: bold; }"
         ".header-card { background-color: #f8f9fa; padding: 15px; border-radius: 10px; border-left: 5px solid #ff4b4b; margin-bottom: 15px; }"
         ".kpi-card { background: linear-gradient(135deg, #ffebee, #ffcdd2); padding: 15px; border-radius: 10px; text-align: center; border: 1px solid #ef9a9a; }"
-        ".song-card { background: white; padding: 15px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 15px; transition: transform 0.2s; }"
-        ".song-card:hover { transform: translateY(-3px); box-shadow: 0 6px 12px rgba(0,0,0,0.15); }"
-        ".yt-btn { display: inline-block; background-color: #ff0000; color: white !important; padding: 8px 15px; border-radius: 5px; text-decoration: none; font-weight: bold; margin-top: 10px; font-size: 14px; }"
-        ".yt-btn:hover { background-color: #cc0000; }"
         "</style><div class=\"watermark\"></div>"
     )
     st.markdown(css, unsafe_allow_html=True)
@@ -45,7 +43,7 @@ def inject_security_css(user_name):
 inject_security_css(current_user_name)
 
 # ==========================================
-# GOOGLE SHEETS CONNECTORS (BYPASSING NAME SEARCH)
+# GOOGLE SHEETS CONNECTORS
 # ==========================================
 @st.cache_resource
 def get_google_credentials():
@@ -57,7 +55,6 @@ def get_google_credentials():
 @st.cache_resource
 def init_celeb_sheet():
     try: 
-        # Using the exact unique ID extracted from your uploaded file!
         return gspread.authorize(get_google_credentials()).open_by_key("1TXs2o0OnpPz1nr_AnhzrwR_OA3FsAss9gwGvbB6LHQo")
     except APIError:
         st.error("⚠️ The Service Account does not have permission! Please ensure your Service Account email is added as an 'Editor' to the BPS_CELEBRATION sheet.")
@@ -93,12 +90,17 @@ def fetch_programs():
 @st.cache_data(ttl=300)
 def fetch_performances():
     sh = init_celeb_sheet()
-    ws = ensure_worksheet(sh, "event_performances", ["Perf_ID", "Prog_ID", "Order_No", "Perf_Type", "Perf_Name", "Class", "Section", "Choreographer", "Duration_Mins", "YouTube_Link"])
+    ws = ensure_worksheet(sh, "event_performances", PERF_HEADERS)
     records = ws.get_all_records()
     if not records:
-        return pd.DataFrame(columns=["Perf_ID", "Prog_ID", "Order_No", "Perf_Type", "Perf_Name", "Class", "Section", "Choreographer", "Duration_Mins", "YouTube_Link"])
+        return pd.DataFrame(columns=PERF_HEADERS)
     
     df = pd.DataFrame(records)
+    # Ensure backward compatibility if new columns were added
+    for col in PERF_HEADERS:
+        if col not in df.columns:
+            df[col] = "Pending" if col == "Live_Status" else ""
+            
     df['Order_No'] = pd.to_numeric(df['Order_No'], errors='coerce').fillna(99).astype(int)
     return df
 
@@ -118,14 +120,12 @@ def overwrite_sheet(sheet_name, df, headers):
 st.markdown("<h2>🎊 BPS Celebration & Event Manager</h2>", unsafe_allow_html=True)
 st.sidebar.button("🔄 Sync Event Data", on_click=refresh_event_data, use_container_width=True)
 
-tabs = st.tabs(["🎵 Explore Songs", "🎭 Claim Performance", "📋 Event Playlist Manager", "📅 Manage Events (Admin)"])
+tabs = st.tabs(["🔴 Live Controller", "🎭 Claim Performance", "📋 Playlist Manager", "📅 Manage Events (Admin)"])
 
 # ---------------------------------------------------------
-# TAB 1: EXPLORE SONGS & ACTS (BEAUTIFUL GALLERY)
+# TAB 1: LIVE PROGRAM CONTROLLER
 # ---------------------------------------------------------
 with tabs[0]:
-    st.markdown("<div class='header-card' style='border-left-color: #e83e8c;'><h4>🎵 Explore Songs & Acts</h4><p style='margin:0; font-size:14px;'>Listen to the songs curated by the Head Teacher and choose the perfect one for your class!</p></div>", unsafe_allow_html=True)
-    
     programs = fetch_programs()
     active_progs = programs[programs['Status'] != 'Completed'] if not programs.empty else pd.DataFrame()
     
@@ -133,45 +133,73 @@ with tabs[0]:
         st.info("No upcoming celebrations found. Please wait for the Admin to schedule one.")
     else:
         prog_options = {f"{r['Event_Name']} ({r['Date']})": r['Prog_ID'] for _, r in active_progs.iterrows()}
-        sel_prog = st.selectbox("Select Celebration Event to Explore", list(prog_options.keys()), key="explore_prog")
+        sel_prog = st.selectbox("Select Celebration to Monitor Live", list(prog_options.keys()), key="live_prog")
         prog_id = prog_options[sel_prog]
         
         event_name_clean = sel_prog.split(' (')[0]
-        st.markdown(f"### 🎊 {event_name_clean} - Act Gallery")
+        
+        st.markdown(f"<div style='background: linear-gradient(135deg, #1e3c72, #2a5298); padding: 20px; border-radius: 15px; text-align: center; color: white; margin-bottom: 25px; box-shadow: 0 4px 10px rgba(0,0,0,0.2);'><h1 style='margin:0; font-size: 32px;'>🎉 {event_name_clean} 🎉</h1><p style='margin:5px 0 0 0; font-size: 16px; opacity: 0.9;'>🔴 LIVE PROGRAM DASHBOARD</p></div>", unsafe_allow_html=True)
         
         all_perfs = fetch_performances()
         event_perfs = all_perfs[all_perfs['Prog_ID'] == prog_id] if not all_perfs.empty else pd.DataFrame()
         
         if event_perfs.empty:
-            st.warning("No songs or acts have been added to this event yet. Check back later!")
+            st.warning("No performances have been added to this event yet.")
         else:
-            cols = st.columns(2)
-            for i, (_, row) in enumerate(event_perfs.iterrows()):
-                with cols[i % 2]:
-                    # Design the Card based on Availability
-                    is_available = row['Choreographer'] == "TBD"
-                    status_color = "#28a745" if is_available else "#dc3545"
-                    status_text = "🟢 AVAILABLE TO CLAIM" if is_available else f"🔴 CLAIMED BY: {row['Choreographer']} ({row['Class']})"
-                    
-                    yt_link = str(row['YouTube_Link']).strip()
-                    yt_html = ""
-                    if yt_link.startswith("http"):
-                        yt_html = f"<a href='{yt_link}' target='_blank' class='yt-btn'>▶️ Listen on YouTube</a>"
-                    
+            # Sort perfectly by Order No
+            event_perfs = event_perfs.sort_values('Order_No')
+            
+            for _, row in event_perfs.iterrows():
+                is_done = (row['Live_Status'] == 'Done')
+                
+                bg_color = "#eafaf1" if is_done else "#ffffff"
+                border_color = "#28a745" if is_done else "#007bff"
+                opacity = "0.6" if is_done else "1.0"
+                
+                yt_link = str(row['YouTube_Link']).strip()
+                yt_html = ""
+                if yt_link.startswith("http"):
+                    yt_html = f"<a href='{yt_link}' target='_blank' style='display:inline-block; background-color:#ff0000; color:white !important; padding:8px 15px; border-radius:5px; text-decoration:none; font-weight:bold; font-size:14px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);'>▶️ Play Track</a>"
+                
+                sec_str = f"({row.get('Section','')})" if row.get('Section') and row.get('Section') != "TBD" else ""
+                
+                c1, c2 = st.columns([4, 1.5])
+                
+                with c1:
                     card_html = f"""
-                    <div class="song-card" style="border-left: 6px solid {status_color};">
-                        <h4 style="margin: 0 0 5px 0; color: #333;">{row['Perf_Name']}</h4>
-                        <p style="margin: 0; font-size: 13px; font-weight: bold; color: {status_color};">{status_text}</p>
-                        {yt_html}
+                    <div style="background-color: {bg_color}; border-left: 6px solid {border_color}; padding: 15px; border-radius: 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); margin-bottom: 5px; opacity: {opacity}; transition: all 0.3s;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <h3 style="margin:0; color:#333; font-size: 20px;">
+                                    <span style="color:{border_color};">#{row['Order_No']}</span> - {row['Perf_Name']}
+                                </h3>
+                                <p style="margin:5px 0 0 0; color:#555; font-size:15px;">
+                                    <b>Type:</b> {row['Perf_Type']} | <b>Class:</b> {row['Class']} {sec_str} | <b>Guide:</b> {row['Choreographer']}
+                                </p>
+                            </div>
+                            <div>{yt_html}</div>
+                        </div>
                     </div>
                     """
                     st.markdown(card_html, unsafe_allow_html=True)
+                
+                with c2:
+                    st.write("") # Vertical spacing
+                    st.write("")
+                    chk = st.checkbox("✅ Mark Completed", value=is_done, key=f"live_chk_{row['Perf_ID']}")
+                    if chk != is_done:
+                        new_status = 'Done' if chk else 'Pending'
+                        all_perfs.loc[all_perfs['Perf_ID'] == row['Perf_ID'], 'Live_Status'] = new_status
+                        overwrite_sheet("event_performances", all_perfs, PERF_HEADERS)
+                        st.rerun()
+                        
+                st.write("")
 
 # ---------------------------------------------------------
 # TAB 2: TEACHER PERFORMANCE SUBMISSION
 # ---------------------------------------------------------
 with tabs[1]:
-    st.markdown("<div class='header-card'><h4>🎭 Claim & Register Your Act</h4><p style='margin:0; font-size:14px;'>Found a song you like in the Explore tab? Select it here to assign your class to it!</p></div>", unsafe_allow_html=True)
+    st.markdown("<div class='header-card'><h4>🎭 Claim & Register Your Act</h4><p style='margin:0; font-size:14px;'>Found a song you like in the Live Controller? Select it here to assign your class to it!</p></div>", unsafe_allow_html=True)
     
     programs = fetch_programs()
     active_progs = programs[programs['Status'] != 'Completed'] if not programs.empty else pd.DataFrame()
@@ -181,7 +209,6 @@ with tabs[1]:
     else:
         prog_options = {f"{r['Event_Name']} ({r['Date']})": r['Prog_ID'] for _, r in active_progs.iterrows()}
         
-        # Select Event outside the form so the available acts table updates dynamically
         sel_prog_claim = st.selectbox("1. Select Celebration Event *", list(prog_options.keys()), key="claim_prog")
         prog_id_claim = prog_options[sel_prog_claim]
         
@@ -189,7 +216,43 @@ with tabs[1]:
         available_acts = all_perfs[(all_perfs['Prog_ID'] == prog_id_claim) & (all_perfs['Choreographer'] == "TBD")] if not all_perfs.empty else pd.DataFrame()
         
         if available_acts.empty:
-            st.warning("⚠️ No available acts for this event. All curated acts have already been claimed by other teachers!")
+            st.warning("⚠️ No available acts for this event. All curated acts have already been claimed by other teachers! You can add your own custom act below.")
+            
+            with st.form("custom_perf_form"):
+                st.markdown("##### ✨ Submit a Custom Act")
+                c1, c2 = st.columns(2)
+                perf_type = c1.selectbox("Performance Type *", PERFORMANCE_TYPES)
+                perf_name = c2.text_input("Name of Song / Drama / Act *", placeholder="e.g., Alo Amar Alo")
+                
+                c3, c4 = st.columns(2)
+                cls_sel = c3.selectbox("Participating Class *", CLASS_OPTIONS)
+                sec_sel = c4.selectbox("Section", SECTIONS)
+                
+                c5, c6 = st.columns(2)
+                def_idx = TEACHER_LIST.index(current_user_name) if current_user_name in TEACHER_LIST else 0
+                choreo = c5.selectbox("Choreographer / Guiding Teacher *", TEACHER_LIST, index=def_idx)
+                dur = c6.number_input("Estimated Duration (Minutes) *", min_value=1, max_value=45, value=5, step=1)
+                
+                yt_link = st.text_input("YouTube Track / Reference Link (Optional)", placeholder="Paste YouTube link here...")
+                
+                submit_act = st.form_submit_button("✅ Submit Performance", use_container_width=True)
+                
+                if submit_act:
+                    if not perf_name.strip():
+                        st.error("Please provide a name for the performance!")
+                    else:
+                        new_id = uuid.uuid4().hex[:8]
+                        new_act = {
+                            "Perf_ID": new_id, "Prog_ID": prog_id_claim, "Order_No": 99, 
+                            "Perf_Type": perf_type, "Perf_Name": perf_name.strip(),
+                            "Class": cls_sel, "Section": sec_sel, "Choreographer": choreo,
+                            "Duration_Mins": dur, "YouTube_Link": yt_link.strip(), "Live_Status": "Pending"
+                        }
+                        updated_perfs = pd.concat([all_perfs, pd.DataFrame([new_act])], ignore_index=True)
+                        overwrite_sheet("event_performances", updated_perfs, PERF_HEADERS)
+                        st.success(f"Custom Performance '{perf_name}' successfully added!")
+                        st.rerun()
+
         else:
             with st.form("perf_form"):
                 act_dict = {f"{r['Perf_Name']}": r['Perf_ID'] for _, r in available_acts.iterrows()}
@@ -210,11 +273,8 @@ with tabs[1]:
                 
                 if submit_act:
                     target_id = act_dict[selected_act_name]
-                    
-                    # Update the specific row in the master dataframe
-                    all_perfs.loc[all_perfs['Perf_ID'] == target_id, ['Perf_Type', 'Class', 'Section', 'Choreographer', 'Duration_Mins']] = [perf_type, cls_sel, sec_sel, choreo, dur]
-                    
-                    overwrite_sheet("event_performances", all_perfs, ["Perf_ID", "Prog_ID", "Order_No", "Perf_Type", "Perf_Name", "Class", "Section", "Choreographer", "Duration_Mins", "YouTube_Link"])
+                    all_perfs.loc[all_perfs['Perf_ID'] == target_id, ['Perf_Type', 'Class', 'Section', 'Choreographer', 'Duration_Mins', 'Live_Status']] = [perf_type, cls_sel, sec_sel, choreo, dur, "Pending"]
+                    overwrite_sheet("event_performances", all_perfs, PERF_HEADERS)
                     st.success(f"Successfully claimed '{selected_act_name}' for {cls_sel}!")
                     st.rerun()
 
@@ -238,10 +298,8 @@ with tabs[2]:
         if event_perfs.empty:
             st.info("No performances have been registered for this event yet.")
         else:
-            # Sort by Order_No
             event_perfs = event_perfs.sort_values('Order_No')
             
-            # Calculate Total Time
             total_mins = pd.to_numeric(event_perfs['Duration_Mins'], errors='coerce').sum()
             hrs = int(total_mins // 60)
             mins = int(total_mins % 60)
@@ -259,8 +317,7 @@ with tabs[2]:
             st.markdown("##### ↕️ Arrange Performance Order")
             st.caption("Double-click a cell in the **Order No.** column to type a new number. Then click Save to reorder the list.")
             
-            # Setup Editor
-            edit_cols = ["Order_No", "Perf_Type", "Perf_Name", "Class", "Choreographer", "Duration_Mins", "YouTube_Link", "Perf_ID"]
+            edit_cols = ["Order_No", "Perf_Type", "Perf_Name", "Class", "Choreographer", "Duration_Mins", "Live_Status", "Perf_ID"]
             disp_df = event_perfs[edit_cols].copy()
             
             edited_pl = st.data_editor(
@@ -268,14 +325,14 @@ with tabs[2]:
                 hide_index=True,
                 use_container_width=True,
                 column_config={
-                    "Perf_ID": None, # Hide ID
+                    "Perf_ID": None, 
                     "Order_No": st.column_config.NumberColumn("Order No.", min_value=1, step=1, required=True),
                     "Perf_Type": st.column_config.TextColumn("Type", disabled=True),
                     "Perf_Name": st.column_config.TextColumn("Act / Song", disabled=True),
                     "Class": st.column_config.TextColumn("Class", disabled=True),
                     "Choreographer": st.column_config.TextColumn("Guide", disabled=True),
                     "Duration_Mins": st.column_config.NumberColumn("Mins", disabled=True),
-                    "YouTube_Link": st.column_config.LinkColumn("YT Link")
+                    "Live_Status": st.column_config.TextColumn("Status", disabled=True)
                 }
             )
             
@@ -284,8 +341,7 @@ with tabs[2]:
                 if st.button("💾 Save New Playlist Order", type="primary", use_container_width=True):
                     for _, r in edited_pl.iterrows():
                         all_perfs.loc[all_perfs['Perf_ID'] == r['Perf_ID'], 'Order_No'] = r['Order_No']
-                    
-                    overwrite_sheet("event_performances", all_perfs, ["Perf_ID", "Prog_ID", "Order_No", "Perf_Type", "Perf_Name", "Class", "Section", "Choreographer", "Duration_Mins", "YouTube_Link"])
+                    overwrite_sheet("event_performances", all_perfs, PERF_HEADERS)
                     st.success("Playlist order successfully updated!")
                     st.rerun()
             
@@ -294,7 +350,7 @@ with tabs[2]:
                 if del_id != "Select to remove..." and st.button("🗑️ Delete Selected"):
                     target_pid = event_perfs[event_perfs['Perf_Name'] == del_id].iloc[0]['Perf_ID']
                     all_perfs = all_perfs[all_perfs['Perf_ID'] != target_pid]
-                    overwrite_sheet("event_performances", all_perfs, ["Perf_ID", "Prog_ID", "Order_No", "Perf_Type", "Perf_Name", "Class", "Section", "Choreographer", "Duration_Mins", "YouTube_Link"])
+                    overwrite_sheet("event_performances", all_perfs, PERF_HEADERS)
                     st.success("Performance removed.")
                     st.rerun()
 
@@ -362,11 +418,12 @@ with tabs[3]:
                             "Section": "TBD",
                             "Choreographer": "TBD",
                             "Duration_Mins": 0,
-                            "YouTube_Link": yt_link.strip()
+                            "YouTube_Link": yt_link.strip(),
+                            "Live_Status": "Pending"
                         }
                         curr_perfs = fetch_performances()
                         updated_perfs = pd.concat([curr_perfs, pd.DataFrame([new_act])], ignore_index=True)
-                        overwrite_sheet("event_performances", updated_perfs, ["Perf_ID", "Prog_ID", "Order_No", "Perf_Type", "Perf_Name", "Class", "Section", "Choreographer", "Duration_Mins", "YouTube_Link"])
+                        overwrite_sheet("event_performances", updated_perfs, PERF_HEADERS)
                         st.success(f"Act '{act_name}' added to the pool!")
                         st.rerun()
         else:

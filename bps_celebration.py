@@ -7,13 +7,6 @@ import gspread
 from gspread.exceptions import WorksheetNotFound
 from google.oauth2.service_account import Credentials
 
-# ==========================================
-# 1. AUTHENTICATION & SECURITY
-# ==========================================
-if 'authenticated' not in st.session_state or not st.session_state.authenticated:
-    st.warning("🔒 Unauthorized Access. Please log in through the main portal.")
-    st.stop()
-
 IST = pytz.timezone('Asia/Kolkata')
 
 TEACHER_LIST = [
@@ -25,6 +18,10 @@ TEACHER_LIST = [
 CLASS_OPTIONS = ["CLASS PP", "CLASS I", "CLASS II", "CLASS III", "CLASS IV", "CLASS V", "MIXED (Multiple Classes)"]
 SECTIONS = ["A", "B", "C", "All Sections"]
 PERFORMANCE_TYPES = ["Dance 💃", "Drama / Play 🎭", "Recitation 🎙️", "Chorus Song 🎵", "Solo Song 🎤", "Speech 🗣️", "Yoga / Drill 🧘‍♂️", "Other"]
+
+# Safely inherit user details from app.py
+current_user_name = st.session_state.get('user_name', 'Teacher')
+current_user_role = st.session_state.get('user_role', 'teacher')
 
 def inject_security_css(user_name):
     wm = str(user_name) + " - CULTURAL EVENT"
@@ -41,10 +38,10 @@ def inject_security_css(user_name):
     )
     st.markdown(css, unsafe_allow_html=True)
 
-inject_security_css(st.session_state.user_name)
+inject_security_css(current_user_name)
 
 # ==========================================
-# 2. GOOGLE SHEETS CONNECTORS
+# GOOGLE SHEETS CONNECTORS
 # ==========================================
 @st.cache_resource
 def get_google_credentials():
@@ -58,7 +55,7 @@ def init_celeb_sheet():
     try: 
         return gspread.authorize(get_google_credentials()).open("BPS_CELEBRATION")
     except Exception: 
-        st.error("⚠️ BPS_CELEBRATION Google Sheet not found! Please check the name and ensure it is shared with the service account.")
+        st.error("⚠️ BPS_CELEBRATION Google Sheet not found! Please check the name and ensure it is shared with the service account email.")
         st.stop()
 
 def ensure_worksheet(sh, title, headers):
@@ -74,7 +71,7 @@ def refresh_event_data():
     fetch_performances.clear()
 
 # ==========================================
-# 3. DATA FETCHING & SAVING
+# DATA FETCHING & SAVING
 # ==========================================
 @st.cache_data(ttl=300)
 def fetch_programs():
@@ -108,7 +105,7 @@ def overwrite_sheet(sheet_name, df, headers):
     refresh_event_data()
 
 # ==========================================
-# 4. MAIN UI
+# MAIN UI
 # ==========================================
 st.markdown("<h2>🎊 BPS Celebration & Event Manager</h2>", unsafe_allow_html=True)
 st.sidebar.button("🔄 Sync Event Data", on_click=refresh_event_data, use_container_width=True)
@@ -142,7 +139,7 @@ with tabs[0]:
             
             c5, c6 = st.columns(2)
             # Default to logged-in user if they are a teacher
-            def_idx = TEACHER_LIST.index(st.session_state.user_name) if st.session_state.user_name in TEACHER_LIST else 0
+            def_idx = TEACHER_LIST.index(current_user_name) if current_user_name in TEACHER_LIST else 0
             choreo = c5.selectbox("Choreographer / Guiding Teacher *", TEACHER_LIST, index=def_idx)
             dur = c6.number_input("Estimated Duration (Minutes) *", min_value=1, max_value=45, value=5, step=1)
             
@@ -254,7 +251,7 @@ with tabs[1]:
 # TAB 3: ADMIN EVENT CREATION
 # ---------------------------------------------------------
 with tabs[2]:
-    if st.session_state.user_role == "admin":
+    if current_user_role == "admin":
         st.markdown("<div class='header-card' style='border-left: 5px solid #17a2b8;'><h4>📅 Create New Celebration</h4><p style='margin:0; font-size:14px;'>Schedule an upcoming school event to allow teachers to start submitting their acts.</p></div>", unsafe_allow_html=True)
         
         with st.form("create_event"):
@@ -275,7 +272,7 @@ with tabs[2]:
                         "Date": ev_date,
                         "Start_Time": ev_time,
                         "Status": "Upcoming",
-                        "Created_By": st.session_state.user_name
+                        "Created_By": current_user_name
                     }
                     programs = fetch_programs()
                     updated_progs = pd.concat([programs, pd.DataFrame([new_ev])], ignore_index=True)

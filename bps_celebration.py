@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import uuid
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 import pytz
 import gspread
 from gspread.exceptions import WorksheetNotFound, APIError
@@ -39,8 +39,6 @@ def inject_security_css(user_name):
         ".kpi-card { background: linear-gradient(135deg, #ffebee, #ffcdd2); padding: 15px; border-radius: 10px; text-align: center; border: 1px solid #ef9a9a; }"
         ".song-card { background: white; padding: 15px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 15px; transition: transform 0.2s; }"
         ".song-card:hover { transform: translateY(-3px); box-shadow: 0 6px 12px rgba(0,0,0,0.15); }"
-        ".yt-btn { display: inline-block; background-color: #ff0000; color: white !important; padding: 8px 15px; border-radius: 5px; text-decoration: none; font-weight: bold; margin-top: 10px; font-size: 14px; }"
-        ".yt-btn:hover { background-color: #cc0000; }"
         ".local-warning { background-color: #fff3cd; border-left: 5px solid #ffc107; padding: 10px; border-radius: 5px; margin-bottom: 15px; }"
         "</style><div class=\"watermark\"></div>"
     )
@@ -149,71 +147,16 @@ st.markdown("<h2>🎊 BPS Celebration & Event Manager</h2>", unsafe_allow_html=T
 st.sidebar.button("🔄 Sync Event Data", on_click=refresh_event_data, use_container_width=True)
 
 if current_user_role == "admin":
-    tab_titles = ["🎵 Explore Songs", "🔴 Live Controller", "🎭 Claim Performance", "📋 Playlist Manager", "📅 Manage Events", "📝 Audit Log"]
+    tab_titles = ["🔴 Live Controller", "🎭 Claim Performance", "📋 Playlist Manager", "📅 Manage Events", "📝 Audit Log"]
 else:
-    tab_titles = ["🎵 Explore Songs", "🔴 Live Controller", "🎭 Claim Performance", "📋 Playlist Manager"]
+    tab_titles = ["🔴 Live Controller", "🎭 Claim Performance", "📋 Playlist Manager"]
 
 tabs = st.tabs(tab_titles)
 
 # ---------------------------------------------------------
-# TAB 1: EXPLORE SONGS & ACTS
+# TAB 1: LIVE PROGRAM CONTROLLER
 # ---------------------------------------------------------
 with tabs[0]:
-    st.markdown("<div class='header-card' style='border-left-color: #e83e8c;'><h4>🎵 Explore Songs & Acts</h4><p style='margin:0; font-size:14px;'>Listen to the songs curated by the Head Teacher and choose the perfect one for your class!</p></div>", unsafe_allow_html=True)
-    
-    programs = fetch_programs()
-    active_progs = programs[programs['Status'] != 'Completed'] if not programs.empty else pd.DataFrame()
-    
-    if active_progs.empty:
-        st.info("No upcoming celebrations found. Please wait for the Admin to schedule one.")
-    else:
-        prog_options = {f"{r['Event_Name']} ({r['Date']})": r['Prog_ID'] for _, r in active_progs.iterrows()}
-        sel_prog = st.selectbox("Select Celebration Event to Explore", list(prog_options.keys()), key="explore_prog")
-        prog_id = prog_options[sel_prog]
-        
-        event_name_clean = sel_prog.split(' (')[0]
-        st.markdown(f"### 🎊 {event_name_clean} - Act Gallery")
-        
-        all_perfs = fetch_performances()
-        event_perfs = all_perfs[all_perfs['Prog_ID'] == prog_id] if not all_perfs.empty else pd.DataFrame()
-        
-        if event_perfs.empty:
-            st.warning("No songs or acts have been added to this event yet. Check back later!")
-        else:
-            cols = st.columns(2)
-            for i, (_, row) in enumerate(event_perfs.iterrows()):
-                with cols[i % 2]:
-                    is_available = row['Class'] == "TBD"
-                    is_canceled = str(row.get('Cancel_Reason', '')) != ""
-                    
-                    if is_canceled:
-                        status_color = "#6c757d"
-                        status_text = f"🚫 CANCELED by {row['Canceled_By']}"
-                    elif is_available:
-                        status_color = "#28a745"
-                        status_text = f"🟢 AVAILABLE TO CLAIM (Assigned: {row['Choreographer']})"
-                    else:
-                        status_color = "#dc3545"
-                        status_text = f"🔴 CLAIMED BY: {row['Choreographer']} ({row['Class']})"
-                    
-                    yt_link = str(row['YouTube_Link']).strip()
-                    yt_html = ""
-                    if yt_link.startswith("http"):
-                        yt_html = f"<a href='{yt_link}' target='_blank' class='yt-btn'>▶️ Listen on YouTube</a>"
-                    
-                    card_html = f"""
-                    <div class="song-card" style="border-left: 6px solid {status_color};">
-                        <h4 style="margin: 0 0 5px 0; color: #333;">{row['Perf_Name']}</h4>
-                        <p style="margin: 0; font-size: 13px; font-weight: bold; color: {status_color};">{status_text}</p>
-                        {yt_html}
-                    </div>
-                    """
-                    st.markdown(card_html, unsafe_allow_html=True)
-
-# ---------------------------------------------------------
-# TAB 2: LIVE PROGRAM CONTROLLER
-# ---------------------------------------------------------
-with tabs[1]:
     programs = fetch_programs()
     active_progs = programs[programs['Status'] != 'Completed'] if not programs.empty else pd.DataFrame()
     
@@ -233,14 +176,32 @@ with tabs[1]:
             ev_dt = datetime.strptime(ev_dt_str, "%d-%m-%Y %I:%M %p")
             ev_dt = IST.localize(ev_dt)
             is_event_started = current_dt >= ev_dt
+            time_diff = ev_dt - current_dt
         except Exception:
             is_event_started = True 
+            time_diff = timedelta(0)
+            
+        if is_event_started:
+            status_badge = "🔴 LIVE PROGRAM DASHBOARD"
+            badge_color = "#ff4b4b"
+        else:
+            days = time_diff.days
+            hours = time_diff.seconds // 3600
+            mins = (time_diff.seconds % 3600) // 60
+            
+            if days > 0:
+                status_badge = f"⏳ Starts in: {days} Days, {hours} Hours"
+            elif hours > 0:
+                status_badge = f"⏳ Starts in: {hours} Hours, {mins} Mins"
+            else:
+                status_badge = f"⏳ Starts in: {mins} Mins"
+            badge_color = "#ffc107"
         
         st.markdown(f"""
         <div style='background: linear-gradient(135deg, #1e3c72, #2a5298); padding: 15px; border-radius: 10px; text-align: center; color: white; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'>
             <h2 style='margin:0; font-size: 26px;'>🎉 {event_name_clean}</h2>
             <p style='margin:5px 0 5px 0; font-size: 15px; font-weight: 500; color: #e3f2fd;'>📅 {ev_info['Date']} &nbsp;|&nbsp; ⏰ {ev_info['Start_Time']}</p>
-            <p style='margin:0; font-size: 13px; opacity: 0.8; font-weight: bold; letter-spacing: 1px;'>🔴 LIVE PROGRAM DASHBOARD</p>
+            <p style='margin:0; font-size: 15px; font-weight: bold; letter-spacing: 1px; color: {badge_color};'>{status_badge}</p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -316,13 +277,13 @@ with tabs[1]:
                                 log_audit(action_txt, f"{row['Perf_Name']} in {event_name_clean}")
                                 st.rerun()
                         else:
-                            st.markdown(f"<div style='margin-top:10px; font-size:13px; color:#e67e22; font-weight:bold;'>⏳ Starts at {ev_info['Start_Time']}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div style='margin-top:10px; font-size:13px; color:#e67e22; font-weight:bold;'>⏳ Event not started</div>", unsafe_allow_html=True)
             st.write("")
 
 # ---------------------------------------------------------
-# TAB 3: TEACHER PERFORMANCE SUBMISSION
+# TAB 2: TEACHER PERFORMANCE SUBMISSION
 # ---------------------------------------------------------
-with tabs[2]:
+with tabs[1]:
     st.markdown("<div class='header-card'><h4>🎭 Claim & Register Your Act</h4><p style='margin:0; font-size:14px;'>Complete the registration for the song/act assigned to you by the Head Teacher.</p></div>", unsafe_allow_html=True)
     
     programs = fetch_programs()
@@ -413,9 +374,9 @@ with tabs[2]:
                     st.rerun()
 
 # ---------------------------------------------------------
-# TAB 4: PLAYLIST & SEQUENCE MANAGER
+# TAB 3: PLAYLIST & SEQUENCE MANAGER
 # ---------------------------------------------------------
-with tabs[3]:
+with tabs[2]:
     st.markdown("<div class='header-card'><h4>📋 Event Playlist Manager</h4><p style='margin:0; font-size:14px;'>Review all acts and manage the event playlist.</p></div>", unsafe_allow_html=True)
     
     programs = fetch_programs()
@@ -629,10 +590,10 @@ with tabs[3]:
                             st.warning("Please select a valid performance.")
 
 # ---------------------------------------------------------
-# TAB 5 & 6: ADMIN TABS (HIDDEN FROM TEACHERS)
+# TAB 4 & 5: ADMIN TABS (HIDDEN FROM TEACHERS)
 # ---------------------------------------------------------
 if current_user_role == "admin":
-    with tabs[4]:
+    with tabs[3]:
         st.markdown("<div class='header-card' style='border-left: 5px solid #17a2b8;'><h4>📅 Create New Celebration</h4><p style='margin:0; font-size:14px;'>Schedule an upcoming school event first, then add specific songs/acts for teachers to claim.</p></div>", unsafe_allow_html=True)
         
         with st.form("create_event"):

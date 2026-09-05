@@ -1,0 +1,215 @@
+import streamlit as st
+import pandas as pd
+import time
+from datetime import datetime
+import pytz
+import gspread
+from gspread.exceptions import WorksheetNotFound, APIError
+from google.oauth2.service_account import Credentials
+
+# --- Configuration & Setup ---
+st.set_page_config(page_title="BPS Video Logger", page_icon="🎥", layout="centered")
+IST = pytz.timezone('Asia/Kolkata')
+
+# --- State Management ---
+if 'is_recording' not in st.session_state:
+    st.session_state.is_recording = False
+if 'current_row' not in st.session_state:
+    st.session_state.current_row = None
+if 'start_dt' not in st.session_state:
+    st.session_state.start_dt = None
+if 'edit_markers' not in st.session_state:
+    st.session_state.edit_markers = []
+if 'perf_name' not in st.session_state:
+    st.session_state.perf_name = ""
+
+# --- Google Sheets Connectors ---
+@st.cache_resource
+def get_google_credentials():
+    return Credentials.from_service_account_info(
+        dict(st.secrets["gcp_service_account"]),
+        scopes=["https://www.googleapis.com/auth/spreadsheets"]
+    )
+
+@st.cache_resource
+def init_sheet():
+    try: 
+        return gspread.authorize(get_google_credentials()).open_by_key("1TXs2o0OnpPz1nr_AnhzrwR_OA3FsAss9gwGvbB6LHQo")
+    except Exception as e: 
+        st.error(f"⚠️ Connection Error: {e}")
+        st.stop()
+
+def get_video_worksheet(sh):
+    try: 
+        ws = sh.worksheet("Video Clips")
+    except WorksheetNotFound:
+        ws = sh.add_worksheet(title="Video Clips", rows=1000, cols=10)
+        ws.append_row(["Date", "Start", "End", "Duration", "Perf_Name", "Edit_Timestamps"])
+    return ws
+
+@st.cache_data(ttl=60)
+def fetch_performances():
+    sh = init_sheet()
+    try:
+        ws = sh.worksheet("event_performances")
+        records = ws.get_all_records()
+        df = pd.DataFrame(records)
+        if not df.empty and 'Order_No' in df.columns:
+            df['Order_No'] = pd.to_numeric(df['Order_No'], errors='coerce').fillna(99).astype(int)
+            df = df.sort_values('Order_No')
+            return df['Perf_Name'].tolist()
+        return []
+    except WorksheetNotFound:
+        return []
+
+@st.cache_data(ttl=5)
+def fetch_video_logs():
+    sh = init_sheet()
+    ws = get_video_worksheet(sh)
+    records = ws.get_all_records()
+    if not records:
+        return pd.DataFrame(columns=["Date", "Start", "End", "Duration", "Perf_Name", "Edit_Timestamps"])
+    return pd.DataFrame(records)
+
+# --- Main UI ---
+st.markdown("<h2 style='text-align: center; color: #e83e8c;'>🎥 BPS Live Video Logger</h2>", unsafe_allow_html=True)
+st.write("---")
+
+sh = init_sheet()
+video_ws = get_video_worksheet(sh)
+
+# ==========================================
+# 1. RECORDING CONTROLS
+# ==========================================
+if not st.session_state.is_recording:
+    st.markdown("### 🎬 Setup New Clip")
+    perf_list = fetch_performances()
+    
+    options = ["-- Select Performance --"] + perf_list + ["✨ Custom / Out of List"]
+    selected_perf = st.selectbox("Select Performance Being Recorded:", options)
+    
+    custom_perf = ""
+    if selected_perf == "✨ Custom / Out of List":
+        custom_perf = st.text_input("Enter Custom Performance Name:")
+    
+    if st.button("🔴 Start Recording", type="primary", use_container_width=True):
+        final_name = custom_perf.strip() if selected_perf == "✨ Custom / Out of List" else selected_perf
+        
+        if selected_perf == "-- Select Performance --" or (selected_perf == "✨ Custom / Out of List" and not custom_perf.strip()):
+            st.error("⚠️ Please select or enter a performance name before recording.")
+        else:
+            # 5-Second Countdown
+            countdown_ph = st.empty()
+            for i in range(5, 0, -1):
+                countdown_ph.markdown(f"<h3 style='text-align:center; color:#ff4b4b;'>Recording starts in {i}...</h3>", unsafe_allow_html=True)
+                time.sleep(1)
+            countdown_ph.empty()
+            
+            # Record Start
+            now = datetime.now(IST)
+            date_str = now.strftime("%d-%m-%Y")
+            start_str = now.strftime("%I:%M:%S %p")
+            
+            # The exact formula you provided
+            formula = '=IF(INDIRECT("C"&ROW())="RUNNING", "RUNNING", IFERROR(TEXT(MOD(INDIRECT("C"&ROW())-INDIRECT("B"&ROW()), 1), "h:mm"), ""))'
+            
+            new_row = [date_str, start_str, "RUNNING", formula, final_name, ""]
+            
+            # Append to sheet and find row number
+            video_ws.append_row(new_row, value_input_option='USER_ENTERED')
+            all_vals = video_ws.get_all_values()
+            target_row = len(all_vals)
+            
+            # Update State
+            st.session_state.is_recording = True
+            st.session_state.current_row = target_row
+            st.session_state.start_dt = now
+            st.session_state.perf_name = final_name
+            st.session_state.edit_markers = []
+            
+            st.rerun()
+
+else:
+    # 🔴 ACTIVELY RECORDING VIEW
+    st.markdown(f"""
+    <div style='background-color: #ffebee; border: 2px solid #ff4b4b; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px;'>
+        <h2 style='margin:0; color: #c62828;'>🔴 RECORDING LIVE</h2>
+        <p style='margin:5px 0 0 0; font-size: 18px;'><b>{st.session_state.perf_name}</b></p>
+        <p style='margin:0; color: #555;'>Started at: {st.session_state.start_dt.strftime("%I:%M:%S %p")}</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    c1, c2 = st.columns(2)
+    
+    with c1:
+        if st.button("✂️ Need Edit", help="Marks the current timestamp for later editing", use_container_width=True):
+            # Calculate elapsed time for the editor
+            elapsed = datetime.now(IST) - st.session_state.start_dt
+            total_sec = int(elapsed.total_seconds())
+            m, s = divmod(total_sec, 60)
+            h, m = divmod(m, 60)
+            timestamp_str = f"[{h:02d}:{m:02d}:{s:02d}]" if h > 0 else f"[{m:02d}:{s:02d}]"
+            
+            st.session_state.edit_markers.append(timestamp_str)
+            markers_joined = ", ".join(st.session_state.edit_markers)
+            
+            # Update the specific cell in column F (Column 6)
+            video_ws.update_acell(f"F{st.session_state.current_row}", markers_joined)
+            st.toast(f"✅ Edit marker logged at {timestamp_str}")
+            
+    with c2:
+        if st.button("⏹️ Stop Recording", type="primary", use_container_width=True):
+            end_dt = datetime.now(IST)
+            end_str = end_dt.strftime("%I:%M:%S %p")
+            
+            # Update End Time in column C (Column 3)
+            video_ws.update_acell(f"C{st.session_state.current_row}", end_str)
+            
+            # Clear State
+            st.session_state.is_recording = False
+            st.session_state.current_row = None
+            st.session_state.start_dt = None
+            st.session_state.perf_name = ""
+            st.session_state.edit_markers = []
+            
+            fetch_video_logs.clear()
+            st.success("✅ Clip successfully logged and saved!")
+            time.sleep(1)
+            st.rerun()
+            
+    if st.session_state.edit_markers:
+        st.markdown("**Logged Edit Markers:**")
+        st.code(", ".join(st.session_state.edit_markers))
+
+st.write("---")
+
+# ==========================================
+# 2. VIDEO EDITING REFERENCE LOG
+# ==========================================
+st.markdown("### 🗂️ Video Editing Reference Log")
+st.caption("Review your clips here to quickly jump to the exact timestamps during editing.")
+
+if st.button("🔄 Refresh Video Logs"):
+    fetch_video_logs.clear()
+
+logs_df = fetch_video_logs()
+
+if logs_df.empty:
+    st.info("No video clips have been recorded yet.")
+else:
+    # Sort newest first
+    logs_df = logs_df.iloc[::-1]
+    
+    st.dataframe(
+        logs_df,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Date": st.column_config.TextColumn("Date"),
+            "Start": st.column_config.TextColumn("Start Time"),
+            "End": st.column_config.TextColumn("End Time"),
+            "Duration": st.column_config.TextColumn("Duration"),
+            "Perf_Name": st.column_config.TextColumn("Performance"),
+            "Edit_Timestamps": st.column_config.TextColumn("✂️ Edit Markers")
+        }
+    )

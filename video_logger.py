@@ -11,51 +11,6 @@ from google.oauth2.service_account import Credentials
 st.set_page_config(page_title="BPS Video Logger", page_icon="🎥", layout="centered")
 IST = pytz.timezone('Asia/Kolkata')
 
-# --- Custom Button CSS ---
-st.markdown("""
-<style>
-/* Make ALL Primary buttons Solid Blue (Start Recording) */
-button[kind="primary"] {
-    background: #007bff !important;
-    background-color: #007bff !important;
-    border: 2px solid #007bff !important;
-    color: white !important;
-    border-radius: 8px !important;
-}
-button[kind="primary"]:hover, 
-button[kind="primary"]:focus, 
-button[kind="primary"]:active {
-    background: #0056b3 !important;
-    background-color: #0056b3 !important;
-    border-color: #0056b3 !important;
-    color: white !important;
-}
-button[kind="primary"] * {
-    color: white !important;
-}
-
-/* Make Primary buttons inside the 2nd column Solid Red (Stop Recording) */
-div[data-testid="column"]:nth-of-type(2) button[kind="primary"] {
-    background: #dc3545 !important;
-    background-color: #dc3545 !important;
-    border: 2px solid #dc3545 !important;
-}
-div[data-testid="column"]:nth-of-type(2) button[kind="primary"]:hover,
-div[data-testid="column"]:nth-of-type(2) button[kind="primary"]:focus,
-div[data-testid="column"]:nth-of-type(2) button[kind="primary"]:active {
-    background: #c82333 !important;
-    background-color: #c82333 !important;
-    border-color: #c82333 !important;
-}
-
-/* Style Secondary buttons (Need Edit Marker) */
-button[kind="secondary"] {
-    font-weight: bold !important;
-    border-radius: 8px !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
 # --- State Management ---
 if 'is_recording' not in st.session_state:
     st.session_state.is_recording = False
@@ -145,6 +100,27 @@ st.write("---")
 # 1. RECORDING CONTROLS
 # ==========================================
 if not st.session_state.is_recording:
+    
+    # CSS: Make the primary button BLUE when NOT recording
+    st.markdown("""
+    <style>
+    button[kind="primary"] {
+        background-color: #007bff !important;
+        border: 2px solid #007bff !important;
+        border-radius: 8px !important;
+    }
+    button[kind="primary"]:hover {
+        background-color: #0056b3 !important;
+        border-color: #0056b3 !important;
+    }
+    button[kind="primary"] p {
+        color: white !important;
+        font-size: 18px !important;
+        font-weight: bold !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     st.markdown("### 🎬 Setup New Clip")
     perf_list = fetch_performances()
     
@@ -196,6 +172,31 @@ if not st.session_state.is_recording:
             st.rerun()
 
 else:
+    
+    # CSS: Make the primary button RED when ACTIVELY recording
+    st.markdown("""
+    <style>
+    button[kind="primary"] {
+        background-color: #dc3545 !important;
+        border: 2px solid #dc3545 !important;
+        border-radius: 8px !important;
+    }
+    button[kind="primary"]:hover {
+        background-color: #c82333 !important;
+        border-color: #c82333 !important;
+    }
+    button[kind="primary"] p {
+        color: white !important;
+        font-size: 18px !important;
+        font-weight: bold !important;
+    }
+    button[kind="secondary"] p {
+        font-weight: bold !important;
+        font-size: 16px !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     # 🔴 ACTIVELY RECORDING VIEW
     st.markdown(f"""
     <div style='background-color: #ffebee; border: 2px solid #dc3545; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px;'>
@@ -209,7 +210,7 @@ else:
     c1, c2 = st.columns(2)
     
     with c1:
-        if st.button("✂️ Need Edit Marker", help="Marks the current timestamp for later editing", use_container_width=True):
+        if st.button("✂️ Need Edit Marker", type="secondary", help="Marks the current timestamp for later editing", use_container_width=True):
             # Calculate elapsed time for the editor
             elapsed = datetime.now(IST) - st.session_state.start_dt
             total_sec = int(elapsed.total_seconds())

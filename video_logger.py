@@ -52,8 +52,10 @@ def fetch_performances():
     sh = init_sheet()
     try:
         ws = sh.worksheet("event_performances")
-        records = ws.get_all_records()
-        df = pd.DataFrame(records)
+        data = ws.get_all_values()
+        if not data or len(data) <= 1:
+            return []
+        df = pd.DataFrame(data[1:], columns=data[0])
         if not df.empty and 'Order_No' in df.columns:
             df['Order_No'] = pd.to_numeric(df['Order_No'], errors='coerce').fillna(99).astype(int)
             df = df.sort_values('Order_No')
@@ -66,10 +68,28 @@ def fetch_performances():
 def fetch_video_logs():
     sh = init_sheet()
     ws = get_video_worksheet(sh)
-    records = ws.get_all_records()
-    if not records:
+    data = ws.get_all_values()
+    
+    if not data or len(data) <= 1:
         return pd.DataFrame(columns=["Date", "Start", "End", "Duration", "Perf_Name", "Edit_Timestamps"])
-    return pd.DataFrame(records)
+    
+    # Safely handle missing headers without crashing
+    headers = data[0]
+    if len(headers) < 6:
+        headers.append("Edit_Timestamps")
+        try:
+            ws.update_acell("F1", "Edit_Timestamps")
+        except:
+            pass
+
+    # Ensure all data rows align perfectly with headers to prevent index errors
+    rows = []
+    for row in data[1:]:
+        while len(row) < len(headers):
+            row.append("")
+        rows.append(row[:len(headers)])
+
+    return pd.DataFrame(rows, columns=headers)
 
 # --- Main UI ---
 st.markdown("<h2 style='text-align: center; color: #e83e8c;'>🎥 BPS Live Video Logger</h2>", unsafe_allow_html=True)

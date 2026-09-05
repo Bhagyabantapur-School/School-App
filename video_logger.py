@@ -11,6 +11,40 @@ from google.oauth2.service_account import Credentials
 st.set_page_config(page_title="BPS Video Logger", page_icon="🎥", layout="centered")
 IST = pytz.timezone('Asia/Kolkata')
 
+# --- Custom Button CSS ---
+st.markdown("""
+<style>
+/* Make all Primary buttons Blue by default (Start Recording) */
+button[data-testid="baseButton-primary"] {
+    background-color: #007bff !important;
+    border-color: #007bff !important;
+    color: white !important;
+    font-size: 18px !important;
+    font-weight: bold !important;
+}
+button[data-testid="baseButton-primary"]:hover {
+    background-color: #0056b3 !important;
+    border-color: #0056b3 !important;
+}
+
+/* Make Primary buttons inside the 2nd column Red (Stop Recording) */
+div[data-testid="column"]:nth-of-type(2) button[data-testid="baseButton-primary"] {
+    background-color: #dc3545 !important;
+    border-color: #dc3545 !important;
+}
+div[data-testid="column"]:nth-of-type(2) button[data-testid="baseButton-primary"]:hover {
+    background-color: #c82333 !important;
+    border-color: #c82333 !important;
+}
+
+/* Style Secondary buttons (Need Edit & Refresh) */
+button[data-testid="baseButton-secondary"] {
+    font-weight: bold !important;
+    font-size: 16px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # --- State Management ---
 if 'is_recording' not in st.session_state:
     st.session_state.is_recording = False
@@ -86,10 +120,8 @@ def fetch_video_logs():
     rows = []
     for row in data[1:]:
         current_row = list(row)
-        # Pad with blanks if the row is short
         while len(current_row) < 6:
             current_row.append("")
-        # Truncate extra blank columns if the row is too long
         rows.append(current_row[:6])
 
     return pd.DataFrame(rows, columns=expected_headers)
@@ -115,16 +147,16 @@ if not st.session_state.is_recording:
     if selected_perf == "✨ Custom / Out of List":
         custom_perf = st.text_input("Enter Custom Performance Name:")
     
-    if st.button("🔴 Start Recording", type="primary", use_container_width=True):
+    if st.button("🔵 Start Recording", type="primary", use_container_width=True):
         final_name = custom_perf.strip() if selected_perf == "✨ Custom / Out of List" else selected_perf
         
         if selected_perf == "-- Select Performance --" or (selected_perf == "✨ Custom / Out of List" and not custom_perf.strip()):
             st.error("⚠️ Please select or enter a performance name before recording.")
         else:
-            # 5-Second Countdown
+            # 5-Second Start Countdown
             countdown_ph = st.empty()
             for i in range(5, 0, -1):
-                countdown_ph.markdown(f"<h3 style='text-align:center; color:#ff4b4b;'>Recording starts in {i}...</h3>", unsafe_allow_html=True)
+                countdown_ph.markdown(f"<h3 style='text-align:center; color:#007bff;'>Recording starts in {i}...</h3>", unsafe_allow_html=True)
                 time.sleep(1)
             countdown_ph.empty()
             
@@ -155,17 +187,18 @@ if not st.session_state.is_recording:
 else:
     # 🔴 ACTIVELY RECORDING VIEW
     st.markdown(f"""
-    <div style='background-color: #ffebee; border: 2px solid #ff4b4b; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px;'>
+    <div style='background-color: #ffebee; border: 2px solid #dc3545; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px;'>
         <h2 style='margin:0; color: #c62828;'>🔴 RECORDING LIVE</h2>
         <p style='margin:5px 0 0 0; font-size: 18px;'><b>{st.session_state.perf_name}</b></p>
         <p style='margin:0; color: #555;'>Started at: {st.session_state.start_dt.strftime("%I:%M:%S %p")}</p>
     </div>
     """, unsafe_allow_html=True)
     
+    stop_ph = st.empty() # Placeholder for the ending countdown
     c1, c2 = st.columns(2)
     
     with c1:
-        if st.button("✂️ Need Edit", help="Marks the current timestamp for later editing", use_container_width=True):
+        if st.button("✂️ Need Edit Marker", help="Marks the current timestamp for later editing", use_container_width=True):
             # Calculate elapsed time for the editor
             elapsed = datetime.now(IST) - st.session_state.start_dt
             total_sec = int(elapsed.total_seconds())
@@ -182,6 +215,18 @@ else:
             
     with c2:
         if st.button("⏹️ Stop Recording", type="primary", use_container_width=True):
+            
+            # 5-Second Ending Buffer Countdown
+            for i in range(5, 0, -1):
+                stop_ph.markdown(f"""
+                <div style='background-color: #fff3cd; border: 2px solid #ffc107; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 20px;'>
+                    <h3 style='margin:0; color:#856404;'>⏳ Capturing final buffer... ({i}s)</h3>
+                </div>
+                """, unsafe_allow_html=True)
+                time.sleep(1)
+            stop_ph.empty()
+            
+            # Record End Time exactly after the 5 seconds is up
             end_dt = datetime.now(IST)
             end_str = end_dt.strftime("%I:%M:%S %p")
             
@@ -197,11 +242,11 @@ else:
             
             fetch_video_logs.clear()
             st.success("✅ Clip successfully logged and saved!")
-            time.sleep(1)
+            time.sleep(1.5)
             st.rerun()
             
     if st.session_state.edit_markers:
-        st.markdown("**Logged Edit Markers:**")
+        st.markdown("**Logged Edit Markers (Elapsed Time):**")
         st.code(", ".join(st.session_state.edit_markers))
 
 st.write("---")

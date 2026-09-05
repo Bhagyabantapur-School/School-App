@@ -70,26 +70,29 @@ def fetch_video_logs():
     ws = get_video_worksheet(sh)
     data = ws.get_all_values()
     
-    if not data or len(data) <= 1:
-        return pd.DataFrame(columns=["Date", "Start", "End", "Duration", "Perf_Name", "Edit_Timestamps"])
+    expected_headers = ["Date", "Start", "End", "Duration", "Perf_Name", "Edit_Timestamps"]
     
-    # Safely handle missing headers without crashing
-    headers = data[0]
-    if len(headers) < 6:
-        headers.append("Edit_Timestamps")
-        try:
+    if not data or len(data) <= 1:
+        return pd.DataFrame(columns=expected_headers)
+    
+    # Check if we need to silently fix the header row in Google Sheets
+    try:
+        if len(data[0]) < 6 or str(data[0][5]).strip() == "":
             ws.update_acell("F1", "Edit_Timestamps")
-        except:
-            pass
+    except:
+        pass
 
-    # Ensure all data rows align perfectly with headers to prevent index errors
+    # Process rows safely enforcing exactly our 6 headers
     rows = []
     for row in data[1:]:
-        while len(row) < len(headers):
-            row.append("")
-        rows.append(row[:len(headers)])
+        current_row = list(row)
+        # Pad with blanks if the row is short
+        while len(current_row) < 6:
+            current_row.append("")
+        # Truncate extra blank columns if the row is too long
+        rows.append(current_row[:6])
 
-    return pd.DataFrame(rows, columns=headers)
+    return pd.DataFrame(rows, columns=expected_headers)
 
 # --- Main UI ---
 st.markdown("<h2 style='text-align: center; color: #e83e8c;'>🎥 BPS Live Video Logger</h2>", unsafe_allow_html=True)

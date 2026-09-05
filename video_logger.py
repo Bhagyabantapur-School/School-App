@@ -14,33 +14,44 @@ IST = pytz.timezone('Asia/Kolkata')
 # --- Custom Button CSS ---
 st.markdown("""
 <style>
-/* Make all Primary buttons Blue by default (Start Recording) */
-button[data-testid="baseButton-primary"] {
+/* Make ALL Primary buttons Solid Blue (Start Recording) */
+button[kind="primary"] {
+    background: #007bff !important;
     background-color: #007bff !important;
-    border-color: #007bff !important;
+    border: 2px solid #007bff !important;
     color: white !important;
-    font-size: 18px !important;
-    font-weight: bold !important;
+    border-radius: 8px !important;
 }
-button[data-testid="baseButton-primary"]:hover {
+button[kind="primary"]:hover, 
+button[kind="primary"]:focus, 
+button[kind="primary"]:active {
+    background: #0056b3 !important;
     background-color: #0056b3 !important;
     border-color: #0056b3 !important;
+    color: white !important;
+}
+button[kind="primary"] * {
+    color: white !important;
 }
 
-/* Make Primary buttons inside the 2nd column Red (Stop Recording) */
-div[data-testid="column"]:nth-of-type(2) button[data-testid="baseButton-primary"] {
+/* Make Primary buttons inside the 2nd column Solid Red (Stop Recording) */
+div[data-testid="column"]:nth-of-type(2) button[kind="primary"] {
+    background: #dc3545 !important;
     background-color: #dc3545 !important;
-    border-color: #dc3545 !important;
+    border: 2px solid #dc3545 !important;
 }
-div[data-testid="column"]:nth-of-type(2) button[data-testid="baseButton-primary"]:hover {
+div[data-testid="column"]:nth-of-type(2) button[kind="primary"]:hover,
+div[data-testid="column"]:nth-of-type(2) button[kind="primary"]:focus,
+div[data-testid="column"]:nth-of-type(2) button[kind="primary"]:active {
+    background: #c82333 !important;
     background-color: #c82333 !important;
     border-color: #c82333 !important;
 }
 
-/* Style Secondary buttons (Need Edit & Refresh) */
-button[data-testid="baseButton-secondary"] {
+/* Style Secondary buttons (Need Edit Marker) */
+button[kind="secondary"] {
     font-weight: bold !important;
-    font-size: 16px !important;
+    border-radius: 8px !important;
 }
 </style>
 """, unsafe_allow_html=True)

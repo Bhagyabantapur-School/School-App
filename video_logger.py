@@ -141,9 +141,6 @@ def fetch_video_logs():
 st.markdown("<h2 style='text-align: center; color: #e83e8c;'>🎥 BPS Live Video Logger</h2>", unsafe_allow_html=True)
 st.write("---")
 
-sh = init_sheet()
-video_ws = get_video_worksheet(sh)
-
 # ==========================================
 # 1. RECORDING CONTROLS
 # ==========================================
@@ -170,6 +167,9 @@ if not st.session_state.is_recording:
                 countdown_ph.markdown(f"<h3 style='text-align:center; color:#007bff;'>Recording starts in {i}...</h3>", unsafe_allow_html=True)
                 time.sleep(1)
             countdown_ph.empty()
+            
+            # Fetch worksheet ONLY when needed to prevent API rate limit errors
+            video_ws = get_video_worksheet(init_sheet())
             
             # Record Start
             now = datetime.now(IST)
@@ -220,6 +220,9 @@ else:
             st.session_state.edit_markers.append(timestamp_str)
             markers_joined = ", ".join(st.session_state.edit_markers)
             
+            # Fetch worksheet ONLY when needed
+            video_ws = get_video_worksheet(init_sheet())
+            
             # Update the specific cell in column F (Column 6)
             video_ws.update_acell(f"F{st.session_state.current_row}", markers_joined)
             st.toast(f"✅ Edit marker logged at {timestamp_str}")
@@ -240,6 +243,9 @@ else:
             # Record End Time exactly after the 5 seconds is up
             end_dt = datetime.now(IST)
             end_str = end_dt.strftime("%I:%M:%S %p")
+            
+            # Fetch worksheet ONLY when needed
+            video_ws = get_video_worksheet(init_sheet())
             
             # Update End Time in column C (Column 3)
             video_ws.update_acell(f"C{st.session_state.current_row}", end_str)

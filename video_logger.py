@@ -92,6 +92,47 @@ def fetch_video_logs():
 
     return pd.DataFrame(rows, columns=expected_headers)
 
+# ==========================================
+# 🔄 RESUME SESSION CHECKER (Auto-Sync)
+# ==========================================
+# This runs only ONCE when the app is opened or refreshed
+if 'sync_done' not in st.session_state:
+    st.session_state.sync_done = True
+    try:
+        sh = init_sheet()
+        ws = get_video_worksheet(sh)
+        data = ws.get_all_values()
+        
+        # Scan through the rows to see if any performance is currently "RUNNING"
+        for i, row in enumerate(data):
+            # Check if row has at least 3 columns and column C (index 2) is RUNNING
+            if i > 0 and len(row) > 2 and row[2] == "RUNNING":
+                # Reconstruct the session state from the database
+                st.session_state.is_recording = True
+                st.session_state.current_row = i + 1  # 1-based index for Google Sheets
+                
+                # Rebuild start time
+                date_str = row[0] if len(row) > 0 else datetime.now(IST).strftime("%d-%m-%Y")
+                start_str = row[1] if len(row) > 1 else datetime.now(IST).strftime("%I:%M:%S %p")
+                try:
+                    dt = datetime.strptime(f"{date_str} {start_str}", "%d-%m-%Y %I:%M:%S %p")
+                    st.session_state.start_dt = IST.localize(dt)
+                except:
+                    st.session_state.start_dt = datetime.now(IST)
+                
+                # Fetch performance name
+                st.session_state.perf_name = row[4] if len(row) > 4 else "Unknown"
+                
+                # Rebuild Edit Markers
+                markers_raw = row[5] if len(row) > 5 else ""
+                if markers_raw.strip():
+                    st.session_state.edit_markers = [m.strip() for m in markers_raw.split(',') if m.strip()]
+                else:
+                    st.session_state.edit_markers = []
+                break # Stop scanning after finding the running row
+    except Exception as e:
+        pass # Fail silently, let the user start a fresh session
+
 # --- Main UI ---
 st.markdown("<h2 style='text-align: center; color: #e83e8c;'>🎥 BPS Live Video Logger</h2>", unsafe_allow_html=True)
 st.write("---")

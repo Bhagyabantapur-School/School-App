@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 import base64
 import concurrent.futures
 import time
-import re  # ✨ NEW: Imported Regular Expressions for strict date handling
+import re
 
 # --- IMPORTS FOR GOOGLE SHEETS & DRIVE API ---
 import gspread
@@ -296,17 +296,14 @@ def generate_pdf(students_list, photo_dict, progress_bar=None):
         pdf.cell(44, line_h, f"{student.get('Name', '')}".upper()[:25], 0, 1); curr_y += 4.5
         pdf.set_font("Arial", '', 7)
         
-        # ✨ NEW: Bulletproof Regex Date Formatter
-        raw_dob = str(student.get('DOB', '')).strip().split(" ")[0] # Drops any accidental timestamp
+        raw_dob = str(student.get('DOB', '')).strip().split(" ")[0] 
         fmt_dob = raw_dob
         if raw_dob and raw_dob.lower() not in ['nan', 'none', 'nat']:
             try:
-                # Strictly matches YYYY-MM-DD or YYYY/MM/DD and forces it to DD.MM.YYYY mathematically
                 if re.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$", raw_dob):
                     parts = re.split(r"[-/]", raw_dob)
                     fmt_dob = f"{int(parts[2]):02d}.{int(parts[1]):02d}.{parts[0]}"
                 else:
-                    # If it doesn't start with a year, safe to use pandas dayfirst
                     dt = pd.to_datetime(raw_dob, dayfirst=True)
                     fmt_dob = dt.strftime('%d.%m.%Y')
             except:
@@ -316,7 +313,7 @@ def generate_pdf(students_list, photo_dict, progress_bar=None):
             ("Father", str(student.get('Father', ''))[:22]), 
             ("Mother", str(student.get('Mother', ''))[:22]), 
             ("Class", f"{student.get('Class', '')} | Sec: {student.get('Section', 'A')}"), 
-            ("DOB", fmt_dob) # Always strictly printed as DD.MM.YYYY
+            ("DOB", fmt_dob) 
         ]:
             pdf.set_xy(detail_x, curr_y); pdf.cell(44, line_h, f"{label}: {val}", 0, 1); curr_y += line_h
             
@@ -492,14 +489,51 @@ with tabs[0]:
                 print_ready = print_ready.reset_index(drop=True)
                 print_ready.insert(0, "Select", False)
                 
-                # Fill missing sections with 'A'
+                # ✨ NEW: Fill Missing Section
                 if 'Section' not in print_ready.columns:
                     print_ready['Section'] = 'A'
                 print_ready['Section'] = print_ready['Section'].fillna('A').astype(str)
                 
+                # ✨ NEW: Ensure all requested columns exist to prevent errors
+                for c in ['Father', 'Mother', 'DOB', 'Mobile']:
+                    if c not in print_ready.columns:
+                        print_ready[c] = ""
+                
+                # ✨ NEW: Format DOB perfectly for the Table View
+                def format_grid_dob(raw_dob):
+                    raw_dob = str(raw_dob).strip().split(" ")[0]
+                    fmt_dob = raw_dob
+                    if raw_dob and raw_dob.lower() not in ['nan', 'none', 'nat', '']:
+                        try:
+                            if re.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$", raw_dob):
+                                parts = re.split(r"[-/]", raw_dob)
+                                fmt_dob = f"{int(parts[2]):02d}.{int(parts[1]):02d}.{parts[0]}"
+                            else:
+                                dt = pd.to_datetime(raw_dob, dayfirst=True)
+                                fmt_dob = dt.strftime('%d.%m.%Y')
+                        except:
+                            fmt_dob = raw_dob.replace('-', '.').replace('/', '.')
+                    return fmt_dob
+
+                print_ready['DOB'] = print_ready['DOB'].apply(format_grid_dob)
+
+                # ✨ NEW: Fetch Images just like the Shop Tracking tab
+                def get_valid_photo(row):
+                    thumb = str(row.get('Thumb_URL', '')).strip()
+                    photo = str(row.get('Photo_URL', '')).strip()
+                    if thumb and thumb.lower() not in ['nan', 'none']: return thumb
+                    if photo and photo.lower() not in ['nan', 'none']: return photo
+                    return ""
+
+                print_ready['Image_Target'] = print_ready.apply(get_valid_photo, axis=1)
+
+                with st.spinner("Loading stamp size photos for visual verification..."):
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe:
+                        print_ready['Photo'] = list(exe.map(get_secure_photo_b64, print_ready['Image_Target'].tolist()))
+
                 st.write(f"Showing **{len(print_ready)}** students ready for printing.")
                 
-                # Take unique classes in their natural order of appearance, NOT sorted alphabetically.
+                # Color Setup
                 unique_groups = (print_ready['Class'].astype(str) + "_" + print_ready['Section'].astype(str)).unique().tolist()
                 color_map = {grp: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, grp in enumerate(unique_groups)}
 
@@ -508,15 +542,17 @@ with tabs[0]:
                     bg = color_map.get(grp, '#ffffff')
                     return [f'background-color: {bg}' for _ in row]
 
-                show_cols_gen = ['Select', 'Roll', 'Name', 'Class', 'Section', 'Generated']
+                # ✨ NEW: Display exactly the columns you requested (Roll is removed)
+                show_cols_gen = ['Select', 'Photo', 'Name', 'Father', 'Mother', 'Class', 'Section', 'DOB', 'Mobile', 'Generated']
                 styled_gen_df = print_ready[show_cols_gen].style.apply(gen_row_style, axis=1)
                 
                 edited_df = st.data_editor(
                     styled_gen_df,
                     hide_index=True, use_container_width=True, key="gen_editor",
-                    disabled=['Roll', 'Name', 'Class', 'Section', 'Generated'],
+                    disabled=['Photo', 'Name', 'Father', 'Mother', 'Class', 'Section', 'DOB', 'Mobile', 'Generated'],
                     column_config={
-                        "Select": st.column_config.CheckboxColumn("Select", default=False)
+                        "Select": st.column_config.CheckboxColumn("Select", default=False),
+                        "Photo": st.column_config.ImageColumn("Stamp Size Photo", width="medium")
                     }
                 )
                 

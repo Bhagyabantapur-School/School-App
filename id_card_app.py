@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 # --- BACK BUTTON ---
 if st.button("⬅️ Back to BPS Home", type="secondary"):
     st.switch_page("bps_dashboard.py")
@@ -11,7 +10,7 @@ import os
 import math
 from fpdf import FPDF
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import base64
 import concurrent.futures
 import time
@@ -62,6 +61,12 @@ def init_gsheets():
 sh = init_gsheets()
 
 # --- 3. HELPER FUNCTIONS ---
+
+# ✨ FIX: Global time function to lock the app to IST (UTC +5:30)
+def get_ist_now():
+    utc_now = datetime.now(timezone.utc)
+    return utc_now + timedelta(hours=5, minutes=30)
+
 def play_beep():
     """Plays a quick beep sound using the browser's AudioContext"""
     beep_html = """
@@ -188,7 +193,8 @@ def batch_log_action(sheet_name, df, action):
         log_ws.append_row(["Date", "Class", "Roll", "Name", "Action"])
     
     rows = []
-    now_str = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+    # ✨ FIX: Using get_ist_now() instead of datetime.now()
+    now_str = get_ist_now().strftime("%d-%m-%Y %H:%M:%S")
     for _, r in df.iterrows():
         name_val = str(r.get('Name', r.get('Name_x', 'Unknown')))
         rows.append([now_str, str(r.get('Class', '')), str(r.get('Roll', '')), name_val, action])
@@ -347,7 +353,8 @@ def generate_pending_photos_pdf(df_pending):
     pdf.cell(0, 10, "Bhagyabantapur Primary School", ln=True, align='C')
     
     pdf.set_font("Arial", 'B', 12)
-    current_date = datetime.now().strftime("%d-%m-%Y")
+    # ✨ FIX: Using get_ist_now() instead of datetime.now()
+    current_date = get_ist_now().strftime("%d-%m-%Y")
     pdf.cell(0, 8, f"Pending Photos for Present Students - {current_date}", ln=True, align='C')
     
     pdf.set_font("Arial", 'I', 10)
@@ -413,7 +420,8 @@ with tabs[0]:
         st.download_button(
             label="📥 Download ID Cards (PDF)", 
             data=st.session_state['generated_pdf_data'], 
-            file_name=f"BPS_ID_Cards_{datetime.now().strftime('%Y%m%d')}.pdf", 
+            # ✨ FIX: Using get_ist_now() instead of datetime.now()
+            file_name=f"BPS_ID_Cards_{get_ist_now().strftime('%Y%m%d')}.pdf", 
             mime="application/pdf"
         )
         st.divider()
@@ -523,12 +531,10 @@ with tabs[1]:
     
     qr_code = qrcode_scanner(key='distribution_scanner')
     
-    # ✨ FIX: Only process if the qr_code physically changed from the last successful scan
     if qr_code and qr_code != st.session_state.get('last_scanned_dist'):
         scanned_code = str(qr_code).strip().upper()
         m_df = fetch_sheet_data("students_master")
         
-        # Exact Match using only the new BPS Code
         s_match = m_df[m_df['BPS Code'].astype(str).str.strip().str.upper() == scanned_code]
         
         if not s_match.empty:
@@ -544,7 +550,7 @@ with tabs[1]:
             
             if not existing.empty:
                 st.warning(f"⚠️ {student_name} is already in your distribution scan list!")
-                st.session_state['last_scanned_dist'] = qr_code # Log to stop continuous warnings
+                st.session_state['last_scanned_dist'] = qr_code
             else:
                 new_entry = pd.DataFrame([{
                     'Name': student_name, 'Roll': student_roll, 
@@ -552,7 +558,7 @@ with tabs[1]:
                 }])
                 st.session_state['distribution_log'] = pd.concat([st.session_state['distribution_log'], new_entry], ignore_index=True)
                 st.session_state['last_scanned_dist'] = qr_code
-                play_beep() # ✨ Audio Confirmation Triggered!
+                play_beep() 
                 st.success(f"✅ **{student_name}** successfully scanned for distribution!")
         else:
             st.error("Invalid QR Code or BPS Code not found in database. Please scan a valid BPS ID Card.")
@@ -734,7 +740,8 @@ with tabs[3]:
     st.subheader("📋 Students Present Today Missing Photos")
     st.write("Generates a PDF list of students who are in school today but haven't had their photos taken yet.")
     
-    today_str = datetime.now().strftime("%d-%m-%Y")
+    # ✨ FIX: Using get_ist_now() instead of datetime.now()
+    today_str = get_ist_now().strftime("%d-%m-%Y")
     df_mdm = fetch_sheet_data("mdm_log")
     
     if not df_mdm.empty:
@@ -770,7 +777,8 @@ with tabs[3]:
                     st.download_button(
                         label="📥 Download Pending List (PDF)", 
                         data=st.session_state['pending_pdf_data'], 
-                        file_name=f"BPS_Pending_Photos_{datetime.now().strftime('%Y%m%d')}.pdf", 
+                        # ✨ FIX: Using get_ist_now() instead of datetime.now()
+                        file_name=f"BPS_Pending_Photos_{get_ist_now().strftime('%Y%m%d')}.pdf", 
                         mime="application/pdf"
                     )
             else:

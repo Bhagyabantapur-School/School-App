@@ -1,4 +1,6 @@
 import streamlit as st
+import streamlit.components.v1 as components
+
 # --- BACK BUTTON ---
 if st.button("⬅️ Back to BPS Home", type="secondary"):
     st.switch_page("bps_dashboard.py")
@@ -62,7 +64,6 @@ sh = init_gsheets()
 
 # --- 3. HELPER FUNCTIONS ---
 
-# ✨ FIX: Global time function to lock the app to IST (UTC +5:30)
 def get_ist_now():
     utc_now = datetime.now(timezone.utc)
     return utc_now + timedelta(hours=5, minutes=30)
@@ -193,7 +194,6 @@ def batch_log_action(sheet_name, df, action):
         log_ws.append_row(["Date", "Class", "Roll", "Name", "Action"])
     
     rows = []
-    # ✨ FIX: Using get_ist_now() instead of datetime.now()
     now_str = get_ist_now().strftime("%d-%m-%Y %H:%M:%S")
     for _, r in df.iterrows():
         name_val = str(r.get('Name', r.get('Name_x', 'Unknown')))
@@ -353,7 +353,6 @@ def generate_pending_photos_pdf(df_pending):
     pdf.cell(0, 10, "Bhagyabantapur Primary School", ln=True, align='C')
     
     pdf.set_font("Arial", 'B', 12)
-    # ✨ FIX: Using get_ist_now() instead of datetime.now()
     current_date = get_ist_now().strftime("%d-%m-%Y")
     pdf.cell(0, 8, f"Pending Photos for Present Students - {current_date}", ln=True, align='C')
     
@@ -420,7 +419,6 @@ with tabs[0]:
         st.download_button(
             label="📥 Download ID Cards (PDF)", 
             data=st.session_state['generated_pdf_data'], 
-            # ✨ FIX: Using get_ist_now() instead of datetime.now()
             file_name=f"BPS_ID_Cards_{get_ist_now().strftime('%Y%m%d')}.pdf", 
             mime="application/pdf"
         )
@@ -740,7 +738,6 @@ with tabs[3]:
     st.subheader("📋 Students Present Today Missing Photos")
     st.write("Generates a PDF list of students who are in school today but haven't had their photos taken yet.")
     
-    # ✨ FIX: Using get_ist_now() instead of datetime.now()
     today_str = get_ist_now().strftime("%d-%m-%Y")
     df_mdm = fetch_sheet_data("mdm_log")
     
@@ -777,7 +774,6 @@ with tabs[3]:
                     st.download_button(
                         label="📥 Download Pending List (PDF)", 
                         data=st.session_state['pending_pdf_data'], 
-                        # ✨ FIX: Using get_ist_now() instead of datetime.now()
                         file_name=f"BPS_Pending_Photos_{get_ist_now().strftime('%Y%m%d')}.pdf", 
                         mime="application/pdf"
                     )

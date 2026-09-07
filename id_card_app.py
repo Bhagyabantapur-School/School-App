@@ -168,7 +168,7 @@ def clear_sheet_cache():
 
 def clear_grid_states():
     for k in list(st.session_state.keys()):
-        if k == "gen_editor" or k == "db_explorer_grid" or k.startswith("shop_grid_"):
+        if k == "gen_editor" or k == "db_explorer_grid" or k.startswith("shop_grid_") or k == "distributed_grid":
             del st.session_state[k]
 
 def append_sheet_df(sheet_name, df):
@@ -416,7 +416,8 @@ with col_refresh:
 
 st.divider()
 
-tabs = st.tabs(["🖨️ ID Generator", "📸 Scanner", "📂 Database Explorer", "📋 Pending Photos Today", "✂️ Shop Tracking"])
+# ✨ NEW: Added the 6th Tab for Distributed Cards
+tabs = st.tabs(["🖨️ ID Generator", "📸 Scanner", "📂 Database Explorer", "📋 Pending Photos Today", "✂️ Shop Tracking", "✅ Distributed Cards"])
 
 # ==========================================
 # TAB 1: ID GENERATOR
@@ -446,7 +447,6 @@ with tabs[0]:
         df_master['Roll'] = df_master['Roll'].astype(str)
         df_log['Roll'] = df_log['Roll'].astype(str)
         
-        # ✨ FIX: Left Join allows us to catch students missing from the Form Log entirely!
         merged = pd.merge(df_master, df_log, on=['Class', 'Section', 'Roll'], how='left', indicator=True, suffixes=('', '_log'))
         
         if not df_id_log.empty:
@@ -459,7 +459,6 @@ with tabs[0]:
         merged['Key'] = merged['Class'].astype(str) + "_" + merged['Roll'].astype(str) + "_" + merged[name_col].astype(str).str.strip().str.upper()
         merged['Generated'] = merged['Key'].isin(gen_keys)
         
-        # ✨ NEW: ID Generator Control Panel with 4 Toggles
         st.markdown("##### 🎛️ Generator Filters")
         col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns([1.3, 1.3, 1.3, 1.3, 1.2])
         with col_f1:
@@ -478,7 +477,6 @@ with tabs[0]:
                 st.success("Success! List reset.")
                 st.rerun()
 
-        # Custom Filter Logic based on the checkboxes above
         def is_ready_to_print(row):
             has_photo = pd.notna(row.get('Photo_URL')) and str(row.get('Photo_URL')).strip() != ""
             
@@ -1004,3 +1002,82 @@ with tabs[4]:
             st.success("No students found in this stage. Check the other dropdown options.")
     else:
         st.info("No ID card log data available. Generate IDs first.")
+
+# ==========================================
+# TAB 6: DISTRIBUTED CARDS
+# ==========================================
+with tabs[5]:
+    st.subheader("✅ Distributed ID Cards")
+    st.write("View the complete profile of all students whose ID cards have been successfully distributed.")
+
+    df_m_dist = fetch_sheet_data("students_master")
+    df_id_log_dist = fetch_sheet_data("id_card_log")
+
+    if not df_m_dist.empty and not df_id_log_dist.empty:
+        name_col = 'Name_x' if 'Name_x' in df_m_dist.columns else 'Name'
+        df_m_dist['Key'] = df_m_dist['Class'].astype(str) + "_" + df_m_dist['Roll'].astype(str) + "_" + df_m_dist[name_col].astype(str).str.strip().str.upper()
+        df_id_log_dist['Key'] = df_id_log_dist['Class'].astype(str) + "_" + df_id_log_dist['Roll'].astype(str) + "_" + df_id_log_dist['Name'].astype(str).str.strip().str.upper()
+
+        latest_log_dist = df_id_log_dist.drop_duplicates(subset=['Key'], keep='last')
+        dist_track_df = pd.merge(df_m_dist, latest_log_dist[['Key', 'Action']], on='Key', how='left')
+
+        filtered_dist_df = dist_track_df[dist_track_df['Action'] == 'Distributed'].copy()
+
+        if not filtered_dist_df.empty:
+            st.write(f"Showing **{len(filtered_dist_df)}** distributed ID cards.")
+
+            if 'Section' not in filtered_dist_df.columns:
+                filtered_dist_df['Section'] = 'A'
+            filtered_dist_df['Section'] = filtered_dist_df['Section'].fillna('A').astype(str)
+
+            for c in ['Father', 'Mother', 'DOB', 'Mobile', 'BPS Code']:
+                if c not in filtered_dist_df.columns:
+                    filtered_dist_df[c] = ""
+
+            def format_dist_dob(raw_dob):
+                raw_dob = str(raw_dob).strip().split(" ")[0]
+                fmt_dob = raw_dob
+                if raw_dob and raw_dob.lower() not in ['nan', 'none', 'nat', '']:
+                    try:
+                        if re.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$", raw_dob):
+                            parts = re.split(r"[-/]", raw_dob)
+                            fmt_dob = f"{int(parts[2]):02d}.{int(parts[1]):02d}.{parts[0]}"
+                        else:
+                            dt = pd.to_datetime(raw_dob, dayfirst=True)
+                            fmt_dob = dt.strftime('%d.%m.%Y')
+                    except:
+                        fmt_dob = raw_dob.replace('-', '.').replace('/', '.')
+                return fmt_dob
+
+            filtered_dist_df['DOB'] = filtered_dist_df['DOB'].apply(format_dist_dob)
+
+            def get_valid_photo(row):
+                thumb = str(row.get('Thumb_URL', '')).strip()
+                photo = str(row.get('Photo_URL', '')).strip()
+                if thumb and thumb.lower() not in ['nan', 'none']: return thumb
+                if photo and photo.lower() not in ['nan', 'none']: return photo
+                return ""
+
+            filtered_dist_df['Image_Target'] = filtered_dist_df.apply(get_valid_photo, axis=1)
+            filtered_dist_df = filtered_dist_df.reset_index(drop=True)
+
+            with st.spinner("Loading student photos..."):
+                with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe:
+                    filtered_dist_df['Photo'] = list(exe.map(get_secure_photo_b64, filtered_dist_df['Image_Target'].tolist()))
+
+            show_cols_dist = ['Photo', 'Name', 'Father', 'Mother', 'Class', 'Section', 'DOB', 'Mobile', 'BPS Code']
+
+            st.data_editor(
+                filtered_dist_df[show_cols_dist],
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Photo": st.column_config.ImageColumn("Stamp Size Photo", width="medium")
+                },
+                disabled=True,
+                key="distributed_grid"
+            )
+        else:
+            st.success("No cards have been distributed yet. Scan them in the Scanner tab!")
+    else:
+        st.info("No ID card log data available.")

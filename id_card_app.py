@@ -133,6 +133,12 @@ def clear_sheet_cache():
     fetch_sheet_data.clear()
     fetch_class_photo_status.clear()
 
+# ✨ FIX: Function to wipe ghost checkboxes from Streamlit memory!
+def clear_grid_states():
+    for k in list(st.session_state.keys()):
+        if k == "gen_editor" or k == "db_explorer_grid" or k.startswith("shop_grid_"):
+            del st.session_state[k]
+
 def append_sheet_df(sheet_name, df):
     if df.empty: return
     try: 
@@ -416,7 +422,6 @@ with tabs[0]:
 
         if not print_ready_all.empty:
             
-            # --- Toggles and Buttons for View/Reset ---
             col_t1, col_t2 = st.columns([3, 1])
             with col_t1:
                 hide_generated = st.checkbox("Hide students who already have generated IDs", value=True)
@@ -424,6 +429,7 @@ with tabs[0]:
                 if st.button("⚠️ Reset All 'Generated' Statuses", use_container_width=True):
                     with st.spinner("Resetting database..."):
                         reset_generated_status()
+                    clear_grid_states() # ✨ Wiper applied
                     st.success("Success! List reset.")
                     st.rerun()
             
@@ -433,6 +439,7 @@ with tabs[0]:
                 print_ready = print_ready_all.copy()
 
             if not print_ready.empty:
+                print_ready = print_ready.reset_index(drop=True)
                 print_ready.insert(0, "Select", False)
                 
                 st.write(f"Showing **{len(print_ready)}** students ready for printing.")
@@ -473,6 +480,7 @@ with tabs[0]:
                         batch_log_action("id_card_log", selected_students, "Generated")
                             
                         st.session_state['generated_pdf_data'] = pdf_bytes
+                        clear_grid_states() # ✨ Wiper applied
                         st.balloons()
                         st.rerun()
                         
@@ -503,7 +511,6 @@ with tabs[1]:
             student_section = str(s_match.iloc[0].get('Section', 'A')).strip()
             student_roll = str(s_match.iloc[0]['Roll']).strip()
 
-            # Check if already scanned today
             existing = st.session_state['attendance_log'][
                 (st.session_state['attendance_log']['Name'] == student_name) & 
                 (st.session_state['attendance_log']['Class'] == student_class) &
@@ -566,7 +573,6 @@ with tabs[2]:
         
         photo_keys, gen_keys, dist_keys = [], [], []
         
-        # --- Handle Checked vs Unchecked Logic ---
         if not df_photo.empty:
             df_photo['Key'] = df_photo['Class'].astype(str) + "_" + df_photo['Roll'].astype(str)
             latest_photo = df_photo.drop_duplicates(subset=['Key'], keep='last')
@@ -584,7 +590,6 @@ with tabs[2]:
         class_photo_keys = fetch_class_photo_status()
         photo_keys = list(set(photo_keys + class_photo_keys))
 
-        # Boolean Checkboxes for URLs
         explorer_db['Photo_URL'] = explorer_db['Photo_URL'].apply(lambda x: True if pd.notna(x) and str(x).strip() != "" else False)
         if 'Thumb_URL' in explorer_db.columns:
             explorer_db['Thumb_URL'] = explorer_db['Thumb_URL'].apply(lambda x: True if pd.notna(x) and str(x).strip() != "" else False)
@@ -621,20 +626,18 @@ with tabs[2]:
 
         st.write("---")
         
-        # 1. Counts Placeholder
         metrics_container = st.container()
 
-        # 2. Style rows based on class for alternation
         def row_style(row):
             classes = filtered_view['Class'].unique()
             color_map = {c: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, c in enumerate(classes)}
             bg = color_map.get(row['Class'], '#ffffff')
             return [f'background-color: {bg}' for _ in row]
 
+        filtered_view = filtered_view.reset_index(drop=True)
         cols_to_show = ['Photo Taken', 'Photo_URL', 'Thumb_URL', 'Name', 'Class', 'Roll', 'Form_OK', 'Verified', 'Generated', 'Distributed']
         styled_df = filtered_view[cols_to_show + ['Already_Photo', 'Already_Dist']].style.apply(row_style, axis=1)
 
-        # Draw Editor
         final_ed = st.data_editor(
             styled_df,
             column_order=cols_to_show, 
@@ -653,7 +656,6 @@ with tabs[2]:
             key="db_explorer_grid"
         )
 
-        # 3. Populate live counts
         with metrics_container:
             st.markdown("##### 📊 Live Column Counts")
             
@@ -671,12 +673,8 @@ with tabs[2]:
             st.write("") 
 
         if st.button("💾 Sync Manual Updates to Cloud"):
-            
-            # Identify checks added
             new_photos = final_ed[(final_ed['Photo Taken'] == True) & (final_ed['Already_Photo'] == False)]
             new_dist = final_ed[(final_ed['Distributed'] == True) & (final_ed['Already_Dist'] == False)]
-            
-            # Identify checks removed
             removed_photos = final_ed[(final_ed['Photo Taken'] == False) & (final_ed['Already_Photo'] == True)]
             removed_dist = final_ed[(final_ed['Distributed'] == False) & (final_ed['Already_Dist'] == True)]
             
@@ -688,7 +686,6 @@ with tabs[2]:
                 if not removed_photos.empty:
                     batch_log_action("photo_log", removed_photos, "Untaken")
                     updated = True
-                    
                 if not new_dist.empty:
                     batch_log_action("id_card_log", new_dist, "Distributed")
                     updated = True
@@ -700,6 +697,7 @@ with tabs[2]:
                 st.success("✅ Successfully synced updates to Cloud!")
                 if not removed_photos.empty:
                     st.warning("⚠️ **Note:** If a 'Photo Taken' checkmark instantly reappears, it means that student is still marked directly inside their specific Class Google Sheet (e.g., 'CLASS 1 - PHOTOS'). You must delete the checkmark directly in that sheet to remove it permanently.")
+                clear_grid_states() # ✨ Wiper applied
                 st.rerun()
             else:
                 st.info("No changes were detected to sync.")
@@ -715,14 +713,12 @@ with tabs[3]:
     df_mdm = fetch_sheet_data("mdm_log")
     
     if not df_mdm.empty:
-        # Filter MDM Log for today
         df_mdm['Date'] = df_mdm['Date'].astype(str)
         today_present = df_mdm[df_mdm['Date'] == today_str].copy()
         
         if not today_present.empty:
             today_present['Key'] = today_present['Class'].astype(str) + "_" + today_present['Roll'].astype(str)
             
-            # Fetch all taken photos keys
             df_photo_local = fetch_sheet_data("photo_log")
             photo_keys_local = []
             if not df_photo_local.empty:
@@ -733,11 +729,9 @@ with tabs[3]:
             auto_keys_local = fetch_class_photo_status()
             all_taken_keys = list(set(photo_keys_local + auto_keys_local))
             
-            # Filter out students whose photos are already taken
             pending_students = today_present[~today_present['Key'].isin(all_taken_keys)].copy()
             
             if not pending_students.empty:
-                # Clean up display columns
                 display_cols = ['Class', 'Section', 'Roll', 'Name', 'Time']
                 st.dataframe(pending_students[display_cols], hide_index=True, use_container_width=True)
                 
@@ -775,10 +769,7 @@ with tabs[4]:
         df_m_shop['Key'] = df_m_shop['Class'].astype(str) + "_" + df_m_shop['Roll'].astype(str)
         df_id_log_shop['Key'] = df_id_log_shop['Class'].astype(str) + "_" + df_id_log_shop['Roll'].astype(str)
         
-        # We want the LATEST action for each student to know exactly where they are in the pipeline
         latest_log = df_id_log_shop.drop_duplicates(subset=['Key'], keep='last')
-        
-        # Merge Master Data with Latest Action
         track_df = pd.merge(df_m_shop, latest_log[['Key', 'Action']], on='Key', how='left')
         track_df['Action'] = track_df['Action'].fillna('None')
         
@@ -790,18 +781,14 @@ with tabs[4]:
             return ""
             
         track_df['Image_Target'] = track_df.apply(get_valid_photo, axis=1)
-        
-        # This completely removes any student without a photo link from the shop pipeline
         track_df = track_df[track_df['Image_Target'] != ""]
         
-        # Dropdown to filter which phase of the shop pipeline you want to look at
         view_filter = st.selectbox("Select Pipeline Stage:", [
             "1. Ready to Send to Shop (Cards Generated)",
             "2. Currently At Shop (Pending Return)",
             "3. Received from Shop (Ready to Distribute)"
         ])
         
-        # ✨ FIX: Added undo variables to handle mistakes!
         if "1." in view_filter:
             filtered_df = track_df[track_df['Action'] == 'Generated'].copy()
             target_action = "Sent to Shop"
@@ -823,7 +810,8 @@ with tabs[4]:
         if not filtered_df.empty:
             st.write(f"Showing **{len(filtered_df)}** valid students in this stage.")
                 
-            # Load images as Base64 strings quickly using concurrent threading
+            filtered_df = filtered_df.reset_index(drop=True)
+                
             with st.spinner("Loading stamp size photos..."):
                 with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe:
                     filtered_df['Photo'] = list(exe.map(get_secure_photo_b64, filtered_df['Image_Target'].tolist()))
@@ -832,12 +820,10 @@ with tabs[4]:
             
             show_cols = ['Select', 'Photo', 'Name', 'Class', 'Roll', 'BPS Code']
             
-            # Ensure columns exist to prevent errors
             for c in show_cols:
                 if c not in filtered_df.columns:
                     filtered_df[c] = ""
                     
-            # Render interactive table with Image Column
             ed_df = st.data_editor(
                 filtered_df[show_cols],
                 hide_index=True,
@@ -847,34 +833,34 @@ with tabs[4]:
                     "Photo": st.column_config.ImageColumn("Stamp Size Photo", width="medium")
                 },
                 disabled=['Photo', 'Name', 'Class', 'Roll', 'BPS Code'],
-                key=f"shop_grid_{view_filter[:2]}" # Dynamic key to force re-render when switching views
+                key=f"shop_grid_{view_filter[:2]}" 
             )
             
-            # Safer selection logic
             selected_indices = ed_df[ed_df['Select'] == True].index
             selected = filtered_df.loc[selected_indices]
             
-            # Update Button Logic with the new Undo options
             if not selected.empty:
                 st.info(f"🎯 **You have selected {len(selected)} student(s).**") 
                 
-                # Split into two columns if an undo action is available
                 if undo_action:
                     c1, c2 = st.columns(2)
                     with c1:
                         if st.button(btn_text, type="primary", use_container_width=True):
                             batch_log_action("id_card_log", selected, target_action)
                             st.success(f"✅ Successfully logged {len(selected)} students as '{target_action}'!")
+                            clear_grid_states() # ✨ Wiper applied
                             st.rerun()
                     with c2:
                         if st.button(undo_text, type="secondary", use_container_width=True):
                             batch_log_action("id_card_log", selected, undo_action)
                             st.warning(f"⏪ Successfully reverted {len(selected)} students back to '{undo_action}'.")
+                            clear_grid_states() # ✨ Wiper applied
                             st.rerun()
                 else:
                     if st.button(btn_text, type="primary"):
                         batch_log_action("id_card_log", selected, target_action)
                         st.success(f"✅ Successfully logged {len(selected)} students as '{target_action}'!")
+                        clear_grid_states() # ✨ Wiper applied
                         st.rerun()
         else:
             st.success("No students found in this stage. Check the other dropdown options.")

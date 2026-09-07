@@ -457,143 +457,148 @@ with tabs[0]:
         merged['Key'] = merged['Class'].astype(str) + "_" + merged['Roll'].astype(str) + "_" + merged[name_col].astype(str).str.strip().str.upper()
         merged['Generated'] = merged['Key'].isin(gen_keys)
         
+        # ✨ NEW: ID Generator Control Panel
+        st.markdown("##### 🎛️ Generator Filters")
+        col_f1, col_f2, col_f3, col_f4 = st.columns([1.5, 1.5, 1.5, 1.2])
+        with col_f1:
+            hide_generated = st.checkbox("Hide Already Generated", value=True)
+        with col_f2:
+            require_photo = st.checkbox("Require Uploaded Photo", value=True)
+        with col_f3:
+            require_form = st.checkbox("Require 'Complete' Form", value=True)
+        with col_f4:
+            if st.button("⚠️ Reset All Generated", use_container_width=True, help="Moves all students back to the starting queue."):
+                with st.spinner("Resetting database..."):
+                    reset_generated_status()
+                clear_grid_states()
+                st.success("Success! List reset.")
+                st.rerun()
+
+        # Custom Filter Logic based on the checkboxes above
         def is_ready_to_print(row):
             has_photo = pd.notna(row.get('Photo_URL')) and str(row.get('Photo_URL')).strip() != ""
+            
             is_returned = str(row.get('Return Status', '')).strip() == 'Complete'
             has_corr = any([str(row.get(f'Old {f}', '')).strip() not in ['','nan','None'] for f in ['Student Name', 'Father Name', 'Mobile Number']])
             is_verified = str(row.get('Data Corrected', '')).strip() == 'Yes'
-            return has_photo and is_returned and (is_verified if has_corr else True)
+            form_ok = is_returned and (is_verified if has_corr else True)
+            
+            if require_photo and not has_photo:
+                return False
+            if require_form and not form_ok:
+                return False
+            return True
 
         merged['Ready'] = merged.apply(is_ready_to_print, axis=1)
-        print_ready_all = merged[merged['Ready'] == True].copy()
-
-        if not print_ready_all.empty:
-            
-            col_t1, col_t2 = st.columns([3, 1])
-            with col_t1:
-                hide_generated = st.checkbox("Hide students who already have generated IDs", value=True)
-            with col_t2:
-                if st.button("⚠️ Reset All 'Generated' Statuses", use_container_width=True):
-                    with st.spinner("Resetting database..."):
-                        reset_generated_status()
-                    clear_grid_states()
-                    st.success("Success! List reset.")
-                    st.rerun()
-            
-            if hide_generated:
-                print_ready = print_ready_all[print_ready_all['Generated'] == False].copy()
-            else:
-                print_ready = print_ready_all.copy()
-
-            if not print_ready.empty:
-                print_ready = print_ready.reset_index(drop=True)
-                print_ready.insert(0, "Select", False)
-                
-                # ✨ NEW: Fill Missing Section
-                if 'Section' not in print_ready.columns:
-                    print_ready['Section'] = 'A'
-                print_ready['Section'] = print_ready['Section'].fillna('A').astype(str)
-                
-                # ✨ NEW: Ensure all requested columns exist to prevent errors
-                for c in ['Father', 'Mother', 'DOB', 'Mobile']:
-                    if c not in print_ready.columns:
-                        print_ready[c] = ""
-                
-                # ✨ NEW: Format DOB perfectly for the Table View
-                def format_grid_dob(raw_dob):
-                    raw_dob = str(raw_dob).strip().split(" ")[0]
-                    fmt_dob = raw_dob
-                    if raw_dob and raw_dob.lower() not in ['nan', 'none', 'nat', '']:
-                        try:
-                            if re.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$", raw_dob):
-                                parts = re.split(r"[-/]", raw_dob)
-                                fmt_dob = f"{int(parts[2]):02d}.{int(parts[1]):02d}.{parts[0]}"
-                            else:
-                                dt = pd.to_datetime(raw_dob, dayfirst=True)
-                                fmt_dob = dt.strftime('%d.%m.%Y')
-                        except:
-                            fmt_dob = raw_dob.replace('-', '.').replace('/', '.')
-                    return fmt_dob
-
-                print_ready['DOB'] = print_ready['DOB'].apply(format_grid_dob)
-
-                # ✨ NEW: Fetch Images just like the Shop Tracking tab
-                def get_valid_photo(row):
-                    thumb = str(row.get('Thumb_URL', '')).strip()
-                    photo = str(row.get('Photo_URL', '')).strip()
-                    if thumb and thumb.lower() not in ['nan', 'none']: return thumb
-                    if photo and photo.lower() not in ['nan', 'none']: return photo
-                    return ""
-
-                print_ready['Image_Target'] = print_ready.apply(get_valid_photo, axis=1)
-
-                with st.spinner("Loading stamp size photos for visual verification..."):
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe:
-                        print_ready['Photo'] = list(exe.map(get_secure_photo_b64, print_ready['Image_Target'].tolist()))
-
-                st.write(f"Showing **{len(print_ready)}** students ready for printing.")
-                
-                # Color Setup
-                unique_groups = (print_ready['Class'].astype(str) + "_" + print_ready['Section'].astype(str)).unique().tolist()
-                color_map = {grp: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, grp in enumerate(unique_groups)}
-
-                def gen_row_style(row):
-                    grp = str(row['Class']) + "_" + str(row['Section'])
-                    bg = color_map.get(grp, '#ffffff')
-                    return [f'background-color: {bg}' for _ in row]
-
-                # ✨ NEW: Display exactly the columns you requested (Roll is removed)
-                show_cols_gen = ['Select', 'Photo', 'Name', 'Father', 'Mother', 'Class', 'Section', 'DOB', 'Mobile', 'Generated']
-                styled_gen_df = print_ready[show_cols_gen].style.apply(gen_row_style, axis=1)
-                
-                edited_df = st.data_editor(
-                    styled_gen_df,
-                    hide_index=True, use_container_width=True, key="gen_editor",
-                    disabled=['Photo', 'Name', 'Father', 'Mother', 'Class', 'Section', 'DOB', 'Mobile', 'Generated'],
-                    column_config={
-                        "Select": st.column_config.CheckboxColumn("Select", default=False),
-                        "Photo": st.column_config.ImageColumn("Stamp Size Photo", width="medium")
-                    }
-                )
-                
-                selected_students = print_ready.loc[edited_df[edited_df["Select"] == True].index].copy()
-
-                if not selected_students.empty:
-                    num_students = len(selected_students)
-                    pages_needed = math.ceil(num_students / 10)
-                    
-                    st.divider()
-                    st.info(f"🖨️ **Print Summary:** You selected **{num_students}** students. Requires **{pages_needed}** A4 page(s).")
-                    
-                    if st.button("Generate Secure PDF", type="primary"):
-                        st.session_state['generated_pdf_data'] = None 
-                        photo_dict = {}
-                        my_bar = st.progress(0, text="Starting secure fetch...")
-                        
-                        for idx, (index, student) in enumerate(selected_students.iterrows()):
-                            sid = str(student.get('Sl', index)) + "_" + str(student.get('Roll', '0'))
-                            photo_url = str(student.get('Photo_URL', ''))
-                            
-                            drive_id = extract_drive_id(photo_url)
-                            if drive_id:
-                                img_bytes = fetch_secure_image_bytes(drive_id)
-                                if img_bytes:
-                                    photo_dict[sid] = img_bytes
-                                    
-                            my_bar.progress((idx + 1) / num_students * 0.5, text=f"Fetching photo {idx + 1} of {num_students}...")
-                        
-                        pdf_bytes = generate_pdf(selected_students.to_dict('records'), photo_dict, progress_bar=my_bar)
-                        batch_log_action("id_card_log", selected_students, "Generated")
-                            
-                        st.session_state['generated_pdf_data'] = pdf_bytes
-                        clear_grid_states()
-                        st.balloons()
-                        st.rerun()
-                        
-            else:
-                st.success("All ready students have already had their IDs generated! Uncheck the box above to reprint.")
+        
+        if hide_generated:
+            print_ready = merged[(merged['Ready'] == True) & (merged['Generated'] == False)].copy()
         else:
-            st.info("No students found with a linked Photo URL and a cleared form.")
+            print_ready = merged[merged['Ready'] == True].copy()
+
+        if not print_ready.empty:
+            print_ready = print_ready.reset_index(drop=True)
+            print_ready.insert(0, "Select", False)
+            
+            if 'Section' not in print_ready.columns:
+                print_ready['Section'] = 'A'
+            print_ready['Section'] = print_ready['Section'].fillna('A').astype(str)
+            
+            for c in ['Father', 'Mother', 'DOB', 'Mobile']:
+                if c not in print_ready.columns:
+                    print_ready[c] = ""
+            
+            def format_grid_dob(raw_dob):
+                raw_dob = str(raw_dob).strip().split(" ")[0]
+                fmt_dob = raw_dob
+                if raw_dob and raw_dob.lower() not in ['nan', 'none', 'nat', '']:
+                    try:
+                        if re.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$", raw_dob):
+                            parts = re.split(r"[-/]", raw_dob)
+                            fmt_dob = f"{int(parts[2]):02d}.{int(parts[1]):02d}.{parts[0]}"
+                        else:
+                            dt = pd.to_datetime(raw_dob, dayfirst=True)
+                            fmt_dob = dt.strftime('%d.%m.%Y')
+                    except:
+                        fmt_dob = raw_dob.replace('-', '.').replace('/', '.')
+                return fmt_dob
+
+            print_ready['DOB'] = print_ready['DOB'].apply(format_grid_dob)
+
+            def get_valid_photo(row):
+                thumb = str(row.get('Thumb_URL', '')).strip()
+                photo = str(row.get('Photo_URL', '')).strip()
+                if thumb and thumb.lower() not in ['nan', 'none']: return thumb
+                if photo and photo.lower() not in ['nan', 'none']: return photo
+                return ""
+
+            print_ready['Image_Target'] = print_ready.apply(get_valid_photo, axis=1)
+
+            with st.spinner("Loading stamp size photos for visual verification..."):
+                with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe:
+                    print_ready['Photo'] = list(exe.map(get_secure_photo_b64, print_ready['Image_Target'].tolist()))
+
+            st.write(f"Showing **{len(print_ready)}** students ready for printing.")
+            
+            unique_groups = (print_ready['Class'].astype(str) + "_" + print_ready['Section'].astype(str)).unique().tolist()
+            color_map = {grp: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, grp in enumerate(unique_groups)}
+
+            def gen_row_style(row):
+                grp = str(row['Class']) + "_" + str(row['Section'])
+                bg = color_map.get(grp, '#ffffff')
+                return [f'background-color: {bg}' for _ in row]
+
+            show_cols_gen = ['Select', 'Photo', 'Name', 'Father', 'Mother', 'Class', 'Section', 'DOB', 'Mobile', 'Generated']
+            styled_gen_df = print_ready[show_cols_gen].style.apply(gen_row_style, axis=1)
+            
+            edited_df = st.data_editor(
+                styled_gen_df,
+                hide_index=True, use_container_width=True, key="gen_editor",
+                disabled=['Photo', 'Name', 'Father', 'Mother', 'Class', 'Section', 'DOB', 'Mobile', 'Generated'],
+                column_config={
+                    "Select": st.column_config.CheckboxColumn("Select", default=False),
+                    "Photo": st.column_config.ImageColumn("Stamp Size Photo", width="medium")
+                }
+            )
+            
+            selected_students = print_ready.loc[edited_df[edited_df["Select"] == True].index].copy()
+
+            if not selected_students.empty:
+                num_students = len(selected_students)
+                pages_needed = math.ceil(num_students / 10)
+                
+                st.divider()
+                st.info(f"🖨️ **Print Summary:** You selected **{num_students}** students. Requires **{pages_needed}** A4 page(s).")
+                
+                if st.button("Generate Secure PDF", type="primary"):
+                    st.session_state['generated_pdf_data'] = None 
+                    photo_dict = {}
+                    my_bar = st.progress(0, text="Starting secure fetch...")
+                    
+                    for idx, (index, student) in enumerate(selected_students.iterrows()):
+                        sid = str(student.get('Sl', index)) + "_" + str(student.get('Roll', '0'))
+                        photo_url = str(student.get('Photo_URL', ''))
+                        
+                        drive_id = extract_drive_id(photo_url)
+                        if drive_id:
+                            img_bytes = fetch_secure_image_bytes(drive_id)
+                            if img_bytes:
+                                photo_dict[sid] = img_bytes
+                                
+                        my_bar.progress((idx + 1) / num_students * 0.5, text=f"Fetching photo {idx + 1} of {num_students}...")
+                    
+                    pdf_bytes = generate_pdf(selected_students.to_dict('records'), photo_dict, progress_bar=my_bar)
+                    batch_log_action("id_card_log", selected_students, "Generated")
+                        
+                    st.session_state['generated_pdf_data'] = pdf_bytes
+                    clear_grid_states()
+                    st.balloons()
+                    st.rerun()
+                    
+        else:
+            st.success("No students found in this stage. Check the filters above or scan new forms!")
+    else:
+        st.info("No students found in the main database.")
 
 # ==========================================
 # TAB 2: SCANNER (DISTRIBUTION ONLY)

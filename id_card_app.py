@@ -860,7 +860,6 @@ with tabs[3]:
             
             if not pending_students.empty:
                 
-                # ✨ NEW: Enrich with detailed demographic columns from the Master Database
                 df_m_tab4 = fetch_sheet_data("students_master")
                 if not df_m_tab4.empty:
                     name_col_p = 'Name_x' if 'Name_x' in pending_students.columns else 'Name'
@@ -886,7 +885,6 @@ with tabs[3]:
                     if c not in pending_students.columns:
                         pending_students[c] = ""
 
-                # Format DOB perfectly
                 def format_tab4_dob(raw_dob):
                     raw_dob = str(raw_dob).strip().split(" ")[0]
                     fmt_dob = raw_dob
@@ -904,7 +902,6 @@ with tabs[3]:
 
                 pending_students['DOB'] = pending_students['DOB'].apply(format_tab4_dob)
 
-                # ✨ NEW: Display logic perfectly matching Tab 1 (without the Roll column, applying Section colors)
                 display_cols = ['Name', 'Father', 'Mother', 'Class', 'Section', 'DOB', 'Mobile']
 
                 unique_groups_tab4 = (pending_students['Class'].astype(str) + "_" + pending_students['Section'].astype(str)).unique().tolist()
@@ -1074,12 +1071,21 @@ with tabs[5]:
         df_m_dist['Key'] = df_m_dist['Class'].astype(str) + "_" + df_m_dist['Roll'].astype(str) + "_" + df_m_dist[name_col].astype(str).str.strip().str.upper()
         df_id_log_dist['Key'] = df_id_log_dist['Class'].astype(str) + "_" + df_id_log_dist['Roll'].astype(str) + "_" + df_id_log_dist['Name'].astype(str).str.strip().str.upper()
 
+        # ✨ FIX: Keeping the 'Date' column from the log so we know EXACTLY when it was distributed
         latest_log_dist = df_id_log_dist.drop_duplicates(subset=['Key'], keep='last')
-        dist_track_df = pd.merge(df_m_dist, latest_log_dist[['Key', 'Action']], on='Key', how='left')
+        dist_track_df = pd.merge(df_m_dist, latest_log_dist[['Key', 'Action', 'Date']], on='Key', how='left')
 
         filtered_dist_df = dist_track_df[dist_track_df['Action'] == 'Distributed'].copy()
 
         if not filtered_dist_df.empty:
+            
+            # ✨ NEW: Sort chronologically so newest distributions appear at the very top
+            filtered_dist_df['Parsed_Date'] = pd.to_datetime(filtered_dist_df['Date'], dayfirst=True, errors='coerce')
+            filtered_dist_df = filtered_dist_df.sort_values(by='Parsed_Date', ascending=False).reset_index(drop=True)
+            
+            # ✨ NEW: Extract just the Date (DD-MM-YYYY) dropping the time for clean display and grouping
+            filtered_dist_df['Distributed Date'] = filtered_dist_df['Date'].apply(lambda x: str(x).split(' ')[0] if pd.notna(x) and str(x) != 'nan' else '')
+
             st.write(f"Showing **{len(filtered_dist_df)}** distributed ID cards.")
 
             if 'Section' not in filtered_dist_df.columns:
@@ -1115,16 +1121,26 @@ with tabs[5]:
                 return ""
 
             filtered_dist_df['Image_Target'] = filtered_dist_df.apply(get_valid_photo, axis=1)
-            filtered_dist_df = filtered_dist_df.reset_index(drop=True)
 
             with st.spinner("Loading student photos..."):
                 with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe:
                     filtered_dist_df['Photo'] = list(exe.map(get_secure_photo_b64, filtered_dist_df['Image_Target'].tolist()))
 
-            show_cols_dist = ['Photo', 'Name', 'Father', 'Mother', 'Class', 'Section', 'DOB', 'Mobile', 'BPS Code']
+            # ✨ NEW: Alternate Row Colors based purely on the unique Distribution Dates!
+            unique_dates_dist = filtered_dist_df['Distributed Date'].unique().tolist()
+            color_map_dist = {d: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, d in enumerate(unique_dates_dist)}
+
+            def dist_row_style(row):
+                bg = color_map_dist.get(row['Distributed Date'], '#ffffff')
+                return [f'background-color: {bg}' for _ in row]
+
+            # ✨ NEW: Adding 'Distributed Date' to the final visual columns
+            show_cols_dist = ['Photo', 'Name', 'Father', 'Mother', 'Class', 'Section', 'DOB', 'Mobile', 'BPS Code', 'Distributed Date']
+            
+            styled_dist_df = filtered_dist_df[show_cols_dist].style.apply(dist_row_style, axis=1)
 
             st.data_editor(
-                filtered_dist_df[show_cols_dist],
+                styled_dist_df,
                 hide_index=True,
                 use_container_width=True,
                 column_config={

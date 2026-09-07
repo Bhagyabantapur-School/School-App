@@ -445,7 +445,9 @@ with tabs[0]:
     if not df_master.empty and not df_log.empty:
         df_master['Roll'] = df_master['Roll'].astype(str)
         df_log['Roll'] = df_log['Roll'].astype(str)
-        merged = pd.merge(df_master, df_log, on=['Class', 'Section', 'Roll'], how='inner', suffixes=('', '_log'))
+        
+        # ✨ FIX: Left Join allows us to catch students missing from the Form Log entirely!
+        merged = pd.merge(df_master, df_log, on=['Class', 'Section', 'Roll'], how='left', indicator=True, suffixes=('', '_log'))
         
         if not df_id_log.empty:
             df_id_log['Key'] = df_id_log['Class'].astype(str) + "_" + df_id_log['Roll'].astype(str) + "_" + df_id_log['Name'].astype(str).str.strip().str.upper()
@@ -457,9 +459,9 @@ with tabs[0]:
         merged['Key'] = merged['Class'].astype(str) + "_" + merged['Roll'].astype(str) + "_" + merged[name_col].astype(str).str.strip().str.upper()
         merged['Generated'] = merged['Key'].isin(gen_keys)
         
-        # ✨ NEW: ID Generator Control Panel
+        # ✨ NEW: ID Generator Control Panel with 4 Toggles
         st.markdown("##### 🎛️ Generator Filters")
-        col_f1, col_f2, col_f3, col_f4 = st.columns([1.5, 1.5, 1.5, 1.2])
+        col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns([1.3, 1.3, 1.3, 1.3, 1.2])
         with col_f1:
             hide_generated = st.checkbox("Hide Already Generated", value=True)
         with col_f2:
@@ -467,6 +469,8 @@ with tabs[0]:
         with col_f3:
             require_form = st.checkbox("Require 'Complete' Form", value=True)
         with col_f4:
+            missing_form_only = st.checkbox("Missing Form Log Only", value=False)
+        with col_f5:
             if st.button("⚠️ Reset All Generated", use_container_width=True, help="Moves all students back to the starting queue."):
                 with st.spinner("Resetting database..."):
                     reset_generated_status()
@@ -483,6 +487,13 @@ with tabs[0]:
             is_verified = str(row.get('Data Corrected', '')).strip() == 'Yes'
             form_ok = is_returned and (is_verified if has_corr else True)
             
+            is_missing = (row['_merge'] == 'left_only')
+            
+            if missing_form_only:
+                if not is_missing: return False
+                if require_photo and not has_photo: return False
+                return True
+
             if require_photo and not has_photo:
                 return False
             if require_form and not form_ok:

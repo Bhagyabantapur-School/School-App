@@ -433,7 +433,6 @@ with tabs[0]:
         df_log['Roll'] = df_log['Roll'].astype(str)
         merged = pd.merge(df_master, df_log, on=['Class', 'Section', 'Roll'], how='inner', suffixes=('', '_log'))
         
-        # ✨ FIX: Included Name in the unique ID key to separate Sec A & Sec B duplicate rolls
         if not df_id_log.empty:
             df_id_log['Key'] = df_id_log['Class'].astype(str) + "_" + df_id_log['Roll'].astype(str) + "_" + df_id_log['Name'].astype(str).str.strip().str.upper()
             gen_keys = df_id_log[df_id_log['Action'] == 'Generated']['Key'].unique().tolist()
@@ -476,12 +475,30 @@ with tabs[0]:
                 print_ready = print_ready.reset_index(drop=True)
                 print_ready.insert(0, "Select", False)
                 
+                # ✨ NEW: Add the Section column and fill empty values with 'A'
+                if 'Section' not in print_ready.columns:
+                    print_ready['Section'] = 'A'
+                print_ready['Section'] = print_ready['Section'].fillna('A').astype(str)
+                
                 st.write(f"Showing **{len(print_ready)}** students ready for printing.")
                 
+                # ✨ NEW: Function to color rows alternatively based on Section
+                def gen_row_style(row):
+                    sections = sorted(print_ready['Section'].unique())
+                    color_map = {s: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, s in enumerate(sections)}
+                    bg = color_map.get(row['Section'], '#ffffff')
+                    return [f'background-color: {bg}' for _ in row]
+
+                show_cols_gen = ['Select', 'Roll', 'Name', 'Class', 'Section', 'Generated']
+                styled_gen_df = print_ready[show_cols_gen].style.apply(gen_row_style, axis=1)
+                
                 edited_df = st.data_editor(
-                    print_ready[['Select', 'Roll', 'Name', 'Class', 'Generated']],
+                    styled_gen_df,
                     hide_index=True, use_container_width=True, key="gen_editor",
-                    disabled=['Roll', 'Name', 'Class', 'Generated']
+                    disabled=['Roll', 'Name', 'Class', 'Section', 'Generated'],
+                    column_config={
+                        "Select": st.column_config.CheckboxColumn("Select", default=False)
+                    }
                 )
                 
                 selected_students = print_ready.loc[edited_df[edited_df["Select"] == True].index].copy()
@@ -602,7 +619,6 @@ with tabs[2]:
         
         explorer_db = pd.merge(df_m, df_l, on=['Class', 'Section', 'Roll'], how='left', suffixes=('', '_log'))
         
-        # ✨ FIX: Using strict Class + Roll + Name tracking
         name_col = 'Name_x' if 'Name_x' in explorer_db.columns else 'Name'
         explorer_db['Key'] = explorer_db['Class'].astype(str) + "_" + explorer_db['Roll'].astype(str) + "_" + explorer_db[name_col].astype(str).str.strip().str.upper()
         explorer_db['Photo_Key'] = explorer_db['Class'].astype(str) + "_" + explorer_db['Roll'].astype(str)
@@ -802,7 +818,6 @@ with tabs[4]:
     df_id_log_shop = fetch_sheet_data("id_card_log")
     
     if not df_m_shop.empty and not df_id_log_shop.empty:
-        # ✨ FIX: Using strict Class + Roll + Name tracking
         name_col = 'Name_x' if 'Name_x' in df_m_shop.columns else 'Name'
         df_m_shop['Key'] = df_m_shop['Class'].astype(str) + "_" + df_m_shop['Roll'].astype(str) + "_" + df_m_shop[name_col].astype(str).str.strip().str.upper()
         df_id_log_shop['Key'] = df_id_log_shop['Class'].astype(str) + "_" + df_id_log_shop['Roll'].astype(str) + "_" + df_id_log_shop['Name'].astype(str).str.strip().str.upper()

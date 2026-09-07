@@ -13,6 +13,7 @@ import tempfile
 from datetime import datetime
 import base64
 import concurrent.futures
+import time
 
 # --- IMPORTS FOR GOOGLE SHEETS & DRIVE API ---
 import gspread
@@ -148,7 +149,7 @@ def append_sheet_df(sheet_name, df):
     
     df = df.fillna("").astype(str)
     try:
-        ws.append_rows(df.values.tolist())
+        ws.append_rows(df.values.tolist(), table_range="A1")
         clear_sheet_cache()
     except Exception as e:
         st.error(f"⚠️ Cloud sync error: {e}")
@@ -168,7 +169,7 @@ def batch_log_action(sheet_name, df, action):
         rows.append([now_str, str(r.get('Class', '')), str(r.get('Roll', '')), name_val, action])
     
     if rows:
-        log_ws.append_rows(rows)
+        log_ws.append_rows(rows, table_range="A1")
         clear_sheet_cache()
 
 def reset_generated_status():
@@ -186,7 +187,7 @@ def reset_generated_status():
             ws.clear()
             ws.append_row(headers)
             if not df_kept.empty:
-                ws.append_rows(df_kept.astype(str).values.tolist())
+                ws.append_rows(df_kept.astype(str).values.tolist(), table_range="A1")
         clear_sheet_cache()
     except WorksheetNotFound:
         pass
@@ -489,7 +490,7 @@ with tabs[0]:
             st.info("No students found with a linked Photo URL and a cleared form.")
 
 # ==========================================
-# TAB 2: MDM SCANNER -> NOW ONLY ID CARD DISTRIBUTION
+# TAB 2: SCANNER (DISTRIBUTION ONLY)
 # ==========================================
 with tabs[1]:
     st.markdown('<h3 style="text-align:center; color:#28a745;">📸 Scan ID Card for Distribution</h3>', unsafe_allow_html=True)
@@ -538,6 +539,7 @@ with tabs[1]:
             st.success(f"✅ Successfully marked {len(st.session_state['distribution_log'])} cards as Distributed in the database!")
             st.session_state['distribution_log'] = pd.DataFrame(columns=['Name', 'Roll', 'Class', 'BPS Code'])
             clear_grid_states()
+            time.sleep(1.5)
             st.rerun()
             
         if st.button("🗑️ Clear Scan List"):

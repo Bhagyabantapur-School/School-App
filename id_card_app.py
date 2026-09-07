@@ -475,20 +475,23 @@ with tabs[0]:
                 print_ready = print_ready.reset_index(drop=True)
                 print_ready.insert(0, "Select", False)
                 
-                # ✨ NEW: Add the Section column and fill empty values with 'A'
+                # Fill missing sections with 'A'
                 if 'Section' not in print_ready.columns:
                     print_ready['Section'] = 'A'
                 print_ready['Section'] = print_ready['Section'].fillna('A').astype(str)
                 
                 st.write(f"Showing **{len(print_ready)}** students ready for printing.")
                 
-                # ✨ NEW: Function to color rows alternatively based on Section
+                # ✨ FIX: Color rows alternately based on the combination of BOTH Class and Section
+                unique_groups = sorted((print_ready['Class'].astype(str) + "_" + print_ready['Section'].astype(str)).unique())
+                color_map = {grp: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, grp in enumerate(unique_groups)}
+
                 def gen_row_style(row):
-                    sections = sorted(print_ready['Section'].unique())
-                    color_map = {s: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, s in enumerate(sections)}
-                    bg = color_map.get(row['Section'], '#ffffff')
+                    grp = str(row['Class']) + "_" + str(row['Section'])
+                    bg = color_map.get(grp, '#ffffff')
                     return [f'background-color: {bg}' for _ in row]
 
+                # Arranged columns so Section appears immediately after Class
                 show_cols_gen = ['Select', 'Roll', 'Name', 'Class', 'Section', 'Generated']
                 styled_gen_df = print_ready[show_cols_gen].style.apply(gen_row_style, axis=1)
                 

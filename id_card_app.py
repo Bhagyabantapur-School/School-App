@@ -416,7 +416,6 @@ with col_refresh:
 
 st.divider()
 
-# ✨ NEW: Added the 6th Tab for Distributed Cards
 tabs = st.tabs(["🖨️ ID Generator", "📸 Scanner", "📂 Database Explorer", "📋 Pending Photos Today", "✂️ Shop Tracking", "✅ Distributed Cards"])
 
 # ==========================================
@@ -860,9 +859,66 @@ with tabs[3]:
             pending_students = today_present[~today_present['Key'].isin(all_taken_keys)].copy()
             
             if not pending_students.empty:
-                display_cols = ['Class', 'Section', 'Roll', 'Name', 'Time']
-                st.dataframe(pending_students[display_cols], hide_index=True, use_container_width=True)
                 
+                # ✨ NEW: Enrich with detailed demographic columns from the Master Database
+                df_m_tab4 = fetch_sheet_data("students_master")
+                if not df_m_tab4.empty:
+                    name_col_p = 'Name_x' if 'Name_x' in pending_students.columns else 'Name'
+                    pending_students['Join_Key'] = pending_students['Class'].astype(str) + "_" + pending_students['Roll'].astype(str) + "_" + pending_students[name_col_p].astype(str).str.strip().str.upper()
+
+                    name_col_m = 'Name_x' if 'Name_x' in df_m_tab4.columns else 'Name'
+                    df_m_tab4['Join_Key'] = df_m_tab4['Class'].astype(str) + "_" + df_m_tab4['Roll'].astype(str) + "_" + df_m_tab4[name_col_m].astype(str).str.strip().str.upper()
+
+                    cols_to_pull = ['Join_Key', 'Father', 'Mother', 'DOB', 'Mobile']
+                    if 'Section' not in pending_students.columns and 'Section' in df_m_tab4.columns:
+                        cols_to_pull.append('Section')
+
+                    pending_students = pd.merge(pending_students, df_m_tab4[cols_to_pull], on='Join_Key', how='left')
+
+                if 'Name' not in pending_students.columns and 'Name_x' in pending_students.columns:
+                    pending_students['Name'] = pending_students['Name_x']
+
+                if 'Section' not in pending_students.columns:
+                    pending_students['Section'] = 'A'
+                pending_students['Section'] = pending_students['Section'].fillna('A').astype(str)
+
+                for c in ['Father', 'Mother', 'DOB', 'Mobile', 'Name']:
+                    if c not in pending_students.columns:
+                        pending_students[c] = ""
+
+                # Format DOB perfectly
+                def format_tab4_dob(raw_dob):
+                    raw_dob = str(raw_dob).strip().split(" ")[0]
+                    fmt_dob = raw_dob
+                    if raw_dob and raw_dob.lower() not in ['nan', 'none', 'nat', '']:
+                        try:
+                            if re.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$", raw_dob):
+                                parts = re.split(r"[-/]", raw_dob)
+                                fmt_dob = f"{int(parts[2]):02d}.{int(parts[1]):02d}.{parts[0]}"
+                            else:
+                                dt = pd.to_datetime(raw_dob, dayfirst=True)
+                                fmt_dob = dt.strftime('%d.%m.%Y')
+                        except:
+                            fmt_dob = raw_dob.replace('-', '.').replace('/', '.')
+                    return fmt_dob
+
+                pending_students['DOB'] = pending_students['DOB'].apply(format_tab4_dob)
+
+                # ✨ NEW: Display logic perfectly matching Tab 1 (without the Roll column, applying Section colors)
+                display_cols = ['Name', 'Father', 'Mother', 'Class', 'Section', 'DOB', 'Mobile']
+
+                unique_groups_tab4 = (pending_students['Class'].astype(str) + "_" + pending_students['Section'].astype(str)).unique().tolist()
+                color_map_tab4 = {grp: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, grp in enumerate(unique_groups_tab4)}
+
+                def tab4_row_style(row):
+                    grp = str(row['Class']) + "_" + str(row['Section'])
+                    bg = color_map_tab4.get(grp, '#ffffff')
+                    return [f'background-color: {bg}' for _ in row]
+
+                styled_pending_df = pending_students[display_cols].style.apply(tab4_row_style, axis=1)
+
+                st.dataframe(styled_pending_df, hide_index=True, use_container_width=True)
+
                 st.write("---")
                 if st.button("🖨️ Generate PDF for Teachers", type="primary"):
                     pdf_bytes = generate_pending_photos_pdf(pending_students)

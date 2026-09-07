@@ -295,11 +295,26 @@ def generate_pdf(students_list, photo_dict, progress_bar=None):
         pdf.cell(44, line_h, f"{student.get('Name', '')}".upper()[:25], 0, 1); curr_y += 4.5
         pdf.set_font("Arial", '', 7)
         
+        # ✨ NEW: Smart DOB Formatting to guarantee DD.MM.YYYY
+        raw_dob = str(student.get('DOB', '')).strip()
+        fmt_dob = raw_dob
+        try:
+            if raw_dob and raw_dob.lower() not in ['nan', 'none']:
+                # Parse date, assuming Day comes first (Indian Standard)
+                dt = pd.to_datetime(raw_dob, errors='coerce', dayfirst=True)
+                if pd.notna(dt):
+                    fmt_dob = dt.strftime('%d.%m.%Y')
+                else:
+                    # Fallback replacing dashes and slashes if pandas fails
+                    fmt_dob = raw_dob.replace('-', '.').replace('/', '.')
+        except:
+            pass
+
         for label, val in [
             ("Father", str(student.get('Father', ''))[:22]), 
             ("Mother", str(student.get('Mother', ''))[:22]), 
             ("Class", f"{student.get('Class', '')} | Sec: {student.get('Section', 'A')}"), 
-            ("DOB", student.get('DOB', ''))
+            ("DOB", fmt_dob) # ✨ Using the freshly formatted DOB
         ]:
             pdf.set_xy(detail_x, curr_y); pdf.cell(44, line_h, f"{label}: {val}", 0, 1); curr_y += line_h
             
@@ -482,7 +497,7 @@ with tabs[0]:
                 
                 st.write(f"Showing **{len(print_ready)}** students ready for printing.")
                 
-                # ✨ FIX: Take unique classes in their natural order of appearance, NOT sorted alphabetically.
+                # Take unique classes in their natural order of appearance, NOT sorted alphabetically.
                 unique_groups = (print_ready['Class'].astype(str) + "_" + print_ready['Section'].astype(str)).unique().tolist()
                 color_map = {grp: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, grp in enumerate(unique_groups)}
 
@@ -684,7 +699,6 @@ with tabs[2]:
 
         filtered_view = filtered_view.reset_index(drop=True)
         
-        # ✨ FIX: Make Tab 3 perfectly match the Tab 1 section coloring logic
         if 'Section' not in filtered_view.columns:
             filtered_view['Section'] = 'A'
         filtered_view['Section'] = filtered_view['Section'].fillna('A').astype(str)

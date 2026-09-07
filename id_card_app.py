@@ -33,6 +33,8 @@ st.set_page_config(page_title="BPS Digital - ID Generator", page_icon="🏫", la
 # Initialize Session States
 if 'attendance_log' not in st.session_state:
     st.session_state['attendance_log'] = pd.DataFrame(columns=['Time', 'Name', 'Roll', 'Class', 'Status', 'MDM'])
+if 'distribution_log' not in st.session_state:
+    st.session_state['distribution_log'] = pd.DataFrame(columns=['Name', 'Roll', 'Class', 'BPS Code'])
 if 'generated_pdf_data' not in st.session_state:
     st.session_state['generated_pdf_data'] = None
 if 'pending_pdf_data' not in st.session_state:
@@ -133,7 +135,6 @@ def clear_sheet_cache():
     fetch_sheet_data.clear()
     fetch_class_photo_status.clear()
 
-# ✨ FIX: Function to wipe ghost checkboxes from Streamlit memory!
 def clear_grid_states():
     for k in list(st.session_state.keys()):
         if k == "gen_editor" or k == "db_explorer_grid" or k.startswith("shop_grid_"):
@@ -429,7 +430,7 @@ with tabs[0]:
                 if st.button("⚠️ Reset All 'Generated' Statuses", use_container_width=True):
                     with st.spinner("Resetting database..."):
                         reset_generated_status()
-                    clear_grid_states() # ✨ Wiper applied
+                    clear_grid_states()
                     st.success("Success! List reset.")
                     st.rerun()
             
@@ -480,7 +481,7 @@ with tabs[0]:
                         batch_log_action("id_card_log", selected_students, "Generated")
                             
                         st.session_state['generated_pdf_data'] = pdf_bytes
-                        clear_grid_states() # ✨ Wiper applied
+                        clear_grid_states()
                         st.balloons()
                         st.rerun()
                         
@@ -494,6 +495,14 @@ with tabs[0]:
 # ==========================================
 with tabs[1]:
     st.markdown('<h3 style="text-align:center; color:#28a745;">📸 Scan ID Card</h3>', unsafe_allow_html=True)
+    
+    # ✨ FIX: Added the toggle switch for MDM vs Distribution!
+    scanner_mode = st.radio(
+        "Select Scanner Mode:", 
+        ["🍱 MDM & Attendance", "🎁 ID Card Distribution"], 
+        horizontal=True
+    )
+    
     st.write("Scanned data will sync directly to the main BPS Cloud Database!")
     
     qr_code = qrcode_scanner(key='mdm_scanner')
@@ -511,47 +520,87 @@ with tabs[1]:
             student_section = str(s_match.iloc[0].get('Section', 'A')).strip()
             student_roll = str(s_match.iloc[0]['Roll']).strip()
 
-            existing = st.session_state['attendance_log'][
-                (st.session_state['attendance_log']['Name'] == student_name) & 
-                (st.session_state['attendance_log']['Class'] == student_class) &
-                (st.session_state['attendance_log']['Roll'] == student_roll)
-            ]
-            
-            if not existing.empty:
-                st.warning(f"⚠️ {student_name} is already marked present today!")
+            if scanner_mode == "🍱 MDM & Attendance":
+                # Check if already scanned today
+                existing = st.session_state['attendance_log'][
+                    (st.session_state['attendance_log']['Name'] == student_name) & 
+                    (st.session_state['attendance_log']['Class'] == student_class) &
+                    (st.session_state['attendance_log']['Roll'] == student_roll)
+                ]
+                
+                if not existing.empty:
+                    st.warning(f"⚠️ {student_name} is already marked present today!")
+                else:
+                    curr_date_str = datetime.now().strftime("%d-%m-%Y")
+                    curr_time_str = datetime.now().strftime("%H:%M")
+                    
+                    new_entry = pd.DataFrame([{
+                        'Time': curr_time_str, 'Name': student_name, 'Roll': student_roll, 
+                        'Class': student_class, 'Status': 'Present', 'MDM': 'Yes'
+                    }])
+                    st.session_state['attendance_log'] = pd.concat([st.session_state['attendance_log'], new_entry], ignore_index=True)
+                    
+                    mdm_data = pd.DataFrame([{
+                        'Date': curr_date_str, 'Teacher': 'Scanned via ID App', 
+                        'Class': student_class, 'Section': student_section, 'Roll': student_roll, 
+                        'Name': student_name, 'Time': curr_time_str
+                    }])
+                    append_sheet_df('mdm_log', mdm_data)
+
+                    att_data = pd.DataFrame([{
+                        'Date': curr_date_str, 'Class': student_class, 'Section': student_section, 
+                        'Roll': student_roll, 'Name': student_name, 'Status': True
+                    }])
+                    append_sheet_df('student_attendance_master', att_data)
+
+                    st.success(f"✅ **{student_name}** logged & synced to Cloud!")
             else:
-                curr_date_str = datetime.now().strftime("%d-%m-%Y")
-                curr_time_str = datetime.now().strftime("%H:%M")
+                # ✨ FIX: New Distribution Mode Logic
+                existing = st.session_state['distribution_log'][
+                    (st.session_state['distribution_log']['Name'] == student_name) & 
+                    (st.session_state['distribution_log']['Class'] == student_class) &
+                    (st.session_state['distribution_log']['Roll'] == student_roll)
+                ]
                 
-                new_entry = pd.DataFrame([{
-                    'Time': curr_time_str, 'Name': student_name, 'Roll': student_roll, 
-                    'Class': student_class, 'Status': 'Present', 'MDM': 'Yes'
-                }])
-                st.session_state['attendance_log'] = pd.concat([st.session_state['attendance_log'], new_entry], ignore_index=True)
-                
-                mdm_data = pd.DataFrame([{
-                    'Date': curr_date_str, 'Teacher': 'Scanned via ID App', 
-                    'Class': student_class, 'Section': student_section, 'Roll': student_roll, 
-                    'Name': student_name, 'Time': curr_time_str
-                }])
-                append_sheet_df('mdm_log', mdm_data)
-
-                att_data = pd.DataFrame([{
-                    'Date': curr_date_str, 'Class': student_class, 'Section': student_section, 
-                    'Roll': student_roll, 'Name': student_name, 'Status': True
-                }])
-                append_sheet_df('student_attendance_master', att_data)
-
-                st.success(f"✅ **{student_name}** logged & synced to Cloud!")
+                if not existing.empty:
+                    st.warning(f"⚠️ {student_name} is already in your distribution scan list!")
+                else:
+                    new_entry = pd.DataFrame([{
+                        'Name': student_name, 'Roll': student_roll, 
+                        'Class': student_class, 'BPS Code': scanned_code
+                    }])
+                    st.session_state['distribution_log'] = pd.concat([st.session_state['distribution_log'], new_entry], ignore_index=True)
+                    st.success(f"✅ **{student_name}** successfully scanned for distribution!")
         else:
             st.error("Invalid QR Code or BPS Code not found in database. Please scan a valid BPS ID Card.")
 
     st.divider()
-    st.markdown("### 📋 Today's Local Scans")
-    if not st.session_state['attendance_log'].empty:
-        st.dataframe(st.session_state['attendance_log'], use_container_width=True)
+    
+    if scanner_mode == "🍱 MDM & Attendance":
+        st.markdown("### 📋 Today's Local Scans (MDM)")
+        if not st.session_state['attendance_log'].empty:
+            st.dataframe(st.session_state['attendance_log'], use_container_width=True)
+        else:
+            st.info("No students scanned yet today.")
     else:
-        st.info("No students scanned yet today.")
+        # ✨ FIX: New Distribution Scan List & Action Button
+        st.markdown("### 🎁 Scanned Cards for Distribution")
+        if not st.session_state['distribution_log'].empty:
+            st.dataframe(st.session_state['distribution_log'], use_container_width=True)
+            
+            if st.button("🎁 Mark Scanned Cards as 'Distributed'", type="primary", use_container_width=True):
+                batch_log_action("id_card_log", st.session_state['distribution_log'], "Distributed")
+                st.success(f"✅ Successfully marked {len(st.session_state['distribution_log'])} cards as Distributed in the database!")
+                # Clear the list after successfully logging
+                st.session_state['distribution_log'] = pd.DataFrame(columns=['Name', 'Roll', 'Class', 'BPS Code'])
+                clear_grid_states()
+                st.rerun()
+                
+            if st.button("🗑️ Clear Scan List"):
+                st.session_state['distribution_log'] = pd.DataFrame(columns=['Name', 'Roll', 'Class', 'BPS Code'])
+                st.rerun()
+        else:
+            st.info("Scan ID cards above to add them to your distribution list.")
 
 # ==========================================
 # TAB 3: DATABASE EXPLORER
@@ -697,7 +746,7 @@ with tabs[2]:
                 st.success("✅ Successfully synced updates to Cloud!")
                 if not removed_photos.empty:
                     st.warning("⚠️ **Note:** If a 'Photo Taken' checkmark instantly reappears, it means that student is still marked directly inside their specific Class Google Sheet (e.g., 'CLASS 1 - PHOTOS'). You must delete the checkmark directly in that sheet to remove it permanently.")
-                clear_grid_states() # ✨ Wiper applied
+                clear_grid_states()
                 st.rerun()
             else:
                 st.info("No changes were detected to sync.")
@@ -783,6 +832,7 @@ with tabs[4]:
         track_df['Image_Target'] = track_df.apply(get_valid_photo, axis=1)
         track_df = track_df[track_df['Image_Target'] != ""]
         
+        # ✨ FIX: Cleaned up the dropdown to redirect Distribution to Tab 2
         view_filter = st.selectbox("Select Pipeline Stage:", [
             "1. Ready to Send to Shop (Cards Generated)",
             "2. Currently At Shop (Pending Return)",
@@ -802,10 +852,11 @@ with tabs[4]:
             undo_text = "⏪ Undo: Send back to 'Ready to Shop'"
         else:
             filtered_df = track_df[track_df['Action'] == 'Received from Shop'].copy()
-            target_action = "Distributed"
-            btn_text = "🎁 Mark Selected as 'Distributed'"
+            target_action = None
+            btn_text = None
             undo_action = "Sent to Shop"
             undo_text = "⏪ Undo: Send back to 'At Shop'"
+            st.info("💡 **To mark these cards as Distributed, please flip to the '📸 Scanner' tab and scan them as you hand them out.**")
             
         if not filtered_df.empty:
             st.write(f"Showing **{len(filtered_df)}** valid students in this stage.")
@@ -842,25 +893,31 @@ with tabs[4]:
             if not selected.empty:
                 st.info(f"🎯 **You have selected {len(selected)} student(s).**") 
                 
-                if undo_action:
+                if target_action and undo_action:
                     c1, c2 = st.columns(2)
                     with c1:
                         if st.button(btn_text, type="primary", use_container_width=True):
                             batch_log_action("id_card_log", selected, target_action)
                             st.success(f"✅ Successfully logged {len(selected)} students as '{target_action}'!")
-                            clear_grid_states() # ✨ Wiper applied
+                            clear_grid_states()
                             st.rerun()
                     with c2:
                         if st.button(undo_text, type="secondary", use_container_width=True):
                             batch_log_action("id_card_log", selected, undo_action)
                             st.warning(f"⏪ Successfully reverted {len(selected)} students back to '{undo_action}'.")
-                            clear_grid_states() # ✨ Wiper applied
+                            clear_grid_states()
                             st.rerun()
-                else:
+                elif target_action:
                     if st.button(btn_text, type="primary"):
                         batch_log_action("id_card_log", selected, target_action)
                         st.success(f"✅ Successfully logged {len(selected)} students as '{target_action}'!")
-                        clear_grid_states() # ✨ Wiper applied
+                        clear_grid_states()
+                        st.rerun()
+                elif undo_action:
+                    if st.button(undo_text, type="secondary"):
+                        batch_log_action("id_card_log", selected, undo_action)
+                        st.warning(f"⏪ Successfully reverted {len(selected)} students back to '{undo_action}'.")
+                        clear_grid_states()
                         st.rerun()
         else:
             st.success("No students found in this stage. Check the other dropdown options.")

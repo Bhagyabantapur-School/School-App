@@ -378,7 +378,6 @@ with tabs[0]:
     with h_col2:
         st.markdown("<h3 style='margin-top:10px;'>BPS Student ID Card Generator</h3>", unsafe_allow_html=True)
         
-    # ✨ FIX: Placed the download button immediately at the top of the tab so it never gets hidden!
     if st.session_state['generated_pdf_data'] is not None:
         st.success("✅ Your PDF is ready! Click below to save it.")
         st.download_button(
@@ -784,6 +783,19 @@ with tabs[4]:
         track_df = pd.merge(df_m_shop, latest_log[['Key', 'Action']], on='Key', how='left')
         track_df['Action'] = track_df['Action'].fillna('None')
         
+        # ✨ FIX: Filter out ghost records (students missing photos)
+        def get_valid_photo(row):
+            thumb = str(row.get('Thumb_URL', '')).strip()
+            photo = str(row.get('Photo_URL', '')).strip()
+            if thumb and thumb.lower() not in ['nan', 'none']: return thumb
+            if photo and photo.lower() not in ['nan', 'none']: return photo
+            return ""
+            
+        track_df['Image_Target'] = track_df.apply(get_valid_photo, axis=1)
+        
+        # This completely removes any student without a photo link from the shop pipeline
+        track_df = track_df[track_df['Image_Target'] != ""]
+        
         # Dropdown to filter which phase of the shop pipeline you want to look at
         view_filter = st.selectbox("Select Pipeline Stage:", [
             "1. Ready to Send to Shop (Cards Generated)",
@@ -806,13 +818,7 @@ with tabs[4]:
             btn_text = "🎁 Mark Selected as 'Distributed'"
             
         if not filtered_df.empty:
-            st.write(f"Showing **{len(filtered_df)}** students in this stage.")
-            
-            # Resolve Photo URL (Prioritize Thumb_URL if it exists)
-            if 'Thumb_URL' in filtered_df.columns:
-                filtered_df['Image_Target'] = filtered_df['Thumb_URL'].fillna(filtered_df.get('Photo_URL', ''))
-            else:
-                filtered_df['Image_Target'] = filtered_df.get('Photo_URL', '')
+            st.write(f"Showing **{len(filtered_df)}** valid students in this stage.")
                 
             # Load images as Base64 strings quickly using concurrent threading
             with st.spinner("Loading stamp size photos..."):
@@ -845,7 +851,6 @@ with tabs[4]:
             
             # Update Button Logic
             if not selected.empty:
-                # ✨ FIX: Added the tracker line right before the action button!
                 st.info(f"🎯 **You have selected {len(selected)} student(s).**") 
                 if st.button(btn_text, type="primary"):
                     batch_log_action("id_card_log", selected, target_action)

@@ -845,6 +845,8 @@ with tabs[4]:
             
             # Update Button Logic
             if not selected.empty:
+                # ✨ FIX: Added the tracker line right before the action button!
+                st.info(f"🎯 **You have selected {len(selected)} student(s).**") 
                 if st.button(btn_text, type="primary"):
                     batch_log_action("id_card_log", selected, target_action)
                     st.success(f"✅ Successfully logged {len(selected)} students as '{target_action}'!")

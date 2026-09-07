@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 # --- BACK BUTTON ---
 if st.button("⬅️ Back to BPS Home", type="secondary"):
     st.switch_page("bps_dashboard.py")
@@ -38,6 +39,8 @@ if 'generated_pdf_data' not in st.session_state:
     st.session_state['generated_pdf_data'] = None
 if 'pending_pdf_data' not in st.session_state:
     st.session_state['pending_pdf_data'] = None
+if 'last_scanned_dist' not in st.session_state:
+    st.session_state['last_scanned_dist'] = None
 
 # --- 2. GOOGLE CREDENTIALS & DRIVE CONNECTIONS ---
 @st.cache_resource
@@ -59,6 +62,28 @@ def init_gsheets():
 sh = init_gsheets()
 
 # --- 3. HELPER FUNCTIONS ---
+def play_beep():
+    """Plays a quick beep sound using the browser's AudioContext"""
+    beep_html = """
+    <script>
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (AudioContext) {
+        const ctx = new AudioContext();
+        const osc = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+        osc.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.1);
+    }
+    </script>
+    """
+    components.html(beep_html, height=0, width=0)
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_secure_image_bytes(file_id):
     try:
@@ -498,7 +523,8 @@ with tabs[1]:
     
     qr_code = qrcode_scanner(key='distribution_scanner')
     
-    if qr_code:
+    # ✨ FIX: Only process if the qr_code physically changed from the last successful scan
+    if qr_code and qr_code != st.session_state.get('last_scanned_dist'):
         scanned_code = str(qr_code).strip().upper()
         m_df = fetch_sheet_data("students_master")
         
@@ -518,15 +544,19 @@ with tabs[1]:
             
             if not existing.empty:
                 st.warning(f"⚠️ {student_name} is already in your distribution scan list!")
+                st.session_state['last_scanned_dist'] = qr_code # Log to stop continuous warnings
             else:
                 new_entry = pd.DataFrame([{
                     'Name': student_name, 'Roll': student_roll, 
                     'Class': student_class, 'BPS Code': scanned_code
                 }])
                 st.session_state['distribution_log'] = pd.concat([st.session_state['distribution_log'], new_entry], ignore_index=True)
+                st.session_state['last_scanned_dist'] = qr_code
+                play_beep() # ✨ Audio Confirmation Triggered!
                 st.success(f"✅ **{student_name}** successfully scanned for distribution!")
         else:
             st.error("Invalid QR Code or BPS Code not found in database. Please scan a valid BPS ID Card.")
+            st.session_state['last_scanned_dist'] = qr_code
 
     st.divider()
     

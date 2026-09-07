@@ -365,7 +365,6 @@ with col_refresh:
 
 st.divider()
 
-# ✨ ADDED 5TH TAB HERE ✨
 tabs = st.tabs(["🖨️ ID Generator", "📸 Scanner", "📂 Database Explorer", "📋 Pending Photos Today", "✂️ Shop Tracking"])
 
 # ==========================================
@@ -783,7 +782,6 @@ with tabs[4]:
         track_df = pd.merge(df_m_shop, latest_log[['Key', 'Action']], on='Key', how='left')
         track_df['Action'] = track_df['Action'].fillna('None')
         
-        # ✨ FIX: Filter out ghost records (students missing photos)
         def get_valid_photo(row):
             thumb = str(row.get('Thumb_URL', '')).strip()
             photo = str(row.get('Photo_URL', '')).strip()
@@ -803,19 +801,24 @@ with tabs[4]:
             "3. Received from Shop (Ready to Distribute)"
         ])
         
-        # Determine data and target actions based on what the user is looking at
+        # ✨ FIX: Added undo variables to handle mistakes!
         if "1." in view_filter:
             filtered_df = track_df[track_df['Action'] == 'Generated'].copy()
             target_action = "Sent to Shop"
             btn_text = "📤 Mark Selected as 'Sent to Shop'"
+            undo_action = None
         elif "2." in view_filter:
             filtered_df = track_df[track_df['Action'] == 'Sent to Shop'].copy()
             target_action = "Received from Shop"
             btn_text = "📥 Mark Selected as 'Received from Shop'"
+            undo_action = "Generated"
+            undo_text = "⏪ Undo: Send back to 'Ready to Shop'"
         else:
             filtered_df = track_df[track_df['Action'] == 'Received from Shop'].copy()
             target_action = "Distributed"
             btn_text = "🎁 Mark Selected as 'Distributed'"
+            undo_action = "Sent to Shop"
+            undo_text = "⏪ Undo: Send back to 'At Shop'"
             
         if not filtered_df.empty:
             st.write(f"Showing **{len(filtered_df)}** valid students in this stage.")
@@ -847,15 +850,32 @@ with tabs[4]:
                 key=f"shop_grid_{view_filter[:2]}" # Dynamic key to force re-render when switching views
             )
             
-            selected = filtered_df.loc[ed_df[ed_df['Select'] == True].index]
+            # Safer selection logic
+            selected_indices = ed_df[ed_df['Select'] == True].index
+            selected = filtered_df.loc[selected_indices]
             
-            # Update Button Logic
+            # Update Button Logic with the new Undo options
             if not selected.empty:
                 st.info(f"🎯 **You have selected {len(selected)} student(s).**") 
-                if st.button(btn_text, type="primary"):
-                    batch_log_action("id_card_log", selected, target_action)
-                    st.success(f"✅ Successfully logged {len(selected)} students as '{target_action}'!")
-                    st.rerun()
+                
+                # Split into two columns if an undo action is available
+                if undo_action:
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button(btn_text, type="primary", use_container_width=True):
+                            batch_log_action("id_card_log", selected, target_action)
+                            st.success(f"✅ Successfully logged {len(selected)} students as '{target_action}'!")
+                            st.rerun()
+                    with c2:
+                        if st.button(undo_text, type="secondary", use_container_width=True):
+                            batch_log_action("id_card_log", selected, undo_action)
+                            st.warning(f"⏪ Successfully reverted {len(selected)} students back to '{undo_action}'.")
+                            st.rerun()
+                else:
+                    if st.button(btn_text, type="primary"):
+                        batch_log_action("id_card_log", selected, target_action)
+                        st.success(f"✅ Successfully logged {len(selected)} students as '{target_action}'!")
+                        st.rerun()
         else:
             st.success("No students found in this stage. Check the other dropdown options.")
     else:

@@ -433,12 +433,15 @@ with tabs[0]:
         df_log['Roll'] = df_log['Roll'].astype(str)
         merged = pd.merge(df_master, df_log, on=['Class', 'Section', 'Roll'], how='inner', suffixes=('', '_log'))
         
-        gen_keys = []
+        # ✨ FIX: Included Name in the unique ID key to separate Sec A & Sec B duplicate rolls
         if not df_id_log.empty:
-            df_id_log['Key'] = df_id_log['Class'].astype(str) + "_" + df_id_log['Roll'].astype(str)
+            df_id_log['Key'] = df_id_log['Class'].astype(str) + "_" + df_id_log['Roll'].astype(str) + "_" + df_id_log['Name'].astype(str).str.strip().str.upper()
             gen_keys = df_id_log[df_id_log['Action'] == 'Generated']['Key'].unique().tolist()
+        else:
+            gen_keys = []
             
-        merged['Key'] = merged['Class'].astype(str) + "_" + merged['Roll'].astype(str)
+        name_col = 'Name_x' if 'Name_x' in merged.columns else 'Name'
+        merged['Key'] = merged['Class'].astype(str) + "_" + merged['Roll'].astype(str) + "_" + merged[name_col].astype(str).str.strip().str.upper()
         merged['Generated'] = merged['Key'].isin(gen_keys)
         
         def is_ready_to_print(row):
@@ -598,17 +601,21 @@ with tabs[2]:
         df_l['Roll'] = df_l['Roll'].astype(str)
         
         explorer_db = pd.merge(df_m, df_l, on=['Class', 'Section', 'Roll'], how='left', suffixes=('', '_log'))
-        explorer_db['Key'] = explorer_db['Class'].astype(str) + "_" + explorer_db['Roll'].astype(str)
+        
+        # ✨ FIX: Using strict Class + Roll + Name tracking
+        name_col = 'Name_x' if 'Name_x' in explorer_db.columns else 'Name'
+        explorer_db['Key'] = explorer_db['Class'].astype(str) + "_" + explorer_db['Roll'].astype(str) + "_" + explorer_db[name_col].astype(str).str.strip().str.upper()
+        explorer_db['Photo_Key'] = explorer_db['Class'].astype(str) + "_" + explorer_db['Roll'].astype(str)
         
         photo_keys, gen_keys, dist_keys = [], [], []
         
         if not df_photo.empty:
-            df_photo['Key'] = df_photo['Class'].astype(str) + "_" + df_photo['Roll'].astype(str)
-            latest_photo = df_photo.drop_duplicates(subset=['Key'], keep='last')
-            photo_keys = latest_photo[latest_photo['Action'] == 'Taken']['Key'].tolist()
+            df_photo['Photo_Key'] = df_photo['Class'].astype(str) + "_" + df_photo['Roll'].astype(str)
+            latest_photo = df_photo.drop_duplicates(subset=['Photo_Key'], keep='last')
+            photo_keys = latest_photo[latest_photo['Action'] == 'Taken']['Photo_Key'].tolist()
             
         if not df_id_log.empty:
-            df_id_log['Key'] = df_id_log['Class'].astype(str) + "_" + df_id_log['Roll'].astype(str)
+            df_id_log['Key'] = df_id_log['Class'].astype(str) + "_" + df_id_log['Roll'].astype(str) + "_" + df_id_log['Name'].astype(str).str.strip().str.upper()
             gen_keys = df_id_log[df_id_log['Action'] == 'Generated']['Key'].unique().tolist()
             
             dist_df = df_id_log[df_id_log['Action'].isin(['Distributed', 'Undistributed'])]
@@ -628,7 +635,7 @@ with tabs[2]:
         explorer_db['Form_OK'] = explorer_db['Return Status'].apply(lambda x: True if str(x) == "Complete" else False)
         explorer_db['Verified'] = explorer_db['Data Corrected'].apply(lambda x: True if str(x) == "Yes" else False)
         
-        explorer_db['Photo Taken'] = explorer_db['Key'].isin(photo_keys)
+        explorer_db['Photo Taken'] = explorer_db['Photo_Key'].isin(photo_keys)
         explorer_db['Generated'] = explorer_db['Key'].isin(gen_keys)
         explorer_db['Distributed'] = explorer_db['Key'].isin(dist_keys)
         
@@ -795,8 +802,10 @@ with tabs[4]:
     df_id_log_shop = fetch_sheet_data("id_card_log")
     
     if not df_m_shop.empty and not df_id_log_shop.empty:
-        df_m_shop['Key'] = df_m_shop['Class'].astype(str) + "_" + df_m_shop['Roll'].astype(str)
-        df_id_log_shop['Key'] = df_id_log_shop['Class'].astype(str) + "_" + df_id_log_shop['Roll'].astype(str)
+        # ✨ FIX: Using strict Class + Roll + Name tracking
+        name_col = 'Name_x' if 'Name_x' in df_m_shop.columns else 'Name'
+        df_m_shop['Key'] = df_m_shop['Class'].astype(str) + "_" + df_m_shop['Roll'].astype(str) + "_" + df_m_shop[name_col].astype(str).str.strip().str.upper()
+        df_id_log_shop['Key'] = df_id_log_shop['Class'].astype(str) + "_" + df_id_log_shop['Roll'].astype(str) + "_" + df_id_log_shop['Name'].astype(str).str.strip().str.upper()
         
         latest_log = df_id_log_shop.drop_duplicates(subset=['Key'], keep='last')
         track_df = pd.merge(df_m_shop, latest_log[['Key', 'Action']], on='Key', how='left')

@@ -482,8 +482,8 @@ with tabs[0]:
                 
                 st.write(f"Showing **{len(print_ready)}** students ready for printing.")
                 
-                # ✨ FIX: Color rows alternately based on the combination of BOTH Class and Section
-                unique_groups = sorted((print_ready['Class'].astype(str) + "_" + print_ready['Section'].astype(str)).unique())
+                # ✨ FIX: Take unique classes in their natural order of appearance, NOT sorted alphabetically.
+                unique_groups = (print_ready['Class'].astype(str) + "_" + print_ready['Section'].astype(str)).unique().tolist()
                 color_map = {grp: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, grp in enumerate(unique_groups)}
 
                 def gen_row_style(row):
@@ -491,7 +491,6 @@ with tabs[0]:
                     bg = color_map.get(grp, '#ffffff')
                     return [f'background-color: {bg}' for _ in row]
 
-                # Arranged columns so Section appears immediately after Class
                 show_cols_gen = ['Select', 'Roll', 'Name', 'Class', 'Section', 'Generated']
                 styled_gen_df = print_ready[show_cols_gen].style.apply(gen_row_style, axis=1)
                 
@@ -683,15 +682,23 @@ with tabs[2]:
         
         metrics_container = st.container()
 
-        def row_style(row):
-            classes = filtered_view['Class'].unique()
-            color_map = {c: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, c in enumerate(classes)}
-            bg = color_map.get(row['Class'], '#ffffff')
+        filtered_view = filtered_view.reset_index(drop=True)
+        
+        # ✨ FIX: Make Tab 3 perfectly match the Tab 1 section coloring logic
+        if 'Section' not in filtered_view.columns:
+            filtered_view['Section'] = 'A'
+        filtered_view['Section'] = filtered_view['Section'].fillna('A').astype(str)
+
+        unique_groups_db = (filtered_view['Class'].astype(str) + "_" + filtered_view['Section'].astype(str)).unique().tolist()
+        color_map_db = {grp: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, grp in enumerate(unique_groups_db)}
+
+        def db_row_style(row):
+            grp = str(row['Class']) + "_" + str(row['Section'])
+            bg = color_map_db.get(grp, '#ffffff')
             return [f'background-color: {bg}' for _ in row]
 
-        filtered_view = filtered_view.reset_index(drop=True)
-        cols_to_show = ['Photo Taken', 'Photo_URL', 'Thumb_URL', 'Name', 'Class', 'Roll', 'Form_OK', 'Verified', 'Generated', 'Distributed']
-        styled_df = filtered_view[cols_to_show + ['Already_Photo', 'Already_Dist']].style.apply(row_style, axis=1)
+        cols_to_show = ['Photo Taken', 'Photo_URL', 'Thumb_URL', 'Name', 'Class', 'Section', 'Roll', 'Form_OK', 'Verified', 'Generated', 'Distributed']
+        styled_df = filtered_view[cols_to_show + ['Already_Photo', 'Already_Dist']].style.apply(db_row_style, axis=1)
 
         final_ed = st.data_editor(
             styled_df,
@@ -705,7 +712,7 @@ with tabs[2]:
                 "Generated": st.column_config.CheckboxColumn("Generated?", disabled=True),
                 "Distributed": st.column_config.CheckboxColumn("Distributed?"),
             },
-            disabled=['Photo_URL', 'Thumb_URL', 'Name', 'Class', 'Roll', 'Form_OK', 'Verified', 'Generated'],
+            disabled=['Photo_URL', 'Thumb_URL', 'Name', 'Class', 'Section', 'Roll', 'Form_OK', 'Verified', 'Generated'],
             hide_index=True,
             use_container_width=True,
             key="db_explorer_grid"

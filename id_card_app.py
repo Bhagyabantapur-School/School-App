@@ -377,6 +377,17 @@ with tabs[0]:
         if os.path.exists('logo.png'): st.image('logo.png', width=70)
     with h_col2:
         st.markdown("<h3 style='margin-top:10px;'>BPS Student ID Card Generator</h3>", unsafe_allow_html=True)
+        
+    # ✨ FIX: Placed the download button immediately at the top of the tab so it never gets hidden!
+    if st.session_state['generated_pdf_data'] is not None:
+        st.success("✅ Your PDF is ready! Click below to save it.")
+        st.download_button(
+            label="📥 Download ID Cards (PDF)", 
+            data=st.session_state['generated_pdf_data'], 
+            file_name=f"BPS_ID_Cards_{datetime.now().strftime('%Y%m%d')}.pdf", 
+            mime="application/pdf"
+        )
+        st.divider()
 
     df_master = fetch_sheet_data("students_master")
     df_log = fetch_sheet_data("form_distribution_log")
@@ -466,15 +477,7 @@ with tabs[0]:
                         st.session_state['generated_pdf_data'] = pdf_bytes
                         st.balloons()
                         st.rerun()
-                    
-                    if st.session_state['generated_pdf_data'] is not None:
-                        st.success("✅ Your PDF is ready! Click below to save it.")
-                        st.download_button(
-                            label="📥 Download ID Cards (PDF)", 
-                            data=st.session_state['generated_pdf_data'], 
-                            file_name=f"BPS_ID_Cards_{datetime.now().strftime('%Y%m%d')}.pdf", 
-                            mime="application/pdf"
-                        )
+                        
             else:
                 st.success("All ready students have already had their IDs generated! Uncheck the box above to reprint.")
         else:

@@ -69,7 +69,6 @@ def get_ist_now():
     utc_now = datetime.now(timezone.utc)
     return utc_now + timedelta(hours=5, minutes=30)
 
-# ✨ NEW: Bulletproof Key Generators to prevent all mismatch bugs
 def get_unified_key(df, name_col='Name'):
     if 'Class' not in df.columns: df['Class'] = ''
     if 'Roll' not in df.columns: df['Roll'] = ''
@@ -267,20 +266,16 @@ def generate_pdf(students_list, photo_dict, progress_bar=None):
         x = x_start + (col * (card_w + gap))
         y = y_start + (row * (card_h + gap))
         
-        # Background
         if bg_img:
             try: pdf.image(bg_img, x=x, y=y, w=card_w, h=card_h)
             except: pass 
 
-        # Border & Blue Header
         pdf.set_draw_color(0, 0, 0); pdf.set_line_width(0.3); pdf.rect(x, y, card_w, card_h)
         pdf.set_fill_color(0, 51, 153); pdf.rect(x, y, card_w, 11, 'F')
         
-        # Logo
         if os.path.exists('logo.png'): 
             pdf.image('logo.png', x=x+68.5, y=y+1, w=16, h=16)
             
-        # Header Text
         pdf.set_font("Arial", '', 6)
         pdf.set_text_color(255, 255, 255)
         pdf.set_xy(x+2, y+2) 
@@ -290,7 +285,6 @@ def generate_pdf(students_list, photo_dict, progress_bar=None):
         pdf.set_xy(x+2, y+6) 
         pdf.cell(66, 5, "BHAGYABANTAPUR PRIMARY SCHOOL", 0, 1, 'C')
         
-        # Photo
         photo_x, photo_y, photo_w, photo_h = x+3, y+14, 18, 22
         student_id = str(student.get('Sl', 0)) + "_" + str(student.get('Roll', '0'))
         
@@ -306,7 +300,6 @@ def generate_pdf(students_list, photo_dict, progress_bar=None):
             pdf.set_text_color(150); pdf.set_font("Arial", '', 5)
             pdf.set_xy(photo_x, y+20); pdf.cell(photo_w, 5, "NO PHOTO", 0, 0, 'C')
         
-        # Details
         pdf.set_text_color(0); detail_x, curr_y, line_h = x+24, y+14, 4
         pdf.set_font("Arial", 'B', 9); pdf.set_xy(detail_x, curr_y)
         pdf.cell(44, line_h, f"{student.get('Name', '')}".upper()[:25], 0, 1); curr_y += 4.5
@@ -336,24 +329,20 @@ def generate_pdf(students_list, photo_dict, progress_bar=None):
         pdf.set_xy(detail_x, curr_y); pdf.set_font("Arial", 'B', 7)
         pdf.cell(44, line_h, f"Mob: {student.get('Mobile', '')}", 0, 1)
 
-        # Updated QR Code (BPS Code only)
         qr_data = str(student.get('BPS Code', '')).strip()
         qr = qrcode.make(qr_data); qr_path = tempfile.mktemp(suffix=".png"); qr.save(qr_path)
         pdf.image(qr_path, x=x+4.5, y=y+37, w=15, h=15)
         
-        # Footer Image
         if os.path.exists('image_2.png'):
             try: pdf.image('image_2.png', x=x, y=y+44, w=card_w, h=10)
             except: pass
 
-        # Watermark
         wm_x, wm_y = x + 55, y + 42
         pdf.set_draw_color(220, 240, 255); pdf.set_line_width(0.4)
         pdf.line(wm_x, wm_y, wm_x, wm_y + 6); pdf.line(wm_x, wm_y, wm_x + 2, wm_y); pdf.line(wm_x, wm_y + 6, wm_x + 2, wm_y + 6)
         pdf.line(wm_x + 27, wm_y, wm_x + 27, wm_y + 6); pdf.line(wm_x + 25, wm_y, wm_x + 27, wm_y); pdf.line(wm_x + 25, wm_y + 6, wm_x + 27, wm_y + 6)
         pdf.set_text_color(210, 235, 255); pdf.set_font("Arial", 'B', 6); pdf.set_xy(wm_x, wm_y + 1); pdf.cell(27, 4, "BPS DIGITAL", 0, 0, 'C')
 
-        # Signature
         if os.path.exists('signature.png'): 
             try: pdf.image('signature.png', x=x+58, y=y+40, w=22, h=8)
             except: pass
@@ -361,12 +350,10 @@ def generate_pdf(students_list, photo_dict, progress_bar=None):
         pdf.set_text_color(0); pdf.set_font("Arial", 'I', 6); pdf.set_xy(x, y+49); pdf.cell(card_w-5, 3, "Sukhamay Kisku", 0, 1, 'R')
         pdf.set_font("Arial", '', 5); pdf.set_xy(x, y+51); pdf.cell(card_w-5, 2, "Head Teacher", 0, 0, 'R')
         
-        # 10 Cards Per Page Logic
         col += 1
         if col >= 2: col, row = 0, row + 1
         if row >= 5: pdf.add_page(); col, row = 0, 0
             
-    # Final Output Fix
     if progress_bar: progress_bar.progress(1.0, text="✅ PDF Rendering Complete!")
     pdf_output = pdf.output(dest='S')
     if isinstance(pdf_output, str):
@@ -378,7 +365,6 @@ def generate_pending_photos_pdf(df_pending):
     pdf = FPDF()
     pdf.add_page()
     
-    # Header
     pdf.set_font("Arial", 'B', 16)
     pdf.cell(0, 10, "Bhagyabantapur Primary School", ln=True, align='C')
     
@@ -391,14 +377,12 @@ def generate_pending_photos_pdf(df_pending):
     pdf.cell(0, 8, "Message to Teachers: Please send the following students for photo taking today.", ln=True, align='C')
     pdf.ln(5)
     
-    # Body grouped by class and section
     pdf.set_text_color(0, 0, 0)
     
     if df_pending.empty:
         pdf.set_font("Arial", '', 12)
         pdf.cell(0, 10, "No pending photos for present students today. Great job!", ln=True, align='C')
     else:
-        # Group data
         grouped = df_pending.groupby(['Class', 'Section'])
         for (cls_name, sec_name), group in grouped:
             pdf.set_font("Arial", 'B', 11)
@@ -420,12 +404,11 @@ def generate_pending_photos_pdf(df_pending):
 
 # --- 5. MAIN APP LAYOUT ---
 
-# Header with Refresh Button
 col_title, col_refresh = st.columns([5, 1])
 with col_title:
     st.markdown("<h2 style='margin-top:0px;'>🏫 BPS Digital System</h2>", unsafe_allow_html=True)
 with col_refresh:
-    st.write("") # Adjust vertical alignment slightly
+    st.write("") 
     if st.button("🔄 Refresh Cloud Data", use_container_width=True):
         clear_sheet_cache()
         st.rerun()
@@ -473,14 +456,10 @@ with tabs[0]:
         
         st.markdown("##### 🎛️ Generator Filters")
         col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns([1.3, 1.3, 1.3, 1.3, 1.2])
-        with col_f1:
-            hide_generated = st.checkbox("Hide Already Generated", value=True)
-        with col_f2:
-            require_photo = st.checkbox("Require Uploaded Photo", value=True)
-        with col_f3:
-            require_form = st.checkbox("Require 'Complete' Form", value=True)
-        with col_f4:
-            missing_form_only = st.checkbox("Missing Form Log Only", value=False)
+        with col_f1: hide_generated = st.checkbox("Hide Already Generated", value=True)
+        with col_f2: require_photo = st.checkbox("Require Uploaded Photo", value=True)
+        with col_f3: require_form = st.checkbox("Require 'Complete' Form", value=True)
+        with col_f4: missing_form_only = st.checkbox("Missing Form Log Only", value=False)
         with col_f5:
             if st.button("⚠️ Reset All Generated", use_container_width=True, help="Moves all students back to the starting queue."):
                 with st.spinner("Resetting database..."):
@@ -508,10 +487,8 @@ with tabs[0]:
 
         merged['Ready'] = merged.apply(is_ready_to_print, axis=1)
         
-        if hide_generated:
-            print_ready = merged[(merged['Ready'] == True) & (merged['Generated'] == False)].copy()
-        else:
-            print_ready = merged[merged['Ready'] == True].copy()
+        if hide_generated: print_ready = merged[(merged['Ready'] == True) & (merged['Generated'] == False)].copy()
+        else: print_ready = merged[merged['Ready'] == True].copy()
 
         if not print_ready.empty:
             print_ready = print_ready.reset_index(drop=True)
@@ -681,7 +658,6 @@ with tabs[2]:
     df_photo = fetch_sheet_data("photo_log")
     df_id_log_raw = fetch_sheet_data("id_card_log")
     
-    # ✨ FIX: Strict Data Processing to guarantee chronological accuracy for math
     if not df_id_log_raw.empty:
         df_id_log = df_id_log_raw.copy()
         df_id_log['Action'] = df_id_log['Action'].astype(str).str.strip()
@@ -709,7 +685,6 @@ with tabs[2]:
             gen_keys = df_id_log[df_id_log['Action'] == 'Generated']['Key'].unique().tolist()
             dist_df = df_id_log[df_id_log['Action'].isin(['Distributed', 'Undistributed'])]
             if not dist_df.empty:
-                # Guaranteed chronological last thanks to strict sort above
                 latest_dist = dist_df.drop_duplicates(subset=['Key'], keep='last')
                 dist_keys = latest_dist[latest_dist['Action'] == 'Distributed']['Key'].tolist()
 
@@ -838,11 +813,10 @@ with tabs[2]:
                 last_received = received_log.drop_duplicates(subset=['Key'], keep='last')[['Key', 'Date_Only']]
                 last_received.rename(columns={'Date_Only': 'Lot Date (Received)'}, inplace=True)
                 
-                latest_status = df_id_log.drop_duplicates(subset=['Key'], keep='last')[['Key', 'Action']]
-                latest_status['Is_Distributed'] = latest_status['Action'].apply(lambda x: 1 if str(x) == 'Distributed' else 0)
-                
-                lot_df = pd.merge(last_received, latest_status, on='Key', how='left')
-                lot_df['Is_Distributed'] = lot_df['Is_Distributed'].fillna(0).astype(int)
+                # ✨ FLAWLESS FIX: We use 'dist_keys' which safely holds the TRUE current distributed state of every card, 
+                # ignoring any extra PDF generated clicks that might have happened afterwards.
+                lot_df = last_received.copy()
+                lot_df['Is_Distributed'] = lot_df['Key'].apply(lambda k: 1 if k in dist_keys else 0)
                 
                 lot_summary = lot_df.groupby('Lot Date (Received)').agg(
                     Received_from_Shop=('Key', 'count'),
@@ -1127,7 +1101,6 @@ with tabs[5]:
 
     if not df_m_dist.empty and not df_id_log_dist_raw.empty:
         
-        # ✨ FIX: Apply the unified key system and strict chronological sort!
         df_id_log_dist = df_id_log_dist_raw.copy()
         df_id_log_dist['Action'] = df_id_log_dist['Action'].astype(str).str.strip()
         df_id_log_dist['Key'] = get_unified_key(df_id_log_dist)

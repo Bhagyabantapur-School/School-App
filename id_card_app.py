@@ -799,49 +799,54 @@ with tabs[2]:
             c8.metric("🎁 Distributed", int(final_ed['Distributed'].sum()))
             st.write("") 
 
-        # ✨ NEW: Date-wise Action Summary Area
+        # ✨ NEW: Lot-wise Distribution Summary Area
         st.write("---")
-        st.markdown("##### 📅 Date-wise Action Summary")
+        st.markdown("##### 📦 Lot-wise Distribution Summary (Based on 'Received from Shop' Date)")
         
         if not df_id_log.empty:
             summary_log = df_id_log.copy()
-            # Extract just the date string (DD-MM-YYYY)
-            summary_log['Date_Only'] = summary_log['Date'].apply(lambda x: str(x).split(' ')[0] if pd.notna(x) and str(x).strip() != 'nan' else '')
-            
-            target_actions = ['Generated', 'Sent to Shop', 'Received from Shop', 'Distributed']
-            summary_log = summary_log[summary_log['Action'].isin(target_actions)]
-            
-            if not summary_log.empty:
-                # Group by Date and Action, count the occurrences
-                pivot_df = pd.pivot_table(
-                    summary_log,
-                    index='Date_Only',
-                    columns='Action',
-                    aggfunc='size',
-                    fill_value=0
+            # Clean keys to ensure accurate merging
+            summary_log['Roll_Clean'] = summary_log['Roll'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+            summary_log['Key'] = summary_log['Class'].astype(str).str.strip() + "_" + summary_log['Roll_Clean'] + "_" + summary_log['Name'].astype(str).str.strip().str.upper()
+
+            # Find the last "Received from Shop" date for each specific card
+            received_log = summary_log[summary_log['Action'] == 'Received from Shop'].copy()
+            if not received_log.empty:
+                received_log['Date_Only'] = received_log['Date'].apply(lambda x: str(x).split(' ')[0] if pd.notna(x) and str(x).strip() != 'nan' else '')
+                last_received = received_log.drop_duplicates(subset=['Key'], keep='last')[['Key', 'Date_Only']]
+                last_received.rename(columns={'Date_Only': 'Lot Date (Received)'}, inplace=True)
+                
+                # Check the CURRENT status of those specific cards
+                latest_status = summary_log.drop_duplicates(subset=['Key'], keep='last')[['Key', 'Action']]
+                latest_status['Is_Distributed'] = latest_status['Action'].apply(lambda x: 1 if x == 'Distributed' else 0)
+                
+                # Merge and calculate
+                lot_df = pd.merge(last_received, latest_status, on='Key', how='left')
+                lot_df['Is_Distributed'] = lot_df['Is_Distributed'].fillna(0).astype(int)
+                
+                # Group by Lot Date
+                lot_summary = lot_df.groupby('Lot Date (Received)').agg(
+                    Received_from_Shop=('Key', 'count'),
+                    Distributed=('Is_Distributed', 'sum')
                 ).reset_index()
                 
-                # Ensure all action columns exist even if no events happened for them yet
-                for act in target_actions:
-                    if act not in pivot_df.columns:
-                        pivot_df[act] = 0
-                        
-                pivot_df = pivot_df[['Date_Only'] + target_actions]
+                # Math for remaining cards
+                lot_summary['Remain'] = lot_summary['Received_from_Shop'] - lot_summary['Distributed']
+                lot_summary.rename(columns={'Received_from_Shop': 'Received from Shop'}, inplace=True)
                 
                 # Sort descending by date
-                pivot_df['Parsed'] = pd.to_datetime(pivot_df['Date_Only'], dayfirst=True, errors='coerce')
-                pivot_df = pivot_df.sort_values('Parsed', ascending=False).drop(columns=['Parsed']).reset_index(drop=True)
-                pivot_df.rename(columns={'Date_Only': 'Date'}, inplace=True)
+                lot_summary['Parsed'] = pd.to_datetime(lot_summary['Lot Date (Received)'], dayfirst=True, errors='coerce')
+                lot_summary = lot_summary.sort_values('Parsed', ascending=False).drop(columns=['Parsed']).reset_index(drop=True)
                 
-                # Apply alternate colors to the rows
-                color_map_sum = {d: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, d in enumerate(pivot_df['Date'])}
-                def sum_row_style(row):
-                    bg = color_map_sum.get(row['Date'], '#ffffff')
+                # Apply Alternate colors based on Lot Date
+                color_map_lot = {d: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, d in enumerate(lot_summary['Lot Date (Received)'])}
+                def lot_row_style(row):
+                    bg = color_map_lot.get(row['Lot Date (Received)'], '#ffffff')
                     return [f'background-color: {bg}' for _ in row]
                     
-                st.dataframe(pivot_df.style.apply(sum_row_style, axis=1), hide_index=True, use_container_width=True)
+                st.dataframe(lot_summary.style.apply(lot_row_style, axis=1), hide_index=True, use_container_width=True)
             else:
-                st.info("No action logs found to summarize yet.")
+                st.info("No cards have been 'Received from Shop' yet to create a Lot summary.")
         else:
             st.info("ID card log is empty.")
 

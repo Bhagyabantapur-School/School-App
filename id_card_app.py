@@ -799,6 +799,54 @@ with tabs[2]:
             c8.metric("🎁 Distributed", int(final_ed['Distributed'].sum()))
             st.write("") 
 
+        # ✨ NEW: Date-wise Action Summary Area
+        st.write("---")
+        st.markdown("##### 📅 Date-wise Action Summary")
+        
+        if not df_id_log.empty:
+            summary_log = df_id_log.copy()
+            # Extract just the date string (DD-MM-YYYY)
+            summary_log['Date_Only'] = summary_log['Date'].apply(lambda x: str(x).split(' ')[0] if pd.notna(x) and str(x).strip() != 'nan' else '')
+            
+            target_actions = ['Generated', 'Sent to Shop', 'Received from Shop', 'Distributed']
+            summary_log = summary_log[summary_log['Action'].isin(target_actions)]
+            
+            if not summary_log.empty:
+                # Group by Date and Action, count the occurrences
+                pivot_df = pd.pivot_table(
+                    summary_log,
+                    index='Date_Only',
+                    columns='Action',
+                    aggfunc='size',
+                    fill_value=0
+                ).reset_index()
+                
+                # Ensure all action columns exist even if no events happened for them yet
+                for act in target_actions:
+                    if act not in pivot_df.columns:
+                        pivot_df[act] = 0
+                        
+                pivot_df = pivot_df[['Date_Only'] + target_actions]
+                
+                # Sort descending by date
+                pivot_df['Parsed'] = pd.to_datetime(pivot_df['Date_Only'], dayfirst=True, errors='coerce')
+                pivot_df = pivot_df.sort_values('Parsed', ascending=False).drop(columns=['Parsed']).reset_index(drop=True)
+                pivot_df.rename(columns={'Date_Only': 'Date'}, inplace=True)
+                
+                # Apply alternate colors to the rows
+                color_map_sum = {d: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, d in enumerate(pivot_df['Date'])}
+                def sum_row_style(row):
+                    bg = color_map_sum.get(row['Date'], '#ffffff')
+                    return [f'background-color: {bg}' for _ in row]
+                    
+                st.dataframe(pivot_df.style.apply(sum_row_style, axis=1), hide_index=True, use_container_width=True)
+            else:
+                st.info("No action logs found to summarize yet.")
+        else:
+            st.info("ID card log is empty.")
+
+        st.write("---")
+
         if st.button("💾 Sync Manual Updates to Cloud"):
             new_photos = final_ed[(final_ed['Photo Taken'] == True) & (final_ed['Already_Photo'] == False)]
             new_dist = final_ed[(final_ed['Distributed'] == True) & (final_ed['Already_Dist'] == False)]
@@ -1067,7 +1115,6 @@ with tabs[5]:
     df_id_log_dist = fetch_sheet_data("id_card_log")
 
     if not df_m_dist.empty and not df_id_log_dist.empty:
-        # ✨ FIX: Clean the Roll numbers aggressively so '1.0' and '1' perfectly match every time
         df_m_dist['Roll_Clean'] = df_m_dist['Roll'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         df_id_log_dist['Roll_Clean'] = df_id_log_dist['Roll'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
 
@@ -1075,7 +1122,6 @@ with tabs[5]:
         df_m_dist['Key'] = df_m_dist['Class'].astype(str).str.strip() + "_" + df_m_dist['Roll_Clean'] + "_" + df_m_dist[name_col].astype(str).str.strip().str.upper()
         df_id_log_dist['Key'] = df_id_log_dist['Class'].astype(str).str.strip() + "_" + df_id_log_dist['Roll_Clean'] + "_" + df_id_log_dist['Name'].astype(str).str.strip().str.upper()
 
-        # ✨ FIX: Ignore PDF "Generated" or "Shop" actions that happen AFTER a card was Distributed
         dist_events_only = df_id_log_dist[df_id_log_dist['Action'].isin(['Distributed', 'Undistributed'])].copy()
 
         if not dist_events_only.empty:

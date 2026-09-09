@@ -1067,88 +1067,91 @@ with tabs[5]:
     df_id_log_dist = fetch_sheet_data("id_card_log")
 
     if not df_m_dist.empty and not df_id_log_dist.empty:
+        # ✨ FIX: Clean the Roll numbers aggressively so '1.0' and '1' perfectly match every time
+        df_m_dist['Roll_Clean'] = df_m_dist['Roll'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        df_id_log_dist['Roll_Clean'] = df_id_log_dist['Roll'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+
         name_col = 'Name_x' if 'Name_x' in df_m_dist.columns else 'Name'
-        df_m_dist['Key'] = df_m_dist['Class'].astype(str) + "_" + df_m_dist['Roll'].astype(str) + "_" + df_m_dist[name_col].astype(str).str.strip().str.upper()
-        df_id_log_dist['Key'] = df_id_log_dist['Class'].astype(str) + "_" + df_id_log_dist['Roll'].astype(str) + "_" + df_id_log_dist['Name'].astype(str).str.strip().str.upper()
+        df_m_dist['Key'] = df_m_dist['Class'].astype(str).str.strip() + "_" + df_m_dist['Roll_Clean'] + "_" + df_m_dist[name_col].astype(str).str.strip().str.upper()
+        df_id_log_dist['Key'] = df_id_log_dist['Class'].astype(str).str.strip() + "_" + df_id_log_dist['Roll_Clean'] + "_" + df_id_log_dist['Name'].astype(str).str.strip().str.upper()
 
-        # ✨ FIX: Keeping the 'Date' column from the log so we know EXACTLY when it was distributed
-        latest_log_dist = df_id_log_dist.drop_duplicates(subset=['Key'], keep='last')
-        dist_track_df = pd.merge(df_m_dist, latest_log_dist[['Key', 'Action', 'Date']], on='Key', how='left')
+        # ✨ FIX: Ignore PDF "Generated" or "Shop" actions that happen AFTER a card was Distributed
+        dist_events_only = df_id_log_dist[df_id_log_dist['Action'].isin(['Distributed', 'Undistributed'])].copy()
 
-        filtered_dist_df = dist_track_df[dist_track_df['Action'] == 'Distributed'].copy()
-
-        if not filtered_dist_df.empty:
+        if not dist_events_only.empty:
+            latest_log_dist = dist_events_only.drop_duplicates(subset=['Key'], keep='last')
+            currently_distributed = latest_log_dist[latest_log_dist['Action'] == 'Distributed']
             
-            # ✨ NEW: Sort chronologically so newest distributions appear at the very top
-            filtered_dist_df['Parsed_Date'] = pd.to_datetime(filtered_dist_df['Date'], dayfirst=True, errors='coerce')
-            filtered_dist_df = filtered_dist_df.sort_values(by='Parsed_Date', ascending=False).reset_index(drop=True)
-            
-            # ✨ NEW: Extract just the Date (DD-MM-YYYY) dropping the time for clean display and grouping
-            filtered_dist_df['Distributed Date'] = filtered_dist_df['Date'].apply(lambda x: str(x).split(' ')[0] if pd.notna(x) and str(x) != 'nan' else '')
+            filtered_dist_df = pd.merge(df_m_dist, currently_distributed[['Key', 'Date']], on='Key', how='inner')
 
-            st.write(f"Showing **{len(filtered_dist_df)}** distributed ID cards.")
+            if not filtered_dist_df.empty:
+                filtered_dist_df['Parsed_Date'] = pd.to_datetime(filtered_dist_df['Date'], dayfirst=True, errors='coerce')
+                filtered_dist_df = filtered_dist_df.sort_values(by='Parsed_Date', ascending=False).reset_index(drop=True)
+                filtered_dist_df['Distributed Date'] = filtered_dist_df['Date'].apply(lambda x: str(x).split(' ')[0] if pd.notna(x) and str(x) != 'nan' else '')
 
-            if 'Section' not in filtered_dist_df.columns:
-                filtered_dist_df['Section'] = 'A'
-            filtered_dist_df['Section'] = filtered_dist_df['Section'].fillna('A').astype(str)
+                st.write(f"Showing **{len(filtered_dist_df)}** distributed ID cards.")
 
-            for c in ['Father', 'Mother', 'DOB', 'Mobile', 'BPS Code']:
-                if c not in filtered_dist_df.columns:
-                    filtered_dist_df[c] = ""
+                if 'Section' not in filtered_dist_df.columns:
+                    filtered_dist_df['Section'] = 'A'
+                filtered_dist_df['Section'] = filtered_dist_df['Section'].fillna('A').astype(str)
 
-            def format_dist_dob(raw_dob):
-                raw_dob = str(raw_dob).strip().split(" ")[0]
-                fmt_dob = raw_dob
-                if raw_dob and raw_dob.lower() not in ['nan', 'none', 'nat', '']:
-                    try:
-                        if re.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$", raw_dob):
-                            parts = re.split(r"[-/]", raw_dob)
-                            fmt_dob = f"{int(parts[2]):02d}.{int(parts[1]):02d}.{parts[0]}"
-                        else:
-                            dt = pd.to_datetime(raw_dob, dayfirst=True)
-                            fmt_dob = dt.strftime('%d.%m.%Y')
-                    except:
-                        fmt_dob = raw_dob.replace('-', '.').replace('/', '.')
-                return fmt_dob
+                for c in ['Father', 'Mother', 'DOB', 'Mobile', 'BPS Code']:
+                    if c not in filtered_dist_df.columns:
+                        filtered_dist_df[c] = ""
 
-            filtered_dist_df['DOB'] = filtered_dist_df['DOB'].apply(format_dist_dob)
+                def format_dist_dob(raw_dob):
+                    raw_dob = str(raw_dob).strip().split(" ")[0]
+                    fmt_dob = raw_dob
+                    if raw_dob and raw_dob.lower() not in ['nan', 'none', 'nat', '']:
+                        try:
+                            if re.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$", raw_dob):
+                                parts = re.split(r"[-/]", raw_dob)
+                                fmt_dob = f"{int(parts[2]):02d}.{int(parts[1]):02d}.{parts[0]}"
+                            else:
+                                dt = pd.to_datetime(raw_dob, dayfirst=True)
+                                fmt_dob = dt.strftime('%d.%m.%Y')
+                        except:
+                            fmt_dob = raw_dob.replace('-', '.').replace('/', '.')
+                    return fmt_dob
 
-            def get_valid_photo(row):
-                thumb = str(row.get('Thumb_URL', '')).strip()
-                photo = str(row.get('Photo_URL', '')).strip()
-                if thumb and thumb.lower() not in ['nan', 'none']: return thumb
-                if photo and photo.lower() not in ['nan', 'none']: return photo
-                return ""
+                filtered_dist_df['DOB'] = filtered_dist_df['DOB'].apply(format_dist_dob)
 
-            filtered_dist_df['Image_Target'] = filtered_dist_df.apply(get_valid_photo, axis=1)
+                def get_valid_photo(row):
+                    thumb = str(row.get('Thumb_URL', '')).strip()
+                    photo = str(row.get('Photo_URL', '')).strip()
+                    if thumb and thumb.lower() not in ['nan', 'none']: return thumb
+                    if photo and photo.lower() not in ['nan', 'none']: return photo
+                    return ""
 
-            with st.spinner("Loading student photos..."):
-                with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe:
-                    filtered_dist_df['Photo'] = list(exe.map(get_secure_photo_b64, filtered_dist_df['Image_Target'].tolist()))
+                filtered_dist_df['Image_Target'] = filtered_dist_df.apply(get_valid_photo, axis=1)
 
-            # ✨ NEW: Alternate Row Colors based purely on the unique Distribution Dates!
-            unique_dates_dist = filtered_dist_df['Distributed Date'].unique().tolist()
-            color_map_dist = {d: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, d in enumerate(unique_dates_dist)}
+                with st.spinner("Loading student photos..."):
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe:
+                        filtered_dist_df['Photo'] = list(exe.map(get_secure_photo_b64, filtered_dist_df['Image_Target'].tolist()))
 
-            def dist_row_style(row):
-                bg = color_map_dist.get(row['Distributed Date'], '#ffffff')
-                return [f'background-color: {bg}' for _ in row]
+                unique_dates_dist = filtered_dist_df['Distributed Date'].unique().tolist()
+                color_map_dist = {d: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, d in enumerate(unique_dates_dist)}
 
-            # ✨ NEW: Adding 'Distributed Date' to the final visual columns
-            show_cols_dist = ['Photo', 'Name', 'Father', 'Mother', 'Class', 'Section', 'DOB', 'Mobile', 'BPS Code', 'Distributed Date']
-            
-            styled_dist_df = filtered_dist_df[show_cols_dist].style.apply(dist_row_style, axis=1)
+                def dist_row_style(row):
+                    bg = color_map_dist.get(row['Distributed Date'], '#ffffff')
+                    return [f'background-color: {bg}' for _ in row]
 
-            st.data_editor(
-                styled_dist_df,
-                hide_index=True,
-                use_container_width=True,
-                column_config={
-                    "Photo": st.column_config.ImageColumn("Stamp Size Photo", width="medium")
-                },
-                disabled=True,
-                key="distributed_grid"
-            )
+                show_cols_dist = ['Photo', 'Name', 'Father', 'Mother', 'Class', 'Section', 'DOB', 'Mobile', 'BPS Code', 'Distributed Date']
+                
+                styled_dist_df = filtered_dist_df[show_cols_dist].style.apply(dist_row_style, axis=1)
+
+                st.data_editor(
+                    styled_dist_df,
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "Photo": st.column_config.ImageColumn("Stamp Size Photo", width="medium")
+                    },
+                    disabled=True,
+                    key="distributed_grid"
+                )
+            else:
+                st.success("No cards have been distributed yet. Scan them in the Scanner tab!")
         else:
             st.success("No cards have been distributed yet. Scan them in the Scanner tab!")
     else:

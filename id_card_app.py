@@ -69,8 +69,26 @@ def get_ist_now():
     utc_now = datetime.now(timezone.utc)
     return utc_now + timedelta(hours=5, minutes=30)
 
+# ✨ NEW: Bulletproof Key Generators to prevent all mismatch bugs
+def get_unified_key(df, name_col='Name'):
+    if 'Class' not in df.columns: df['Class'] = ''
+    if 'Roll' not in df.columns: df['Roll'] = ''
+    if name_col not in df.columns: df[name_col] = ''
+    
+    c = df['Class'].astype(str).str.strip().str.upper()
+    r = df['Roll'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+    n = df[name_col].astype(str).str.strip().str.upper()
+    return c + "_" + r + "_" + n
+
+def get_photo_key(df):
+    if 'Class' not in df.columns: df['Class'] = ''
+    if 'Roll' not in df.columns: df['Roll'] = ''
+    
+    c = df['Class'].astype(str).str.strip().str.upper()
+    r = df['Roll'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+    return c + "_" + r
+
 def play_beep():
-    """Plays a quick beep sound using the browser's AudioContext"""
     beep_html = """
     <script>
     const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -139,14 +157,14 @@ def fetch_class_photo_status():
                 title_clean = title.split("- PHOTO")[0].strip()
                 parts = title_clean.split()
                 if len(parts) >= 2 and parts[0] == "CLASS":
-                    class_name = f"CLASS {parts[1]}"
+                    class_name = f"CLASS {parts[1].strip()}"
                 else:
                     continue
                 
                 values = ws.get_all_values()
                 for row in values:
                     if not row or len(row) < 2: continue
-                    roll = str(row[0]).strip()
+                    roll = str(row[0]).strip().replace('.0', '')
                     if not roll.isdigit(): continue 
                     
                     is_taken = False
@@ -157,7 +175,7 @@ def fetch_class_photo_status():
                             break
                         
                     if is_taken:
-                        taken_keys.add(f"{class_name}_{roll}")
+                        taken_keys.add(f"{class_name.upper()}_{roll}")
     except:
         pass
     return list(taken_keys)
@@ -212,10 +230,8 @@ def reset_generated_status():
         if len(data) > 1:
             headers = data[0]
             df = pd.DataFrame(data[1:], columns=headers)
-            # Filter out the "Generated" records, keep everything else (like "Distributed")
-            df_kept = df[df['Action'] != 'Generated']
+            df_kept = df[df['Action'].astype(str).str.strip() != 'Generated']
             
-            # Clear the sheet and write back only the kept records
             ws.clear()
             ws.append_row(headers)
             if not df_kept.empty:
@@ -443,19 +459,16 @@ with tabs[0]:
     df_id_log = fetch_sheet_data("id_card_log")
     
     if not df_master.empty and not df_log.empty:
-        df_master['Roll'] = df_master['Roll'].astype(str)
-        df_log['Roll'] = df_log['Roll'].astype(str)
-        
         merged = pd.merge(df_master, df_log, on=['Class', 'Section', 'Roll'], how='left', indicator=True, suffixes=('', '_log'))
+        merged['Key'] = get_unified_key(merged, name_col='Name_x' if 'Name_x' in merged.columns else 'Name')
         
         if not df_id_log.empty:
-            df_id_log['Key'] = df_id_log['Class'].astype(str) + "_" + df_id_log['Roll'].astype(str) + "_" + df_id_log['Name'].astype(str).str.strip().str.upper()
+            df_id_log['Action'] = df_id_log['Action'].astype(str).str.strip()
+            df_id_log['Key'] = get_unified_key(df_id_log)
             gen_keys = df_id_log[df_id_log['Action'] == 'Generated']['Key'].unique().tolist()
         else:
             gen_keys = []
             
-        name_col = 'Name_x' if 'Name_x' in merged.columns else 'Name'
-        merged['Key'] = merged['Class'].astype(str) + "_" + merged['Roll'].astype(str) + "_" + merged[name_col].astype(str).str.strip().str.upper()
         merged['Generated'] = merged['Key'].isin(gen_keys)
         
         st.markdown("##### 🎛️ Generator Filters")
@@ -478,12 +491,10 @@ with tabs[0]:
 
         def is_ready_to_print(row):
             has_photo = pd.notna(row.get('Photo_URL')) and str(row.get('Photo_URL')).strip() != ""
-            
             is_returned = str(row.get('Return Status', '')).strip() == 'Complete'
             has_corr = any([str(row.get(f'Old {f}', '')).strip() not in ['','nan','None'] for f in ['Student Name', 'Father Name', 'Mobile Number']])
             is_verified = str(row.get('Data Corrected', '')).strip() == 'Yes'
             form_ok = is_returned and (is_verified if has_corr else True)
-            
             is_missing = (row['_merge'] == 'left_only')
             
             if missing_form_only:
@@ -491,10 +502,8 @@ with tabs[0]:
                 if require_photo and not has_photo: return False
                 return True
 
-            if require_photo and not has_photo:
-                return False
-            if require_form and not form_ok:
-                return False
+            if require_photo and not has_photo: return False
+            if require_form and not form_ok: return False
             return True
 
         merged['Ready'] = merged.apply(is_ready_to_print, axis=1)
@@ -508,13 +517,11 @@ with tabs[0]:
             print_ready = print_ready.reset_index(drop=True)
             print_ready.insert(0, "Select", False)
             
-            if 'Section' not in print_ready.columns:
-                print_ready['Section'] = 'A'
+            if 'Section' not in print_ready.columns: print_ready['Section'] = 'A'
             print_ready['Section'] = print_ready['Section'].fillna('A').astype(str)
             
             for c in ['Father', 'Mother', 'DOB', 'Mobile']:
-                if c not in print_ready.columns:
-                    print_ready[c] = ""
+                if c not in print_ready.columns: print_ready[c] = ""
             
             def format_grid_dob(raw_dob):
                 raw_dob = str(raw_dob).strip().split(" ")[0]
@@ -574,7 +581,6 @@ with tabs[0]:
             if not selected_students.empty:
                 num_students = len(selected_students)
                 pages_needed = math.ceil(num_students / 10)
-                
                 st.divider()
                 st.info(f"🖨️ **Print Summary:** You selected **{num_students}** students. Requires **{pages_needed}** A4 page(s).")
                 
@@ -582,27 +588,21 @@ with tabs[0]:
                     st.session_state['generated_pdf_data'] = None 
                     photo_dict = {}
                     my_bar = st.progress(0, text="Starting secure fetch...")
-                    
                     for idx, (index, student) in enumerate(selected_students.iterrows()):
                         sid = str(student.get('Sl', index)) + "_" + str(student.get('Roll', '0'))
                         photo_url = str(student.get('Photo_URL', ''))
-                        
                         drive_id = extract_drive_id(photo_url)
                         if drive_id:
                             img_bytes = fetch_secure_image_bytes(drive_id)
-                            if img_bytes:
-                                photo_dict[sid] = img_bytes
-                                
+                            if img_bytes: photo_dict[sid] = img_bytes
                         my_bar.progress((idx + 1) / num_students * 0.5, text=f"Fetching photo {idx + 1} of {num_students}...")
                     
                     pdf_bytes = generate_pdf(selected_students.to_dict('records'), photo_dict, progress_bar=my_bar)
                     batch_log_action("id_card_log", selected_students, "Generated")
-                        
                     st.session_state['generated_pdf_data'] = pdf_bytes
                     clear_grid_states()
                     st.balloons()
                     st.rerun()
-                    
         else:
             st.success("No students found in this stage. Check the filters above or scan new forms!")
     else:
@@ -671,7 +671,7 @@ with tabs[1]:
         st.info("Scan ID cards above to add them to your distribution list.")
 
 # ==========================================
-# TAB 3: DATABASE EXPLORER
+# TAB 3: DATABASE EXPLORER & SUMMARIES
 # ==========================================
 with tabs[2]:
     st.subheader("📂 ID Lifecycle & Media Tracker")
@@ -679,31 +679,37 @@ with tabs[2]:
     df_m = fetch_sheet_data("students_master")
     df_l = fetch_sheet_data("form_distribution_log")
     df_photo = fetch_sheet_data("photo_log")
-    df_id_log = fetch_sheet_data("id_card_log")
+    df_id_log_raw = fetch_sheet_data("id_card_log")
     
+    # ✨ FIX: Strict Data Processing to guarantee chronological accuracy for math
+    if not df_id_log_raw.empty:
+        df_id_log = df_id_log_raw.copy()
+        df_id_log['Action'] = df_id_log['Action'].astype(str).str.strip()
+        df_id_log['Key'] = get_unified_key(df_id_log)
+        
+        df_id_log['Parsed_Time'] = pd.to_datetime(df_id_log['Date'], format="%d-%m-%Y %H:%M:%S", errors='coerce')
+        df_id_log['Parsed_Time'] = df_id_log['Parsed_Time'].fillna(pd.to_datetime(df_id_log['Date'], dayfirst=True, errors='coerce'))
+        df_id_log = df_id_log.sort_values(by='Parsed_Time', ascending=True).reset_index(drop=True)
+    else:
+        df_id_log = pd.DataFrame()
+
     if not df_m.empty and not df_l.empty:
-        df_m['Roll'] = df_m['Roll'].astype(str)
-        df_l['Roll'] = df_l['Roll'].astype(str)
-        
         explorer_db = pd.merge(df_m, df_l, on=['Class', 'Section', 'Roll'], how='left', suffixes=('', '_log'))
-        
-        name_col = 'Name_x' if 'Name_x' in explorer_db.columns else 'Name'
-        explorer_db['Key'] = explorer_db['Class'].astype(str) + "_" + explorer_db['Roll'].astype(str) + "_" + explorer_db[name_col].astype(str).str.strip().str.upper()
-        explorer_db['Photo_Key'] = explorer_db['Class'].astype(str) + "_" + explorer_db['Roll'].astype(str)
+        explorer_db['Key'] = get_unified_key(explorer_db, name_col='Name_x' if 'Name_x' in explorer_db.columns else 'Name')
+        explorer_db['Photo_Key'] = get_photo_key(explorer_db)
         
         photo_keys, gen_keys, dist_keys = [], [], []
         
         if not df_photo.empty:
-            df_photo['Photo_Key'] = df_photo['Class'].astype(str) + "_" + df_photo['Roll'].astype(str)
+            df_photo['Photo_Key'] = get_photo_key(df_photo)
             latest_photo = df_photo.drop_duplicates(subset=['Photo_Key'], keep='last')
             photo_keys = latest_photo[latest_photo['Action'] == 'Taken']['Photo_Key'].tolist()
             
         if not df_id_log.empty:
-            df_id_log['Key'] = df_id_log['Class'].astype(str) + "_" + df_id_log['Roll'].astype(str) + "_" + df_id_log['Name'].astype(str).str.strip().str.upper()
             gen_keys = df_id_log[df_id_log['Action'] == 'Generated']['Key'].unique().tolist()
-            
             dist_df = df_id_log[df_id_log['Action'].isin(['Distributed', 'Undistributed'])]
             if not dist_df.empty:
+                # Guaranteed chronological last thanks to strict sort above
                 latest_dist = dist_df.drop_duplicates(subset=['Key'], keep='last')
                 dist_keys = latest_dist[latest_dist['Action'] == 'Distributed']['Key'].tolist()
 
@@ -745,13 +751,10 @@ with tabs[2]:
             filtered_view = filtered_view[(filtered_view['Generated'] == True) & (filtered_view['Distributed'] == False)]
 
         st.write("---")
-        
         metrics_container = st.container()
 
         filtered_view = filtered_view.reset_index(drop=True)
-        
-        if 'Section' not in filtered_view.columns:
-            filtered_view['Section'] = 'A'
+        if 'Section' not in filtered_view.columns: filtered_view['Section'] = 'A'
         filtered_view['Section'] = filtered_view['Section'].fillna('A').astype(str)
 
         unique_groups_db = (filtered_view['Class'].astype(str) + "_" + filtered_view['Section'].astype(str)).unique().tolist()
@@ -778,16 +781,12 @@ with tabs[2]:
                 "Distributed": st.column_config.CheckboxColumn("Distributed?"),
             },
             disabled=['Photo_URL', 'Thumb_URL', 'Name', 'Class', 'Section', 'Roll', 'Form_OK', 'Verified', 'Generated'],
-            hide_index=True,
-            use_container_width=True,
-            key="db_explorer_grid"
+            hide_index=True, use_container_width=True, key="db_explorer_grid"
         )
 
         with metrics_container:
             st.markdown("##### 📊 Live Column Counts")
-            
             ready_mask = (final_ed['Photo_URL'] == True) & (final_ed['Form_OK'] == True) & (final_ed['Verified'] == True) & (final_ed['Generated'] == False)
-            
             c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
             c1.metric("📸 Photo Taken", int(final_ed['Photo Taken'].sum()))
             c2.metric("🔗 Photo Link", int(final_ed['Photo_URL'].sum()))
@@ -799,10 +798,9 @@ with tabs[2]:
             c8.metric("🎁 Distributed", int(final_ed['Distributed'].sum()))
             st.write("") 
 
-        # ✨ Date-wise Action Summary Area
+        # 📅 Date-wise Action Summary
         st.write("---")
         st.markdown("##### 📅 Date-wise Action Summary")
-        
         if not df_id_log.empty:
             summary_log_action = df_id_log.copy()
             summary_log_action['Date_Only'] = summary_log_action['Date'].apply(lambda x: str(x).split(' ')[0] if pd.notna(x) and str(x).strip() != 'nan' else '')
@@ -811,20 +809,10 @@ with tabs[2]:
             summary_log_action = summary_log_action[summary_log_action['Action'].isin(target_actions)]
             
             if not summary_log_action.empty:
-                pivot_df = pd.pivot_table(
-                    summary_log_action,
-                    index='Date_Only',
-                    columns='Action',
-                    aggfunc='size',
-                    fill_value=0
-                ).reset_index()
-                
+                pivot_df = pd.pivot_table(summary_log_action, index='Date_Only', columns='Action', aggfunc='size', fill_value=0).reset_index()
                 for act in target_actions:
-                    if act not in pivot_df.columns:
-                        pivot_df[act] = 0
-                        
+                    if act not in pivot_df.columns: pivot_df[act] = 0
                 pivot_df = pivot_df[['Date_Only'] + target_actions]
-                
                 pivot_df['Parsed'] = pd.to_datetime(pivot_df['Date_Only'], dayfirst=True, errors='coerce')
                 pivot_df = pivot_df.sort_values('Parsed', ascending=False).drop(columns=['Parsed']).reset_index(drop=True)
                 pivot_df.rename(columns={'Date_Only': 'Date'}, inplace=True)
@@ -840,23 +828,18 @@ with tabs[2]:
         else:
             st.info("ID card log is empty.")
 
-        # ✨ Lot-wise Distribution Summary Area
+        # 📦 Lot-wise Distribution Summary
         st.write("---")
         st.markdown("##### 📦 Lot-wise Distribution Summary (Based on 'Received from Shop' Date)")
-        
         if not df_id_log.empty:
-            summary_log_lot = df_id_log.copy()
-            summary_log_lot['Roll_Clean'] = summary_log_lot['Roll'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-            summary_log_lot['Key'] = summary_log_lot['Class'].astype(str).str.strip() + "_" + summary_log_lot['Roll_Clean'] + "_" + summary_log_lot['Name'].astype(str).str.strip().str.upper()
-
-            received_log = summary_log_lot[summary_log_lot['Action'] == 'Received from Shop'].copy()
+            received_log = df_id_log[df_id_log['Action'] == 'Received from Shop'].copy()
             if not received_log.empty:
                 received_log['Date_Only'] = received_log['Date'].apply(lambda x: str(x).split(' ')[0] if pd.notna(x) and str(x).strip() != 'nan' else '')
                 last_received = received_log.drop_duplicates(subset=['Key'], keep='last')[['Key', 'Date_Only']]
                 last_received.rename(columns={'Date_Only': 'Lot Date (Received)'}, inplace=True)
                 
-                latest_status = summary_log_lot.drop_duplicates(subset=['Key'], keep='last')[['Key', 'Action']]
-                latest_status['Is_Distributed'] = latest_status['Action'].apply(lambda x: 1 if x == 'Distributed' else 0)
+                latest_status = df_id_log.drop_duplicates(subset=['Key'], keep='last')[['Key', 'Action']]
+                latest_status['Is_Distributed'] = latest_status['Action'].apply(lambda x: 1 if str(x) == 'Distributed' else 0)
                 
                 lot_df = pd.merge(last_received, latest_status, on='Key', how='left')
                 lot_df['Is_Distributed'] = lot_df['Is_Distributed'].fillna(0).astype(int)
@@ -928,12 +911,12 @@ with tabs[3]:
         today_present = df_mdm[df_mdm['Date'] == today_str].copy()
         
         if not today_present.empty:
-            today_present['Key'] = today_present['Class'].astype(str) + "_" + today_present['Roll'].astype(str)
+            today_present['Key'] = get_photo_key(today_present)
             
             df_photo_local = fetch_sheet_data("photo_log")
             photo_keys_local = []
             if not df_photo_local.empty:
-                df_photo_local['Key'] = df_photo_local['Class'].astype(str) + "_" + df_photo_local['Roll'].astype(str)
+                df_photo_local['Key'] = get_photo_key(df_photo_local)
                 latest_photo_local = df_photo_local.drop_duplicates(subset=['Key'], keep='last')
                 photo_keys_local = latest_photo_local[latest_photo_local['Action'] == 'Taken']['Key'].tolist()
             
@@ -943,31 +926,24 @@ with tabs[3]:
             pending_students = today_present[~today_present['Key'].isin(all_taken_keys)].copy()
             
             if not pending_students.empty:
-                
                 df_m_tab4 = fetch_sheet_data("students_master")
                 if not df_m_tab4.empty:
-                    name_col_p = 'Name_x' if 'Name_x' in pending_students.columns else 'Name'
-                    pending_students['Join_Key'] = pending_students['Class'].astype(str) + "_" + pending_students['Roll'].astype(str) + "_" + pending_students[name_col_p].astype(str).str.strip().str.upper()
-
-                    name_col_m = 'Name_x' if 'Name_x' in df_m_tab4.columns else 'Name'
-                    df_m_tab4['Join_Key'] = df_m_tab4['Class'].astype(str) + "_" + df_m_tab4['Roll'].astype(str) + "_" + df_m_tab4[name_col_m].astype(str).str.strip().str.upper()
+                    pending_students['Join_Key'] = get_unified_key(pending_students, name_col='Name_x' if 'Name_x' in pending_students.columns else 'Name')
+                    df_m_tab4['Join_Key'] = get_unified_key(df_m_tab4, name_col='Name_x' if 'Name_x' in df_m_tab4.columns else 'Name')
 
                     cols_to_pull = ['Join_Key', 'Father', 'Mother', 'DOB', 'Mobile']
                     if 'Section' not in pending_students.columns and 'Section' in df_m_tab4.columns:
                         cols_to_pull.append('Section')
-
                     pending_students = pd.merge(pending_students, df_m_tab4[cols_to_pull], on='Join_Key', how='left')
 
                 if 'Name' not in pending_students.columns and 'Name_x' in pending_students.columns:
                     pending_students['Name'] = pending_students['Name_x']
 
-                if 'Section' not in pending_students.columns:
-                    pending_students['Section'] = 'A'
+                if 'Section' not in pending_students.columns: pending_students['Section'] = 'A'
                 pending_students['Section'] = pending_students['Section'].fillna('A').astype(str)
 
                 for c in ['Father', 'Mother', 'DOB', 'Mobile', 'Name']:
-                    if c not in pending_students.columns:
-                        pending_students[c] = ""
+                    if c not in pending_students.columns: pending_students[c] = ""
 
                 def format_tab4_dob(raw_dob):
                     raw_dob = str(raw_dob).strip().split(" ")[0]
@@ -987,7 +963,6 @@ with tabs[3]:
                 pending_students['DOB'] = pending_students['DOB'].apply(format_tab4_dob)
 
                 display_cols = ['Name', 'Father', 'Mother', 'Class', 'Section', 'DOB', 'Mobile']
-
                 unique_groups_tab4 = (pending_students['Class'].astype(str) + "_" + pending_students['Section'].astype(str)).unique().tolist()
                 color_map_tab4 = {grp: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, grp in enumerate(unique_groups_tab4)}
 
@@ -997,7 +972,6 @@ with tabs[3]:
                     return [f'background-color: {bg}' for _ in row]
 
                 styled_pending_df = pending_students[display_cols].style.apply(tab4_row_style, axis=1)
-
                 st.dataframe(styled_pending_df, hide_index=True, use_container_width=True)
 
                 st.write("---")
@@ -1028,12 +1002,17 @@ with tabs[4]:
     st.write("Track the physical ID cards as they are sent to the shop for lamination and ribbons.")
     
     df_m_shop = fetch_sheet_data("students_master")
-    df_id_log_shop = fetch_sheet_data("id_card_log")
+    df_id_log_shop_raw = fetch_sheet_data("id_card_log")
     
-    if not df_m_shop.empty and not df_id_log_shop.empty:
-        name_col = 'Name_x' if 'Name_x' in df_m_shop.columns else 'Name'
-        df_m_shop['Key'] = df_m_shop['Class'].astype(str) + "_" + df_m_shop['Roll'].astype(str) + "_" + df_m_shop[name_col].astype(str).str.strip().str.upper()
-        df_id_log_shop['Key'] = df_id_log_shop['Class'].astype(str) + "_" + df_id_log_shop['Roll'].astype(str) + "_" + df_id_log_shop['Name'].astype(str).str.strip().str.upper()
+    if not df_m_shop.empty and not df_id_log_shop_raw.empty:
+        df_id_log_shop = df_id_log_shop_raw.copy()
+        df_id_log_shop['Action'] = df_id_log_shop['Action'].astype(str).str.strip()
+        df_id_log_shop['Key'] = get_unified_key(df_id_log_shop)
+        df_id_log_shop['Parsed_Time'] = pd.to_datetime(df_id_log_shop['Date'], format="%d-%m-%Y %H:%M:%S", errors='coerce')
+        df_id_log_shop['Parsed_Time'] = df_id_log_shop['Parsed_Time'].fillna(pd.to_datetime(df_id_log_shop['Date'], dayfirst=True, errors='coerce'))
+        df_id_log_shop = df_id_log_shop.sort_values(by='Parsed_Time', ascending=True).reset_index(drop=True)
+
+        df_m_shop['Key'] = get_unified_key(df_m_shop, name_col='Name_x' if 'Name_x' in df_m_shop.columns else 'Name')
         
         latest_log = df_id_log_shop.drop_duplicates(subset=['Key'], keep='last')
         track_df = pd.merge(df_m_shop, latest_log[['Key', 'Action']], on='Key', how='left')
@@ -1084,17 +1063,13 @@ with tabs[4]:
                     filtered_df['Photo'] = list(exe.map(get_secure_photo_b64, filtered_df['Image_Target'].tolist()))
             
             filtered_df.insert(0, "Select", False)
-            
             show_cols = ['Select', 'Photo', 'Name', 'Class', 'Roll', 'BPS Code']
-            
             for c in show_cols:
-                if c not in filtered_df.columns:
-                    filtered_df[c] = ""
+                if c not in filtered_df.columns: filtered_df[c] = ""
                     
             ed_df = st.data_editor(
                 filtered_df[show_cols],
-                hide_index=True,
-                use_container_width=True,
+                hide_index=True, use_container_width=True,
                 column_config={
                     "Select": st.column_config.CheckboxColumn("Select", default=False),
                     "Photo": st.column_config.ImageColumn("Stamp Size Photo", width="medium")
@@ -1148,15 +1123,20 @@ with tabs[5]:
     st.write("View the complete profile of all students whose ID cards have been successfully distributed.")
 
     df_m_dist = fetch_sheet_data("students_master")
-    df_id_log_dist = fetch_sheet_data("id_card_log")
+    df_id_log_dist_raw = fetch_sheet_data("id_card_log")
 
-    if not df_m_dist.empty and not df_id_log_dist.empty:
-        df_m_dist['Roll_Clean'] = df_m_dist['Roll'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        df_id_log_dist['Roll_Clean'] = df_id_log_dist['Roll'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+    if not df_m_dist.empty and not df_id_log_dist_raw.empty:
+        
+        # ✨ FIX: Apply the unified key system and strict chronological sort!
+        df_id_log_dist = df_id_log_dist_raw.copy()
+        df_id_log_dist['Action'] = df_id_log_dist['Action'].astype(str).str.strip()
+        df_id_log_dist['Key'] = get_unified_key(df_id_log_dist)
+        
+        df_id_log_dist['Parsed_Time'] = pd.to_datetime(df_id_log_dist['Date'], format="%d-%m-%Y %H:%M:%S", errors='coerce')
+        df_id_log_dist['Parsed_Time'] = df_id_log_dist['Parsed_Time'].fillna(pd.to_datetime(df_id_log_dist['Date'], dayfirst=True, errors='coerce'))
+        df_id_log_dist = df_id_log_dist.sort_values(by='Parsed_Time', ascending=True).reset_index(drop=True)
 
-        name_col = 'Name_x' if 'Name_x' in df_m_dist.columns else 'Name'
-        df_m_dist['Key'] = df_m_dist['Class'].astype(str).str.strip() + "_" + df_m_dist['Roll_Clean'] + "_" + df_m_dist[name_col].astype(str).str.strip().str.upper()
-        df_id_log_dist['Key'] = df_id_log_dist['Class'].astype(str).str.strip() + "_" + df_id_log_dist['Roll_Clean'] + "_" + df_id_log_dist['Name'].astype(str).str.strip().str.upper()
+        df_m_dist['Key'] = get_unified_key(df_m_dist, name_col='Name_x' if 'Name_x' in df_m_dist.columns else 'Name')
 
         dist_events_only = df_id_log_dist[df_id_log_dist['Action'].isin(['Distributed', 'Undistributed'])].copy()
 
@@ -1173,13 +1153,11 @@ with tabs[5]:
 
                 st.write(f"Showing **{len(filtered_dist_df)}** distributed ID cards.")
 
-                if 'Section' not in filtered_dist_df.columns:
-                    filtered_dist_df['Section'] = 'A'
+                if 'Section' not in filtered_dist_df.columns: filtered_dist_df['Section'] = 'A'
                 filtered_dist_df['Section'] = filtered_dist_df['Section'].fillna('A').astype(str)
 
                 for c in ['Father', 'Mother', 'DOB', 'Mobile', 'BPS Code']:
-                    if c not in filtered_dist_df.columns:
-                        filtered_dist_df[c] = ""
+                    if c not in filtered_dist_df.columns: filtered_dist_df[c] = ""
 
                 def format_dist_dob(raw_dob):
                     raw_dob = str(raw_dob).strip().split(" ")[0]
@@ -1219,18 +1197,15 @@ with tabs[5]:
                     return [f'background-color: {bg}' for _ in row]
 
                 show_cols_dist = ['Photo', 'Name', 'Father', 'Mother', 'Class', 'Section', 'DOB', 'Mobile', 'BPS Code', 'Distributed Date']
-                
                 styled_dist_df = filtered_dist_df[show_cols_dist].style.apply(dist_row_style, axis=1)
 
                 st.data_editor(
                     styled_dist_df,
-                    hide_index=True,
-                    use_container_width=True,
+                    hide_index=True, use_container_width=True,
                     column_config={
                         "Photo": st.column_config.ImageColumn("Stamp Size Photo", width="medium")
                     },
-                    disabled=True,
-                    key="distributed_grid"
+                    disabled=True, key="distributed_grid"
                 )
             else:
                 st.success("No cards have been distributed yet. Scan them in the Scanner tab!")

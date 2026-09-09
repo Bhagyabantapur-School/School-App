@@ -37,12 +37,17 @@ st.set_page_config(page_title="BPS Digital - ID Generator", page_icon="🏫", la
 # Initialize Session States
 if 'distribution_log' not in st.session_state:
     st.session_state['distribution_log'] = pd.DataFrame(columns=['Name', 'Roll', 'Class', 'BPS Code'])
+# ✨ NEW: Separate session state for the "Received from Shop" scanner
+if 'received_log' not in st.session_state:
+    st.session_state['received_log'] = pd.DataFrame(columns=['Name', 'Roll', 'Class', 'BPS Code'])
 if 'generated_pdf_data' not in st.session_state:
     st.session_state['generated_pdf_data'] = None
 if 'pending_pdf_data' not in st.session_state:
     st.session_state['pending_pdf_data'] = None
 if 'last_scanned_dist' not in st.session_state:
     st.session_state['last_scanned_dist'] = None
+if 'last_scanned_recv' not in st.session_state:
+    st.session_state['last_scanned_recv'] = None
 
 # --- 2. GOOGLE CREDENTIALS & DRIVE CONNECTIONS ---
 @st.cache_resource
@@ -813,8 +818,6 @@ with tabs[2]:
                 last_received = received_log.drop_duplicates(subset=['Key'], keep='last')[['Key', 'Date_Only']]
                 last_received.rename(columns={'Date_Only': 'Lot Date (Received)'}, inplace=True)
                 
-                # ✨ FLAWLESS FIX: We use 'dist_keys' which safely holds the TRUE current distributed state of every card, 
-                # ignoring any extra PDF generated clicks that might have happened afterwards.
                 lot_df = last_received.copy()
                 lot_df['Is_Distributed'] = lot_df['Key'].apply(lambda k: 1 if k in dist_keys else 0)
                 
@@ -1013,12 +1016,69 @@ with tabs[4]:
             target_action = "Sent to Shop"
             btn_text = "📤 Mark Selected as 'Sent to Shop'"
             undo_action = None
+            
         elif "2." in view_filter:
+            # ✨ NEW: Scanner injected for fast Receiving!
+            st.markdown("<h4 style='color:#0056b3;'>📷 Scan QR to Receive Cards from Shop</h4>", unsafe_allow_html=True)
+            st.write("Scan the ID cards to instantly log them as received back from the lamination shop.")
+            
+            qr_code_recv = qrcode_scanner(key='receive_scanner')
+            
+            if qr_code_recv and qr_code_recv != st.session_state.get('last_scanned_recv'):
+                scanned_code = str(qr_code_recv).strip().upper()
+                s_match = df_m_shop[df_m_shop['BPS Code'].astype(str).str.strip().str.upper() == scanned_code]
+                
+                if not s_match.empty:
+                    student_name = str(s_match.iloc[0]['Name']).strip()
+                    student_class = str(s_match.iloc[0]['Class']).strip()
+                    student_roll = str(s_match.iloc[0]['Roll']).strip()
+
+                    card_status_df = track_df[track_df['BPS Code'].astype(str).str.strip().str.upper() == scanned_code]
+                    current_status = card_status_df.iloc[0]['Action'] if not card_status_df.empty else 'None'
+                    
+                    if current_status != 'Sent to Shop':
+                        st.warning(f"⚠️ Cannot receive **{student_name}**. Current status is '{current_status}', not 'Sent to Shop'.")
+                        st.session_state['last_scanned_recv'] = qr_code_recv
+                    else:
+                        existing = st.session_state['received_log'][st.session_state['received_log']['BPS Code'] == scanned_code]
+                        if not existing.empty:
+                            st.warning(f"⚠️ {student_name} is already in your received scan list!")
+                            st.session_state['last_scanned_recv'] = qr_code_recv
+                        else:
+                            new_entry = pd.DataFrame([{'Name': student_name, 'Roll': student_roll, 'Class': student_class, 'BPS Code': scanned_code}])
+                            st.session_state['received_log'] = pd.concat([st.session_state['received_log'], new_entry], ignore_index=True)
+                            st.session_state['last_scanned_recv'] = qr_code_recv
+                            play_beep() 
+                            st.success(f"✅ **{student_name}** successfully scanned!")
+                else:
+                    st.error("Invalid QR Code or BPS Code not found in database.")
+                    st.session_state['last_scanned_recv'] = qr_code_recv
+
+            if not st.session_state['received_log'].empty:
+                st.markdown("##### 📥 Scanned Cards Ready to be Marked as Received")
+                st.dataframe(st.session_state['received_log'], use_container_width=True)
+                
+                if st.button("📥 Submit Scanned Cards as 'Received from Shop'", type="primary", use_container_width=True):
+                    batch_log_action("id_card_log", st.session_state['received_log'], "Received from Shop")
+                    st.success(f"✅ Successfully marked {len(st.session_state['received_log'])} cards as Received!")
+                    st.session_state['received_log'] = pd.DataFrame(columns=['Name', 'Roll', 'Class', 'BPS Code'])
+                    clear_grid_states()
+                    time.sleep(1.5)
+                    st.rerun()
+                    
+                if st.button("🗑️ Clear Receive Scan List"):
+                    st.session_state['received_log'] = pd.DataFrame(columns=['Name', 'Roll', 'Class', 'BPS Code'])
+                    st.rerun()
+
+            st.divider()
+            st.markdown("#### 📋 Or Manual Grid Selection")
+            
             filtered_df = track_df[track_df['Action'] == 'Sent to Shop'].copy()
             target_action = "Received from Shop"
-            btn_text = "📥 Mark Selected as 'Received from Shop'"
+            btn_text = "📥 Mark Manual Selection as 'Received from Shop'"
             undo_action = "Generated"
             undo_text = "⏪ Undo: Send back to 'Ready to Shop'"
+            
         else:
             filtered_df = track_df[track_df['Action'] == 'Received from Shop'].copy()
             target_action = None
@@ -1028,7 +1088,7 @@ with tabs[4]:
             st.info("💡 **To mark these cards as Distributed, please flip to the '📸 Scanner' tab and scan them as you hand them out.**")
             
         if not filtered_df.empty:
-            st.write(f"Showing **{len(filtered_df)}** valid students in this stage.")
+            st.write(f"Showing **{len(filtered_df)}** valid students in this list.")
                 
             filtered_df = filtered_df.reset_index(drop=True)
                 

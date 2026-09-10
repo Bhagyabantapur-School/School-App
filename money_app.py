@@ -145,30 +145,33 @@ with st.expander("⚡ Busy Time Quick Entry", expanded=True):
     b_type = st.radio("Flow Type", ["Expense (OUT)", "Income (IN)"], horizontal=True)
     
     c_amt1, c_amt2, c_amt3 = st.columns([1, 1, 1])
-    with c_amt1: b_amount = st.number_input("Total Amount (₹)", min_value=0.0, step=10.0, key="b_amt")
-    with c_amt2: b_due = st.number_input("Due / Pay Later (₹)", min_value=0.0, max_value=float(b_amount), value=0.0, step=1.0, key="b_due")
+    with c_amt1: b_amount = st.number_input("Total Amount (₹)", min_value=0.0, value=None, step=10.0, key="b_amt")
+    with c_amt2: b_due = st.number_input("Due / Pay Later (₹)", min_value=0.0, max_value=float(b_amount or 0.0), value=None, step=1.0, key="b_due")
     with c_amt3:
         st.markdown("<br>", unsafe_allow_html=True)
         chk_pers = st.checkbox("Entity: PERS", value=True)
         chk_mb = st.checkbox("Paid Acc: MB", value=False)
 
     if st.button("🚀 Fast Save", use_container_width=True, type="primary"):
-        if b_amount > 0:
+        safe_amount = float(b_amount or 0.0)
+        safe_due = float(b_due or 0.0)
+        
+        if safe_amount > 0:
             time_now = get_ist_now()
             today_str, time_str = time_now.strftime("%d-%m-%Y"), time_now.strftime("%H:%M")
             
             final_entity = "PERS" if chk_pers else ""
             final_tf = current_loc if should_inject_tofrom(current_loc) else ""
             
-            b_paid = b_amount - b_due
+            b_paid = safe_amount - safe_due
             
             if b_paid > 0:
                 sh.worksheet("MONEY_DATA").append_row([today_str, time_str, b_paid if "IN" in b_type else "", b_paid if "OUT" in b_type else "", "MB" if chk_mb else "", "", final_entity, "", "", "", final_tf, current_loc or "", "⚠️ INCOMPLETE"])
-            if b_due > 0:
-                sh.worksheet("MONEY_DATA").append_row([today_str, time_str, b_due if "IN" in b_type else "", b_due if "OUT" in b_type else "", "UNPAID", "", final_entity, "", "", "", final_tf, current_loc or "", "⚠️ INCOMPLETE"])
+            if safe_due > 0:
+                sh.worksheet("MONEY_DATA").append_row([today_str, time_str, safe_due if "IN" in b_type else "", safe_due if "OUT" in b_type else "", "UNPAID", "", final_entity, "", "", "", final_tf, current_loc or "", "⚠️ INCOMPLETE"])
                 
             load_money_data.clear()
-            st.success(f"Fast saved! Paid: ₹{b_paid}, Due: ₹{b_due}.")
+            st.success(f"Fast saved! Paid: ₹{b_paid}, Due: ₹{safe_due}.")
             st.rerun()
         else: st.warning("Enter an amount!")
     
@@ -193,21 +196,24 @@ with st.expander("🏍️ Quick Log: Bike Refuel & Auto-Mileage"):
         
     b_col1, b_col2, b_col3 = st.columns(3)
     with b_col1: b_odo = st.number_input("Current Odometer", min_value=last_odo, value=last_odo, step=1)
-    with b_col2: b_litres = st.number_input("Petrol (Litres)", min_value=0.0, step=0.1)
-    with b_col3: b_cost = st.number_input("Total Cost (₹)", min_value=0.0, step=10.0)
+    with b_col2: b_litres = st.number_input("Petrol (Litres)", min_value=0.0, value=None, step=0.1)
+    with b_col3: b_cost = st.number_input("Total Cost (₹)", min_value=0.0, value=None, step=10.0)
     
     b_acc_col1, b_acc_col2 = st.columns(2)
     with b_acc_col1: b_acc = st.selectbox("Paid From", get_clean_accounts(), key="bike_pay_acc")
     with b_acc_col2: 
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("⛽ Save Refuel Log", use_container_width=True, type="primary"):
-            if b_odo > last_odo and b_litres > 0 and b_cost > 0:
+            safe_litres = float(b_litres or 0.0)
+            safe_cost = float(b_cost or 0.0)
+            
+            if b_odo > last_odo and safe_litres > 0 and safe_cost > 0:
                 try:
                     time_now = get_ist_now()
                     date_str, time_str = time_now.strftime("%d-%m-%Y"), time_now.strftime("%H:%M")
                     
-                    sh.worksheet("BIKE_LOG").append_row([date_str, time_str, b_odo, b_litres, b_cost])
-                    sh.worksheet("MONEY_DATA").append_row([date_str, time_str, "", b_cost, b_acc, "Salary", "PERS", "NEEDS", "Transport", "Petrol", current_loc if should_inject_tofrom(current_loc) else "Petrol Pump", current_loc or "", f"Odo: {b_odo}"])
+                    sh.worksheet("BIKE_LOG").append_row([date_str, time_str, b_odo, safe_litres, safe_cost])
+                    sh.worksheet("MONEY_DATA").append_row([date_str, time_str, "", safe_cost, b_acc, "Salary", "PERS", "NEEDS", "Transport", "Petrol", current_loc if should_inject_tofrom(current_loc) else "Petrol Pump", current_loc or "", f"Odo: {b_odo}"])
                     load_bike_data.clear()
                     load_money_data.clear()
                     st.success("⛽ Refuel Logged! Mileage updated in Dashboard.")
@@ -368,8 +374,8 @@ with st.expander("📝 Add Manual Financial Record", expanded=False):
     with t_col2: entry_time_str = st.text_input("Time (HH:MM)", value=st.session_state.locked_time.strftime("%H:%M"))
     
     amt_col1, amt_col2 = st.columns(2)
-    with amt_col1: amount_in = st.number_input("IN (Income/Receive)", min_value=0.0, step=10.0)
-    with amt_col2: amount_out = st.number_input("OUT (Expense/Send)", min_value=0.0, step=10.0)
+    with amt_col1: amount_in = st.number_input("IN (Income/Receive)", min_value=0.0, value=None, step=10.0)
+    with amt_col2: amount_out = st.number_input("OUT (Expense/Send)", min_value=0.0, value=None, step=10.0)
     
     col1, col2 = st.columns(2)
     with col1:
@@ -428,12 +434,15 @@ with st.expander("📝 Add Manual Financial Record", expanded=False):
     remark = st.text_input("Type New Remark") if remark_box_sel == "-- Type New --" else ("" if remark_box_sel == "- None -" else remark_box_sel)
     
     if st.button("💾 Save Manual Money Entry", use_container_width=True):
+        safe_in = float(amount_in or 0.0)
+        safe_out = float(amount_out or 0.0)
+        
         try:
             try: parsed_time = datetime.strptime(entry_time_str.strip(), "%H:%M").strftime("%H:%M")
             except ValueError: st.error("⚠️ Invalid time! Use HH:MM format."); st.stop()
                 
-            sh.worksheet("MONEY_DATA").append_row([entry_date.strftime("%d-%m-%Y"), parsed_time, amount_in if amount_in > 0 else "", amount_out if amount_out > 0 else "", account, fund, entity, category, sub_cat, particulars, to_from, current_loc or "", remark])
+            sh.worksheet("MONEY_DATA").append_row([entry_date.strftime("%d-%m-%Y"), parsed_time, safe_in if safe_in > 0 else "", safe_out if safe_out > 0 else "", account, fund, entity, category, sub_cat, particulars, to_from, current_loc or "", remark])
             load_money_data.clear() 
-            st.success(f"Saved: ₹{amount_in if amount_in > 0 else amount_out} logged!")
+            st.success(f"Saved: ₹{safe_in if safe_in > 0 else safe_out} logged!")
             st.session_state.update(locked_date=get_ist_now().date(), locked_time=get_ist_now().time())
         except Exception as e: st.error(f"Failed to save: {e}")

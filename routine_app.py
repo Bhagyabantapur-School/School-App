@@ -325,12 +325,6 @@ try:
     current_sub_activities = scheduled_sub_activities
     current_check_list = scheduled_check_list
 
-    if current_activity in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"]: color = "#ff4b4b" 
-    elif current_activity in ["WORK", "REPORT", "TASK", "HOME TASK", "HOME UTILITIES"]: color = "#0068c9" 
-    elif current_activity == "HEALTH": color = "#2e7b32" 
-    elif current_activity in ["SLEEP", "PRE", "TEA", "OUT"]: color = "#ff9f36" 
-    else: color = "#333333" 
-
     hide_extras = (current_activity == "SLEEP")
     filtered_app_list = [app for app in base_app_list if app[0] in active_apps_filter] if active_apps_filter else []
 
@@ -346,23 +340,6 @@ try:
                             if file_name != "routine_app.py":
                                 st.switch_page(file_name)
         st.markdown("---")
-
-    st.markdown(f'<h3 style="margin: 5px 0px 10px 0px; font-size: 1.8rem; color: {color}; letter-spacing: 0.5px; text-align: left;">{current_activity}</h3>', unsafe_allow_html=True)
-
-    if current_activity_start:
-        dt_start = datetime.combine(now.date(), current_activity_start)
-        dt_start = ist_timezone.localize(dt_start)
-        if current_time < current_activity_start: dt_start -= timedelta(days=1)
-        elapsed = now - dt_start
-        eh, erem = divmod(int(elapsed.total_seconds()), 3600)
-        em = erem // 60
-        elapsed_text = f"{eh}h {em}m" if eh > 0 else f"{em}m"
-        st.markdown(f'<h3 style="text-align: left; color: #555; margin-top: 0px; margin-bottom: 10px; font-weight: 400; font-size: 1.1rem;">⏱️ Elapsed: {elapsed_text}</h3>', unsafe_allow_html=True)
-    else:
-        st.markdown('<div style="margin-bottom: 15px;"></div>', unsafe_allow_html=True)
-        
-    if next_activity not in ["NONE", "END OF DAY"]: st.markdown(f'<h4 style="text-align: right; color: #666; margin-bottom: 20px; font-weight: 400; font-size: 1.1rem;">Up Next: <b>{next_activity}</b> at {next_time_str}</h4>', unsafe_allow_html=True)
-    elif next_activity == "END OF DAY": st.markdown('<h4 style="text-align: right; color: #666; margin-bottom: 20px; font-weight: 400; font-size: 1.1rem;">Up Next: Schedule Complete</h4>', unsafe_allow_html=True)
 
     # --- MAIN TABBED STRUCTURE ---
     tab_main, tab_timeline, tab_apps = st.tabs(["📋 Dashboard", "⏳ Timeline", "🧩 App Launchpad"])

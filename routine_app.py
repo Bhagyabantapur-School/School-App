@@ -237,7 +237,26 @@ try:
     auto_occasion = today_holiday_match.iloc[0]['Occasion'] if is_auto_holiday else ""
     effective_day = "Holiday" if is_auto_holiday else current_day
 
-    # --- APP GROUPS ---
+    # ==========================================
+    # --- ROUTINE HUB UI HEADER ---
+    # ==========================================
+    if active_count > 0:
+        st.markdown(f'<div style="position: fixed; bottom: 30px; left: 20px; background-color: #ff4b4b; color: white; padding: 8px 16px; border-radius: 20px; box-shadow: 0px 4px 12px rgba(0,0,0,0.3); font-weight: bold; font-size: 16px; z-index: 9999; pointer-events: none; display: flex; align-items: center; justify-content: center;"><span style="font-size: 16px; margin-right: 6px; animation: pulse 1.5s infinite;">⏱️</span> {active_count}</div>', unsafe_allow_html=True)
+
+    st.markdown(f'<h3 style="text-align: center; color: #888; margin-top: 0px; margin-bottom: 0px;">{current_day} | {now.strftime("%I:%M %p")}</h3>', unsafe_allow_html=True)
+    
+    if is_auto_holiday: 
+        st.markdown(f'<p style="text-align: center; color: #ff9f36; font-weight: bold; font-size: 1.1rem; margin-top: 0px;">🎉 {auto_occasion} (Holiday Schedule)</p>', unsafe_allow_html=True)
+
+    col1, col2 = st.columns([8, 2])
+    with col2:
+        if st.button("🔄 Sync", use_container_width=True):
+            get_all_ecosystem_data.clear()
+            st.toast("✅ Force Synced with Google Sheets!")
+            time.sleep(1.0)
+            st.rerun()
+
+    # --- UPDATED APP GROUPS ---
     app_groups = {
         "MONEY": [("Money App", "money_app.py", "💰"), ("Money Utilities", "money_utilities.py", "💳"), ("Money Tracker", "money_tracker.py", "💵"), ("Product Inventory", "product_inventory.py", "📦")],
         "LOCATION": [("Location App", "location_app.py", "📍"), ("Packing Tracker", "packing_app.py", "🎒")],
@@ -349,29 +368,10 @@ try:
                         elif r['Type'] == 'Checklist': chk_list.append(formatted_task)
                 except: continue
 
-    # ==========================================
-    # --- ROUTINE HUB UI HEADER ---
-    # ==========================================
-    if active_count > 0:
-        st.markdown(f'<div style="position: fixed; bottom: 30px; left: 20px; background-color: #ff4b4b; color: white; padding: 8px 16px; border-radius: 20px; box-shadow: 0px 4px 12px rgba(0,0,0,0.3); font-weight: bold; font-size: 16px; z-index: 9999; pointer-events: none; display: flex; align-items: center; justify-content: center;"><span style="font-size: 16px; margin-right: 6px; animation: pulse 1.5s infinite;">⏱️</span> {active_count}</div>', unsafe_allow_html=True)
-
-    st.markdown(f'<h3 style="text-align: center; color: #888; margin-top: 0px; margin-bottom: 0px;">{current_day} | {now.strftime("%I:%M %p")}</h3>', unsafe_allow_html=True)
-    
-    if is_auto_holiday: 
-        st.markdown(f'<p style="text-align: center; color: #ff9f36; font-weight: bold; font-size: 1.1rem; margin-top: 0px;">🎉 {auto_occasion} (Holiday Schedule)</p>', unsafe_allow_html=True)
-
-    col1, col2 = st.columns([8, 2])
-    with col2:
-        if st.button("🔄 Sync", use_container_width=True):
-            get_all_ecosystem_data.clear()
-            st.toast("✅ Force Synced with Google Sheets!")
-            time.sleep(1.0)
-            st.rerun()
-
-    # --- TRACKING SECTION MOVED TO TOP ---
+    # --- TRACKING SECTION MOVED TO TOP (COMPACT STYLING) ---
     if sub_list or active_count > 0:
-        st.markdown("---")
-        st.markdown('<h4 style="text-align: center; color: #333;">Tap to Track Activity</h4>', unsafe_allow_html=True)
+        st.markdown("<hr style='margin: 8px 0px 4px 0px; border: none; border-top: 1px solid #e0e0e0;'>", unsafe_allow_html=True)
+        st.markdown('<div style="font-size: 12px; font-weight: 700; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; text-align: center;">Tap to Track Activity</div>', unsafe_allow_html=True)
         
         if active_count > 0:
             for idx, active_row in running_tasks.iterrows():
@@ -436,7 +436,7 @@ try:
         
         avail_subs = [t for t in sub_list if t not in running_tasks['Sub_Activities'].tolist()]
         if avail_subs:
-            st.markdown('<div style="margin-top: 15px; margin-bottom: 5px; color: #333;"><b>▶️ Routine Tasks:</b></div>', unsafe_allow_html=True)
+            st.markdown('<div style="margin-top: 6px; margin-bottom: 4px; font-size: 13px; font-weight: 600; color: #444;">▶️ Routine Tasks:</div>', unsafe_allow_html=True)
             
             for i in range(0, len(avail_subs), 3):
                 cols = st.columns(3)
@@ -451,7 +451,7 @@ try:
                                 st.rerun()
 
     if filtered_app_list and not hide_extras:
-        st.markdown('<h4 style="text-align: left; color: #d84315; margin-top: 10px;">🚀 Scheduled Apps</h4>', unsafe_allow_html=True)
+        st.markdown('<div style="text-align: left; color: #d84315; font-size: 12px; font-weight: 700; margin-top: 6px; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 1px;">🚀 Scheduled Apps</div>', unsafe_allow_html=True)
         for i in range(0, len(filtered_app_list), 3):
             cols = st.columns(3)
             for j in range(3):
@@ -461,25 +461,13 @@ try:
                         if st.button(f"{icon} {app_name}", key=f"sch_app_{i+j}", use_container_width=True):
                             if file_name != "routine_app.py":
                                 st.switch_page(file_name)
-        st.markdown("---")
+        st.markdown("<hr style='margin: 8px 0px 12px 0px; border: none; border-top: 1px solid #e0e0e0;'>", unsafe_allow_html=True)
 
     # --- MAIN TABBED STRUCTURE ---
     tab_main, tab_timeline, tab_apps = st.tabs(["📋 Dashboard", "⏳ Timeline", "🧩 App Launchpad"])
 
     with tab_main:
         if not hide_extras:
-            all_alert_pays = []
-            if not payment_df.empty:
-                def parse_pay_date(d_str):
-                    try: return pd.to_datetime(str(d_str).strip(), dayfirst=True).date()
-                    except: return pd.NaT
-                payment_df['Due_Date_dt'] = payment_df['Due_Date'].apply(parse_pay_date)
-                pending_payments = payment_df[~payment_df['Status'].str.strip().str.upper().isin(['PAID', 'DONE'])]
-                for _, p_row in pending_payments.iterrows():
-                    if pd.notna(p_row['Due_Date_dt']):
-                        days_until = (p_row['Due_Date_dt'] - now.date()).days
-                        if days_until <= 3: all_alert_pays.append((days_until, p_row))
-
             if all_alert_pays:
                 all_alert_pays.sort(key=lambda x: x[0])
                 min_days = all_alert_pays[0][0]

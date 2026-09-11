@@ -237,7 +237,7 @@ try:
     auto_occasion = today_holiday_match.iloc[0]['Occasion'] if is_auto_holiday else ""
     effective_day = "Holiday" if is_auto_holiday else current_day
 
-    # --- UPDATED APP GROUPS ---
+    # --- APP GROUPS ---
     app_groups = {
         "MONEY": [("Money App", "money_app.py", "💰"), ("Money Utilities", "money_utilities.py", "💳"), ("Money Tracker", "money_tracker.py", "💵"), ("Product Inventory", "product_inventory.py", "📦")],
         "LOCATION": [("Location App", "location_app.py", "📍"), ("Packing Tracker", "packing_app.py", "🎒")],
@@ -305,12 +305,6 @@ try:
     current_activity_start = scheduled_activity_start
     current_sub_activities = scheduled_sub_activities
     current_check_list = scheduled_check_list
-
-    if current_activity in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"]: color = "#ff4b4b" 
-    elif current_activity in ["WORK", "REPORT", "TASK", "HOME TASK", "HOME UTILITIES"]: color = "#0068c9" 
-    elif current_activity == "HEALTH": color = "#2e7b32" 
-    elif current_activity in ["SLEEP", "PRE", "TEA", "OUT"]: color = "#ff9f36" 
-    else: color = "#333333" 
 
     hide_extras = (current_activity == "SLEEP")
     filtered_app_list = [app for app in base_app_list if app[0] in active_apps_filter] if active_apps_filter else []
@@ -474,6 +468,18 @@ try:
 
     with tab_main:
         if not hide_extras:
+            all_alert_pays = []
+            if not payment_df.empty:
+                def parse_pay_date(d_str):
+                    try: return pd.to_datetime(str(d_str).strip(), dayfirst=True).date()
+                    except: return pd.NaT
+                payment_df['Due_Date_dt'] = payment_df['Due_Date'].apply(parse_pay_date)
+                pending_payments = payment_df[~payment_df['Status'].str.strip().str.upper().isin(['PAID', 'DONE'])]
+                for _, p_row in pending_payments.iterrows():
+                    if pd.notna(p_row['Due_Date_dt']):
+                        days_until = (p_row['Due_Date_dt'] - now.date()).days
+                        if days_until <= 3: all_alert_pays.append((days_until, p_row))
+
             if all_alert_pays:
                 all_alert_pays.sort(key=lambda x: x[0])
                 min_days = all_alert_pays[0][0]

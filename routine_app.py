@@ -911,14 +911,14 @@ try:
                 n_dur = str(n_row.get('Duration', ''))
                 
                 st.markdown(f'''
-                <div style="background-color: #ffffff; border-left: 4px solid #0068c9; padding: 12px 16px; border-radius: 8px; margin-bottom: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.04); border: 1px solid #f0f2f6;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                        <h4 style="margin: 0; color: #222; font-size: 16px; font-weight: 700;">{n_act}</h4>
-                        <span style="color: #777; font-size: 12px; font-weight: 600;">{n_time}</span>
+                <div style="background-color: #0ea5e9; color: white; padding: 8px 12px; border-radius: 6px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center;">
+                    <div style="flex-grow: 1; padding-right: 10px; overflow: hidden;">
+                        <strong style="font-size: 15px; display: block; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;">{n_act}</strong>
+                        <span style="font-size: 12px; opacity: 0.9; display: block; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;">{n_sub}</span>
                     </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <p style="margin: 0; color: #555; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 75%;">{n_sub}</p>
-                        <span style="font-size: 18px; font-weight: 800; color: #0068c9;">{n_dur}</span>
+                    <div style="text-align: right; min-width: 75px;">
+                        <span style="font-size: 11px; opacity: 0.9; display: block; margin-bottom: 2px;">{n_time}</span>
+                        <strong style="font-size: 16px; display: block;">{n_dur}</strong>
                     </div>
                 </div>
                 ''', unsafe_allow_html=True)

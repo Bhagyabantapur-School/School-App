@@ -881,19 +881,14 @@ try:
             c_dur = str(curr_row.get('Duration', ''))
             
             st.markdown(f'''
-            <div style="background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border-left: 6px solid #2e7b32; padding: 15px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                    <span style="color: #1b5e20; font-size: 11px; font-weight: 800; background: rgba(46, 123, 50, 0.15); padding: 3px 8px; border-radius: 12px; letter-spacing: 0.5px;">▶ CURRENT</span>
-                    <span style="color: #2e7b32; font-size: 13px; font-weight: 600;">{c_time}</span>
+            <div style="background-color: #2e7b32; color: white; padding: 8px 12px; border-radius: 6px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.2); display: flex; justify-content: space-between; align-items: center;">
+                <div style="flex-grow: 1; padding-right: 10px; overflow: hidden;">
+                    <strong style="font-size: 15px; display: block; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;">{c_act}</strong>
+                    <span style="font-size: 12px; opacity: 0.9; display: block; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;">{c_sub}</span>
                 </div>
-                <div style="display: flex; justify-content: space-between; align-items: flex-end;">
-                    <div style="flex-grow: 1; padding-right: 10px;">
-                        <h3 style="margin: 0 0 4px 0; color: #1b5e20; font-size: 20px; font-weight: 800;">{c_act}</h3>
-                        <p style="margin: 0; color: #388e3c; font-size: 14px; font-weight: 500; line-height: 1.3;">{c_sub}</p>
-                    </div>
-                    <div style="text-align: right; min-width: 60px;">
-                        <span style="font-size: 24px; font-weight: 900; color: #1b5e20;">{c_dur}</span>
-                    </div>
+                <div style="text-align: right; min-width: 75px;">
+                    <span style="font-size: 11px; opacity: 0.9; display: block; margin-bottom: 2px;">{c_time}</span>
+                    <strong style="font-size: 16px; display: block;">{c_dur}</strong>
                 </div>
             </div>
             ''', unsafe_allow_html=True)
@@ -902,7 +897,6 @@ try:
             
         next_rows = today_schedule[next_start_index : next_start_index+4]
         if next_rows:
-            st.markdown("<h4 style='color: #888; margin-top: 5px; margin-bottom: 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; font-weight: 700;'>Up Next</h4>", unsafe_allow_html=True)
             for n_row in next_rows:
                 n_act = str(n_row['Activity']).strip().upper()
                 n_sub = str(n_row.get('Sub_Activities', '')).strip()

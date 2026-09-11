@@ -279,6 +279,10 @@ try:
     scheduled_sub_activities = ""
     scheduled_check_list = ""
     active_apps_filter = []
+    
+    # Timing indexes for Timeline Tab
+    current_index = -1
+    next_start_index = 0
 
     today_schedule = df[df['Day'].str.strip().str.title() == effective_day.title()].to_dict('records')
 
@@ -292,6 +296,9 @@ try:
             is_current = (start_t <= current_time <= end_t) if start_t <= end_t else (current_time >= start_t or current_time <= end_t)
 
             if is_current:
+                current_index = i
+                next_start_index = i + 1
+                
                 scheduled_activity = str(row['Activity']).strip().upper()
                 scheduled_activity_start = start_t
                 scheduled_sub_activities = str(row.get('Sub_Activities', '')).strip()
@@ -307,6 +314,7 @@ try:
                 else: next_activity = "END OF DAY"
                 break
             elif current_time < start_t and scheduled_activity == "FREE TIME":
+                next_start_index = i
                 next_activity = str(row['Activity']).strip().upper()
                 next_time_str = datetime.strptime(start_str, '%H:%M').strftime('%I:%M %p')
                 break
@@ -356,8 +364,8 @@ try:
     if next_activity not in ["NONE", "END OF DAY"]: st.markdown(f'<h4 style="text-align: right; color: #666; margin-bottom: 20px; font-weight: 400; font-size: 1.1rem;">Up Next: <b>{next_activity}</b> at {next_time_str}</h4>', unsafe_allow_html=True)
     elif next_activity == "END OF DAY": st.markdown('<h4 style="text-align: right; color: #666; margin-bottom: 20px; font-weight: 400; font-size: 1.1rem;">Up Next: Schedule Complete</h4>', unsafe_allow_html=True)
 
-    # --- TABBED LAYOUT ---
-    tab_main, tab_apps = st.tabs(["📋 Dashboard", "🧩 App Launchpad"])
+    # --- MAIN TABBED STRUCTURE ---
+    tab_main, tab_timeline, tab_apps = st.tabs(["📋 Dashboard", "⏳ Timeline", "🧩 App Launchpad"])
 
     with tab_main:
         if not hide_extras:
@@ -860,6 +868,60 @@ try:
                         st.rerun()
                     else: 
                         st.error("Please provide an Activity.")
+
+    with tab_timeline:
+        st.markdown("### ⏳ Routine Timeline")
+        
+        if current_index != -1:
+            curr_row = today_schedule[current_index]
+            c_act = str(curr_row['Activity']).strip().upper()
+            c_sub = str(curr_row.get('Sub_Activities', '')).strip()
+            if not c_sub: c_sub = "No specific sub-activities"
+            c_time = f"{curr_row['Start_Time']} - {curr_row['End_Time']}"
+            c_dur = str(curr_row.get('Duration', ''))
+            
+            st.markdown(f'''
+            <div style="background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border-left: 6px solid #2e7b32; padding: 15px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                    <span style="color: #1b5e20; font-size: 11px; font-weight: 800; background: rgba(46, 123, 50, 0.15); padding: 3px 8px; border-radius: 12px; letter-spacing: 0.5px;">▶ CURRENT</span>
+                    <span style="color: #2e7b32; font-size: 13px; font-weight: 600;">{c_time}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: flex-end;">
+                    <div style="flex-grow: 1; padding-right: 10px;">
+                        <h3 style="margin: 0 0 4px 0; color: #1b5e20; font-size: 20px; font-weight: 800;">{c_act}</h3>
+                        <p style="margin: 0; color: #388e3c; font-size: 14px; font-weight: 500; line-height: 1.3;">{c_sub}</p>
+                    </div>
+                    <div style="text-align: right; min-width: 60px;">
+                        <span style="font-size: 24px; font-weight: 900; color: #1b5e20;">{c_dur}</span>
+                    </div>
+                </div>
+            </div>
+            ''', unsafe_allow_html=True)
+        else:
+            st.info("No active schedule at this moment.")
+            
+        next_rows = today_schedule[next_start_index : next_start_index+4]
+        if next_rows:
+            st.markdown("<h4 style='color: #888; margin-top: 5px; margin-bottom: 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; font-weight: 700;'>Up Next</h4>", unsafe_allow_html=True)
+            for n_row in next_rows:
+                n_act = str(n_row['Activity']).strip().upper()
+                n_sub = str(n_row.get('Sub_Activities', '')).strip()
+                if not n_sub: n_sub = "Routine Tasks"
+                n_time = f"{n_row['Start_Time']} - {n_row['End_Time']}"
+                n_dur = str(n_row.get('Duration', ''))
+                
+                st.markdown(f'''
+                <div style="background-color: #ffffff; border-left: 4px solid #0068c9; padding: 12px 16px; border-radius: 8px; margin-bottom: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.04); border: 1px solid #f0f2f6;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                        <h4 style="margin: 0; color: #222; font-size: 16px; font-weight: 700;">{n_act}</h4>
+                        <span style="color: #777; font-size: 12px; font-weight: 600;">{n_time}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <p style="margin: 0; color: #555; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 75%;">{n_sub}</p>
+                        <span style="font-size: 18px; font-weight: 800; color: #0068c9;">{n_dur}</span>
+                    </div>
+                </div>
+                ''', unsafe_allow_html=True)
 
     with tab_apps:
         # --- PERMANENT ALL APPS LAUNCHPAD ---

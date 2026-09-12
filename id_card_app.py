@@ -443,22 +443,101 @@ with tabs[0]:
 
     df_master = fetch_sheet_data("students_master")
     df_log = fetch_sheet_data("form_distribution_log")
-    df_id_log = fetch_sheet_data("id_card_log")
+    df_id_log_raw = fetch_sheet_data("id_card_log")
     
     if not df_master.empty and not df_log.empty:
         merged = pd.merge(df_master, df_log, on=['Class', 'Section', 'Roll'], how='left', indicator=True, suffixes=('', '_log'))
         merged['Key'] = get_unified_key(merged, name_col='Name_x' if 'Name_x' in merged.columns else 'Name')
         
-        if not df_id_log.empty:
+        if not df_id_log_raw.empty:
+            df_id_log = df_id_log_raw.copy()
             df_id_log['Action'] = df_id_log['Action'].astype(str).str.strip()
             df_id_log['Key'] = get_unified_key(df_id_log)
+            df_id_log['Parsed_Time'] = pd.to_datetime(df_id_log['Date'], format="%d-%m-%Y %H:%M:%S", errors='coerce')
+            df_id_log['Parsed_Time'] = df_id_log['Parsed_Time'].fillna(pd.to_datetime(df_id_log['Date'], dayfirst=True, errors='coerce'))
+            df_id_log = df_id_log.sort_values(by='Parsed_Time', ascending=True).reset_index(drop=True)
+            
             gen_keys = df_id_log[df_id_log['Action'] == 'Generated']['Key'].unique().tolist()
         else:
+            df_id_log = pd.DataFrame()
             gen_keys = []
             
         merged['Generated'] = merged['Key'].isin(gen_keys)
-        
-        st.markdown("##### 🎛️ Generator Filters")
+
+        def format_grid_dob(raw_dob):
+            raw_dob = str(raw_dob).strip().split(" ")[0]
+            fmt_dob = raw_dob
+            if raw_dob and raw_dob.lower() not in ['nan', 'none', 'nat', '']:
+                try:
+                    if re.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$", raw_dob):
+                        parts = re.split(r"[-/]", raw_dob)
+                        fmt_dob = f"{int(parts[2]):02d}.{int(parts[1]):02d}.{parts[0]}"
+                    else:
+                        dt = pd.to_datetime(raw_dob, dayfirst=True)
+                        fmt_dob = dt.strftime('%d.%m.%Y')
+                except:
+                    fmt_dob = raw_dob.replace('-', '.').replace('/', '.')
+            return fmt_dob
+
+        # ✨ NEW: Lot Reprint Section
+        if not df_id_log.empty:
+            gen_log_only = df_id_log[df_id_log['Action'] == 'Generated'].copy()
+            if not gen_log_only.empty:
+                gen_log_only['Date_Only'] = gen_log_only['Date'].apply(lambda x: str(x).split(' ')[0] if pd.notna(x) and str(x).strip() != 'nan' else '')
+                latest_gen_reprint = gen_log_only.drop_duplicates(subset=['Key'], keep='last').copy()
+                
+                unique_gen_dates_reprint = sorted(latest_gen_reprint['Date_Only'].unique(), key=lambda d: pd.to_datetime(d, dayfirst=True))
+                lot_mapping_reprint = {d: f"Lot {i+1}" for i, d in enumerate(unique_gen_dates_reprint)}
+                
+                lot_options = []
+                lot_to_keys = {}
+                for d in unique_gen_dates_reprint:
+                    lot_name = lot_mapping_reprint[d]
+                    keys_in_lot = latest_gen_reprint[latest_gen_reprint['Date_Only'] == d]['Key'].tolist()
+                    lot_label = f"📦 {lot_name} (Generated: {d}) - {len(keys_in_lot)} Cards"
+                    lot_options.append(lot_label)
+                    lot_to_keys[lot_label] = keys_in_lot
+                
+                st.markdown("##### 📦 Reprint an Existing Lot")
+                col_l1, col_l2 = st.columns([3, 1])
+                with col_l1:
+                    selected_lot_to_reprint = st.selectbox("Select a previously generated Lot to re-download:", ["-- Select Lot --"] + list(reversed(lot_options)))
+                with col_l2:
+                    st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
+                    reprint_btn = st.button("🖨️ Generate PDF for Lot", use_container_width=True)
+                    
+                if reprint_btn and selected_lot_to_reprint != "-- Select Lot --":
+                    target_keys = lot_to_keys[selected_lot_to_reprint]
+                    selected_students = merged[merged['Key'].isin(target_keys)].copy()
+                    
+                    if not selected_students.empty:
+                        if 'Section' not in selected_students.columns: selected_students['Section'] = 'A'
+                        selected_students['Section'] = selected_students['Section'].fillna('A').astype(str)
+                        selected_students['DOB'] = selected_students['DOB'].apply(format_grid_dob)
+                        
+                        st.session_state['generated_pdf_data'] = None 
+                        photo_dict = {}
+                        my_bar = st.progress(0, text="Starting secure fetch for Lot Reprint...")
+                        
+                        num_students = len(selected_students)
+                        for idx, (index, student) in enumerate(selected_students.iterrows()):
+                            sid = str(student.get('Sl', index)) + "_" + str(student.get('Roll', '0'))
+                            photo_url = str(student.get('Photo_URL', ''))
+                            drive_id = extract_drive_id(photo_url)
+                            if drive_id:
+                                img_bytes = fetch_secure_image_bytes(drive_id)
+                                if img_bytes: photo_dict[sid] = img_bytes
+                            my_bar.progress((idx + 1) / num_students * 0.5, text=f"Fetching photo {idx + 1} of {num_students}...")
+                        
+                        pdf_bytes = generate_pdf(selected_students.to_dict('records'), photo_dict, progress_bar=my_bar)
+                        # We intentionally DO NOT batch_log_action here so it doesn't change the Lot's historical date
+                        st.session_state['generated_pdf_data'] = pdf_bytes
+                        clear_grid_states()
+                        st.balloons()
+                        st.rerun()
+                st.divider()
+
+        st.markdown("##### 🎛️ Generate NEW Cards (Filters)")
         col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns([1.3, 1.3, 1.3, 1.3, 1.2])
         with col_f1: hide_generated = st.checkbox("Hide Already Generated", value=True)
         with col_f2: require_photo = st.checkbox("Require Uploaded Photo", value=True)
@@ -504,21 +583,6 @@ with tabs[0]:
             for c in ['Father', 'Mother', 'DOB', 'Mobile']:
                 if c not in print_ready.columns: print_ready[c] = ""
             
-            def format_grid_dob(raw_dob):
-                raw_dob = str(raw_dob).strip().split(" ")[0]
-                fmt_dob = raw_dob
-                if raw_dob and raw_dob.lower() not in ['nan', 'none', 'nat', '']:
-                    try:
-                        if re.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$", raw_dob):
-                            parts = re.split(r"[-/]", raw_dob)
-                            fmt_dob = f"{int(parts[2]):02d}.{int(parts[1]):02d}.{parts[0]}"
-                        else:
-                            dt = pd.to_datetime(raw_dob, dayfirst=True)
-                            fmt_dob = dt.strftime('%d.%m.%Y')
-                    except:
-                        fmt_dob = raw_dob.replace('-', '.').replace('/', '.')
-                return fmt_dob
-
             print_ready['DOB'] = print_ready['DOB'].apply(format_grid_dob)
 
             def get_valid_photo(row):
@@ -534,7 +598,7 @@ with tabs[0]:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe:
                     print_ready['Photo'] = list(exe.map(get_secure_photo_b64, print_ready['Image_Target'].tolist()))
 
-            st.write(f"Showing **{len(print_ready)}** students ready for printing.")
+            st.write(f"Showing **{len(print_ready)}** students ready for new printing.")
             
             unique_groups = (print_ready['Class'].astype(str) + "_" + print_ready['Section'].astype(str)).unique().tolist()
             color_map = {grp: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, grp in enumerate(unique_groups)}
@@ -698,7 +762,6 @@ with tabs[2]:
         class_photo_keys = fetch_class_photo_status()
         photo_keys = list(set(photo_keys + class_photo_keys))
 
-        # ✨ FIX: Save Raw Image URLs before breaking them for checkboxes
         explorer_db['Photo_URL_Raw'] = explorer_db['Photo_URL']
         if 'Thumb_URL' in explorer_db.columns:
             explorer_db['Thumb_URL_Raw'] = explorer_db['Thumb_URL']
@@ -887,7 +950,6 @@ with tabs[2]:
                 latest_overall = df_id_log.drop_duplicates(subset=['Key'], keep='last')
                 status_dict = dict(zip(latest_overall['Key'], latest_overall['Action']))
 
-                # ✨ FIX: Use Photo_URL_Raw to pull images perfectly in the expander
                 def get_valid_photo_tab3(row):
                     thumb = str(row.get('Thumb_URL_Raw', '')).strip()
                     photo = str(row.get('Photo_URL_Raw', '')).strip()

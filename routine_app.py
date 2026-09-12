@@ -316,8 +316,8 @@ try:
     
     upcoming_ui_elements_raw = []
     all_alert_pays = []
-    overdue_tasks_count = 0
-    overdue_pays_count = 0
+    due_overdue_tasks_count = 0
+    due_overdue_pays_count = 0
     
     if not hide_extras:
         if not future_df.empty:
@@ -353,7 +353,7 @@ try:
                         elif r['Type'] == 'Checklist': chk_list.append(formatted_task)
                 except: continue
         upcoming_ui_elements_raw.sort(key=lambda x: x[0])
-        overdue_tasks_count = sum(1 for t in upcoming_ui_elements_raw if t[3])
+        due_overdue_tasks_count = len(upcoming_ui_elements_raw)
         
         if not payment_df.empty:
             def parse_pay_date(d_str):
@@ -366,7 +366,7 @@ try:
                     days_until = (p_row['Due_Date_dt'] - now.date()).days
                     if days_until <= 3: all_alert_pays.append((days_until, p_row))
         all_alert_pays.sort(key=lambda x: x[0])
-        overdue_pays_count = sum(1 for p in all_alert_pays if p[0] < 0)
+        due_overdue_pays_count = sum(1 for p in all_alert_pays if p[0] <= 0)
 
     # ==========================================
     # --- ROUTINE HUB UI HEADER ---
@@ -382,8 +382,8 @@ try:
     col1, col2 = st.columns([8, 2])
     with col1:
         alerts = []
-        if overdue_pays_count > 0: alerts.append(f"🔴 {overdue_pays_count} OVERDUE PAYMENTS")
-        if overdue_tasks_count > 0: alerts.append(f"🔴 {overdue_tasks_count} OVERDUE TASKS")
+        if due_overdue_pays_count > 0: alerts.append(f"🔴 {due_overdue_pays_count} PAYMENTS")
+        if due_overdue_tasks_count > 0: alerts.append(f"🔴 {due_overdue_tasks_count} TASKS")
         if alerts:
             st.markdown(f"<div style='font-size: 11px; font-weight: 800; color: #d32f2f; margin-top: 10px; letter-spacing: 0.5px;'>{' &nbsp;|&nbsp; '.join(alerts)}</div>", unsafe_allow_html=True)
 

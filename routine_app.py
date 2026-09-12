@@ -467,7 +467,7 @@ try:
     tab_timeline, tab_schedule, tab_main, tab_apps = st.tabs(["⏳ Timeline", "📅 Full Schedule", "📋 Manage", "🧩 App Launchpad"])
 
     with tab_timeline:
-        st.markdown("### ⏳ Routine Timeline")
+        st.markdown("<div style='font-size: 14px; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px;'>⏳ Routine Timeline</div>", unsafe_allow_html=True)
         
         if current_index != -1:
             curr_row = today_schedule[current_index]
@@ -515,7 +515,7 @@ try:
                 ''', unsafe_allow_html=True)
 
     with tab_schedule:
-        st.markdown("### 📅 Full Schedule Overview")
+        st.markdown("<div style='font-size: 14px; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px;'>📅 Full Schedule Overview</div>", unsafe_allow_html=True)
         
         # PREVIOUS 5 ACTIVITIES (ASH COLOR)
         end_idx = current_index if current_index != -1 else next_start_index
@@ -590,18 +590,6 @@ try:
 
     with tab_main:
         if not hide_extras:
-            all_alert_pays = []
-            if not payment_df.empty:
-                def parse_pay_date(d_str):
-                    try: return pd.to_datetime(str(d_str).strip(), dayfirst=True).date()
-                    except: return pd.NaT
-                payment_df['Due_Date_dt'] = payment_df['Due_Date'].apply(parse_pay_date)
-                pending_payments = payment_df[~payment_df['Status'].str.strip().str.upper().isin(['PAID', 'DONE'])]
-                for _, p_row in pending_payments.iterrows():
-                    if pd.notna(p_row['Due_Date_dt']):
-                        days_until = (p_row['Due_Date_dt'] - now.date()).days
-                        if days_until <= 3: all_alert_pays.append((days_until, p_row))
-
             if all_alert_pays:
                 all_alert_pays.sort(key=lambda x: x[0])
                 min_days = all_alert_pays[0][0]
@@ -970,7 +958,7 @@ try:
 
     with tab_apps:
         # --- PERMANENT ALL APPS LAUNCHPAD ---
-        st.markdown("### 🧩 All Applications Launchpad")
+        st.markdown("<div style='font-size: 14px; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px;'>🧩 All Applications Launchpad</div>", unsafe_allow_html=True)
         for group_name, apps in app_groups.items():
             st.markdown(f"<div style='color: #0068c9; font-weight: bold; margin-top: 10px; margin-bottom: 5px; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;'>{group_name}</div>", unsafe_allow_html=True)
             for i in range(0, len(apps), 3):

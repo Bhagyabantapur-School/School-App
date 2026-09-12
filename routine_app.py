@@ -309,12 +309,16 @@ try:
     hide_extras = (current_activity == "SLEEP")
     filtered_app_list = [app for app in base_app_list if app[0] in active_apps_filter] if active_apps_filter else []
 
-    # --- PREPARE DYNAMIC LISTS ---
+    # --- PREPARE DYNAMIC LISTS & ALERTS ---
     sub_list = [s.strip() for s in current_sub_activities.split(',') if s.strip()]
     chk_list = [c.strip() for c in current_check_list.split(',') if c.strip()]
     all_logged_items = log_df['check_list'].tolist() + log_df['Sub_Activities'].tolist()
     
     upcoming_ui_elements_raw = []
+    all_alert_pays = []
+    overdue_tasks_count = 0
+    overdue_pays_count = 0
+    
     if not hide_extras:
         if not future_df.empty:
             for _, r in future_df.iterrows():
@@ -348,6 +352,21 @@ try:
                         if r['Type'] == 'Sub-Activity': sub_list.append(formatted_task)
                         elif r['Type'] == 'Checklist': chk_list.append(formatted_task)
                 except: continue
+        upcoming_ui_elements_raw.sort(key=lambda x: x[0])
+        overdue_tasks_count = sum(1 for t in upcoming_ui_elements_raw if t[3])
+        
+        if not payment_df.empty:
+            def parse_pay_date(d_str):
+                try: return pd.to_datetime(str(d_str).strip(), dayfirst=True).date()
+                except: return pd.NaT
+            payment_df['Due_Date_dt'] = payment_df['Due_Date'].apply(parse_pay_date)
+            pending_payments = payment_df[~payment_df['Status'].str.strip().str.upper().isin(['PAID', 'DONE'])]
+            for _, p_row in pending_payments.iterrows():
+                if pd.notna(p_row['Due_Date_dt']):
+                    days_until = (p_row['Due_Date_dt'] - now.date()).days
+                    if days_until <= 3: all_alert_pays.append((days_until, p_row))
+        all_alert_pays.sort(key=lambda x: x[0])
+        overdue_pays_count = sum(1 for p in all_alert_pays if p[0] < 0)
 
     # ==========================================
     # --- ROUTINE HUB UI HEADER ---
@@ -361,6 +380,13 @@ try:
         st.markdown(f'<p style="text-align: center; color: #ff9f36; font-weight: bold; font-size: 1.1rem; margin-top: 0px;">🎉 {auto_occasion} (Holiday Schedule)</p>', unsafe_allow_html=True)
 
     col1, col2 = st.columns([8, 2])
+    with col1:
+        alerts = []
+        if overdue_pays_count > 0: alerts.append(f"🔴 {overdue_pays_count} OVERDUE PAYMENTS")
+        if overdue_tasks_count > 0: alerts.append(f"🔴 {overdue_tasks_count} OVERDUE TASKS")
+        if alerts:
+            st.markdown(f"<div style='font-size: 11px; font-weight: 800; color: #d32f2f; margin-top: 10px; letter-spacing: 0.5px;'>{' &nbsp;|&nbsp; '.join(alerts)}</div>", unsafe_allow_html=True)
+
     with col2:
         if st.button("🔄 Sync", use_container_width=True):
             get_all_ecosystem_data.clear()
@@ -590,20 +616,7 @@ try:
 
     with tab_main:
         if not hide_extras:
-            all_alert_pays = []
-            if not payment_df.empty:
-                def parse_pay_date(d_str):
-                    try: return pd.to_datetime(str(d_str).strip(), dayfirst=True).date()
-                    except: return pd.NaT
-                payment_df['Due_Date_dt'] = payment_df['Due_Date'].apply(parse_pay_date)
-                pending_payments = payment_df[~payment_df['Status'].str.strip().str.upper().isin(['PAID', 'DONE'])]
-                for _, p_row in pending_payments.iterrows():
-                    if pd.notna(p_row['Due_Date_dt']):
-                        days_until = (p_row['Due_Date_dt'] - now.date()).days
-                        if days_until <= 3: all_alert_pays.append((days_until, p_row))
-
             if all_alert_pays:
-                all_alert_pays.sort(key=lambda x: x[0])
                 min_days = all_alert_pays[0][0]
                 if min_days < 0: header_text = f"🔴 OVERDUE PAYMENTS! ({len(all_alert_pays)})"
                 elif min_days == 0: header_text = f"🔴 PAYMENTS DUE TODAY! ({len(all_alert_pays)})"
@@ -622,7 +635,6 @@ try:
                     st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
 
             if upcoming_ui_elements_raw:
-                upcoming_ui_elements_raw.sort(key=lambda x: x[0])
                 most_urgent_dt = upcoming_ui_elements_raw[0][0]
                 is_urgent_overdue = (most_urgent_dt - now).total_seconds() < 0
                 header_text = f"🔴 Upcoming Special Tasks - OVERDUE ({len(upcoming_ui_elements_raw)})" if is_urgent_overdue else f"🟠 Upcoming Special Tasks ({len(upcoming_ui_elements_raw)})"

@@ -698,11 +698,15 @@ with tabs[2]:
         class_photo_keys = fetch_class_photo_status()
         photo_keys = list(set(photo_keys + class_photo_keys))
 
-        explorer_db['Photo_URL'] = explorer_db['Photo_URL'].apply(lambda x: True if pd.notna(x) and str(x).strip() != "" else False)
+        # ✨ FIX: Save Raw Image URLs before breaking them for checkboxes
+        explorer_db['Photo_URL_Raw'] = explorer_db['Photo_URL']
         if 'Thumb_URL' in explorer_db.columns:
-            explorer_db['Thumb_URL'] = explorer_db['Thumb_URL'].apply(lambda x: True if pd.notna(x) and str(x).strip() != "" else False)
+            explorer_db['Thumb_URL_Raw'] = explorer_db['Thumb_URL']
         else:
-            explorer_db['Thumb_URL'] = False
+            explorer_db['Thumb_URL_Raw'] = ""
+
+        explorer_db['Photo_URL'] = explorer_db['Photo_URL'].apply(lambda x: True if pd.notna(x) and str(x).strip() != "" else False)
+        explorer_db['Thumb_URL'] = explorer_db['Thumb_URL'].apply(lambda x: True if pd.notna(x) and str(x).strip() != "" else False) if 'Thumb_URL' in explorer_db.columns else False
 
         explorer_db['Form_OK'] = explorer_db['Return Status'].apply(lambda x: True if str(x) == "Complete" else False)
         explorer_db['Verified'] = explorer_db['Data Corrected'].apply(lambda x: True if str(x) == "Yes" else False)
@@ -810,7 +814,7 @@ with tabs[2]:
         else:
             st.info("ID card log is empty.")
 
-        # ✨ NEW: 📦 Lot-wise Generation & Action Flow Summary
+        # 📦 Lot-wise Distribution Summary
         st.write("---")
         st.markdown("##### 📦 Lot-wise Action Summary (Based on 'Generated' Date)")
         if not df_id_log.empty:
@@ -818,15 +822,11 @@ with tabs[2]:
             if not gen_log.empty:
                 gen_log['Date_Only'] = gen_log['Date'].apply(lambda x: str(x).split(' ')[0] if pd.notna(x) and str(x).strip() != 'nan' else '')
                 
-                # Each card gets assigned to a Lot based on its most recent 'Generated' date
                 latest_gen = gen_log.drop_duplicates(subset=['Key'], keep='last').copy()
-                
-                # Sort dates chronologically to assign natural Lot numbers (Lot 1 is oldest date)
                 unique_gen_dates = sorted(latest_gen['Date_Only'].unique(), key=lambda d: pd.to_datetime(d, dayfirst=True))
                 lot_mapping = {d: f"Lot {i+1}" for i, d in enumerate(unique_gen_dates)}
                 latest_gen['Lot'] = latest_gen['Date_Only'].map(lot_mapping)
                 
-                # Helper to format aggregations: "02.09.2026 (5), 03.09.2026 (10)"
                 def get_stage_agg(keys, action):
                     stage_log = df_id_log[(df_id_log['Key'].isin(keys)) & (df_id_log['Action'] == action)].copy()
                     if stage_log.empty: return ""
@@ -846,10 +846,8 @@ with tabs[2]:
                     sent_str = get_stage_agg(keys_in_lot, "Sent to Shop")
                     recv_str = get_stage_agg(keys_in_lot, "Received from Shop")
                     
-                    # For distributed, strictly check current True status to avoid false counts
                     dist_qty = sum([1 for k in keys_in_lot if k in dist_keys])
                     
-                    # Also format the actual distribution dates for those truly distributed
                     dist_str = ""
                     if dist_qty > 0:
                         dist_logs = df_id_log[(df_id_log['Key'].isin(keys_in_lot)) & (df_id_log['Action'] == 'Distributed')].copy()
@@ -874,7 +872,6 @@ with tabs[2]:
                 
                 lot_summary_df = pd.DataFrame(summary_data)
                 
-                # Sort the table descending so the newest Lot appears at the top
                 lot_summary_df['SortVal'] = lot_summary_df['Lot Number'].apply(lambda x: int(x.replace('Lot ', '')))
                 lot_summary_df = lot_summary_df.sort_values('SortVal', ascending=False).drop(columns=['SortVal']).reset_index(drop=True)
                 
@@ -885,17 +882,17 @@ with tabs[2]:
                     
                 st.dataframe(lot_summary_df.style.apply(lot_row_style, axis=1), hide_index=True, use_container_width=True)
                 
-                # ✨ NEW: Expandable visual roster for every Lot!
                 st.markdown("##### 👥 Students Grouped by Lot")
                 
                 latest_overall = df_id_log.drop_duplicates(subset=['Key'], keep='last')
                 status_dict = dict(zip(latest_overall['Key'], latest_overall['Action']))
 
+                # ✨ FIX: Use Photo_URL_Raw to pull images perfectly in the expander
                 def get_valid_photo_tab3(row):
-                    thumb = str(row.get('Thumb_URL', '')).strip()
-                    photo = str(row.get('Photo_URL', '')).strip()
-                    if thumb and thumb.lower() not in ['nan', 'none']: return thumb
-                    if photo and photo.lower() not in ['nan', 'none']: return photo
+                    thumb = str(row.get('Thumb_URL_Raw', '')).strip()
+                    photo = str(row.get('Photo_URL_Raw', '')).strip()
+                    if thumb and thumb.lower() not in ['nan', 'none', 'false']: return thumb
+                    if photo and photo.lower() not in ['nan', 'none', 'false']: return photo
                     return ""
                 
                 def format_lot_dob(raw_dob):
@@ -913,7 +910,6 @@ with tabs[2]:
                             fmt_dob = raw_dob.replace('-', '.').replace('/', '.')
                     return fmt_dob
 
-                # Create an expander for each lot
                 for idx, row in lot_summary_df.iterrows():
                     lot_name = row['Lot Number']
                     gen_date = row['Generated'].split(' ')[0]

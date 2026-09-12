@@ -354,9 +354,10 @@ def generate_pdf(students_list, photo_dict, progress_bar=None):
         pdf.set_text_color(0); pdf.set_font("Arial", 'I', 6); pdf.set_xy(x, y+49); pdf.cell(card_w-5, 3, "Sukhamay Kisku", 0, 1, 'R')
         pdf.set_font("Arial", '', 5); pdf.set_xy(x, y+51); pdf.cell(card_w-5, 2, "Head Teacher", 0, 0, 'R')
         
+        # ✨ UPDATE: 8 Cards Per Page Logic (2 columns x 4 rows)
         col += 1
         if col >= 2: col, row = 0, row + 1
-        if row >= 5: pdf.add_page(); col, row = 0, 0
+        if row >= 4: pdf.add_page(); col, row = 0, 0
             
     if progress_bar: progress_bar.progress(1.0, text="✅ PDF Rendering Complete!")
     pdf_output = pdf.output(dest='S')
@@ -479,7 +480,6 @@ with tabs[0]:
                     fmt_dob = raw_dob.replace('-', '.').replace('/', '.')
             return fmt_dob
 
-        # ✨ NEW: Lot Reprint Section
         if not df_id_log.empty:
             gen_log_only = df_id_log[df_id_log['Action'] == 'Generated'].copy()
             if not gen_log_only.empty:
@@ -520,6 +520,9 @@ with tabs[0]:
                         my_bar = st.progress(0, text="Starting secure fetch for Lot Reprint...")
                         
                         num_students = len(selected_students)
+                        # ✨ UPDATE: Changed math to 8 per page
+                        pages_needed_reprint = math.ceil(num_students / 8)
+                        
                         for idx, (index, student) in enumerate(selected_students.iterrows()):
                             sid = str(student.get('Sl', index)) + "_" + str(student.get('Roll', '0'))
                             photo_url = str(student.get('Photo_URL', ''))
@@ -530,7 +533,6 @@ with tabs[0]:
                             my_bar.progress((idx + 1) / num_students * 0.5, text=f"Fetching photo {idx + 1} of {num_students}...")
                         
                         pdf_bytes = generate_pdf(selected_students.to_dict('records'), photo_dict, progress_bar=my_bar)
-                        # We intentionally DO NOT batch_log_action here so it doesn't change the Lot's historical date
                         st.session_state['generated_pdf_data'] = pdf_bytes
                         clear_grid_states()
                         st.balloons()
@@ -625,7 +627,8 @@ with tabs[0]:
 
             if not selected_students.empty:
                 num_students = len(selected_students)
-                pages_needed = math.ceil(num_students / 10)
+                # ✨ UPDATE: Changed math to 8 per page
+                pages_needed = math.ceil(num_students / 8)
                 st.divider()
                 st.info(f"🖨️ **Print Summary:** You selected **{num_students}** students. Requires **{pages_needed}** A4 page(s).")
                 

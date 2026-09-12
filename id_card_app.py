@@ -37,7 +37,6 @@ st.set_page_config(page_title="BPS Digital - ID Generator", page_icon="🏫", la
 # Initialize Session States
 if 'distribution_log' not in st.session_state:
     st.session_state['distribution_log'] = pd.DataFrame(columns=['Name', 'Roll', 'Class', 'BPS Code'])
-# ✨ NEW: Separate session state for the "Received from Shop" scanner
 if 'received_log' not in st.session_state:
     st.session_state['received_log'] = pd.DataFrame(columns=['Name', 'Roll', 'Class', 'BPS Code'])
 if 'generated_pdf_data' not in st.session_state:
@@ -190,7 +189,7 @@ def clear_sheet_cache():
 
 def clear_grid_states():
     for k in list(st.session_state.keys()):
-        if k == "gen_editor" or k == "db_explorer_grid" or k.startswith("shop_grid_") or k == "distributed_grid":
+        if k == "gen_editor" or k == "db_explorer_grid" or k.startswith("shop_grid_") or k.startswith("lot_grid_") or k == "distributed_grid":
             del st.session_state[k]
 
 def append_sheet_df(sheet_name, df):
@@ -679,6 +678,9 @@ with tabs[2]:
         explorer_db['Key'] = get_unified_key(explorer_db, name_col='Name_x' if 'Name_x' in explorer_db.columns else 'Name')
         explorer_db['Photo_Key'] = get_photo_key(explorer_db)
         
+        for c in ['Father', 'Mother', 'DOB', 'Mobile']:
+            if c not in explorer_db.columns: explorer_db[c] = ""
+            
         photo_keys, gen_keys, dist_keys = [], [], []
         
         if not df_photo.empty:
@@ -808,38 +810,148 @@ with tabs[2]:
         else:
             st.info("ID card log is empty.")
 
-        # 📦 Lot-wise Distribution Summary
+        # ✨ NEW: 📦 Lot-wise Generation & Action Flow Summary
         st.write("---")
-        st.markdown("##### 📦 Lot-wise Distribution Summary (Based on 'Received from Shop' Date)")
+        st.markdown("##### 📦 Lot-wise Action Summary (Based on 'Generated' Date)")
         if not df_id_log.empty:
-            received_log = df_id_log[df_id_log['Action'] == 'Received from Shop'].copy()
-            if not received_log.empty:
-                received_log['Date_Only'] = received_log['Date'].apply(lambda x: str(x).split(' ')[0] if pd.notna(x) and str(x).strip() != 'nan' else '')
-                last_received = received_log.drop_duplicates(subset=['Key'], keep='last')[['Key', 'Date_Only']]
-                last_received.rename(columns={'Date_Only': 'Lot Date (Received)'}, inplace=True)
+            gen_log = df_id_log[df_id_log['Action'] == 'Generated'].copy()
+            if not gen_log.empty:
+                gen_log['Date_Only'] = gen_log['Date'].apply(lambda x: str(x).split(' ')[0] if pd.notna(x) and str(x).strip() != 'nan' else '')
                 
-                lot_df = last_received.copy()
-                lot_df['Is_Distributed'] = lot_df['Key'].apply(lambda k: 1 if k in dist_keys else 0)
+                # Each card gets assigned to a Lot based on its most recent 'Generated' date
+                latest_gen = gen_log.drop_duplicates(subset=['Key'], keep='last').copy()
                 
-                lot_summary = lot_df.groupby('Lot Date (Received)').agg(
-                    Received_from_Shop=('Key', 'count'),
-                    Distributed=('Is_Distributed', 'sum')
-                ).reset_index()
+                # Sort dates chronologically to assign natural Lot numbers (Lot 1 is oldest date)
+                unique_gen_dates = sorted(latest_gen['Date_Only'].unique(), key=lambda d: pd.to_datetime(d, dayfirst=True))
+                lot_mapping = {d: f"Lot {i+1}" for i, d in enumerate(unique_gen_dates)}
+                latest_gen['Lot'] = latest_gen['Date_Only'].map(lot_mapping)
                 
-                lot_summary['Remain'] = lot_summary['Received_from_Shop'] - lot_summary['Distributed']
-                lot_summary.rename(columns={'Received_from_Shop': 'Received from Shop'}, inplace=True)
+                # Helper to format aggregations: "02.09.2026 (5), 03.09.2026 (10)"
+                def get_stage_agg(keys, action):
+                    stage_log = df_id_log[(df_id_log['Key'].isin(keys)) & (df_id_log['Action'] == action)].copy()
+                    if stage_log.empty: return ""
+                    latest_stage = stage_log.drop_duplicates(subset=['Key'], keep='last').copy()
+                    latest_stage['Date_Only'] = latest_stage['Date'].apply(lambda x: str(x).split(' ')[0])
+                    counts = latest_stage['Date_Only'].value_counts()
+                    sorted_dates = sorted(counts.index, key=lambda d: pd.to_datetime(d, dayfirst=True))
+                    return " , ".join([f"{d} ({counts[d]})" for d in sorted_dates])
                 
-                lot_summary['Parsed'] = pd.to_datetime(lot_summary['Lot Date (Received)'], dayfirst=True, errors='coerce')
-                lot_summary = lot_summary.sort_values('Parsed', ascending=False).drop(columns=['Parsed']).reset_index(drop=True)
+                summary_data = []
+                for d in unique_gen_dates:
+                    lot_name = lot_mapping[d]
+                    keys_in_lot = latest_gen[latest_gen['Date_Only'] == d]['Key'].tolist()
+                    qty = len(keys_in_lot)
+                    
+                    gen_str = f"{d} ({qty})"
+                    sent_str = get_stage_agg(keys_in_lot, "Sent to Shop")
+                    recv_str = get_stage_agg(keys_in_lot, "Received from Shop")
+                    
+                    # For distributed, strictly check current True status to avoid false counts
+                    dist_qty = sum([1 for k in keys_in_lot if k in dist_keys])
+                    
+                    # Also format the actual distribution dates for those truly distributed
+                    dist_str = ""
+                    if dist_qty > 0:
+                        dist_logs = df_id_log[(df_id_log['Key'].isin(keys_in_lot)) & (df_id_log['Action'] == 'Distributed')].copy()
+                        dist_logs = dist_logs[dist_logs['Key'].isin(dist_keys)].drop_duplicates(subset=['Key'], keep='last')
+                        if not dist_logs.empty:
+                            dist_logs['Date_Only'] = dist_logs['Date'].apply(lambda x: str(x).split(' ')[0])
+                            counts = dist_logs['Date_Only'].value_counts()
+                            sorted_d_dates = sorted(counts.index, key=lambda dt: pd.to_datetime(dt, dayfirst=True))
+                            dist_str = " , ".join([f"{dt} ({counts[dt]})" for dt in sorted_d_dates])
+                    
+                    remain = qty - dist_qty
+                    
+                    summary_data.append({
+                        "Lot Number": lot_name,
+                        "Quantity": qty,
+                        "Generated": gen_str,
+                        "Sent to Shop": sent_str,
+                        "Received from Shop": recv_str,
+                        "Distributed": dist_str,
+                        "Remain": remain
+                    })
                 
-                color_map_lot = {d: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, d in enumerate(lot_summary['Lot Date (Received)'])}
+                lot_summary_df = pd.DataFrame(summary_data)
+                
+                # Sort the table descending so the newest Lot appears at the top
+                lot_summary_df['SortVal'] = lot_summary_df['Lot Number'].apply(lambda x: int(x.replace('Lot ', '')))
+                lot_summary_df = lot_summary_df.sort_values('SortVal', ascending=False).drop(columns=['SortVal']).reset_index(drop=True)
+                
+                color_map_lot = {l: '#f4f6f9' if i % 2 == 0 else '#ffffff' for i, l in enumerate(lot_summary_df['Lot Number'])}
                 def lot_row_style(row):
-                    bg = color_map_lot.get(row['Lot Date (Received)'], '#ffffff')
+                    bg = color_map_lot.get(row['Lot Number'], '#ffffff')
                     return [f'background-color: {bg}' for _ in row]
                     
-                st.dataframe(lot_summary.style.apply(lot_row_style, axis=1), hide_index=True, use_container_width=True)
+                st.dataframe(lot_summary_df.style.apply(lot_row_style, axis=1), hide_index=True, use_container_width=True)
+                
+                # ✨ NEW: Expandable visual roster for every Lot!
+                st.markdown("##### 👥 Students Grouped by Lot")
+                
+                latest_overall = df_id_log.drop_duplicates(subset=['Key'], keep='last')
+                status_dict = dict(zip(latest_overall['Key'], latest_overall['Action']))
+
+                def get_valid_photo_tab3(row):
+                    thumb = str(row.get('Thumb_URL', '')).strip()
+                    photo = str(row.get('Photo_URL', '')).strip()
+                    if thumb and thumb.lower() not in ['nan', 'none']: return thumb
+                    if photo and photo.lower() not in ['nan', 'none']: return photo
+                    return ""
+                
+                def format_lot_dob(raw_dob):
+                    raw_dob = str(raw_dob).strip().split(" ")[0]
+                    fmt_dob = raw_dob
+                    if raw_dob and raw_dob.lower() not in ['nan', 'none', 'nat', '']:
+                        try:
+                            if re.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$", raw_dob):
+                                parts = re.split(r"[-/]", raw_dob)
+                                fmt_dob = f"{int(parts[2]):02d}.{int(parts[1]):02d}.{parts[0]}"
+                            else:
+                                dt = pd.to_datetime(raw_dob, dayfirst=True)
+                                fmt_dob = dt.strftime('%d.%m.%Y')
+                        except:
+                            fmt_dob = raw_dob.replace('-', '.').replace('/', '.')
+                    return fmt_dob
+
+                # Create an expander for each lot
+                for idx, row in lot_summary_df.iterrows():
+                    lot_name = row['Lot Number']
+                    gen_date = row['Generated'].split(' ')[0]
+                    qty = row['Quantity']
+                    remain = row['Remain']
+                    
+                    with st.expander(f"📦 {lot_name} (Generated: {gen_date}) | Total: {qty} | Remaining: {remain}"):
+                        keys_in_lot = latest_gen[latest_gen['Lot'] == lot_name]['Key'].tolist()
+                        lot_students = explorer_db[explorer_db['Key'].isin(keys_in_lot)].copy()
+                        
+                        if not lot_students.empty:
+                            lot_students['Current Status'] = lot_students['Key'].map(status_dict).fillna('Generated')
+                            lot_students['Image_Target'] = lot_students.apply(get_valid_photo_tab3, axis=1)
+                            lot_students['DOB'] = lot_students['DOB'].apply(format_lot_dob)
+                            
+                            if 'Name_x' in lot_students.columns and 'Name' not in lot_students.columns:
+                                lot_students['Name'] = lot_students['Name_x']
+
+                            with st.spinner(f"Loading photos for {lot_name}..."):
+                                with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe:
+                                    lot_students['Photo'] = list(exe.map(get_secure_photo_b64, lot_students['Image_Target'].tolist()))
+
+                            show_cols = ['Photo', 'Name', 'Father', 'Mother', 'Class', 'Section', 'DOB', 'Mobile', 'Current Status']
+                            st.data_editor(
+                                lot_students[show_cols],
+                                hide_index=True,
+                                use_container_width=True,
+                                column_config={
+                                    "Photo": st.column_config.ImageColumn("Stamp Photo", width="medium")
+                                },
+                                disabled=True,
+                                key=f"lot_grid_exp_{lot_name}"
+                            )
+
             else:
-                st.info("No cards have been 'Received from Shop' yet to create a Lot summary.")
+                st.info("No cards have been Generated yet to create a Lot summary.")
+        else:
+            st.info("ID card log is empty.")
 
         st.write("---")
 
@@ -1018,7 +1130,6 @@ with tabs[4]:
             undo_action = None
             
         elif "2." in view_filter:
-            # ✨ NEW: Scanner injected for fast Receiving!
             st.markdown("<h4 style='color:#0056b3;'>📷 Scan QR to Receive Cards from Shop</h4>", unsafe_allow_html=True)
             st.write("Scan the ID cards to instantly log them as received back from the lamination shop.")
             

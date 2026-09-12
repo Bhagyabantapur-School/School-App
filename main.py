@@ -19,7 +19,7 @@ personal_apps = [
     "Live Routine Hub", "Money App", "Location App", "Money Utilities", "Strong Tracker", 
     "Project App", "AI Video Tracker", "Courses", "Election Duty", "Monthly Tracker", "Money Tracker", 
     "Product Inventory", "Health Hub", "Backup Tracker", "Routine Audit", 
-    "Routine Editor", "MDM Returns", "Video Manager", "Speech Mastery", "Image Resizer", "Trace Inventory", 
+    "Routine Editor", "MDM Returns", "Video Manager", "Speech Mastery", "Portal Registry", "Image Resizer", "Trace Inventory", 
     "Sleep & Water", "Packing Tracker", "App Updater", "Visual Dashboard"
 ]
 
@@ -165,7 +165,8 @@ routine_editor = st.Page("routine_editor.py", title="Routine Editor", icon="✏�
 mdm_return = st.Page("mdm_return_log.py", title="MDM Returns", icon="📦", default=is_default("MDM Returns", "Personal Hub"))
 ytfb_videos = st.Page("bps_ytfb_videos.py", title="Video Manager", icon="🎬", default=is_default("Video Manager", "Personal Hub"))
 speech_prep = st.Page("speech_prep_app.py", title="Speech Mastery", icon="🎙️", default=is_default("Speech Mastery", "Personal Hub"))
-resizer_app = st.Page("resizer.py", title="Image Resizer", icon="🖼️", default=is_default("Image Resizer", "Personal Hub")) # <-- Defined here
+portal_registry = st.Page("portal_registry_app.py", title="Portal Registry", icon="🔗", default=is_default("Portal Registry", "Personal Hub")) # <-- Defined here
+resizer_app = st.Page("resizer.py", title="Image Resizer", icon="🖼️", default=is_default("Image Resizer", "Personal Hub")) 
 trace_app = st.Page("trace.py", title="Trace Inventory", icon="🏷️", default=is_default("Trace Inventory", "Personal Hub"))
 sleep_water = st.Page("sleep_water_app.py", title="Sleep & Water", icon="💧", default=is_default("Sleep & Water", "Personal Hub"))
 packing_tracker = st.Page("packing_app.py", title="Packing Tracker", icon="🎒", default=is_default("Packing Tracker", "Personal Hub")) 
@@ -197,7 +198,7 @@ if system_choice == 'Personal Hub':
         "LOCATION": [location_app, packing_tracker],
         "ROUTINE": [routine_hub, routine_audit, routine_editor, project, ai_video_tracker, courses_app], 
         "HEALTH": [health, sleep_water],
-        "SCH WORK": [mdm_return, ytfb_videos, speech_prep, resizer_app], # <-- Added here
+        "SCH WORK": [mdm_return, ytfb_videos, speech_prep, portal_registry, resizer_app], # <-- Placed above resizer_app here
         "HOME": [trace_app, monthly],
         "HARDWARE": [backup],
         "BALANCE": [strong],

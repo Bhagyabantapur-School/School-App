@@ -35,7 +35,7 @@ app_groups = {
         ("Routine Editor", "routine_editor.py", "✏️"), 
         ("Project App", "project_app.py", "🚀"), 
         ("AI Video Tracker", "ai_video_tracker.py", "🤖"),
-        ("Courses", "courses.py", "🎓") # <-- Added here
+        ("Courses", "courses.py", "🎓")
     ],
     "HEALTH": [
         ("Health Hub", "health_app.py", "❤️"), 
@@ -44,7 +44,9 @@ app_groups = {
     "SCH WORK": [
         ("MDM Returns", "mdm_return_log.py", "📦"), 
         ("Video Manager", "bps_ytfb_videos.py", "🎬"), 
-        ("Speech Mastery", "speech_prep_app.py", "🎙️")
+        ("Speech Mastery", "speech_prep_app.py", "🎙️"),
+        ("Portal Registry", "portal_registry_app.py", "🔗"), # <-- Added here
+        ("Image Resizer", "resizer.py", "🖼️")                # <-- Added here
     ],
     "HOME": [
         ("Trace Inventory", "trace.py", "🏷️"), 

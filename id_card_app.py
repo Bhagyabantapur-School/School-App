@@ -248,12 +248,31 @@ def reset_generated_status():
 # --- 4. PDF GENERATORS ---
 
 def generate_pdf(students_list, photo_dict, progress_bar=None):
-    """Generates the Landscape Student ID Cards"""
+    """Generates the Landscape Student ID Cards with Edge-to-Edge Cut Guides"""
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.set_auto_page_break(auto=True, margin=10)
-    pdf.add_page()
     
     x_start, y_start, card_w, card_h, gap = 10, 10, 86, 54, 8
+    
+    # ✨ NEW: Edge-to-Edge Dashed Cutting Guides
+    def draw_cut_guides():
+        pdf.set_draw_color(180, 180, 180) # Light grey
+        pdf.set_line_width(0.2)
+        
+        # Vertical center guide (runs perfectly down the middle of the 8mm gap)
+        vx = x_start + card_w + (gap / 2)
+        for cy in range(0, 297, 4):
+            pdf.line(vx, cy, vx, min(cy + 2, 297))
+            
+        # Horizontal guides (Top edge + Bottom edges of all 4 rows)
+        for r in range(5): 
+            hy = y_start + (card_h + gap) * r - (gap / 2)
+            for cx in range(0, 210, 4):
+                pdf.line(cx, hy, min(cx + 2, 210), hy)
+
+    pdf.add_page()
+    draw_cut_guides()
+    
     col, row = 0, 0
     total_cards = len(students_list)
     
@@ -354,10 +373,16 @@ def generate_pdf(students_list, photo_dict, progress_bar=None):
         pdf.set_text_color(0); pdf.set_font("Arial", 'I', 6); pdf.set_xy(x, y+49); pdf.cell(card_w-5, 3, "Sukhamay Kisku", 0, 1, 'R')
         pdf.set_font("Arial", '', 5); pdf.set_xy(x, y+51); pdf.cell(card_w-5, 2, "Head Teacher", 0, 0, 'R')
         
-        # ✨ UPDATE: 8 Cards Per Page Logic (2 columns x 4 rows)
+        # ✨ STRICTLY 8 CARDS PER PAGE with Guides
         col += 1
-        if col >= 2: col, row = 0, row + 1
-        if row >= 4: pdf.add_page(); col, row = 0, 0
+        if col >= 2: 
+            col = 0
+            row += 1
+            
+        if row >= 4 and idx < total_cards - 1: 
+            pdf.add_page()
+            draw_cut_guides()
+            col, row = 0, 0
             
     if progress_bar: progress_bar.progress(1.0, text="✅ PDF Rendering Complete!")
     pdf_output = pdf.output(dest='S')
@@ -520,7 +545,6 @@ with tabs[0]:
                         my_bar = st.progress(0, text="Starting secure fetch for Lot Reprint...")
                         
                         num_students = len(selected_students)
-                        # ✨ UPDATE: Changed math to 8 per page
                         pages_needed_reprint = math.ceil(num_students / 8)
                         
                         for idx, (index, student) in enumerate(selected_students.iterrows()):
@@ -627,7 +651,6 @@ with tabs[0]:
 
             if not selected_students.empty:
                 num_students = len(selected_students)
-                # ✨ UPDATE: Changed math to 8 per page
                 pages_needed = math.ceil(num_students / 8)
                 st.divider()
                 st.info(f"🖨️ **Print Summary:** You selected **{num_students}** students. Requires **{pages_needed}** A4 page(s).")
@@ -880,7 +903,7 @@ with tabs[2]:
         else:
             st.info("ID card log is empty.")
 
-        # 📦 Lot-wise Distribution Summary
+        # 📦 Lot-wise Action Summary
         st.write("---")
         st.markdown("##### 📦 Lot-wise Action Summary (Based on 'Generated' Date)")
         if not df_id_log.empty:

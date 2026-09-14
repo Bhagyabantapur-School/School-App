@@ -140,6 +140,27 @@ with c_loc2:
         load_shopping_data.clear()
         st.rerun()
 
+# --- COLOR-CODED QUICK NAVIGATION BUTTON ---
+st.markdown("""
+    <div class="loc-btn-hook"></div>
+    <style>
+    div:has(.loc-btn-hook) + div button { 
+        background-color: #6f42c1 !important; /* Nice distinct Purple */
+        color: white !important; 
+        border-color: #6f42c1 !important; 
+    }
+    div:has(.loc-btn-hook) + div button:hover { 
+        background-color: #59339d !important; /* Darker Purple on Hover */
+        border-color: #59339d !important; 
+        color: white !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+if st.button("📍 Go to Location Tracker", use_container_width=True):
+    st.switch_page("location_app.py")
+
+st.divider()
+
 # --- EXPANDABLE BUSY TIME QUICK ENTRY ---
 with st.expander("⚡ Busy Time Quick Entry", expanded=True):
     b_type = st.radio("Flow Type", ["Expense (OUT)", "Income (IN)"], horizontal=True)

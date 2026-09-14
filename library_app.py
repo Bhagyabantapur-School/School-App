@@ -185,67 +185,97 @@ if menu_choice == "Add Books & QR":
     st.subheader("Generate & Print QR Codes")
     
     if not df_books.empty:
-        total_books = len(df_books)
-        qrs_per_page = 24
-        total_pages = math.ceil(total_books / qrs_per_page)
+        st.write("Select the books you want to print QR codes for:")
         
-        st.info(f"🖨️ **Printing Details:** You have {total_books} books. This will require **{total_pages}** A4 page(s) to print (24 stickers per page).")
+        # Add a "Select All" toggle for quick bulk selection
+        select_all = st.checkbox("Select All Books", value=False)
         
-        if st.button("Generate A4 PDF for Printing"):
-            with st.spinner("Generating PDF layout..."):
-                pdf = FPDF(orientation='P', unit='mm', format='A4')
-                pdf.set_auto_page_break(auto=False)
-                pdf.add_page()
-                pdf.set_font("helvetica", size=8)
-                
-                col_width = 45
-                row_height = 48
-                margin_x = 15
-                margin_y = 15
-                x, y = margin_x, margin_y
-                col_count = 0
-                row_count = 0
-                
-                for idx, row in df_books.iterrows():
-                    qr_data = str(row['Book_ID'])
-                    qr = qrcode.make(qr_data)
+        # Prepare a clean dataframe for the selection UI
+        selection_df = df_books[['Book_ID', 'Title', 'Author']].copy()
+        selection_df.insert(0, "Print", select_all)
+        
+        # Display the interactive data editor
+        edited_df = st.data_editor(
+            selection_df,
+            column_config={
+                "Print": st.column_config.CheckboxColumn("Print?", default=False)
+            },
+            disabled=["Book_ID", "Title", "Author"],  # Prevent editing actual book data here
+            hide_index=True,
+            use_container_width=True
+        )
+        
+        # Filter the main dataframe based on the user's selection
+        selected_ids = edited_df[edited_df["Print"]]["Book_ID"].tolist()
+        selected_df = df_books[df_books['Book_ID'].isin(selected_ids)]
+        total_selected = len(selected_df)
+        
+        if total_selected > 0:
+            qrs_per_page = 24
+            total_pages = math.ceil(total_selected / qrs_per_page)
+            
+            st.info(f"🖨️ **Printing Details:** You selected {total_selected} book(s). This will require **{total_pages}** A4 page(s) to print (24 stickers per page).")
+            
+            if st.button("Generate A4 PDF for Selected Books"):
+                with st.spinner("Generating PDF layout..."):
+                    pdf = FPDF(orientation='P', unit='mm', format='A4')
+                    pdf.set_auto_page_break(auto=False)
+                    pdf.add_page()
+                    pdf.set_font("helvetica", size=8)
                     
-                    # Fix: Close the file context before reading/unlinking to prevent Windows PermissionError
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
-                        tmp_name = tmp.name
-                        
-                    qr.save(tmp_name)
-                    pdf.image(tmp_name, x=x, y=y, w=40, h=40)
-                    pdf.set_xy(x, y + 40)
-                    pdf.cell(40, 5, txt=str(row['Book_ID']), align='C')
-                        
-                    os.unlink(tmp_name)
+                    col_width = 45
+                    row_height = 48
+                    margin_x = 15
+                    margin_y = 15
+                    x, y = margin_x, margin_y
+                    col_count = 0
+                    row_count = 0
+                    item_count = 0  # Track how many items we've processed
                     
-                    col_count += 1
-                    x += col_width
-                    
-                    if col_count >= 4:
-                        col_count = 0
-                        x = margin_x
-                        row_count += 1
-                        y += row_height
+                    for _, row in selected_df.iterrows():
+                        item_count += 1
+                        qr_data = str(row['Book_ID'])
+                        qr = qrcode.make(qr_data)
                         
-                    # Fix: Only add a new page if we haven't processed all books yet
-                    if row_count >= 6 and (idx + 1) < total_books:
-                        pdf.add_page()
-                        row_count = 0
-                        col_count = 0
-                        x = margin_x
-                        y = margin_y
-                
-                pdf_bytes = bytes(pdf.output())
-                st.success("✅ PDF Generated Successfully!")
-                st.download_button(
-                    label="📥 Download PDF to Print",
-                    data=pdf_bytes,
-                    file_name=f"Library_QR_Codes_{datetime.now(IST).strftime('%d-%m-%Y')}.pdf",
-                    mime="application/pdf"
-                )
+                        # Safe tempfile handling to prevent Windows PermissionError
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
+                            tmp_name = tmp.name
+                            
+                        qr.save(tmp_name)
+                        pdf.image(tmp_name, x=x, y=y, w=40, h=40)
+                        pdf.set_xy(x, y + 40)
+                        pdf.cell(40, 5, txt=str(row['Book_ID']), align='C')
+                            
+                        os.unlink(tmp_name)
+                        
+                        col_count += 1
+                        x += col_width
+                        
+                        # Move to next row
+                        if col_count >= 4:
+                            col_count = 0
+                            x = margin_x
+                            row_count += 1
+                            y += row_height
+                            
+                        # Move to next page (only if there are more items to print)
+                        if row_count >= 6 and item_count < total_selected:
+                            pdf.add_page()
+                            row_count = 0
+                            col_count = 0
+                            x = margin_x
+                            y = margin_y
+                    
+                    pdf_bytes = bytes(pdf.output())
+                    st.success("✅ PDF Generated Successfully!")
+                    st.download_button(
+                        label="📥 Download PDF to Print",
+                        data=pdf_bytes,
+                        file_name=f"Library_QR_Codes_{datetime.now(IST).strftime('%d-%m-%Y')}.pdf",
+                        mime="application/pdf"
+                    )
+        else:
+            st.warning("⚠️ Please select at least one book using the checkboxes above to generate QR codes.")
     else:
         st.write("No books in the library yet.")
 

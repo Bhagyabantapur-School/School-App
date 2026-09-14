@@ -10,6 +10,13 @@ from google.oauth2.service_account import Credentials
 from google.auth.transport.requests import AuthorizedSession
 
 # ==========================================
+# 1. AUTHENTICATION & SECURITY
+# ==========================================
+if 'authenticated' not in st.session_state or not st.session_state.authenticated:
+    st.warning("🔒 Unauthorized Access. Please log in through the main portal.")
+    st.stop()
+
+# ==========================================
 # ⚙️ CONFIGURATION & SETUP
 # ==========================================
 st.set_page_config(page_title="CookPro Tracker", page_icon="👩‍🍳", layout="centered")
@@ -24,12 +31,12 @@ COOK_PHOTOS = {
     "ASPIYA BIBI": ""
 }
 
-current_user_name = st.session_state.get('user_name', 'Head Teacher')
+current_user_name = st.session_state.get('user_name', 'Unknown User')
 user_role = st.session_state.get('user_role', 'admin')
 
 TEACHER_INITIALS = {
     "SUKHAMAY KISKU": "SK", "TAPASI RANA": "TR", "SUJATA BISWAS ROTHA": "SBR", 
-    "ROHINI SINGH": "RS", "UDAY NARAYAN JANA": "UNJ", "BIMAL KUMAR PATRA": "BKP", 
+    "ROHINI SINGH": "RS", "UDAY NARAYAN JANA": "UNJ", "BIMAL কুমার PATRA": "BKP", 
     "SUSMITA PAUL": "SP", "TAPAN KUMAR MANDAL": "TKM", "MANJUMA KHATUN": "MK"
 }
 INV_TEACHER_INITIALS = {v: k for k, v in TEACHER_INITIALS.items()}
@@ -209,8 +216,15 @@ with tab1:
     # 🌅 STEP 1: ATTENDANCE, TIME & AUTO-COOKING
     # -----------------------------------------------------
     st.markdown("### 🌅 Step 1: Morning Attendance & Time Log")
+    
+    is_admin = user_role == 'admin'
+    
     with st.form("att_form"):
-        st.caption("🔒 Admin or Alt. Teacher Only: Record attendance and specific movement times.")
+        st.caption("🔒 Admin Only: Record attendance and specific movement times.")
+        
+        if not is_admin:
+            st.warning("🔒 **Locked:** Only the Admin can record attendance and movement times.")
+            
         att_results = {}
         time_results = {}
         
@@ -223,22 +237,22 @@ with tab1:
             with c1: 
                 st.markdown(f"<img src='{get_secure_photo_uri(COOK_PHOTOS.get(cook, ''))}' width='55' height='55' class='cook-img'>", unsafe_allow_html=True)
             with c2: 
-                att_results[cook] = st.radio(f"**{cook}**", ["Present", "Absent"], index=idx, horizontal=True, key=f"att_{cook}")
+                att_results[cook] = st.radio(f"**{cook}**", ["Present", "Absent"], index=idx, horizontal=True, key=f"att_{cook}", disabled=not is_admin)
             
             # Time Input Fields
             t1, t2, t3 = st.columns(3)
             with t1:
-                min_in = st.text_input("🟢 Morning In", value=db_state.get("Morning_In", ""), placeholder="e.g. 9:00 AM", key=f"min_{cook}")
+                min_in = st.text_input("🟢 Morning In", value=db_state.get("Morning_In", ""), placeholder="e.g. 9:00 AM", key=f"min_{cook}", disabled=not is_admin)
             with t2:
-                dout = st.text_input("🔴 Out (During Duty)", value=db_state.get("Duty_Out", ""), placeholder="e.g. 11:30 AM", key=f"dout_{cook}")
+                dout = st.text_input("🔴 Out (During Duty)", value=db_state.get("Duty_Out", ""), placeholder="e.g. 11:30 AM", key=f"dout_{cook}", disabled=not is_admin)
             with t3:
-                din = st.text_input("🟡 In (Return)", value=db_state.get("Duty_In", ""), placeholder="e.g. 12:15 PM", key=f"din_{cook}")
+                din = st.text_input("🟡 In (Return)", value=db_state.get("Duty_In", ""), placeholder="e.g. 12:15 PM", key=f"din_{cook}", disabled=not is_admin)
                 
             time_results[cook] = {"in": min_in, "out": dout, "ret": din}
             
             st.markdown("<hr style='margin: 10px 0 20px 0;'>", unsafe_allow_html=True)
 
-        if st.form_submit_button("💾 Save Attendance & Times", type="primary"):
+        if st.form_submit_button("💾 Save Attendance & Times", type="primary", disabled=not is_admin):
             updates = {}
             for cook, att in att_results.items():
                 c_sch = today_schedule[today_schedule['Cook_Name'].str.strip().str.upper() == cook.upper()] if not today_schedule.empty else pd.DataFrame()

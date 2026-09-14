@@ -98,7 +98,7 @@ def fetch_data():
 def overwrite_sheet_df(sheet_name, df):
     sh = init_cookpro_sheet()
     try: ws = sh.worksheet(sheet_name)
-    except WorksheetNotFound: ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=10)
+    except WorksheetNotFound: ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=12)
     except Exception: return
     try: 
         ws.clear()
@@ -121,6 +121,7 @@ st.markdown("""
         border-radius: 50%; border: 2px solid #ddd; object-fit: cover;
     }
     div[data-testid="stForm"] { border-left: 5px solid #007bff; border-radius: 10px; margin-bottom: 25px; }
+    .time-label { font-size: 13px; font-weight: bold; color: #555; margin-bottom: -10px; display: block;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -149,7 +150,8 @@ with tab1:
     def save_data_chunk(updates_dict):
         df = fetch_data()
         timestamp_str = datetime.now(IST).strftime("%d-%m-%Y %I:%M:%S %p")
-        cols = ["Date", "Cook_Name", "Attendance", "Cooked_Today", "Cleaned_Room", "Points_Earned", "Submitted_By", "Timestamp"]
+        # Added new time-tracking columns
+        cols = ["Date", "Cook_Name", "Attendance", "Morning_In", "Duty_Out", "Duty_In", "Cooked_Today", "Cleaned_Room", "Points_Earned", "Submitted_By", "Timestamp"]
         if df.empty: df = pd.DataFrame(columns=cols)
         
         for cook, new_vals in updates_dict.items():
@@ -163,6 +165,9 @@ with tab1:
                 new_row = {
                     "Date": date_str, "Cook_Name": cook, 
                     "Attendance": new_vals.get("Attendance", "Pending"), 
+                    "Morning_In": new_vals.get("Morning_In", ""),
+                    "Duty_Out": new_vals.get("Duty_Out", ""),
+                    "Duty_In": new_vals.get("Duty_In", ""),
                     "Cooked_Today": new_vals.get("Cooked_Today", "Pending"), 
                     "Cleaned_Room": new_vals.get("Cleaned_Room", "Pending"), 
                     "Points_Earned": 0, "Submitted_By": current_user_name, "Timestamp": timestamp_str
@@ -182,6 +187,11 @@ with tab1:
             else:
                 df.at[idx, "Cooked_Today"] = "No"
                 df.at[idx, "Cleaned_Room"] = "None"
+                # Clear time logs if absent
+                df.at[idx, "Morning_In"] = ""
+                df.at[idx, "Duty_Out"] = ""
+                df.at[idx, "Duty_In"] = ""
+                
             df.at[idx, "Points_Earned"] = pts 
 
         for c in cols: 
@@ -196,37 +206,59 @@ with tab1:
         return {}
 
     # -----------------------------------------------------
-    # 🌅 STEP 1: ATTENDANCE & AUTO-COOKING
+    # 🌅 STEP 1: ATTENDANCE, TIME & AUTO-COOKING
     # -----------------------------------------------------
-    st.markdown("### 🌅 Step 1: Morning Attendance & Cooking")
+    st.markdown("### 🌅 Step 1: Morning Attendance & Time Log")
     with st.form("att_form"):
-        st.caption("🔒 Admin or Alt. Teacher Only: Marking 'Present' automatically logs their Cooking duty (+5 pts) if they are assigned today.")
+        st.caption("🔒 Admin or Alt. Teacher Only: Record attendance and specific movement times.")
         att_results = {}
+        time_results = {}
+        
         for cook in COOKS:
-            curr_att = get_db_state(cook).get("Attendance", "Present")
+            db_state = get_db_state(cook)
+            curr_att = db_state.get("Attendance", "Present")
             idx = 0 if curr_att == "Present" else (1 if curr_att == "Absent" else 0)
             
             c1, c2 = st.columns([1, 4])
-            with c1: st.markdown(f"<img src='{get_secure_photo_uri(COOK_PHOTOS.get(cook, ''))}' width='50' height='50' class='cook-img'>", unsafe_allow_html=True)
-            with c2: att_results[cook] = st.radio(f"**{cook}**", ["Present", "Absent"], index=idx, horizontal=True, key=f"att_{cook}")
-            st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
+            with c1: 
+                st.markdown(f"<img src='{get_secure_photo_uri(COOK_PHOTOS.get(cook, ''))}' width='55' height='55' class='cook-img'>", unsafe_allow_html=True)
+            with c2: 
+                att_results[cook] = st.radio(f"**{cook}**", ["Present", "Absent"], index=idx, horizontal=True, key=f"att_{cook}")
+            
+            # Time Input Fields
+            t1, t2, t3 = st.columns(3)
+            with t1:
+                min_in = st.text_input("🟢 Morning In", value=db_state.get("Morning_In", ""), placeholder="e.g. 9:00 AM", key=f"min_{cook}")
+            with t2:
+                dout = st.text_input("🔴 Out (During Duty)", value=db_state.get("Duty_Out", ""), placeholder="e.g. 11:30 AM", key=f"dout_{cook}")
+            with t3:
+                din = st.text_input("🟡 In (Return)", value=db_state.get("Duty_In", ""), placeholder="e.g. 12:15 PM", key=f"din_{cook}")
+                
+            time_results[cook] = {"in": min_in, "out": dout, "ret": din}
+            
+            st.markdown("<hr style='margin: 10px 0 20px 0;'>", unsafe_allow_html=True)
 
-        if st.form_submit_button("💾 Save Attendance & Cooking", type="primary"):
+        if st.form_submit_button("💾 Save Attendance & Times", type="primary"):
             updates = {}
             for cook, att in att_results.items():
-                # Auto-check if they are supposed to cook today
                 c_sch = today_schedule[today_schedule['Cook_Name'].str.strip().str.upper() == cook.upper()] if not today_schedule.empty else pd.DataFrame()
                 will_cook = False
                 if not c_sch.empty:
                     val = str(c_sch.iloc[0].get('Will_Cook_Today', '')).strip().lower()
                     will_cook = val in ['yes', 'y', 'true', '1']
                 
-                # Auto-assign cooking based on attendance
                 cooked = "Yes" if (att == "Present" and will_cook) else "No"
-                updates[cook] = {"Attendance": att, "Cooked_Today": cooked}
+                
+                updates[cook] = {
+                    "Attendance": att,
+                    "Morning_In": time_results[cook]["in"] if att == "Present" else "",
+                    "Duty_Out": time_results[cook]["out"] if att == "Present" else "",
+                    "Duty_In": time_results[cook]["ret"] if att == "Present" else "",
+                    "Cooked_Today": cooked
+                }
                 
             save_data_chunk(updates)
-            st.success("✅ Attendance & Cooking duties automatically updated!")
+            st.success("✅ Attendance, Movement Times, and Cooking duties successfully updated!")
             st.rerun()
 
     # -----------------------------------------------------
@@ -234,7 +266,6 @@ with tab1:
     # -----------------------------------------------------
     st.markdown("### 🧹 Step 2: Cleaning Verification")
     
-    # Check bps_routine for First Period Teachers
     routine_df = fetch_routine()
     first_teachers_full = []
     if not routine_df.empty and 'Day' in routine_df.columns and 'Start_Time' in routine_df.columns:
@@ -343,4 +374,9 @@ with tab3:
             return ''
             
         styled_df = data_df.style.map(highlight_pts, subset=['Points_Earned'])
-        st.dataframe(styled_df, hide_index=True, use_container_width=True)
+        
+        # Determine logical column order ensuring new time columns show neatly
+        display_cols = ["Date", "Cook_Name", "Attendance", "Morning_In", "Duty_Out", "Duty_In", "Cooked_Today", "Cleaned_Room", "Points_Earned", "Submitted_By", "Timestamp"]
+        existing_cols = [c for c in display_cols if c in data_df.columns]
+        
+        st.dataframe(styled_df, column_order=existing_cols, hide_index=True, use_container_width=True)

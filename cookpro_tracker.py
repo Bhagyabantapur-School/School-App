@@ -36,7 +36,7 @@ user_role = st.session_state.get('user_role', 'admin')
 
 TEACHER_INITIALS = {
     "SUKHAMAY KISKU": "SK", "TAPASI RANA": "TR", "SUJATA BISWAS ROTHA": "SBR", 
-    "ROHINI SINGH": "RS", "UDAY NARAYAN JANA": "UNJ", "BIMAL কুমার PATRA": "BKP", 
+    "ROHINI SINGH": "RS", "UDAY NARAYAN JANA": "UNJ", "BIMAL KUMAR PATRA": "BKP", 
     "SUSMITA PAUL": "SP", "TAPAN KUMAR MANDAL": "TKM", "MANJUMA KHATUN": "MK"
 }
 INV_TEACHER_INITIALS = {v: k for k, v in TEACHER_INITIALS.items()}

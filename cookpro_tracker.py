@@ -127,8 +127,8 @@ st.markdown("""
     .cook-img {
         border-radius: 50%; border: 2px solid #ddd; object-fit: cover;
     }
-    div[data-testid="stForm"] { border-left: 5px solid #007bff; border-radius: 10px; margin-bottom: 25px; }
-    .time-label { font-size: 13px; font-weight: bold; color: #555; margin-bottom: -10px; display: block;}
+    div[data-testid="stForm"] { border-left: 4px solid #007bff; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+    p { margin-bottom: 5px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -141,7 +141,9 @@ tab1, tab2, tab3 = st.tabs(["📝 Daily Timeline", "🏆 Leaderboard", "📊 His
 # 📝 TAB 1: DAILY TRACKER (Auto-Logic System)
 # ==========================================
 with tab1:
-    today_ist = datetime.now(IST).date()
+    current_ist = datetime.now(IST)
+    today_ist = current_ist.date()
+    
     selected_date = st.date_input("Select Date", today_ist)
     date_str = selected_date.strftime("%d-%m-%Y")
     day_name = selected_date.strftime("%A")
@@ -209,62 +211,94 @@ with tab1:
             mask = (data_df['Date'] == date_str) & (data_df['Cook_Name'] == cook_name)
             if mask.any(): return data_df[mask].iloc[0].to_dict()
         return {}
+        
+    def parse_time_string(t_str, default_time):
+        if not t_str or str(t_str).strip() == "" or str(t_str).strip() == "nan":
+            return default_time
+        try:
+            return datetime.strptime(str(t_str).strip(), "%I:%M %p").time()
+        except:
+            try: return datetime.strptime(str(t_str).strip(), "%H:%M:%S").time()
+            except: return default_time
 
     # -----------------------------------------------------
     # 🌅 STEP 1: ATTENDANCE, TIME & AUTO-COOKING
     # -----------------------------------------------------
-    st.markdown("### 🌅 Step 1: Morning Attendance & Time Log")
+    st.markdown("### 🌅 Step 1: Attendance & Time Log")
     
     is_admin = user_role == 'admin'
     
-    with st.form("att_form"):
-        st.caption("🔒 Admin Only: Record attendance and specific movement times.")
+    if not is_admin:
+        st.warning("🔒 **Locked:** Only the Admin can record attendance and movement times.")
         
-        if not is_admin:
-            st.warning("🔒 **Locked:** Only the Admin can record attendance and movement times.")
-            
-        att_results = {}
-        time_results = {}
+    for cook in COOKS:
+        db_state = get_db_state(cook)
         
-        for cook in COOKS:
-            db_state = get_db_state(cook)
-            curr_att = db_state.get("Attendance", "Present")
-            idx = 0 if curr_att == "Present" else (1 if curr_att == "Absent" else 0)
-            
-            c1, c2 = st.columns([1, 4])
-            with c1: 
-                st.markdown(f"<img src='{get_secure_photo_uri(COOK_PHOTOS.get(cook, ''))}' width='55' height='55' class='cook-img'>", unsafe_allow_html=True)
-            with c2: 
-                att_results[cook] = st.radio(f"**{cook}**", ["Present", "Absent"], index=idx, horizontal=True, key=f"att_{cook}", disabled=not is_admin)
-            
-            t1, t2, t3 = st.columns(3)
-            with t1: min_in = st.text_input("🟢 Morning In", value=db_state.get("Morning_In", ""), placeholder="e.g. 9:00 AM", key=f"min_{cook}", disabled=not is_admin)
-            with t2: dout = st.text_input("🔴 Out (During Duty)", value=db_state.get("Duty_Out", ""), placeholder="e.g. 11:30 AM", key=f"dout_{cook}", disabled=not is_admin)
-            with t3: din = st.text_input("🟡 In (Return)", value=db_state.get("Duty_In", ""), placeholder="e.g. 12:15 PM", key=f"din_{cook}", disabled=not is_admin)
+        # Cook Profile Header
+        st.markdown(f"""
+        <div style='display:flex; align-items:center; gap: 15px; margin-top: 15px; margin-bottom: 5px;'>
+            <img src='{get_secure_photo_uri(COOK_PHOTOS.get(cook, ''))}' style='width:45px; height:45px; border-radius:50%; object-fit:cover; border:2px solid #ddd;'>
+            <h4 style='margin:0; color:#2c3e50;'>{cook}</h4>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        c1, c2, c3, c4 = st.columns(4)
+        
+        # 1. INDIVIDUAL ATTENDANCE FORM
+        with c1:
+            with st.form(f"f_att_{cook}"):
+                curr_att = db_state.get("Attendance", "Present")
+                att_val = st.radio("Status", ["Present", "Absent"], index=0 if curr_att == "Present" else 1, disabled=not is_admin)
                 
-            time_results[cook] = {"in": min_in, "out": dout, "ret": din}
-            st.markdown("<hr style='margin: 10px 0 20px 0;'>", unsafe_allow_html=True)
+                if st.form_submit_button("💾 Att.", use_container_width=True, disabled=not is_admin):
+                    c_sch = today_schedule[today_schedule['Cook_Name'].str.strip().str.upper() == cook.upper()] if not today_schedule.empty else pd.DataFrame()
+                    will_cook = False
+                    if not c_sch.empty:
+                        val = str(c_sch.iloc[0].get('Will_Cook_Today', '')).strip().lower()
+                        will_cook = val in ['yes', 'y', 'true', '1']
+                    
+                    cooked = "Yes" if (att_val == "Present" and will_cook) else "No"
+                    save_data_chunk({cook: {"Attendance": att_val, "Cooked_Today": cooked}})
+                    st.success(f"Saved!")
+                    st.rerun()
+                    
+        # 2. INDIVIDUAL MORNING IN FORM
+        with c2:
+            with st.form(f"f_min_{cook}"):
+                m_str = db_state.get("Morning_In", "")
+                m_val = parse_time_string(m_str, current_ist.time())
+                m_in = st.time_input("🟢 In", value=m_val, disabled=not is_admin)
+                
+                if st.form_submit_button("💾 Save In", use_container_width=True, disabled=not is_admin):
+                    save_data_chunk({cook: {"Morning_In": m_in.strftime("%I:%M %p")}})
+                    st.success("Saved!")
+                    st.rerun()
+                    
+        # 3. INDIVIDUAL DUTY OUT FORM
+        with c3:
+            with st.form(f"f_mout_{cook}"):
+                o_str = db_state.get("Duty_Out", "")
+                o_val = parse_time_string(o_str, current_ist.time())
+                m_out = st.time_input("🔴 Out", value=o_val, disabled=not is_admin)
+                
+                if st.form_submit_button("💾 Save Out", use_container_width=True, disabled=not is_admin):
+                    save_data_chunk({cook: {"Duty_Out": m_out.strftime("%I:%M %p")}})
+                    st.success("Saved!")
+                    st.rerun()
 
-        if st.form_submit_button("💾 Save Attendance & Times", type="primary", disabled=not is_admin):
-            updates = {}
-            for cook, att in att_results.items():
-                c_sch = today_schedule[today_schedule['Cook_Name'].str.strip().str.upper() == cook.upper()] if not today_schedule.empty else pd.DataFrame()
-                will_cook = False
-                if not c_sch.empty:
-                    val = str(c_sch.iloc[0].get('Will_Cook_Today', '')).strip().lower()
-                    will_cook = val in ['yes', 'y', 'true', '1']
+        # 4. INDIVIDUAL DUTY RETURN FORM
+        with c4:
+            with st.form(f"f_din_{cook}"):
+                r_str = db_state.get("Duty_In", "")
+                r_val = parse_time_string(r_str, current_ist.time())
+                d_in = st.time_input("🟡 Return", value=r_val, disabled=not is_admin)
                 
-                cooked = "Yes" if (att == "Present" and will_cook) else "No"
-                updates[cook] = {
-                    "Attendance": att,
-                    "Morning_In": time_results[cook]["in"] if att == "Present" else "",
-                    "Duty_Out": time_results[cook]["out"] if att == "Present" else "",
-                    "Duty_In": time_results[cook]["ret"] if att == "Present" else "",
-                    "Cooked_Today": cooked
-                }
-            save_data_chunk(updates)
-            st.success("✅ Attendance, Movement Times, and Cooking duties successfully updated!")
-            st.rerun()
+                if st.form_submit_button("💾 Save Return", use_container_width=True, disabled=not is_admin):
+                    save_data_chunk({cook: {"Duty_In": d_in.strftime("%I:%M %p")}})
+                    st.success("Saved!")
+                    st.rerun()
+                    
+        st.write("---")
 
     # -----------------------------------------------------
     # 🧹 STEP 2: DYNAMIC CLEANING VERIFICATION
@@ -273,10 +307,8 @@ with tab1:
     
     routine_df = fetch_routine()
     
-    # Text Parser: Extracts class names & finds first-period teachers for those classes
     def get_authorized_teachers_for_room(rooms_str, day_name, routine_df):
         auth_teachers = set()
-        # Find all patterns like "Class IV A", "Class PP A", "Class I B", etc.
         matches = re.finditer(r"Class\s+(PP|I{1,3}|IV|V)\s+([A-C])", str(rooms_str), flags=re.IGNORECASE)
         for match in matches:
             cls = f"CLASS {match.group(1).upper()}"
@@ -312,7 +344,6 @@ with tab1:
                 has_clean_duty = True
                 db_state = get_db_state(cook)
                 
-                # Check authorization specifically for this cook's assigned rooms
                 auth_teachers = get_authorized_teachers_for_room(room, day_name, routine_df)
                 is_authorized = (user_role == 'admin') or (current_user_name in auth_teachers)
                 
@@ -336,7 +367,6 @@ with tab1:
                     
         if not has_clean_duty: st.info("No cleaning duties are scheduled today.")
         
-        # Button is enabled only if the logged-in user is authorized for at least one scheduled cook
         if st.form_submit_button("💾 Verify & Save Cleaning", type="primary", disabled=not can_save_anything and has_clean_duty):
             if clean_results:
                 updates = {c: {"Cleaned_Room": clean_results[c]} for c in clean_results}

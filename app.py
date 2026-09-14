@@ -295,6 +295,7 @@ gas_page = st.Page("bps_gas_tracker.py", title="Gas Tracker", icon="🛢️")
 exam_page = st.Page("bps_exam.py", title="BPS Exams", icon="📝")
 assembly_page = st.Page("bps_assembly.py", title="Assembly Planner", icon="🎙️")
 celeb_page = st.Page("bps_celebration.py", title="Celebrations", icon="🎊")
+cookpro_page = st.Page("cookpro_tracker.py", title="CookPro Tracker", icon="👩‍🍳") # NEW: CookPro Tracker
 
 def home_page_ui():
     st.markdown(f"<h3 style='margin-bottom: 5px;'>👋 Welcome, {st.session_state.user_name}</h3>", unsafe_allow_html=True)
@@ -322,8 +323,15 @@ def home_page_ui():
         if st.button("🎊 Celebrations", type="secondary", use_container_width=True):
             st.switch_page(celeb_page)
             
+    # NEW: CookPro Button added to Secondary Applications row
+    col7, col8 = st.columns(2)
+    with col7:
+        if st.button("👩‍🍳 CookPro Tracker", type="secondary", use_container_width=True):
+            st.switch_page(cookpro_page)
+
     # Admin-only Applications
     if st.session_state.user_role == "admin":
+        st.markdown("#### 🛠️ Admin Controls")
         col5, col6 = st.columns(2)
         with col5:
             if st.button("🎙️ Assembly Planner", type="secondary", use_container_width=True): 
@@ -339,7 +347,7 @@ home_page = st.Page(home_page_ui, title="Home Portal", icon="🏠", default=True
 
 nav_pages = {
     "Portal": [home_page],
-    "Applications": [app_page, exam_page, celeb_page, fees_page]
+    "Applications": [app_page, exam_page, celeb_page, fees_page, cookpro_page] # NEW: Added to navigation
 }
 
 if st.session_state.user_role == "admin":

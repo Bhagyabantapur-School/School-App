@@ -18,9 +18,8 @@ IST = pytz.timezone('Asia/Kolkata')
 COOKS = ["AKLIMA BIBI", "ASIMA MANDAL", "ASPIYA BIBI"]
 
 # ⚠️ IMPORTANT: Paste Cook Photo Google Drive Links Here!
-# (Make sure the link sharing is set to "Anyone with the link")
 COOK_PHOTOS = {
-    "AKLIMA BIBI": "",  # Example: "https://drive.google.com/file/d/1abc.../view"
+    "AKLIMA BIBI": "",  
     "ASIMA MANDAL": "",
     "ASPIYA BIBI": ""
 }
@@ -58,7 +57,7 @@ def fetch_secure_image_bytes(file_id):
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_secure_photo_uri(url):
-    fb = "https://www.w3schools.com/howto/img_avatar.png" # Fallback dummy avatar
+    fb = "https://www.w3schools.com/howto/img_avatar.png"
     if pd.isna(url) or url == "" or not isinstance(url, str): return fb
     match = re.search(r"(?:id=|/d/)([\w-]+)", url)
     if match:
@@ -101,7 +100,6 @@ st.markdown("""
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         margin-bottom: 20px;
     }
-    .absent-card { border-left: 6px solid #dc3545; }
     .kpi-card {
         background: linear-gradient(135deg, #fff3e0, #ffe0b2);
         padding: 15px; border-radius: 10px;
@@ -140,7 +138,7 @@ with tab1:
         today_schedule = pd.DataFrame()
 
     with st.form("daily_tracker_form"):
-        st.caption("Marks automatically calculate points: Present (10) + Cooking (5) + Cleaning (5) = Max 20/day")
+        st.caption("Points Breakdown: Present (10) | Cooking (5) | Cleaning (5) = Max 20/day")
         
         results = {}
         
@@ -213,23 +211,25 @@ with tab1:
                 
                 rows_to_append = []
                 for cook, data in results.items():
-                    pts = 0
-                    if data["attendance"] == "Present":
-                        pts += 10
-                        if data["did_cook"]: pts += 5
-                        if data["did_clean"]: pts += 5
+                    # SEPARATED POINT CALCULATIONS
+                    att_pts = 10 if data["attendance"] == "Present" else 0
+                    cook_pts = 5 if data["did_cook"] else 0
+                    clean_pts = 5 if data["did_clean"] else 0
+                    total_pts = att_pts + cook_pts + clean_pts
                     
                     cooked_val = "Yes" if data["did_cook"] else "No"
                     cleaned_val = data["room"] if data["did_clean"] else "None"
                     
+                    # 11 Columns match the new Google Sheet format
                     rows_to_append.append([
-                        date_str, cook, data["attendance"], cooked_val, 
-                        cleaned_val, pts, current_user_name, timestamp_str
+                        date_str, cook, data["attendance"], att_pts, cooked_val, 
+                        cook_pts, cleaned_val, clean_pts, total_pts, current_user_name, timestamp_str
                     ])
                 
                 ws.append_rows(rows_to_append, value_input_option='USER_ENTERED')
                 fetch_data.clear()
                 st.success(f"✅ Awesome! Points successfully logged for {date_str}.")
+                st.rerun()
 
 # ==========================================
 # 🏆 TAB 2: MONTHLY LEADERBOARD
@@ -241,9 +241,15 @@ with tab2:
     if data_df.empty:
         st.info("No points data available yet.")
     else:
-        data_df['Points_Earned'] = pd.to_numeric(data_df['Points_Earned'], errors='coerce').fillna(0)
-        leaderboard = data_df.groupby('Cook_Name')['Points_Earned'].sum().reset_index()
-        leaderboard = leaderboard.sort_values(by='Points_Earned', ascending=False).reset_index(drop=True)
+        # Ensure points are numeric
+        data_df['Total_Pts'] = pd.to_numeric(data_df.get('Total_Pts', 0), errors='coerce').fillna(0)
+        data_df['Att_Pts'] = pd.to_numeric(data_df.get('Att_Pts', 0), errors='coerce').fillna(0)
+        data_df['Cook_Pts'] = pd.to_numeric(data_df.get('Cook_Pts', 0), errors='coerce').fillna(0)
+        data_df['Clean_Pts'] = pd.to_numeric(data_df.get('Clean_Pts', 0), errors='coerce').fillna(0)
+        
+        # Group and calculate points
+        leaderboard = data_df.groupby('Cook_Name')[['Total_Pts', 'Att_Pts', 'Cook_Pts', 'Clean_Pts']].sum().reset_index()
+        leaderboard = leaderboard.sort_values(by='Total_Pts', ascending=False).reset_index(drop=True)
         
         medals = ["🥇", "🥈", "🥉"]
         cols = st.columns(3)
@@ -260,14 +266,24 @@ with tab2:
                         <h1 style='margin:0; font-size:40px;'>{medal}</h1>
                         <img src='{photo_uri}' width='60' height='60' style='border-radius: 50%; object-fit: cover; margin: 10px 0; border: 2px solid white;'>
                         <h4 style='margin:5px 0;'>{cook_name}</h4>
-                        <h2 style='margin:0; color:#d35400;'>{int(row['Points_Earned'])} pts</h2>
+                        <h2 style='margin:0; color:#d35400;'>{int(row['Total_Pts'])} pts</h2>
                     </div>
                     """, unsafe_allow_html=True)
         
-        st.write("")
-        st.markdown("##### 📈 Attendance Overview")
-        attendance_counts = data_df[data_df['Attendance'] == 'Present'].groupby('Cook_Name').size().reset_index(name='Days_Present')
-        st.dataframe(attendance_counts, hide_index=True, use_container_width=True)
+        st.write("---")
+        st.markdown("##### 📊 Detailed Points Breakdown")
+        st.dataframe(
+            leaderboard, 
+            hide_index=True, 
+            use_container_width=True,
+            column_config={
+                "Cook_Name": "Cook",
+                "Total_Pts": st.column_config.NumberColumn("Total 🏆", format="%d"),
+                "Att_Pts": st.column_config.NumberColumn("Attendance (10)", format="%d"),
+                "Cook_Pts": st.column_config.NumberColumn("Cooking (5)", format="%d"),
+                "Clean_Pts": st.column_config.NumberColumn("Cleaning (5)", format="%d"),
+            }
+        )
 
 # ==========================================
 # 📊 TAB 3: HISTORY & AUDIT
@@ -291,5 +307,8 @@ with tab3:
             except: pass
             return ''
             
-        styled_df = data_df.style.map(highlight_pts, subset=['Points_Earned'])
-        st.dataframe(styled_df, hide_index=True, use_container_width=True)
+        if 'Total_Pts' in data_df.columns:
+            styled_df = data_df.style.map(highlight_pts, subset=['Total_Pts'])
+            st.dataframe(styled_df, hide_index=True, use_container_width=True)
+        else:
+            st.dataframe(data_df, hide_index=True, use_container_width=True)

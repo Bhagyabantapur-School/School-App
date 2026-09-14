@@ -69,12 +69,22 @@ def append_to_sheet(worksheet_name, data_dict):
 def update_log_status(book_id, student_name):
     sheet = client.open("Library_Database").worksheet("Logs")
     records = sheet.get_all_records()
+    headers = sheet.row_values(1)
+    
+    # Dynamic column lookup to prevent hardcoding errors
+    try:
+        ret_col_idx = headers.index("Return_Date") + 1
+        status_col_idx = headers.index("Status") + 1
+    except ValueError:
+        st.error("Could not find 'Return_Date' or 'Status' columns in the Logs sheet.")
+        return
+
     today_str = datetime.now(IST).strftime("%Y-%m-%d")
     
     for idx, row in enumerate(records):
         if str(row["Book_ID"]) == str(book_id) and row["Student_Name"] == student_name and row["Status"] == "Issued":
-            sheet.update_cell(idx + 2, 7, today_str) 
-            sheet.update_cell(idx + 2, 8, "Returned") 
+            sheet.update_cell(idx + 2, ret_col_idx, today_str) 
+            sheet.update_cell(idx + 2, status_col_idx, "Returned") 
             break
             
     load_sheet_data.clear()
@@ -114,7 +124,13 @@ if menu_choice == "Add Books & QR":
             
             if submit_btn:
                 if title:
-                    next_id_num = len(df_books) + 1 if not df_books.empty else 1
+                    # Robust Dynamic ID Generation (immune to deletions)
+                    if not df_books.empty and 'Book_ID' in df_books.columns:
+                        nums = df_books['Book_ID'].astype(str).str.extract(r'B(\d+)')[0].dropna().astype(int)
+                        next_id_num = nums.max() + 1 if not nums.empty else 1
+                    else:
+                        next_id_num = 1
+                        
                     book_id = f"BPS-B{next_id_num:03d}"
                     
                     now_ist = datetime.now(IST)
@@ -194,13 +210,16 @@ if menu_choice == "Add Books & QR":
                     qr_data = str(row['Book_ID'])
                     qr = qrcode.make(qr_data)
                     
+                    # Fix: Close the file context before reading/unlinking to prevent Windows PermissionError
                     with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
-                        qr.save(tmp.name)
-                        pdf.image(tmp.name, x=x, y=y, w=40, h=40)
-                        pdf.set_xy(x, y + 40)
-                        pdf.cell(40, 5, txt=str(row['Book_ID']), align='C')
+                        tmp_name = tmp.name
                         
-                    os.unlink(tmp.name)
+                    qr.save(tmp_name)
+                    pdf.image(tmp_name, x=x, y=y, w=40, h=40)
+                    pdf.set_xy(x, y + 40)
+                    pdf.cell(40, 5, txt=str(row['Book_ID']), align='C')
+                        
+                    os.unlink(tmp_name)
                     
                     col_count += 1
                     x += col_width
@@ -211,7 +230,8 @@ if menu_choice == "Add Books & QR":
                         row_count += 1
                         y += row_height
                         
-                    if row_count >= 6:
+                    # Fix: Only add a new page if we haven't processed all books yet
+                    if row_count >= 6 and (idx + 1) < total_books:
                         pdf.add_page()
                         row_count = 0
                         col_count = 0
@@ -421,7 +441,8 @@ elif menu_choice == "Returns & Reminders":
         issued_books = df_logs[df_logs['Status'] == "Issued"].copy()
         
         if not issued_books.empty:
-            issued_books['Due_Date_Obj'] = pd.to_datetime(issued_books['Due_Date'])
+            # Fix: Added errors='coerce' to prevent crash on invalid date strings
+            issued_books['Due_Date_Obj'] = pd.to_datetime(issued_books['Due_Date'], errors='coerce')
             today = pd.to_datetime(datetime.now(IST).strftime("%Y-%m-%d"))
             
             overdue = issued_books[issued_books['Due_Date_Obj'] < today]
@@ -555,8 +576,13 @@ elif menu_choice == "Book Details & Admin":
                                 book_ids = sheet.col_values(1)
                                 row_idx = book_ids.index(selected_id) + 1
                                 
-                                sheet.update_cell(row_idx, 2, new_title)
-                                sheet.update_cell(row_idx, 3, new_author)
+                                # Fix: Dynamic column lookup to prevent hardcoding breakage
+                                headers = sheet.row_values(1)
+                                title_col = headers.index("Title") + 1
+                                author_col = headers.index("Author") + 1
+                                
+                                sheet.update_cell(row_idx, title_col, new_title)
+                                sheet.update_cell(row_idx, author_col, new_author)
                                 
                                 load_sheet_data.clear()
                                 st.success("Book details updated successfully!")
@@ -586,7 +612,10 @@ elif menu_choice == "Book Details & Admin":
                                 sheet = client.open("Library_Database").worksheet("Books")
                                 book_ids = sheet.col_values(1)
                                 row_idx = book_ids.index(selected_id) + 1
-                                sheet.update_cell(row_idx, 7, new_image_url)
+                                
+                                headers = sheet.row_values(1)
+                                photo_col = headers.index("Cover_Image_URL") + 1
+                                sheet.update_cell(row_idx, photo_col, new_image_url)
                                 
                                 load_sheet_data.clear()
                                 st.success("Cover photo updated successfully!")

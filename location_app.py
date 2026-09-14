@@ -34,6 +34,8 @@ if 'current_people' not in st.session_state: st.session_state.current_people = "
 if 'current_move' not in st.session_state: st.session_state.current_move = "BIKE"
 if 'last_used_route' not in st.session_state: st.session_state.last_used_route = None
 if 'target_destination' not in st.session_state: st.session_state.target_destination = ""
+# Track the last used direction
+if 'last_direction' not in st.session_state: st.session_state.last_direction = "Forward"
 
 @st.cache_resource
 def init_connection():
@@ -245,7 +247,12 @@ with st.expander("🗺️ Dynamic Area Route", expanded=False):
             is_sequential = selected_route.strip().lower().endswith('route')
             if is_sequential:
                 dir_col1, dir_col2 = st.columns([1, 1])
-                with dir_col1: route_direction = st.radio("Direction", ["Forward", "Return"], horizontal=True, key="dyn_dir")
+                with dir_col1: 
+                    # State-controlled direction toggle
+                    dir_idx = 0 if st.session_state.last_direction == "Forward" else 1
+                    route_direction = st.radio("Direction", ["Forward", "Return"], horizontal=True, index=dir_idx, key="dyn_dir")
+                    st.session_state.last_direction = route_direction # Sync state
+                    
                 if current_loc in places_for_route:
                     c_idx = places_for_route.index(current_loc)
                     available_places = places_for_route[c_idx + 1:] if route_direction == "Forward" else places_for_route[:c_idx][::-1]
@@ -399,6 +406,7 @@ with st.expander("🗺️ Dynamic Area Route", expanded=False):
                     elif dyn_place == "HOME": 
                         final_arr_people = get_home_occupants(active_p)
                         st.session_state.current_people = "I"
+                        st.session_state.last_direction = "Forward" # --- RESETS DIRECTION ---
                         
                     sh.worksheet("LOCATION_DATA").append_row([time_now.strftime("%d.%m.%y"), time_now.strftime("%H:%M"), "- Stationary -", dyn_place, final_arr_people, arr_remark])
                     load_location_data.clear()

@@ -230,9 +230,25 @@ st.divider()
 all_places_list = get_list("Places")
 if 'target_destination' not in st.session_state: st.session_state.target_destination = ""
 
-# --- QUICK NAVIGATION BUTTON ---
+# --- COLOR-CODED QUICK NAVIGATION BUTTON ---
+st.markdown("""
+    <div class="money-btn-hook"></div>
+    <style>
+    div:has(.money-btn-hook) + div button { 
+        background-color: #007BFF !important; /* Nice distinct Blue */
+        color: white !important; 
+        border-color: #007BFF !important; 
+    }
+    div:has(.money-btn-hook) + div button:hover { 
+        background-color: #0056b3 !important; /* Darker Blue on Hover */
+        border-color: #004085 !important; 
+        color: white !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
 if st.button("💸 Go to Money Manager", use_container_width=True):
     st.switch_page("money_app.py")
+
 
 # ==========================================
 # DYNAMIC AREA ROUTE 

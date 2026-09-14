@@ -157,7 +157,6 @@ with tab1:
     def save_data_chunk(updates_dict):
         df = fetch_data()
         timestamp_str = datetime.now(IST).strftime("%d-%m-%Y %I:%M:%S %p")
-        # Added new time-tracking columns
         cols = ["Date", "Cook_Name", "Attendance", "Morning_In", "Duty_Out", "Duty_In", "Cooked_Today", "Cleaned_Room", "Points_Earned", "Submitted_By", "Timestamp"]
         if df.empty: df = pd.DataFrame(columns=cols)
         
@@ -194,7 +193,6 @@ with tab1:
             else:
                 df.at[idx, "Cooked_Today"] = "No"
                 df.at[idx, "Cleaned_Room"] = "None"
-                # Clear time logs if absent
                 df.at[idx, "Morning_In"] = ""
                 df.at[idx, "Duty_Out"] = ""
                 df.at[idx, "Duty_In"] = ""
@@ -239,17 +237,12 @@ with tab1:
             with c2: 
                 att_results[cook] = st.radio(f"**{cook}**", ["Present", "Absent"], index=idx, horizontal=True, key=f"att_{cook}", disabled=not is_admin)
             
-            # Time Input Fields
             t1, t2, t3 = st.columns(3)
-            with t1:
-                min_in = st.text_input("🟢 Morning In", value=db_state.get("Morning_In", ""), placeholder="e.g. 9:00 AM", key=f"min_{cook}", disabled=not is_admin)
-            with t2:
-                dout = st.text_input("🔴 Out (During Duty)", value=db_state.get("Duty_Out", ""), placeholder="e.g. 11:30 AM", key=f"dout_{cook}", disabled=not is_admin)
-            with t3:
-                din = st.text_input("🟡 In (Return)", value=db_state.get("Duty_In", ""), placeholder="e.g. 12:15 PM", key=f"din_{cook}", disabled=not is_admin)
+            with t1: min_in = st.text_input("🟢 Morning In", value=db_state.get("Morning_In", ""), placeholder="e.g. 9:00 AM", key=f"min_{cook}", disabled=not is_admin)
+            with t2: dout = st.text_input("🔴 Out (During Duty)", value=db_state.get("Duty_Out", ""), placeholder="e.g. 11:30 AM", key=f"dout_{cook}", disabled=not is_admin)
+            with t3: din = st.text_input("🟡 In (Return)", value=db_state.get("Duty_In", ""), placeholder="e.g. 12:15 PM", key=f"din_{cook}", disabled=not is_admin)
                 
             time_results[cook] = {"in": min_in, "out": dout, "ret": din}
-            
             st.markdown("<hr style='margin: 10px 0 20px 0;'>", unsafe_allow_html=True)
 
         if st.form_submit_button("💾 Save Attendance & Times", type="primary", disabled=not is_admin):
@@ -262,7 +255,6 @@ with tab1:
                     will_cook = val in ['yes', 'y', 'true', '1']
                 
                 cooked = "Yes" if (att == "Present" and will_cook) else "No"
-                
                 updates[cook] = {
                     "Attendance": att,
                     "Morning_In": time_results[cook]["in"] if att == "Present" else "",
@@ -270,35 +262,46 @@ with tab1:
                     "Duty_In": time_results[cook]["ret"] if att == "Present" else "",
                     "Cooked_Today": cooked
                 }
-                
             save_data_chunk(updates)
             st.success("✅ Attendance, Movement Times, and Cooking duties successfully updated!")
             st.rerun()
 
     # -----------------------------------------------------
-    # 🧹 STEP 2: CLEANING VERIFICATION (Security Checked)
+    # 🧹 STEP 2: DYNAMIC CLEANING VERIFICATION
     # -----------------------------------------------------
     st.markdown("### 🧹 Step 2: Cleaning Verification")
     
     routine_df = fetch_routine()
-    first_teachers_full = []
-    if not routine_df.empty and 'Day' in routine_df.columns and 'Start_Time' in routine_df.columns:
-        day_routine = routine_df[routine_df['Day'].str.lower() == day_name.lower()]
-        if not day_routine.empty:
-            min_time = day_routine['Start_Time'].min()
-            first_period_df = day_routine[day_routine['Start_Time'] == min_time]
-            initials = first_period_df['Teacher'].dropna().unique().tolist()
-            first_teachers_full = [INV_TEACHER_INITIALS.get(i.strip(), i.strip()) for i in initials]
-
-    is_authorized_for_cleaning = (user_role == 'admin') or (current_user_name in first_teachers_full)
+    
+    # Text Parser: Extracts class names & finds first-period teachers for those classes
+    def get_authorized_teachers_for_room(rooms_str, day_name, routine_df):
+        auth_teachers = set()
+        # Find all patterns like "Class IV A", "Class PP A", "Class I B", etc.
+        matches = re.finditer(r"Class\s+(PP|I{1,3}|IV|V)\s+([A-C])", str(rooms_str), flags=re.IGNORECASE)
+        for match in matches:
+            cls = f"CLASS {match.group(1).upper()}"
+            sec = match.group(2).upper()
+            
+            if not routine_df.empty and 'Day' in routine_df.columns:
+                day_routine = routine_df[(routine_df['Day'].str.lower() == day_name.lower()) & 
+                                         (routine_df['Class'].astype(str).str.strip().str.upper() == cls) & 
+                                         (routine_df['Section'].astype(str).str.strip().str.upper() == sec)]
+                if not day_routine.empty:
+                    min_time = day_routine['Start_Time'].min()
+                    first_period_df = day_routine[day_routine['Start_Time'] == min_time]
+                    initials = first_period_df['Teacher'].dropna().unique().tolist()
+                    for i in initials:
+                        full_name = INV_TEACHER_INITIALS.get(i.strip(), i.strip())
+                        if full_name != "--- UNASSIGNED ---":
+                            auth_teachers.add(full_name)
+        return list(auth_teachers)
 
     with st.form("clean_form"):
-        st.caption("Bonus Points: Verified Cleaning = +5 pts")
-        if not is_authorized_for_cleaning:
-            st.warning(f"🔒 **Locked:** Only Admin or First-Period Teachers ({', '.join(first_teachers_full)}) can verify room cleaning today.")
+        st.caption("Bonus Points: Verified Cleaning = +5 pts. Only the Admin or the First-Period Teacher of the assigned class can verify.")
         
         clean_results = {}
         has_clean_duty = False
+        can_save_anything = False
         
         for cook in COOKS:
             c_sch = today_schedule[today_schedule['Cook_Name'].str.strip().str.upper() == cook.upper()] if not today_schedule.empty else pd.DataFrame()
@@ -309,17 +312,32 @@ with tab1:
                 has_clean_duty = True
                 db_state = get_db_state(cook)
                 
+                # Check authorization specifically for this cook's assigned rooms
+                auth_teachers = get_authorized_teachers_for_room(room, day_name, routine_df)
+                is_authorized = (user_role == 'admin') or (current_user_name in auth_teachers)
+                
+                if is_authorized:
+                    can_save_anything = True
+                
                 if db_state.get("Attendance", "Pending") == "Absent":
                     st.error(f"❌ {cook} is marked Absent (Cannot clean {room}).")
                     clean_results[cook] = "None"
                 else:
                     is_done = True if db_state.get("Cleaned_Room", "Pending") not in ["No", "None", "Pending", ""] else False
-                    ans = st.checkbox(f"🧹 **{cook}** cleaned the **{room}**?", value=is_done, key=f"clean_{cook}", disabled=not is_authorized_for_cleaning)
-                    clean_results[cook] = room if ans else "None"
+                    
+                    if not is_authorized:
+                        auth_names = ", ".join(auth_teachers) if auth_teachers else "Admin Only"
+                        st.warning(f"🔒 **Locked for {cook}:** Cleans **{room}**. Only **{auth_names}** can verify.")
+                        
+                    ans = st.checkbox(f"🧹 **{cook}** cleaned the **{room}**?", value=is_done, key=f"clean_{cook}", disabled=not is_authorized)
+                    
+                    if is_authorized:
+                        clean_results[cook] = room if ans else "None"
                     
         if not has_clean_duty: st.info("No cleaning duties are scheduled today.")
         
-        if st.form_submit_button("💾 Verify & Save Cleaning", type="primary", disabled=not is_authorized_for_cleaning):
+        # Button is enabled only if the logged-in user is authorized for at least one scheduled cook
+        if st.form_submit_button("💾 Verify & Save Cleaning", type="primary", disabled=not can_save_anything and has_clean_duty):
             if clean_results:
                 updates = {c: {"Cleaned_Room": clean_results[c]} for c in clean_results}
                 save_data_chunk(updates)
@@ -388,9 +406,6 @@ with tab3:
             return ''
             
         styled_df = data_df.style.map(highlight_pts, subset=['Points_Earned'])
-        
-        # Determine logical column order ensuring new time columns show neatly
         display_cols = ["Date", "Cook_Name", "Attendance", "Morning_In", "Duty_Out", "Duty_In", "Cooked_Today", "Cleaned_Room", "Points_Earned", "Submitted_By", "Timestamp"]
         existing_cols = [c for c in display_cols if c in data_df.columns]
-        
         st.dataframe(styled_df, column_order=existing_cols, hide_index=True, use_container_width=True)

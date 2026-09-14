@@ -17,14 +17,22 @@ IST = pytz.timezone('Asia/Kolkata')
 
 COOKS = ["AKLIMA BIBI", "ASIMA MANDAL", "ASPIYA BIBI"]
 
-# ⚠️ IMPORTANT: Paste Cook Photo Google Drive Links Here!
+# ⚠️ Paste Cook Photo Google Drive Links Here
 COOK_PHOTOS = {
-    "AKLIMA BIBI": "",  
+    "AKLIMA BIBI": "",
     "ASIMA MANDAL": "",
     "ASPIYA BIBI": ""
 }
 
 current_user_name = st.session_state.get('user_name', 'Head Teacher')
+user_role = st.session_state.get('user_role', 'admin')
+
+TEACHER_INITIALS = {
+    "SUKHAMAY KISKU": "SK", "TAPASI RANA": "TR", "SUJATA BISWAS ROTHA": "SBR", 
+    "ROHINI SINGH": "RS", "UDAY NARAYAN JANA": "UNJ", "BIMAL KUMAR PATRA": "BKP", 
+    "SUSMITA PAUL": "SP", "TAPAN KUMAR MANDAL": "TKM", "MANJUMA KHATUN": "MK"
+}
+INV_TEACHER_INITIALS = {v: k for k, v in TEACHER_INITIALS.items()}
 
 # ==========================================
 # 🔌 GOOGLE SHEETS & DRIVE CONNECTORS
@@ -38,11 +46,13 @@ def get_google_credentials():
 
 @st.cache_resource
 def init_cookpro_sheet():
-    try: 
-        return gspread.authorize(get_google_credentials()).open("COOKPRO TRACKER")
-    except Exception: 
-        st.error("⚠️ Google Sheets Connection Failed! Make sure the sheet is named exactly 'COOKPRO TRACKER' and is shared with the service account.")
-        st.stop()
+    try: return gspread.authorize(get_google_credentials()).open("COOKPRO TRACKER")
+    except Exception: st.error("⚠️ Connection Failed! Ensure sheet is named 'COOKPRO TRACKER'."); st.stop()
+
+@st.cache_resource
+def init_routine_sheet():
+    try: return gspread.authorize(get_google_credentials()).open("bps_routine")
+    except Exception: return None
 
 @st.cache_resource
 def get_drive_session(): 
@@ -65,41 +75,42 @@ def get_secure_photo_uri(url):
         if b: return f"data:image/jpeg;base64,{base64.b64encode(b).decode()}"
     return url if url.startswith("http") else fb
 
+@st.cache_data(ttl=600)
+def fetch_routine():
+    sh = init_routine_sheet()
+    if sh:
+        try: return pd.DataFrame(sh.worksheet("Sheet1").get_all_records())
+        except Exception: pass
+    return pd.DataFrame()
+
 @st.cache_data(ttl=60)
 def fetch_schedule():
     sh = init_cookpro_sheet()
-    try:
-        ws = sh.worksheet("CookPro_Schedule")
-        records = ws.get_all_records()
-        return pd.DataFrame(records)
-    except WorksheetNotFound:
-        st.error("⚠️ 'CookPro_Schedule' tab not found in the Google Sheet.")
-        return pd.DataFrame()
+    try: return pd.DataFrame(sh.worksheet("CookPro_Schedule").get_all_records())
+    except WorksheetNotFound: return pd.DataFrame()
 
 @st.cache_data(ttl=5)
 def fetch_data():
     sh = init_cookpro_sheet()
-    try:
-        ws = sh.worksheet("CookPro_Data")
-        records = ws.get_all_records()
-        return pd.DataFrame(records)
-    except WorksheetNotFound:
-        st.error("⚠️ 'CookPro_Data' tab not found in the Google Sheet.")
-        return pd.DataFrame()
+    try: return pd.DataFrame(sh.worksheet("CookPro_Data").get_all_records())
+    except WorksheetNotFound: return pd.DataFrame()
+
+def overwrite_sheet_df(sheet_name, df):
+    sh = init_cookpro_sheet()
+    try: ws = sh.worksheet(sheet_name)
+    except WorksheetNotFound: ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=10)
+    except Exception: return
+    try: 
+        ws.clear()
+        df = df.fillna("").astype(str)
+        ws.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name='A1') if not df.empty else None
+    except Exception as e: st.error(f"⚠️ Failed to update database: {e}")
 
 # ==========================================
 # 🎨 CUSTOM UI STYLING
 # ==========================================
 st.markdown("""
 <style>
-    .cook-card {
-        background-color: #ffffff;
-        padding: 20px;
-        border-radius: 10px;
-        border-left: 6px solid #28a745;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        margin-bottom: 20px;
-    }
     .kpi-card {
         background: linear-gradient(135deg, #fff3e0, #ffe0b2);
         padding: 15px; border-radius: 10px;
@@ -107,128 +118,167 @@ st.markdown("""
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
     .cook-img {
-        border-radius: 50%;
-        border: 2px solid #ddd;
-        object-fit: cover;
+        border-radius: 50%; border: 2px solid #ddd; object-fit: cover;
     }
+    div[data-testid="stForm"] { border-left: 5px solid #007bff; border-radius: 10px; margin-bottom: 25px; }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<h2 style='text-align: center; color: #e67e22;'>👩‍🍳 CookPro Task & Point Tracker</h2>", unsafe_allow_html=True)
+st.markdown("<h2 style='text-align: center; color: #e67e22;'>👩‍🍳 CookPro Task Tracker</h2>", unsafe_allow_html=True)
 st.write("---")
 
-tab1, tab2, tab3 = st.tabs(["📝 Daily Tracker", "🏆 Leaderboard", "📊 History"])
+tab1, tab2, tab3 = st.tabs(["📝 Daily Timeline", "🏆 Leaderboard", "📊 History"])
 
 # ==========================================
-# 📝 TAB 1: DAILY TRACKER (Logic & Submission)
+# 📝 TAB 1: DAILY TRACKER (Auto-Logic System)
 # ==========================================
 with tab1:
     today_ist = datetime.now(IST).date()
     selected_date = st.date_input("Select Date", today_ist)
-    
+    date_str = selected_date.strftime("%d-%m-%Y")
     day_name = selected_date.strftime("%A")
+    
     st.markdown(f"#### 📅 Schedule for: **{day_name}**")
     
     schedule_df = fetch_schedule()
     data_df = fetch_data()
     
-    if not schedule_df.empty:
-        today_schedule = schedule_df[schedule_df['Day_of_Week'].str.lower() == day_name.lower()]
-    else:
-        today_schedule = pd.DataFrame()
+    today_schedule = schedule_df[schedule_df['Day_of_Week'].str.lower() == day_name.lower()] if not schedule_df.empty else pd.DataFrame()
 
-    with st.form("daily_tracker_form"):
-        st.caption("Points Breakdown: Present (10) | Cooking (5) | Cleaning (5) = Max 20/day")
+    # --- UPSERT DATABASE LOGIC ---
+    def save_data_chunk(updates_dict):
+        df = fetch_data()
+        timestamp_str = datetime.now(IST).strftime("%d-%m-%Y %I:%M:%S %p")
+        cols = ["Date", "Cook_Name", "Attendance", "Cooked_Today", "Cleaned_Room", "Points_Earned", "Submitted_By", "Timestamp"]
+        if df.empty: df = pd.DataFrame(columns=cols)
         
-        results = {}
+        for cook, new_vals in updates_dict.items():
+            mask = (df['Date'] == date_str) & (df['Cook_Name'] == cook)
+            if mask.any():
+                idx = df[mask].index[0]
+                for k, v in new_vals.items(): df.at[idx, k] = v
+                df.at[idx, "Timestamp"] = timestamp_str
+                df.at[idx, "Submitted_By"] = current_user_name
+            else:
+                new_row = {
+                    "Date": date_str, "Cook_Name": cook, 
+                    "Attendance": new_vals.get("Attendance", "Pending"), 
+                    "Cooked_Today": new_vals.get("Cooked_Today", "Pending"), 
+                    "Cleaned_Room": new_vals.get("Cleaned_Room", "Pending"), 
+                    "Points_Earned": 0, "Submitted_By": current_user_name, "Timestamp": timestamp_str
+                }
+                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+                
+        # Master Point Recalculator
+        mask_date = df['Date'] == date_str
+        for idx in df[mask_date].index:
+            pts = 0
+            att = str(df.at[idx, "Attendance"]).strip()
+            if att == "Present":
+                pts += 10
+                if str(df.at[idx, "Cooked_Today"]).strip() == "Yes": pts += 5
+                cl = str(df.at[idx, "Cleaned_Room"]).strip()
+                if cl not in ["No", "None", "Pending", ""]: pts += 5
+            else:
+                df.at[idx, "Cooked_Today"] = "No"
+                df.at[idx, "Cleaned_Room"] = "None"
+            df.at[idx, "Points_Earned"] = pts 
+
+        for c in cols: 
+            if c not in df.columns: df[c] = ""
+        overwrite_sheet_df("CookPro_Data", df[cols])
+        fetch_data.clear()
+
+    def get_db_state(cook_name):
+        if not data_df.empty and 'Date' in data_df.columns:
+            mask = (data_df['Date'] == date_str) & (data_df['Cook_Name'] == cook_name)
+            if mask.any(): return data_df[mask].iloc[0].to_dict()
+        return {}
+
+    # -----------------------------------------------------
+    # 🌅 STEP 1: ATTENDANCE & AUTO-COOKING
+    # -----------------------------------------------------
+    st.markdown("### 🌅 Step 1: Morning Attendance & Cooking")
+    with st.form("att_form"):
+        st.caption("🔒 Admin or Alt. Teacher Only: Marking 'Present' automatically logs their Cooking duty (+5 pts) if they are assigned today.")
+        att_results = {}
+        for cook in COOKS:
+            curr_att = get_db_state(cook).get("Attendance", "Present")
+            idx = 0 if curr_att == "Present" else (1 if curr_att == "Absent" else 0)
+            
+            c1, c2 = st.columns([1, 4])
+            with c1: st.markdown(f"<img src='{get_secure_photo_uri(COOK_PHOTOS.get(cook, ''))}' width='50' height='50' class='cook-img'>", unsafe_allow_html=True)
+            with c2: att_results[cook] = st.radio(f"**{cook}**", ["Present", "Absent"], index=idx, horizontal=True, key=f"att_{cook}")
+            st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
+
+        if st.form_submit_button("💾 Save Attendance & Cooking", type="primary"):
+            updates = {}
+            for cook, att in att_results.items():
+                # Auto-check if they are supposed to cook today
+                c_sch = today_schedule[today_schedule['Cook_Name'].str.strip().str.upper() == cook.upper()] if not today_schedule.empty else pd.DataFrame()
+                will_cook = False
+                if not c_sch.empty:
+                    val = str(c_sch.iloc[0].get('Will_Cook_Today', '')).strip().lower()
+                    will_cook = val in ['yes', 'y', 'true', '1']
+                
+                # Auto-assign cooking based on attendance
+                cooked = "Yes" if (att == "Present" and will_cook) else "No"
+                updates[cook] = {"Attendance": att, "Cooked_Today": cooked}
+                
+            save_data_chunk(updates)
+            st.success("✅ Attendance & Cooking duties automatically updated!")
+            st.rerun()
+
+    # -----------------------------------------------------
+    # 🧹 STEP 2: CLEANING VERIFICATION (Security Checked)
+    # -----------------------------------------------------
+    st.markdown("### 🧹 Step 2: Cleaning Verification")
+    
+    # Check bps_routine for First Period Teachers
+    routine_df = fetch_routine()
+    first_teachers_full = []
+    if not routine_df.empty and 'Day' in routine_df.columns and 'Start_Time' in routine_df.columns:
+        day_routine = routine_df[routine_df['Day'].str.lower() == day_name.lower()]
+        if not day_routine.empty:
+            min_time = day_routine['Start_Time'].min()
+            first_period_df = day_routine[day_routine['Start_Time'] == min_time]
+            initials = first_period_df['Teacher'].dropna().unique().tolist()
+            first_teachers_full = [INV_TEACHER_INITIALS.get(i.strip(), i.strip()) for i in initials]
+
+    is_authorized_for_cleaning = (user_role == 'admin') or (current_user_name in first_teachers_full)
+
+    with st.form("clean_form"):
+        st.caption("Bonus Points: Verified Cleaning = +5 pts")
+        if not is_authorized_for_cleaning:
+            st.warning(f"🔒 **Locked:** Only Admin or First-Period Teachers ({', '.join(first_teachers_full)}) can verify room cleaning today.")
+        
+        clean_results = {}
+        has_clean_duty = False
         
         for cook in COOKS:
-            st.markdown(f"<div class='cook-card'>", unsafe_allow_html=True)
+            c_sch = today_schedule[today_schedule['Cook_Name'].str.strip().str.upper() == cook.upper()] if not today_schedule.empty else pd.DataFrame()
+            room = str(c_sch.iloc[0].get('Room_To_Clean', '')).strip() if not c_sch.empty else ""
+            if room.lower() in ['nan', 'none', '']: room = ""
             
-            # Photo and Name Layout
-            h_col1, h_col2 = st.columns([1, 4])
-            with h_col1:
-                photo_uri = get_secure_photo_uri(COOK_PHOTOS.get(cook, ""))
-                st.markdown(f"<img src='{photo_uri}' width='70' height='70' class='cook-img'>", unsafe_allow_html=True)
-            with h_col2:
-                st.markdown(f"<h3 style='margin:15px 0 0 0; color:#333;'>{cook}</h3>", unsafe_allow_html=True)
-            
-            st.write("") # Spacer
-            
-            cook_sch = today_schedule[today_schedule['Cook_Name'].str.strip().str.upper() == cook.upper()] if not today_schedule.empty else pd.DataFrame()
-            
-            is_cooking_assigned = False
-            room_assigned = ""
-            
-            if not cook_sch.empty:
-                will_cook = str(cook_sch.iloc[0].get('Will_Cook_Today', '')).strip().lower()
-                is_cooking_assigned = will_cook in ['yes', 'y', 'true', '1']
-                room_assigned = str(cook_sch.iloc[0].get('Room_To_Clean', '')).strip()
-                if room_assigned.lower() in ['nan', 'none', '']:
-                    room_assigned = ""
-
-            c1, c2 = st.columns([1, 2])
-            with c1:
-                attendance = st.radio(f"Attendance:", ["Present", "Absent"], horizontal=True, key=f"att_{cook}")
-            
-            with c2:
-                did_cook = False
-                did_clean = False
+            if room:
+                has_clean_duty = True
+                db_state = get_db_state(cook)
                 
-                if attendance == "Present":
-                    if is_cooking_assigned:
-                        did_cook = st.checkbox("🍳 Completed Cooking Duty?", value=True, key=f"cook_{cook}")
-                    else:
-                        st.write("🍳 *No cooking duty today*")
-                        
-                    if room_assigned:
-                        did_clean = st.checkbox(f"🧹 Cleaned **{room_assigned}**?", value=True, key=f"clean_{cook}")
-                    else:
-                        st.write("🧹 *No cleaning duty today*")
+                if db_state.get("Attendance", "Pending") == "Absent":
+                    st.error(f"❌ {cook} is marked Absent (Cannot clean {room}).")
+                    clean_results[cook] = "None"
                 else:
-                    st.error("❌ Marked Absent (0 Points)")
-            
-            st.markdown("</div>", unsafe_allow_html=True)
-            
-            results[cook] = {
-                "attendance": attendance,
-                "did_cook": did_cook,
-                "did_clean": did_clean,
-                "room": room_assigned if did_clean else ""
-            }
-            
-        submit_btn = st.form_submit_button("💾 Save Daily Points", type="primary", use_container_width=True)
+                    is_done = True if db_state.get("Cleaned_Room", "Pending") not in ["No", "None", "Pending", ""] else False
+                    ans = st.checkbox(f"🧹 **{cook}** cleaned the **{room}**?", value=is_done, key=f"clean_{cook}", disabled=not is_authorized_for_cleaning)
+                    clean_results[cook] = room if ans else "None"
+                    
+        if not has_clean_duty: st.info("No cleaning duties are scheduled today.")
         
-        if submit_btn:
-            date_str = selected_date.strftime("%d-%m-%Y")
-            timestamp_str = datetime.now(IST).strftime("%d-%m-%Y %I:%M:%S %p")
-            
-            if not data_df.empty and date_str in data_df['Date'].values:
-                st.error(f"⚠️ Data for {date_str} already exists! Please check the History tab.")
-            else:
-                sh = init_cookpro_sheet()
-                ws = sh.worksheet("CookPro_Data")
-                
-                rows_to_append = []
-                for cook, data in results.items():
-                    # SEPARATED POINT CALCULATIONS
-                    att_pts = 10 if data["attendance"] == "Present" else 0
-                    cook_pts = 5 if data["did_cook"] else 0
-                    clean_pts = 5 if data["did_clean"] else 0
-                    total_pts = att_pts + cook_pts + clean_pts
-                    
-                    cooked_val = "Yes" if data["did_cook"] else "No"
-                    cleaned_val = data["room"] if data["did_clean"] else "None"
-                    
-                    # 11 Columns match the new Google Sheet format
-                    rows_to_append.append([
-                        date_str, cook, data["attendance"], att_pts, cooked_val, 
-                        cook_pts, cleaned_val, clean_pts, total_pts, current_user_name, timestamp_str
-                    ])
-                
-                ws.append_rows(rows_to_append, value_input_option='USER_ENTERED')
-                fetch_data.clear()
-                st.success(f"✅ Awesome! Points successfully logged for {date_str}.")
+        if st.form_submit_button("💾 Verify & Save Cleaning", type="primary", disabled=not is_authorized_for_cleaning):
+            if clean_results:
+                updates = {c: {"Cleaned_Room": clean_results[c]} for c in clean_results}
+                save_data_chunk(updates)
+                st.success("✅ Cleaning duties verified and updated!")
                 st.rerun()
 
 # ==========================================
@@ -241,15 +291,9 @@ with tab2:
     if data_df.empty:
         st.info("No points data available yet.")
     else:
-        # Ensure points are numeric
-        data_df['Total_Pts'] = pd.to_numeric(data_df.get('Total_Pts', 0), errors='coerce').fillna(0)
-        data_df['Att_Pts'] = pd.to_numeric(data_df.get('Att_Pts', 0), errors='coerce').fillna(0)
-        data_df['Cook_Pts'] = pd.to_numeric(data_df.get('Cook_Pts', 0), errors='coerce').fillna(0)
-        data_df['Clean_Pts'] = pd.to_numeric(data_df.get('Clean_Pts', 0), errors='coerce').fillna(0)
-        
-        # Group and calculate points
-        leaderboard = data_df.groupby('Cook_Name')[['Total_Pts', 'Att_Pts', 'Cook_Pts', 'Clean_Pts']].sum().reset_index()
-        leaderboard = leaderboard.sort_values(by='Total_Pts', ascending=False).reset_index(drop=True)
+        data_df['Points_Earned'] = pd.to_numeric(data_df['Points_Earned'], errors='coerce').fillna(0)
+        leaderboard = data_df.groupby('Cook_Name')['Points_Earned'].sum().reset_index()
+        leaderboard = leaderboard.sort_values(by='Points_Earned', ascending=False).reset_index(drop=True)
         
         medals = ["🥇", "🥈", "🥉"]
         cols = st.columns(3)
@@ -266,24 +310,14 @@ with tab2:
                         <h1 style='margin:0; font-size:40px;'>{medal}</h1>
                         <img src='{photo_uri}' width='60' height='60' style='border-radius: 50%; object-fit: cover; margin: 10px 0; border: 2px solid white;'>
                         <h4 style='margin:5px 0;'>{cook_name}</h4>
-                        <h2 style='margin:0; color:#d35400;'>{int(row['Total_Pts'])} pts</h2>
+                        <h2 style='margin:0; color:#d35400;'>{int(row['Points_Earned'])} pts</h2>
                     </div>
                     """, unsafe_allow_html=True)
         
-        st.write("---")
-        st.markdown("##### 📊 Detailed Points Breakdown")
-        st.dataframe(
-            leaderboard, 
-            hide_index=True, 
-            use_container_width=True,
-            column_config={
-                "Cook_Name": "Cook",
-                "Total_Pts": st.column_config.NumberColumn("Total 🏆", format="%d"),
-                "Att_Pts": st.column_config.NumberColumn("Attendance (10)", format="%d"),
-                "Cook_Pts": st.column_config.NumberColumn("Cooking (5)", format="%d"),
-                "Clean_Pts": st.column_config.NumberColumn("Cleaning (5)", format="%d"),
-            }
-        )
+        st.write("")
+        st.markdown("##### 📈 Attendance Overview")
+        attendance_counts = data_df[data_df['Attendance'] == 'Present'].groupby('Cook_Name').size().reset_index(name='Days_Present')
+        st.dataframe(attendance_counts, hide_index=True, use_container_width=True)
 
 # ==========================================
 # 📊 TAB 3: HISTORY & AUDIT
@@ -293,6 +327,7 @@ with tab3:
     if st.button("🔄 Refresh Data"):
         fetch_data.clear()
         fetch_schedule.clear()
+        fetch_routine.clear()
         
     data_df = fetch_data()
     if data_df.empty:
@@ -307,8 +342,5 @@ with tab3:
             except: pass
             return ''
             
-        if 'Total_Pts' in data_df.columns:
-            styled_df = data_df.style.map(highlight_pts, subset=['Total_Pts'])
-            st.dataframe(styled_df, hide_index=True, use_container_width=True)
-        else:
-            st.dataframe(data_df, hide_index=True, use_container_width=True)
+        styled_df = data_df.style.map(highlight_pts, subset=['Points_Earned'])
+        st.dataframe(styled_df, hide_index=True, use_container_width=True)

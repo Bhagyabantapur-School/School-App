@@ -3,8 +3,11 @@ import pandas as pd
 from datetime import datetime
 import pytz
 import gspread
+import re
+import base64
 from gspread.exceptions import WorksheetNotFound, APIError
 from google.oauth2.service_account import Credentials
+from google.auth.transport.requests import AuthorizedSession
 
 # ==========================================
 # ⚙️ CONFIGURATION & SETUP
@@ -13,10 +16,19 @@ st.set_page_config(page_title="CookPro Tracker", page_icon="👩‍🍳", layout
 IST = pytz.timezone('Asia/Kolkata')
 
 COOKS = ["AKLIMA BIBI", "ASIMA MANDAL", "ASPIYA BIBI"]
+
+# ⚠️ IMPORTANT: Paste Cook Photo Google Drive Links Here!
+# (Make sure the link sharing is set to "Anyone with the link")
+COOK_PHOTOS = {
+    "AKLIMA BIBI": "",  # Example: "https://drive.google.com/file/d/1abc.../view"
+    "ASIMA MANDAL": "",
+    "ASPIYA BIBI": ""
+}
+
 current_user_name = st.session_state.get('user_name', 'Head Teacher')
 
 # ==========================================
-# 🔌 GOOGLE SHEETS CONNECTORS (Matched to bps_digital.py)
+# 🔌 GOOGLE SHEETS & DRIVE CONNECTORS
 # ==========================================
 @st.cache_resource
 def get_google_credentials(): 
@@ -28,11 +40,31 @@ def get_google_credentials():
 @st.cache_resource
 def init_cookpro_sheet():
     try: 
-        # Opens directly by the sheet name, exactly like BPS_Database
         return gspread.authorize(get_google_credentials()).open("COOKPRO TRACKER")
     except Exception: 
         st.error("⚠️ Google Sheets Connection Failed! Make sure the sheet is named exactly 'COOKPRO TRACKER' and is shared with the service account.")
         st.stop()
+
+@st.cache_resource
+def get_drive_session(): 
+    return AuthorizedSession(get_google_credentials())
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_secure_image_bytes(file_id):
+    try:
+        r = get_drive_session().get(f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media")
+        return r.content if r.status_code == 200 else None
+    except Exception: return None
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_secure_photo_uri(url):
+    fb = "https://www.w3schools.com/howto/img_avatar.png" # Fallback dummy avatar
+    if pd.isna(url) or url == "" or not isinstance(url, str): return fb
+    match = re.search(r"(?:id=|/d/)([\w-]+)", url)
+    if match:
+        b = fetch_secure_image_bytes(match.group(1))
+        if b: return f"data:image/jpeg;base64,{base64.b64encode(b).decode()}"
+    return url if url.startswith("http") else fb
 
 @st.cache_data(ttl=60)
 def fetch_schedule():
@@ -76,6 +108,11 @@ st.markdown("""
         text-align: center; border: 1px solid #ffb74d;
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
+    .cook-img {
+        border-radius: 50%;
+        border: 2px solid #ddd;
+        object-fit: cover;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -91,14 +128,12 @@ with tab1:
     today_ist = datetime.now(IST).date()
     selected_date = st.date_input("Select Date", today_ist)
     
-    # Get the name of the day (e.g., "Monday")
     day_name = selected_date.strftime("%A")
     st.markdown(f"#### 📅 Schedule for: **{day_name}**")
     
     schedule_df = fetch_schedule()
     data_df = fetch_data()
     
-    # Filter schedule for selected day
     if not schedule_df.empty:
         today_schedule = schedule_df[schedule_df['Day_of_Week'].str.lower() == day_name.lower()]
     else:
@@ -111,12 +146,19 @@ with tab1:
         
         for cook in COOKS:
             st.markdown(f"<div class='cook-card'>", unsafe_allow_html=True)
-            st.markdown(f"<h3 style='margin-top:0; color:#333;'>{cook}</h3>", unsafe_allow_html=True)
             
-            # Find schedule for this specific cook today
+            # Photo and Name Layout
+            h_col1, h_col2 = st.columns([1, 4])
+            with h_col1:
+                photo_uri = get_secure_photo_uri(COOK_PHOTOS.get(cook, ""))
+                st.markdown(f"<img src='{photo_uri}' width='70' height='70' class='cook-img'>", unsafe_allow_html=True)
+            with h_col2:
+                st.markdown(f"<h3 style='margin:15px 0 0 0; color:#333;'>{cook}</h3>", unsafe_allow_html=True)
+            
+            st.write("") # Spacer
+            
             cook_sch = today_schedule[today_schedule['Cook_Name'].str.strip().str.upper() == cook.upper()] if not today_schedule.empty else pd.DataFrame()
             
-            # Defaults
             is_cooking_assigned = False
             room_assigned = ""
             
@@ -127,7 +169,6 @@ with tab1:
                 if room_assigned.lower() in ['nan', 'none', '']:
                     room_assigned = ""
 
-            # Input fields
             c1, c2 = st.columns([1, 2])
             with c1:
                 attendance = st.radio(f"Attendance:", ["Present", "Absent"], horizontal=True, key=f"att_{cook}")
@@ -151,7 +192,6 @@ with tab1:
             
             st.markdown("</div>", unsafe_allow_html=True)
             
-            # Save selections for point calculation
             results[cook] = {
                 "attendance": attendance,
                 "did_cook": did_cook,
@@ -165,7 +205,6 @@ with tab1:
             date_str = selected_date.strftime("%d-%m-%Y")
             timestamp_str = datetime.now(IST).strftime("%d-%m-%Y %I:%M:%S %p")
             
-            # Check for duplicates
             if not data_df.empty and date_str in data_df['Date'].values:
                 st.error(f"⚠️ Data for {date_str} already exists! Please check the History tab.")
             else:
@@ -174,7 +213,6 @@ with tab1:
                 
                 rows_to_append = []
                 for cook, data in results.items():
-                    # Calculate Points
                     pts = 0
                     if data["attendance"] == "Present":
                         pts += 10
@@ -189,7 +227,6 @@ with tab1:
                         cleaned_val, pts, current_user_name, timestamp_str
                     ])
                 
-                # Append all 3 rows to sheet
                 ws.append_rows(rows_to_append, value_input_option='USER_ENTERED')
                 fetch_data.clear()
                 st.success(f"✅ Awesome! Points successfully logged for {date_str}.")
@@ -204,23 +241,25 @@ with tab2:
     if data_df.empty:
         st.info("No points data available yet.")
     else:
-        # Calculate Total Points
         data_df['Points_Earned'] = pd.to_numeric(data_df['Points_Earned'], errors='coerce').fillna(0)
         leaderboard = data_df.groupby('Cook_Name')['Points_Earned'].sum().reset_index()
         leaderboard = leaderboard.sort_values(by='Points_Earned', ascending=False).reset_index(drop=True)
         
-        # Display Medals
         medals = ["🥇", "🥈", "🥉"]
         cols = st.columns(3)
         
         for idx, row in leaderboard.iterrows():
             if idx < 3:
                 medal = medals[idx]
+                cook_name = row['Cook_Name']
+                photo_uri = get_secure_photo_uri(COOK_PHOTOS.get(cook_name, ""))
+                
                 with cols[idx]:
                     st.markdown(f"""
                     <div class='kpi-card'>
                         <h1 style='margin:0; font-size:40px;'>{medal}</h1>
-                        <h4 style='margin:5px 0;'>{row['Cook_Name']}</h4>
+                        <img src='{photo_uri}' width='60' height='60' style='border-radius: 50%; object-fit: cover; margin: 10px 0; border: 2px solid white;'>
+                        <h4 style='margin:5px 0;'>{cook_name}</h4>
                         <h2 style='margin:0; color:#d35400;'>{int(row['Points_Earned'])} pts</h2>
                     </div>
                     """, unsafe_allow_html=True)
@@ -243,7 +282,6 @@ with tab3:
     if data_df.empty:
         st.info("No records found.")
     else:
-        # Sort by latest first
         data_df = data_df.iloc[::-1]
         
         def highlight_pts(val):

@@ -230,6 +230,10 @@ st.divider()
 all_places_list = get_list("Places")
 if 'target_destination' not in st.session_state: st.session_state.target_destination = ""
 
+# --- QUICK NAVIGATION BUTTON ---
+if st.button("💸 Go to Money Manager", use_container_width=True):
+    st.switch_page("money_app.py")
+
 # ==========================================
 # DYNAMIC AREA ROUTE 
 # ==========================================

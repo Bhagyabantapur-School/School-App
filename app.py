@@ -1,359 +1,382 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import pandas as pd
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
+import pytz
 import gspread
+import re
+import base64
+from gspread.exceptions import WorksheetNotFound, APIError
 from google.oauth2.service_account import Credentials
+from google.auth.transport.requests import AuthorizedSession
 
 # ==========================================
-# 1. GLOBAL PAGE CONFIGURATION
+# ⚙️ CONFIGURATION & SETUP
 # ==========================================
-st.set_page_config(
-    page_title="My Unified Hub",
-    page_icon="🌐",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="CookPro Tracker", page_icon="👩‍🍳", layout="centered")
+IST = pytz.timezone('Asia/Kolkata')
 
-# ==========================================
-# 2. USER AUTHENTICATION & INITIALS DICTIONARY
-# ==========================================
-USERS = {
-    "admin": {"name": "SUKHAMAY KISKU", "role": "admin", "password": "bpsAPP@2026"}, 
-    "tr": {"name": "TAPASI RANA", "role": "teacher", "password": "tr26"}, 
-    "sbr": {"name": "SUJATA BISWAS ROTHA", "role": "teacher", "password": "sbr26"}, 
-    "rs": {"name": "ROHINI SINGH", "role": "teacher", "password": "rs26"}, 
-    "unj": {"name": "UDAY NARAYAN JANA", "role": "teacher", "password": "unj26"}, 
-    "bkp": {"name": "BIMAL KUMAR PATRA", "role": "teacher", "password": "bkp26"}, 
-    "sp": {"name": "SUSMITA PAUL", "role": "teacher", "password": "sp26"}, 
-    "tkm": {"name": "TAPAN KUMAR MANDAL", "role": "teacher", "password": "tkm26"}, 
-    "mk": {"name": "MANJUMA KHATUN", "role": "teacher", "password": "mk26"}
+COOKS = ["AKLIMA BIBI", "ASIMA MANDAL", "ASPIYA BIBI"]
+
+# ⚠️ Paste Cook Photo Google Drive Links Here
+COOK_PHOTOS = {
+    "AKLIMA BIBI": "",
+    "ASIMA MANDAL": "",
+    "ASPIYA BIBI": ""
 }
+
+current_user_name = st.session_state.get('user_name', 'Head Teacher')
+user_role = st.session_state.get('user_role', 'admin')
 
 TEACHER_INITIALS = {
-    "SUKHAMAY KISKU": "SK", 
-    "TAPASI RANA": "TR", 
-    "SUJATA BISWAS ROTHA": "SBR", 
-    "ROHINI SINGH": "RS", 
-    "UDAY NARAYAN JANA": "UNJ", 
-    "BIMAL KUMAR PATRA": "BKP", 
-    "SUSMITA PAUL": "SP", 
-    "TAPAN KUMAR MANDAL": "TKM", 
-    "MANJUMA KHATUN": "MK"
+    "SUKHAMAY KISKU": "SK", "TAPASI RANA": "TR", "SUJATA BISWAS ROTHA": "SBR", 
+    "ROHINI SINGH": "RS", "UDAY NARAYAN JANA": "UNJ", "BIMAL KUMAR PATRA": "BKP", 
+    "SUSMITA PAUL": "SP", "TAPAN KUMAR MANDAL": "TKM", "MANJUMA KHATUN": "MK"
 }
+INV_TEACHER_INITIALS = {v: k for k, v in TEACHER_INITIALS.items()}
 
 # ==========================================
-# 3. GOOGLE SHEETS CONNECTORS
+# 🔌 GOOGLE SHEETS & DRIVE CONNECTORS
 # ==========================================
 @st.cache_resource
-def get_google_credentials():
+def get_google_credentials(): 
     return Credentials.from_service_account_info(
-        dict(st.secrets["gcp_service_account"]),
+        dict(st.secrets["gcp_service_account"]), 
         scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive.readonly"]
     )
 
 @st.cache_resource
-def init_routine_gsheet():
-    try:
-        return gspread.authorize(get_google_credentials()).open("bps_routine")
-    except Exception:
-        return None
+def init_cookpro_sheet():
+    try: return gspread.authorize(get_google_credentials()).open("COOKPRO TRACKER")
+    except Exception: st.error("⚠️ Connection Failed! Ensure sheet is named 'COOKPRO TRACKER'."); st.stop()
 
 @st.cache_resource
-def init_database_gsheet():
-    try:
-        return gspread.authorize(get_google_credentials()).open("BPS_Database")
-    except Exception:
-        return None
+def init_routine_sheet():
+    try: return gspread.authorize(get_google_credentials()).open("bps_routine")
+    except Exception: return None
 
-@st.cache_data(ttl=300)
-def fetch_routine_data():
+@st.cache_resource
+def get_drive_session(): 
+    return AuthorizedSession(get_google_credentials())
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_secure_image_bytes(file_id):
     try:
-        r_sh = init_routine_gsheet()
-        if r_sh:
-            df = pd.DataFrame(r_sh.sheet1.get_all_records()).replace({'TRUE': True, 'FALSE': False, 'True': True, 'False': False}).infer_objects(copy=False)
-            df.columns = [str(c).strip() for c in df.columns]
-            return df
-    except Exception:
-        pass
+        r = get_drive_session().get(f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media")
+        return r.content if r.status_code == 200 else None
+    except Exception: return None
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_secure_photo_uri(url):
+    fb = "https://www.w3schools.com/howto/img_avatar.png"
+    if pd.isna(url) or url == "" or not isinstance(url, str): return fb
+    match = re.search(r"(?:id=|/d/)([\w-]+)", url)
+    if match:
+        b = fetch_secure_image_bytes(match.group(1))
+        if b: return f"data:image/jpeg;base64,{base64.b64encode(b).decode()}"
+    return url if url.startswith("http") else fb
+
+@st.cache_data(ttl=600)
+def fetch_routine():
+    sh = init_routine_sheet()
+    if sh:
+        try: return pd.DataFrame(sh.worksheet("Sheet1").get_all_records())
+        except Exception: pass
     return pd.DataFrame()
 
-@st.cache_data(ttl=300)
-def fetch_leave_data():
-    try:
-        db_sh = init_database_gsheet()
-        if db_sh:
-            ws = db_sh.worksheet("teacher_leave")
-            df = pd.DataFrame(ws.get_all_records()).replace({'TRUE': True, 'FALSE': False, 'True': True, 'False': False}).infer_objects(copy=False)
-            df.columns = [str(c).strip() for c in df.columns]
-            return df
-    except Exception:
-        pass
-    return pd.DataFrame()
+@st.cache_data(ttl=60)
+def fetch_schedule():
+    sh = init_cookpro_sheet()
+    try: return pd.DataFrame(sh.worksheet("CookPro_Schedule").get_all_records())
+    except WorksheetNotFound: return pd.DataFrame()
 
-def parse_time_safe(t_str):
-    for fmt in ('%H:%M', '%I:%M %p', '%H:%M:%S'):
-        try:
-            return datetime.strptime(str(t_str).strip(), fmt).time()
-        except Exception:
-            continue
-    return None
+@st.cache_data(ttl=5)
+def fetch_data():
+    sh = init_cookpro_sheet()
+    try: return pd.DataFrame(sh.worksheet("CookPro_Data").get_all_records())
+    except WorksheetNotFound: return pd.DataFrame()
 
-# ==========================================
-# 4. SESSION STATE INITIALIZATION
-# ==========================================
-if 'authenticated' not in st.session_state: st.session_state.authenticated = False
-if 'user_role' not in st.session_state: st.session_state.user_role = None
-if 'user_name' not in st.session_state: st.session_state.user_name = None
+def overwrite_sheet_df(sheet_name, df):
+    sh = init_cookpro_sheet()
+    try: ws = sh.worksheet(sheet_name)
+    except WorksheetNotFound: ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=12)
+    except Exception: return
+    try: 
+        ws.clear()
+        df = df.fillna("").astype(str)
+        ws.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name='A1') if not df.empty else None
+    except Exception as e: st.error(f"⚠️ Failed to update database: {e}")
 
 # ==========================================
-# 5. LOGIN SCREEN (GATEKEEPER)
+# 🎨 CUSTOM UI STYLING
 # ==========================================
-if not st.session_state.authenticated:
-    st.markdown("<style>[data-testid='stSidebar'] {display: none;}</style>", unsafe_allow_html=True)
+st.markdown("""
+<style>
+    .kpi-card {
+        background: linear-gradient(135deg, #fff3e0, #ffe0b2);
+        padding: 15px; border-radius: 10px;
+        text-align: center; border: 1px solid #ffb74d;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    .cook-img {
+        border-radius: 50%; border: 2px solid #ddd; object-fit: cover;
+    }
+    div[data-testid="stForm"] { border-left: 5px solid #007bff; border-radius: 10px; margin-bottom: 25px; }
+    .time-label { font-size: 13px; font-weight: bold; color: #555; margin-bottom: -10px; display: block;}
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("<h2 style='text-align: center; color: #e67e22;'>👩‍🍳 CookPro Task Tracker</h2>", unsafe_allow_html=True)
+st.write("---")
+
+tab1, tab2, tab3 = st.tabs(["📝 Daily Timeline", "🏆 Leaderboard", "📊 History"])
+
+# ==========================================
+# 📝 TAB 1: DAILY TRACKER (Auto-Logic System)
+# ==========================================
+with tab1:
+    today_ist = datetime.now(IST).date()
+    selected_date = st.date_input("Select Date", today_ist)
+    date_str = selected_date.strftime("%d-%m-%Y")
+    day_name = selected_date.strftime("%A")
     
-    st.markdown("<div class='login-box'><h3>🔐 System Login</h3><p>Please enter your Username & Password.</p></div>", unsafe_allow_html=True)
+    st.markdown(f"#### 📅 Schedule for: **{day_name}**")
     
-    with st.form("login_form"):
-        ui = st.text_input("Username").lower().strip() 
-        pi = st.text_input("Password", type="password")
+    schedule_df = fetch_schedule()
+    data_df = fetch_data()
+    
+    today_schedule = schedule_df[schedule_df['Day_of_Week'].str.lower() == day_name.lower()] if not schedule_df.empty else pd.DataFrame()
+
+    # --- UPSERT DATABASE LOGIC ---
+    def save_data_chunk(updates_dict):
+        df = fetch_data()
+        timestamp_str = datetime.now(IST).strftime("%d-%m-%Y %I:%M:%S %p")
+        # Added new time-tracking columns
+        cols = ["Date", "Cook_Name", "Attendance", "Morning_In", "Duty_Out", "Duty_In", "Cooked_Today", "Cleaned_Room", "Points_Earned", "Submitted_By", "Timestamp"]
+        if df.empty: df = pd.DataFrame(columns=cols)
         
-        if st.form_submit_button("Login"):
-            if ui in USERS and pi == USERS[ui]["password"]:
-                st.session_state.authenticated = True
-                st.session_state.user_role = USERS[ui]["role"]
-                st.session_state.user_name = USERS[ui]["name"]
-                st.rerun() 
-            else: 
-                st.error("❌ Incorrect Credentials")
-    
-    st.stop()
-
-# ==========================================
-# 6. SIDEBAR CONTROLS & MANUAL SYNC
-# ==========================================
-st.sidebar.success(f"👋 Welcome, {st.session_state.user_name}")
-
-if st.sidebar.button("🔄 Sync Schedule", use_container_width=True, key="sync_routine_btn"):
-    fetch_routine_data.clear()
-    fetch_leave_data.clear()
-    st.rerun()
-
-if st.sidebar.button("Log Out", use_container_width=True): 
-    st.session_state.authenticated = False 
-    st.rerun()
-st.sidebar.markdown("---")
-
-# ==========================================
-# 7. LIVE ROUTINE TRACKER BANNER
-# ==========================================
-def render_tracker():
-    st.markdown("#### ⏱️ My Live Class")
-    
-    utc_now = datetime.now(timezone.utc)
-    now = utc_now + timedelta(hours=5, minutes=30)
-    curr_time = now.time()
-    tdy = now.strftime('%A')
-    curr_date_str = now.strftime('%d-%m-%Y')
-    
-    rout = fetch_routine_data()
-    ll = fetch_leave_data()
-    mc = TEACHER_INITIALS.get(st.session_state.user_name, st.session_state.user_name)
-    
-    # 1. Check if logged-in user is ON LEAVE or PARTIAL SHIFT today
-    is_fully_on_leave = False
-    given_away_slots = []
-    leave_type = ""
-    
-    if not ll.empty and 'Date' in ll.columns and 'Teacher' in ll.columns:
-        user_leave = ll[(ll['Date'].astype(str).str.strip() == curr_date_str) & (ll['Teacher'].astype(str).str.strip() == st.session_state.user_name)]
-        if not user_leave.empty:
-            leave_type = str(user_leave.iloc[0].get('Type', 'Leave'))
-            # If they are shifted, find out exactly which slots they abandoned
-            if leave_type in ['Class Shift / Internal Duty', 'Half Day']:
-                given_away_slots = [a.split(": ")[0].strip() for a in str(user_leave.iloc[0].get('Detailed_Sub_Log', '')).split(" | ") if ": " in a and "None" not in a]
+        for cook, new_vals in updates_dict.items():
+            mask = (df['Date'] == date_str) & (df['Cook_Name'] == cook)
+            if mask.any():
+                idx = df[mask].index[0]
+                for k, v in new_vals.items(): df.at[idx, k] = v
+                df.at[idx, "Timestamp"] = timestamp_str
+                df.at[idx, "Submitted_By"] = current_user_name
             else:
-                is_fully_on_leave = True
+                new_row = {
+                    "Date": date_str, "Cook_Name": cook, 
+                    "Attendance": new_vals.get("Attendance", "Pending"), 
+                    "Morning_In": new_vals.get("Morning_In", ""),
+                    "Duty_Out": new_vals.get("Duty_Out", ""),
+                    "Duty_In": new_vals.get("Duty_In", ""),
+                    "Cooked_Today": new_vals.get("Cooked_Today", "Pending"), 
+                    "Cleaned_Room": new_vals.get("Cleaned_Room", "Pending"), 
+                    "Points_Earned": 0, "Submitted_By": current_user_name, "Timestamp": timestamp_str
+                }
+                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+                
+        # Master Point Recalculator
+        mask_date = df['Date'] == date_str
+        for idx in df[mask_date].index:
+            pts = 0
+            att = str(df.at[idx, "Attendance"]).strip()
+            if att == "Present":
+                pts += 10
+                if str(df.at[idx, "Cooked_Today"]).strip() == "Yes": pts += 5
+                cl = str(df.at[idx, "Cleaned_Room"]).strip()
+                if cl not in ["No", "None", "Pending", ""]: pts += 5
+            else:
+                df.at[idx, "Cooked_Today"] = "No"
+                df.at[idx, "Cleaned_Room"] = "None"
+                # Clear time logs if absent
+                df.at[idx, "Morning_In"] = ""
+                df.at[idx, "Duty_Out"] = ""
+                df.at[idx, "Duty_In"] = ""
+                
+            df.at[idx, "Points_Earned"] = pts 
+
+        for c in cols: 
+            if c not in df.columns: df[c] = ""
+        overwrite_sheet_df("CookPro_Data", df[cols])
+        fetch_data.clear()
+
+    def get_db_state(cook_name):
+        if not data_df.empty and 'Date' in data_df.columns:
+            mask = (data_df['Date'] == date_str) & (data_df['Cook_Name'] == cook_name)
+            if mask.any(): return data_df[mask].iloc[0].to_dict()
+        return {}
+
+    # -----------------------------------------------------
+    # 🌅 STEP 1: ATTENDANCE, TIME & AUTO-COOKING
+    # -----------------------------------------------------
+    st.markdown("### 🌅 Step 1: Morning Attendance & Time Log")
+    with st.form("att_form"):
+        st.caption("🔒 Admin or Alt. Teacher Only: Record attendance and specific movement times.")
+        att_results = {}
+        time_results = {}
+        
+        for cook in COOKS:
+            db_state = get_db_state(cook)
+            curr_att = db_state.get("Attendance", "Present")
+            idx = 0 if curr_att == "Present" else (1 if curr_att == "Absent" else 0)
             
-    if is_fully_on_leave:
-        st.warning(f"🏖️ You are marked on leave today ({leave_type}). Regular classes are hidden.")
-        ms = pd.DataFrame()
+            c1, c2 = st.columns([1, 4])
+            with c1: 
+                st.markdown(f"<img src='{get_secure_photo_uri(COOK_PHOTOS.get(cook, ''))}' width='55' height='55' class='cook-img'>", unsafe_allow_html=True)
+            with c2: 
+                att_results[cook] = st.radio(f"**{cook}**", ["Present", "Absent"], index=idx, horizontal=True, key=f"att_{cook}")
+            
+            # Time Input Fields
+            t1, t2, t3 = st.columns(3)
+            with t1:
+                min_in = st.text_input("🟢 Morning In", value=db_state.get("Morning_In", ""), placeholder="e.g. 9:00 AM", key=f"min_{cook}")
+            with t2:
+                dout = st.text_input("🔴 Out (During Duty)", value=db_state.get("Duty_Out", ""), placeholder="e.g. 11:30 AM", key=f"dout_{cook}")
+            with t3:
+                din = st.text_input("🟡 In (Return)", value=db_state.get("Duty_In", ""), placeholder="e.g. 12:15 PM", key=f"din_{cook}")
+                
+            time_results[cook] = {"in": min_in, "out": dout, "ret": din}
+            
+            st.markdown("<hr style='margin: 10px 0 20px 0;'>", unsafe_allow_html=True)
+
+        if st.form_submit_button("💾 Save Attendance & Times", type="primary"):
+            updates = {}
+            for cook, att in att_results.items():
+                c_sch = today_schedule[today_schedule['Cook_Name'].str.strip().str.upper() == cook.upper()] if not today_schedule.empty else pd.DataFrame()
+                will_cook = False
+                if not c_sch.empty:
+                    val = str(c_sch.iloc[0].get('Will_Cook_Today', '')).strip().lower()
+                    will_cook = val in ['yes', 'y', 'true', '1']
+                
+                cooked = "Yes" if (att == "Present" and will_cook) else "No"
+                
+                updates[cook] = {
+                    "Attendance": att,
+                    "Morning_In": time_results[cook]["in"] if att == "Present" else "",
+                    "Duty_Out": time_results[cook]["out"] if att == "Present" else "",
+                    "Duty_In": time_results[cook]["ret"] if att == "Present" else "",
+                    "Cooked_Today": cooked
+                }
+                
+            save_data_chunk(updates)
+            st.success("✅ Attendance, Movement Times, and Cooking duties successfully updated!")
+            st.rerun()
+
+    # -----------------------------------------------------
+    # 🧹 STEP 2: CLEANING VERIFICATION (Security Checked)
+    # -----------------------------------------------------
+    st.markdown("### 🧹 Step 2: Cleaning Verification")
+    
+    routine_df = fetch_routine()
+    first_teachers_full = []
+    if not routine_df.empty and 'Day' in routine_df.columns and 'Start_Time' in routine_df.columns:
+        day_routine = routine_df[routine_df['Day'].str.lower() == day_name.lower()]
+        if not day_routine.empty:
+            min_time = day_routine['Start_Time'].min()
+            first_period_df = day_routine[day_routine['Start_Time'] == min_time]
+            initials = first_period_df['Teacher'].dropna().unique().tolist()
+            first_teachers_full = [INV_TEACHER_INITIALS.get(i.strip(), i.strip()) for i in initials]
+
+    is_authorized_for_cleaning = (user_role == 'admin') or (current_user_name in first_teachers_full)
+
+    with st.form("clean_form"):
+        st.caption("Bonus Points: Verified Cleaning = +5 pts")
+        if not is_authorized_for_cleaning:
+            st.warning(f"🔒 **Locked:** Only Admin or First-Period Teachers ({', '.join(first_teachers_full)}) can verify room cleaning today.")
+        
+        clean_results = {}
+        has_clean_duty = False
+        
+        for cook in COOKS:
+            c_sch = today_schedule[today_schedule['Cook_Name'].str.strip().str.upper() == cook.upper()] if not today_schedule.empty else pd.DataFrame()
+            room = str(c_sch.iloc[0].get('Room_To_Clean', '')).strip() if not c_sch.empty else ""
+            if room.lower() in ['nan', 'none', '']: room = ""
+            
+            if room:
+                has_clean_duty = True
+                db_state = get_db_state(cook)
+                
+                if db_state.get("Attendance", "Pending") == "Absent":
+                    st.error(f"❌ {cook} is marked Absent (Cannot clean {room}).")
+                    clean_results[cook] = "None"
+                else:
+                    is_done = True if db_state.get("Cleaned_Room", "Pending") not in ["No", "None", "Pending", ""] else False
+                    ans = st.checkbox(f"🧹 **{cook}** cleaned the **{room}**?", value=is_done, key=f"clean_{cook}", disabled=not is_authorized_for_cleaning)
+                    clean_results[cook] = room if ans else "None"
+                    
+        if not has_clean_duty: st.info("No cleaning duties are scheduled today.")
+        
+        if st.form_submit_button("💾 Verify & Save Cleaning", type="primary", disabled=not is_authorized_for_cleaning):
+            if clean_results:
+                updates = {c: {"Cleaned_Room": clean_results[c]} for c in clean_results}
+                save_data_chunk(updates)
+                st.success("✅ Cleaning duties verified and updated!")
+                st.rerun()
+
+# ==========================================
+# 🏆 TAB 2: MONTHLY LEADERBOARD
+# ==========================================
+with tab2:
+    st.markdown("### 🏆 Kitchen Stars Leaderboard")
+    data_df = fetch_data()
+    
+    if data_df.empty:
+        st.info("No points data available yet.")
     else:
-        # 2. Get Default Regular Schedule and strip out abandoned shift classes
-        ms = rout[(rout['Teacher'] == mc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()
-        if not ms.empty:
-            ms['Is_Sub'] = False
-            if given_away_slots:
-                ms = ms[~ms['Start_Time'].astype(str).str.strip().isin(given_away_slots)]
+        data_df['Points_Earned'] = pd.to_numeric(data_df['Points_Earned'], errors='coerce').fillna(0)
+        leaderboard = data_df.groupby('Cook_Name')['Points_Earned'].sum().reset_index()
+        leaderboard = leaderboard.sort_values(by='Points_Earned', ascending=False).reset_index(drop=True)
         
-        # 3. Check and Merge Today's Substitution Assignments
-        sd = []
-        if not ll.empty and 'Date' in ll.columns and not rout.empty:
-            for _, r in ll[ll['Date'].astype(str).str.strip() == curr_date_str].iterrows():
-                sub_log = str(r.get('Detailed_Sub_Log', ''))
-                absent_teacher = str(r.get('Teacher', '')).strip()
-                absent_initials = TEACHER_INITIALS.get(absent_teacher, absent_teacher)
+        medals = ["🥇", "🥈", "🥉"]
+        cols = st.columns(3)
+        
+        for idx, row in leaderboard.iterrows():
+            if idx < 3:
+                medal = medals[idx]
+                cook_name = row['Cook_Name']
+                photo_uri = get_secure_photo_uri(COOK_PHOTOS.get(cook_name, ""))
                 
-                for item in sub_log.split(" | "):
-                    if ": " in item:
-                        slot, sub_n = item.rsplit(": ", 1)
-                        clean_sub_n = sub_n.replace('✅', '').replace('⚠️', '').replace('⛔', '').replace('🚫', '').strip()
-                        if clean_sub_n == st.session_state.user_name:
-                            oc = rout[(rout['Teacher'] == absent_initials) & (rout['Day'] == tdy) & (rout['Start_Time'].astype(str).str.strip() == slot.strip())]
-                            if not oc.empty:
-                                rx = oc.iloc[0]
-                                sd.append({
-                                    'Start_Time': rx['Start_Time'],
-                                    'End_Time': rx['End_Time'],
-                                    'Class': rx['Class'],
-                                    'Section': rx.get('Section', 'A'),
-                                    'Subject': f"🔄 {rx['Subject']} (Sub for {absent_initials})",
-                                    'Teacher': mc,
-                                    'Day': tdy,
-                                    'Is_Sub': True
-                                })
+                with cols[idx]:
+                    st.markdown(f"""
+                    <div class='kpi-card'>
+                        <h1 style='margin:0; font-size:40px;'>{medal}</h1>
+                        <img src='{photo_uri}' width='60' height='60' style='border-radius: 50%; object-fit: cover; margin: 10px 0; border: 2px solid white;'>
+                        <h4 style='margin:5px 0;'>{cook_name}</h4>
+                        <h2 style='margin:0; color:#d35400;'>{int(row['Points_Earned'])} pts</h2>
+                    </div>
+                    """, unsafe_allow_html=True)
         
-        if sd:
-            ms = pd.concat([ms, pd.DataFrame(sd)], ignore_index=True)
-    
-    prev_rows, curr_rows, next_rows = [], [], []
-    
-    if not ms.empty:
-        ms['Start_Obj'] = ms['Start_Time'].apply(parse_time_safe)
-        ms['End_Obj'] = ms['End_Time'].apply(parse_time_safe)
-        ms = ms.dropna(subset=['Start_Obj', 'End_Obj']).sort_values('Start_Obj')
-        
-        past_slots = ms[ms['End_Obj'] < curr_time]['Start_Obj']
-        latest_past_slot = past_slots.max() if not past_slots.empty else None
-        
-        future_slots = ms[ms['Start_Obj'] > curr_time]['Start_Obj']
-        earliest_future_slot = future_slots.min() if not future_slots.empty else None
-        
-        for _, r in ms.iterrows():
-            st_obj = r['Start_Obj']
-            et_obj = r['End_Obj']
-            
-            if st_obj <= curr_time <= et_obj:
-                curr_rows.append(r)
-            elif latest_past_slot and st_obj == latest_past_slot and et_obj < curr_time:
-                prev_rows.append(r)
-            elif earliest_future_slot and st_obj == earliest_future_slot:
-                next_rows.append(r)
-                
-    def format_tracker_rows(label, rows_list):
-        if not rows_list:
-            return [{
-                "Status": label,
-                "Start_Time": "---",
-                "Class": "---",
-                "Section": "---",
-                "Subject": "---"
-            }]
-        out = []
-        for r in rows_list:
-            display_label = label
-            if r.get('Is_Sub', False):
-                display_label += " (SUB)"
-            out.append({
-                "Status": display_label,
-                "Start_Time": str(r.get('Start_Time', '')),
-                "Class": str(r.get('Class', '')),
-                "Section": str(r.get('Section', 'A')),
-                "Subject": str(r.get('Subject', ''))
-            })
-        return out
-
-    tracker_data = []
-    tracker_data.extend(format_tracker_rows("⬅️ Previous", prev_rows))
-    tracker_data.extend(format_tracker_rows("🟢 Current", curr_rows))
-    tracker_data.extend(format_tracker_rows("➡️ Next", next_rows))
-    
-    tracker_df = pd.DataFrame(tracker_data)
-    
-    def highlight_current_row(row):
-        if "Current" in str(row["Status"]):
-            if "(SUB)" in str(row["Status"]):
-                return ["background-color: #fff3cd; color: #856404; font-weight: bold"] * len(row)
-            else:
-                return ["background-color: #d4edda; color: #155724; font-weight: bold"] * len(row)
-        else:
-            return [""] * len(row)
-            
-    st.dataframe(
-        tracker_df.style.apply(highlight_current_row, axis=1),
-        hide_index=True,
-        use_container_width=True
-    )
+        st.write("")
+        st.markdown("##### 📈 Attendance Overview")
+        attendance_counts = data_df[data_df['Attendance'] == 'Present'].groupby('Cook_Name').size().reset_index(name='Days_Present')
+        st.dataframe(attendance_counts, hide_index=True, use_container_width=True)
 
 # ==========================================
-# 8. HOME PORTAL & NAVIGATION LOGIC
+# 📊 TAB 3: HISTORY & AUDIT
 # ==========================================
-app_page = st.Page("bps_digital.py", title="BPS Digital App", icon="🏫")
-fees_page = st.Page("sch_exam_fees.py", title="Exam Fees", icon="💰")
-udise_page = st.Page("UDISE+.py", title="UDISE+ Progression", icon="🎓")
-gas_page = st.Page("bps_gas_tracker.py", title="Gas Tracker", icon="🛢️")
-exam_page = st.Page("bps_exam.py", title="BPS Exams", icon="📝")
-assembly_page = st.Page("bps_assembly.py", title="Assembly Planner", icon="🎙️")
-celeb_page = st.Page("bps_celebration.py", title="Celebrations", icon="🎊")
-cookpro_page = st.Page("cookpro_tracker.py", title="CookPro Tracker", icon="👩‍🍳") # NEW: CookPro Tracker
-
-def home_page_ui():
-    st.markdown(f"<h3 style='margin-bottom: 5px;'>👋 Welcome, {st.session_state.user_name}</h3>", unsafe_allow_html=True)
-    
-    if st.session_state.user_role in ["teacher", "admin"]:
-        render_tracker()
+with tab3:
+    st.markdown("### 📊 Raw Tracking Data")
+    if st.button("🔄 Refresh Data"):
+        fetch_data.clear()
+        fetch_schedule.clear()
+        fetch_routine.clear()
         
-    st.markdown("#### 🚀 Select Application")
-    
-    # Primary Applications
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🏫 BPS Digital App", type="primary", use_container_width=True):
-            st.switch_page(app_page)
-    with col2:
-        if st.button("📝 BPS Exams", type="primary", use_container_width=True):
-            st.switch_page(exam_page)
+    data_df = fetch_data()
+    if data_df.empty:
+        st.info("No records found.")
+    else:
+        data_df = data_df.iloc[::-1]
+        
+        def highlight_pts(val):
+            try:
+                if int(val) == 20: return 'background-color: #d4edda; font-weight: bold; color: green;'
+                if int(val) == 0: return 'background-color: #f8d7da; color: red;'
+            except: pass
+            return ''
             
-    # Secondary Applications
-    col3, col4 = st.columns(2)
-    with col3:
-        if st.button("💰 Funds & Fees", type="secondary", use_container_width=True):
-            st.switch_page(fees_page)
-    with col4:
-        if st.button("🎊 Celebrations", type="secondary", use_container_width=True):
-            st.switch_page(celeb_page)
-            
-    # NEW: CookPro Button added to Secondary Applications row
-    col7, col8 = st.columns(2)
-    with col7:
-        if st.button("👩‍🍳 CookPro Tracker", type="secondary", use_container_width=True):
-            st.switch_page(cookpro_page)
-
-    # Admin-only Applications
-    if st.session_state.user_role == "admin":
-        st.markdown("#### 🛠️ Admin Controls")
-        col5, col6 = st.columns(2)
-        with col5:
-            if st.button("🎙️ Assembly Planner", type="secondary", use_container_width=True): 
-                st.switch_page(assembly_page)
-        with col6:
-            if st.button("🎓 UDISE+ Progression", type="secondary", use_container_width=True):
-                st.switch_page(udise_page)
-                
-        if st.button("🛢️ Gas Tracker", type="secondary", use_container_width=True):
-            st.switch_page(gas_page)
-
-home_page = st.Page(home_page_ui, title="Home Portal", icon="🏠", default=True)
-
-nav_pages = {
-    "Portal": [home_page],
-    "Applications": [app_page, exam_page, celeb_page, fees_page, cookpro_page] # NEW: Added to navigation
-}
-
-if st.session_state.user_role == "admin":
-    nav_pages["Applications"].append(assembly_page) 
-    nav_pages["Applications"].append(udise_page)
-    nav_pages["Applications"].append(gas_page)
-
-pg = st.navigation(nav_pages)
-pg.run()
+        styled_df = data_df.style.map(highlight_pts, subset=['Points_Earned'])
+        
+        # Determine logical column order ensuring new time columns show neatly
+        display_cols = ["Date", "Cook_Name", "Attendance", "Morning_In", "Duty_Out", "Duty_In", "Cooked_Today", "Cleaned_Room", "Points_Earned", "Submitted_By", "Timestamp"]
+        existing_cols = [c for c in display_cols if c in data_df.columns]
+        
+        st.dataframe(styled_df, column_order=existing_cols, hide_index=True, use_container_width=True)

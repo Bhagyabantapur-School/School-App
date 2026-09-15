@@ -60,6 +60,11 @@ def load_bike_data():
     try: return pd.DataFrame(sh.worksheet("BIKE_LOG").get_all_records())
     except: return pd.DataFrame()
 
+@st.cache_data(ttl=60)
+def load_fast_money_data():
+    try: return pd.DataFrame(sh.worksheet("FAST_MONEY").get_all_records())
+    except: return pd.DataFrame()
+
 config_df = load_config()
 
 ACCOUNT_HEADERS = ["A. Cash:", "B. Bank Accounts:", "C. Credit Cards:", "D. Digital Wallet:", "E. Loan:", "F. Members:"]
@@ -138,6 +143,7 @@ with c_loc2:
         load_location_data.clear()
         load_config.clear()
         load_shopping_data.clear()
+        load_fast_money_data.clear()
         st.rerun()
 
 # --- COLOR-CODED QUICK NAVIGATION BUTTON ---
@@ -161,8 +167,76 @@ if st.button("📍 Go to Location Tracker", use_container_width=True):
 
 st.divider()
 
+# --- NEW: SMART FAST MONEY EXPANDER ---
+with st.expander("🏎️ Smart Fast Money", expanded=True):
+    f_entity = st.radio("Entity Context", ["PERS", "SCH", "TRAN", "PEOPLE"], horizontal=True)
+    
+    df_fm = load_fast_money_data()
+    
+    if not df_fm.empty and (current_shop_type or current_loc):
+        # Create a list of valid location matches (checks BOTH Shop_Type and Exact Location Name)
+        loc_matches = []
+        if current_shop_type: loc_matches.append(str(current_shop_type).strip().lower())
+        if current_loc: loc_matches.append(str(current_loc).strip().lower())
+        
+        # Filter the FAST_MONEY sheet based on Entity and Location/ShopType
+        mask = (df_fm['Entity'].astype(str).str.strip().str.upper() == f_entity) & \
+               (df_fm['Location'].astype(str).str.strip().str.lower().isin(loc_matches))
+        filtered_fm = df_fm[mask]
+        
+        if not filtered_fm.empty:
+            f_part_list = filtered_fm['Particulars'].dropna().unique().tolist()
+            f_part = st.selectbox("Select Particulars", f_part_list)
+            
+            c_f1, c_f2 = st.columns(2)
+            with c_f1: f_amt_in = st.number_input("IN Amount (₹)", min_value=0.0, value=None, step=10.0, key="fm_in")
+            with c_f2: f_amt_out = st.number_input("OUT Amount (₹)", min_value=0.0, value=None, step=10.0, key="fm_out")
+            
+            if st.button("🚀 Log Fast Money", use_container_width=True, type="primary"):
+                s_in = float(f_amt_in or 0.0)
+                s_out = float(f_amt_out or 0.0)
+                
+                if s_in > 0 or s_out > 0:
+                    try:
+                        template = filtered_fm[filtered_fm['Particulars'] == f_part].iloc[0]
+                        time_now = get_ist_now()
+                        today_str, time_str = time_now.strftime("%d-%m-%Y"), time_now.strftime("%H:%M")
+                        
+                        # Grab all pre-configured details from your FAST_MONEY sheet
+                        t_acc = str(template.get('Account', '')).strip()
+                        t_fund = str(template.get('Fund', '')).strip()
+                        t_cat = str(template.get('Category', '')).strip()
+                        t_sub = str(template.get('Sub Category', '')).strip()
+                        
+                        raw_tf = str(template.get('TO_FROM', '')).strip()
+                        t_tf = raw_tf if raw_tf else (current_loc if should_inject_tofrom(current_loc) else "")
+                        t_rem = str(template.get('Remark', '')).strip()
+                        
+                        sh.worksheet("MONEY_DATA").append_row([
+                            today_str, time_str, 
+                            s_in if s_in > 0 else "", 
+                            s_out if s_out > 0 else "", 
+                            t_acc, t_fund, f_entity, t_cat, t_sub, f_part, t_tf, current_loc or "", t_rem
+                        ])
+                        
+                        load_money_data.clear()
+                        st.success(f"Fast Money Saved! ₹{s_in if s_in > 0 else s_out} logged seamlessly.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error saving Fast Money: {e}")
+                else:
+                    st.warning("⚠️ Enter an IN or OUT amount!")
+        else:
+            st.info(f"No fast-fill templates found for Entity **{f_entity}** at **{current_shop_type or current_loc}**. Add them to the FAST_MONEY tab in Google Sheets!")
+    else:
+        if df_fm.empty:
+            st.info("⚠️ FAST_MONEY tab is empty or not found in your Google Sheet.")
+        else:
+            st.info("📍 Move to a mapped location to use Smart Fast Money.")
+
+
 # --- EXPANDABLE BUSY TIME QUICK ENTRY ---
-with st.expander("⚡ Busy Time Quick Entry", expanded=True):
+with st.expander("⚡ Busy Time Quick Entry", expanded=False): # Collapsed to save space since Fast Money is better
     b_type = st.radio("Flow Type", ["Expense (OUT)", "Income (IN)"], horizontal=True)
     
     c_amt1, c_amt2, c_amt3 = st.columns([1, 1, 1])

@@ -170,89 +170,97 @@ st.divider()
 # --- NEW: SMART FAST MONEY EXPANDER ---
 with st.expander("🏎️ Smart Fast Money", expanded=True):
     f_entity = st.radio("Entity Context", ["PERS", "SCH", "TRAN", "PEOPLE"], horizontal=True)
+    ignore_loc = st.toggle("🌍 Show all Particulars (Ignore Location Filter)", value=False)
     
     df_fm = load_fast_money_data()
     
-    if not df_fm.empty and (current_shop_type or current_loc):
-        loc_matches = []
-        if current_shop_type: loc_matches.append(str(current_shop_type).strip().lower())
-        if current_loc: loc_matches.append(str(current_loc).strip().lower())
-        
-        mask = (df_fm['Entity'].astype(str).str.strip().str.upper() == f_entity) & \
-               (df_fm['Location'].astype(str).str.strip().str.lower().isin(loc_matches))
-        filtered_fm = df_fm[mask]
-        
-        if not filtered_fm.empty:
-            f_part_list = filtered_fm['Particulars'].dropna().unique().tolist()
-            f_part = st.selectbox("Select Particulars", f_part_list)
+    if not df_fm.empty:
+        if ignore_loc or (current_shop_type or current_loc):
+            loc_matches = []
+            if current_shop_type: loc_matches.append(str(current_shop_type).strip().lower())
+            if current_loc: loc_matches.append(str(current_loc).strip().lower())
             
-            # Find matching templates
-            matching_templates = filtered_fm[filtered_fm['Particulars'] == f_part]
-            
-            # ONLY trigger double-entry logic if the Entity is "TRAN" and exactly 2 templates exist
-            is_double = (f_entity == "TRAN") and (len(matching_templates) == 2)
-            
-            # If not a TRAN double-entry, strictly use only the first template to prevent accidental duplicates
-            if not is_double:
-                matching_templates = matching_templates.head(1)
-            
-            if is_double:
-                st.info(f"🔄 **Double Entry Detected:**  \n📥 **IN** to `{matching_templates.iloc[0]['Account']}`  \n📤 **OUT** from `{matching_templates.iloc[1]['Account']}`")
-                f_amt = st.number_input("Transaction Amount (₹)", min_value=0.0, value=None, step=10.0, key="fm_amt_single")
-                s_in = float(f_amt or 0.0)
-                s_out = float(f_amt or 0.0)
+            if ignore_loc:
+                mask = (df_fm['Entity'].astype(str).str.strip().str.upper() == f_entity)
             else:
-                c_f1, c_f2 = st.columns(2)
-                with c_f1: f_amt_in = st.number_input("IN Amount (₹)", min_value=0.0, value=None, step=10.0, key="fm_in")
-                with c_f2: f_amt_out = st.number_input("OUT Amount (₹)", min_value=0.0, value=None, step=10.0, key="fm_out")
-                s_in = float(f_amt_in or 0.0)
-                s_out = float(f_amt_out or 0.0)
+                mask = (df_fm['Entity'].astype(str).str.strip().str.upper() == f_entity) & \
+                       (df_fm['Location'].astype(str).str.strip().str.lower().isin(loc_matches))
             
-            if st.button("🚀 Log Fast Money", use_container_width=True, type="primary"):
-                if (is_double and s_in > 0) or (not is_double and (s_in > 0 or s_out > 0)):
-                    try:
-                        time_now = get_ist_now()
-                        today_str, time_str = time_now.strftime("%d-%m-%Y"), time_now.strftime("%H:%M")
-                        
-                        # Loop over every template mapped to this Particular
-                        for idx, (_, template) in enumerate(matching_templates.iterrows()):
-                            t_acc = str(template.get('Account', '')).strip()
-                            t_fund = str(template.get('Fund', '')).strip()
-                            t_cat = str(template.get('Category', '')).strip()
-                            t_sub = str(template.get('Sub Category', '')).strip()
-                            
-                            raw_tf = str(template.get('TO_FROM', '')).strip()
-                            t_tf = raw_tf if raw_tf else (current_loc if should_inject_tofrom(current_loc) else "")
-                            t_rem = str(template.get('Remark', '')).strip()
-                            
-                            # Auto-assign IN and OUT based on row position for double entries
-                            if is_double:
-                                r_in = s_in if idx == 0 else ""
-                                r_out = s_out if idx == 1 else ""
-                            else:
-                                r_in = s_in if s_in > 0 else ""
-                                r_out = s_out if s_out > 0 else ""
-                                
-                            sh.worksheet("MONEY_DATA").append_row([
-                                today_str, time_str, 
-                                r_in, r_out, 
-                                t_acc, t_fund, f_entity, t_cat, t_sub, f_part, t_tf, current_loc or "", t_rem
-                            ])
-                        
-                        load_money_data.clear()
-                        st.success(f"Fast Money Saved! Logged {len(matching_templates)} entry/entries seamlessly.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error saving Fast Money: {e}")
+            filtered_fm = df_fm[mask]
+            
+            if not filtered_fm.empty:
+                f_part_list = filtered_fm['Particulars'].dropna().unique().tolist()
+                f_part = st.selectbox("Select Particulars", f_part_list)
+                
+                # Find matching templates
+                matching_templates = filtered_fm[filtered_fm['Particulars'] == f_part]
+                
+                # ONLY trigger double-entry logic if the Entity is "TRAN" and exactly 2 templates exist
+                is_double = (f_entity == "TRAN") and (len(matching_templates) == 2)
+                
+                # If not a TRAN double-entry, strictly use only the first template to prevent accidental duplicates
+                if not is_double:
+                    matching_templates = matching_templates.head(1)
+                
+                if is_double:
+                    st.info(f"🔄 **Double Entry Detected:**  \n📥 **IN** to `{matching_templates.iloc[0]['Account']}`  \n📤 **OUT** from `{matching_templates.iloc[1]['Account']}`")
+                    f_amt = st.number_input("Transaction Amount (₹)", min_value=0.0, value=None, step=10.0, key="fm_amt_single")
+                    s_in = float(f_amt or 0.0)
+                    s_out = float(f_amt or 0.0)
                 else:
-                    st.warning("⚠️ Enter a valid amount!")
+                    c_f1, c_f2 = st.columns(2)
+                    with c_f1: f_amt_in = st.number_input("IN Amount (₹)", min_value=0.0, value=None, step=10.0, key="fm_in")
+                    with c_f2: f_amt_out = st.number_input("OUT Amount (₹)", min_value=0.0, value=None, step=10.0, key="fm_out")
+                    s_in = float(f_amt_in or 0.0)
+                    s_out = float(f_amt_out or 0.0)
+                
+                if st.button("🚀 Log Fast Money", use_container_width=True, type="primary"):
+                    if (is_double and s_in > 0) or (not is_double and (s_in > 0 or s_out > 0)):
+                        try:
+                            time_now = get_ist_now()
+                            today_str, time_str = time_now.strftime("%d-%m-%Y"), time_now.strftime("%H:%M")
+                            
+                            # Loop over every template mapped to this Particular
+                            for idx, (_, template) in enumerate(matching_templates.iterrows()):
+                                t_acc = str(template.get('Account', '')).strip()
+                                t_fund = str(template.get('Fund', '')).strip()
+                                t_cat = str(template.get('Category', '')).strip()
+                                t_sub = str(template.get('Sub Category', '')).strip()
+                                
+                                raw_tf = str(template.get('TO_FROM', '')).strip()
+                                t_tf = raw_tf if raw_tf else (current_loc if should_inject_tofrom(current_loc) else "")
+                                t_rem = str(template.get('Remark', '')).strip()
+                                
+                                # Auto-assign IN and OUT based on row position for double entries
+                                if is_double:
+                                    r_in = s_in if idx == 0 else ""
+                                    r_out = s_out if idx == 1 else ""
+                                else:
+                                    r_in = s_in if s_in > 0 else ""
+                                    r_out = s_out if s_out > 0 else ""
+                                    
+                                sh.worksheet("MONEY_DATA").append_row([
+                                    today_str, time_str, 
+                                    r_in, r_out, 
+                                    t_acc, t_fund, f_entity, t_cat, t_sub, f_part, t_tf, current_loc or "", t_rem
+                                ])
+                            
+                            load_money_data.clear()
+                            st.success(f"Fast Money Saved! Logged {len(matching_templates)} entry/entries seamlessly.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error saving Fast Money: {e}")
+                    else:
+                        st.warning("⚠️ Enter a valid amount!")
+            else:
+                if ignore_loc:
+                    st.info(f"No fast-fill templates found for Entity **{f_entity}**. Add them to the FAST_MONEY tab in Google Sheets!")
+                else:
+                    st.info(f"No fast-fill templates found for Entity **{f_entity}** at **{current_shop_type or current_loc}**. Add them to the FAST_MONEY tab in Google Sheets, or toggle 'Ignore Location Filter'!")
         else:
-            st.info(f"No fast-fill templates found for Entity **{f_entity}** at **{current_shop_type or current_loc}**. Add them to the FAST_MONEY tab in Google Sheets!")
+            st.info("📍 Move to a mapped location or toggle 'Ignore Location Filter' to use Smart Fast Money.")
     else:
-        if df_fm.empty:
-            st.info("⚠️ FAST_MONEY tab is empty or not found in your Google Sheet.")
-        else:
-            st.info("📍 Move to a mapped location to use Smart Fast Money.")
+        st.info("⚠️ FAST_MONEY tab is empty or not found in your Google Sheet.")
 
 
 # --- EXPANDABLE BUSY TIME QUICK ENTRY ---

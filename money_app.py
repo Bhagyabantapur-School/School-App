@@ -208,11 +208,23 @@ with st.expander("🏎️ Smart Fast Money", expanded=True):
                     s_in = float(f_amt or 0.0)
                     s_out = float(f_amt or 0.0)
                 else:
-                    c_f1, c_f2 = st.columns(2)
-                    with c_f1: f_amt_in = st.number_input("IN Amount (₹)", min_value=0.0, value=None, step=10.0, key="fm_in")
-                    with c_f2: f_amt_out = st.number_input("OUT Amount (₹)", min_value=0.0, value=None, step=10.0, key="fm_out")
-                    s_in = float(f_amt_in or 0.0)
-                    s_out = float(f_amt_out or 0.0)
+                    # Dynamically read the new 'Type' column
+                    t_type = str(matching_templates.iloc[0].get('Type', '')).strip().upper()
+                    s_in, s_out = 0.0, 0.0
+                    
+                    if t_type == "IN":
+                        f_amt_in = st.number_input("IN Amount (₹)", min_value=0.0, value=None, step=10.0, key="fm_in")
+                        s_in = float(f_amt_in or 0.0)
+                    elif t_type == "OUT":
+                        f_amt_out = st.number_input("OUT Amount (₹)", min_value=0.0, value=None, step=10.0, key="fm_out")
+                        s_out = float(f_amt_out or 0.0)
+                    else:
+                        # Fallback if 'Type' column is missing or empty
+                        c_f1, c_f2 = st.columns(2)
+                        with c_f1: f_amt_in = st.number_input("IN Amount (₹)", min_value=0.0, value=None, step=10.0, key="fm_in")
+                        with c_f2: f_amt_out = st.number_input("OUT Amount (₹)", min_value=0.0, value=None, step=10.0, key="fm_out")
+                        s_in = float(f_amt_in or 0.0)
+                        s_out = float(f_amt_out or 0.0)
                 
                 if st.button("🚀 Log Fast Money", use_container_width=True, type="primary"):
                     if (is_double and s_in > 0) or (not is_double and (s_in > 0 or s_out > 0)):

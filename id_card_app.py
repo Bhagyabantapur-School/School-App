@@ -247,35 +247,51 @@ def reset_generated_status():
 
 # --- 4. PDF GENERATORS ---
 
-# ✨ NEW: Modified to accept paper_size ('A4' or 'A5') and layout perfectly!
 def generate_pdf(students_list, photo_dict, progress_bar=None, paper_size='A4'):
     """Generates the Landscape Student ID Cards with Edge-to-Edge Cut Guides"""
     
-    # A4 is Portrait (210x297), A5 is Landscape (210x148) to fit 2 columns perfectly
-    orientation = 'P' if paper_size == 'A4' else 'L'
-    pdf = FPDF(orientation=orientation, unit='mm', format=paper_size)
+    card_w, card_h, gap = 86, 54, 8
+    
+    # ✨ DYNAMIC LAYOUT ENGINE (A4 vs 5x7 inches)
+    if paper_size == 'A4':
+        pdf = FPDF(orientation='P', unit='mm', format='A4')
+        page_w, page_h = 210, 297
+        max_cols, max_rows = 2, 4
+        x_start, y_start = 10, 10
+    else:
+        # 5x7 inches perfectly fits 2 cards (1 column x 2 rows)
+        pdf = FPDF(orientation='P', unit='mm', format=(127, 177.8))
+        page_w, page_h = 127, 177.8
+        max_cols, max_rows = 1, 2
+        x_start = (127 - card_w) / 2              # 20.5mm (Centered Width)
+        y_start = (177.8 - (card_h*2 + gap)) / 2  # 30.9mm (Centered Height)
+
     pdf.set_auto_page_break(auto=True, margin=10)
     
-    x_start, y_start, card_w, card_h, gap = 10, 10, 86, 54, 8
-    
-    page_w = 210 # Both A4 portrait and A5 landscape are 210mm wide
-    page_h = 297 if paper_size == 'A4' else 148
-    max_cols = 2
-    max_rows = 4 if paper_size == 'A4' else 2
-    
+    # ✨ PERFECT EDGE-TO-EDGE CUTTING GUIDES (Like Scan.jpg)
     def draw_cut_guides():
-        pdf.set_draw_color(180, 180, 180) # Light grey
+        pdf.set_draw_color(180, 180, 180) # Light grey dashed pattern via 4mm steps
         pdf.set_line_width(0.2)
         
-        # Vertical center guide
-        vx = x_start + card_w + (gap / 2)
-        for cy in range(0, page_h, 4):
-            pdf.line(vx, cy, vx, min(cy + 2, page_h))
+        # Calculate exactly where the cards edges are
+        v_lines = []
+        for c in range(max_cols):
+            v_lines.append(x_start + c * (card_w + gap))               # Left edge of card
+            v_lines.append(x_start + card_w + c * (card_w + gap))      # Right edge of card
             
-        # Horizontal guides
-        for r in range(max_rows + 1): 
-            hy = y_start + (card_h + gap) * r - (gap / 2)
-            for cx in range(0, page_w, 4):
+        h_lines = []
+        for r in range(max_rows):
+            h_lines.append(y_start + r * (card_h + gap))               # Top edge of card
+            h_lines.append(y_start + card_h + r * (card_h + gap))      # Bottom edge of card
+            
+        # Draw vertical lines extending to top/bottom edges of paper
+        for vx in v_lines:
+            for cy in range(0, int(page_h), 4):
+                pdf.line(vx, cy, vx, min(cy + 2, page_h))
+                
+        # Draw horizontal lines extending to left/right edges of paper
+        for hy in h_lines:
+            for cx in range(0, int(page_w), 4):
                 pdf.line(cx, hy, min(cx + 2, page_w), hy)
 
     pdf.add_page()
@@ -535,8 +551,7 @@ with tabs[0]:
                 with col_l1:
                     selected_lot_to_reprint = st.selectbox("Select a previously generated Lot to re-download:", ["-- Select Lot --"] + list(reversed(lot_options)))
                 with col_l2:
-                    # ✨ NEW: Paper size selector for reprinting!
-                    reprint_paper = st.selectbox("📄 Paper Size:", ["A4 (8 Cards/Page)", "A5 (4 Cards/Page)"], key="reprint_paper")
+                    reprint_paper = st.selectbox("📄 Paper Size:", ["A4 (8 Cards/Page)", "5x7 inch (2 Cards/Page)"], key="reprint_paper")
                 with col_l3:
                     st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
                     reprint_btn = st.button("🖨️ Generate PDF for Lot", use_container_width=True)
@@ -555,8 +570,7 @@ with tabs[0]:
                         my_bar = st.progress(0, text="Starting secure fetch for Lot Reprint...")
                         
                         num_students = len(selected_students)
-                        # Ensure Math strictly splits by paper size limit
-                        cards_per_page_reprint = 8 if "A4" in reprint_paper else 4
+                        cards_per_page_reprint = 8 if "A4" in reprint_paper else 2
                         pages_needed_reprint = math.ceil(num_students / cards_per_page_reprint)
                         
                         for idx, (index, student) in enumerate(selected_students.iterrows()):
@@ -568,7 +582,8 @@ with tabs[0]:
                                 if img_bytes: photo_dict[sid] = img_bytes
                             my_bar.progress((idx + 1) / num_students * 0.5, text=f"Fetching photo {idx + 1} of {num_students}...")
                         
-                        pdf_bytes = generate_pdf(selected_students.to_dict('records'), photo_dict, progress_bar=my_bar, paper_size=reprint_paper[:2])
+                        paper_format_reprint = "A4" if "A4" in reprint_paper else "5x7"
+                        pdf_bytes = generate_pdf(selected_students.to_dict('records'), photo_dict, progress_bar=my_bar, paper_size=paper_format_reprint)
                         st.session_state['generated_pdf_data'] = pdf_bytes
                         clear_grid_states()
                         st.balloons()
@@ -665,17 +680,16 @@ with tabs[0]:
                 num_students = len(selected_students)
                 
                 st.divider()
-                # ✨ NEW: Paper size selector for generating NEW Cards
                 col_p1, col_p2 = st.columns([1, 2])
                 with col_p1:
-                    gen_paper = st.selectbox("📄 Select Paper Size:", ["A4 (8 Cards/Page)", "A5 (4 Cards/Page)"], key="gen_paper")
+                    gen_paper = st.selectbox("📄 Select Paper Size:", ["A4 (8 Cards/Page)", "5x7 inch (2 Cards/Page)"], key="gen_paper")
                 with col_p2:
-                    st.write("") # Adjusting spacing
+                    st.write("") 
                     
-                cards_per_page = 8 if "A4" in gen_paper else 4
+                cards_per_page = 8 if "A4" in gen_paper else 2
                 pages_needed = math.ceil(num_students / cards_per_page)
                 
-                st.info(f"🖨️ **Print Summary:** You selected **{num_students}** students. Requires **{pages_needed}** {gen_paper[:2]} page(s).")
+                st.info(f"🖨️ **Print Summary:** You selected **{num_students}** students. Requires **{pages_needed}** page(s).")
                 
                 if st.button("Generate Secure PDF", type="primary"):
                     st.session_state['generated_pdf_data'] = None 
@@ -690,7 +704,8 @@ with tabs[0]:
                             if img_bytes: photo_dict[sid] = img_bytes
                         my_bar.progress((idx + 1) / num_students * 0.5, text=f"Fetching photo {idx + 1} of {num_students}...")
                     
-                    pdf_bytes = generate_pdf(selected_students.to_dict('records'), photo_dict, progress_bar=my_bar, paper_size=gen_paper[:2])
+                    paper_format_gen = "A4" if "A4" in gen_paper else "5x7"
+                    pdf_bytes = generate_pdf(selected_students.to_dict('records'), photo_dict, progress_bar=my_bar, paper_size=paper_format_gen)
                     batch_log_action("id_card_log", selected_students, "Generated")
                     st.session_state['generated_pdf_data'] = pdf_bytes
                     clear_grid_states()
@@ -925,7 +940,7 @@ with tabs[2]:
         else:
             st.info("ID card log is empty.")
 
-        # 📦 Lot-wise Distribution Summary
+        # 📦 Lot-wise Action Summary
         st.write("---")
         st.markdown("##### 📦 Lot-wise Action Summary (Based on 'Generated' Date)")
         if not df_id_log.empty:

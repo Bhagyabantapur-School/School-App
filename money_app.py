@@ -186,9 +186,15 @@ with st.expander("🏎️ Smart Fast Money", expanded=True):
             f_part_list = filtered_fm['Particulars'].dropna().unique().tolist()
             f_part = st.selectbox("Select Particulars", f_part_list)
             
-            # Find all matching templates for the selected Particular
+            # Find matching templates
             matching_templates = filtered_fm[filtered_fm['Particulars'] == f_part]
-            is_double = len(matching_templates) == 2
+            
+            # ONLY trigger double-entry logic if the Entity is "TRAN" and exactly 2 templates exist
+            is_double = (f_entity == "TRAN") and (len(matching_templates) == 2)
+            
+            # If not a TRAN double-entry, strictly use only the first template to prevent accidental duplicates
+            if not is_double:
+                matching_templates = matching_templates.head(1)
             
             if is_double:
                 st.info(f"🔄 **Double Entry Detected:**  \n📥 **IN** to `{matching_templates.iloc[0]['Account']}`  \n📤 **OUT** from `{matching_templates.iloc[1]['Account']}`")

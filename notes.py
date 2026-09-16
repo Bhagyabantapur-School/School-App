@@ -80,20 +80,24 @@ def append_live_note_by_topic(existing_text, sub_topic, timestamp, content):
     """Inserts a note under its respective sub-topic header, or creates a new header."""
     sub_topic = sub_topic.strip() if sub_topic.strip() else "Note"
     topic_header = f"**🔹 {sub_topic}**"
-    new_bullet = f"• *({timestamp})*: {content.strip()}"
+    
+    # FIXED: Replaced custom unicode bullet with Markdown dash and double line breaks
+    new_bullet = f"- *({timestamp})*: {content.strip()}"
     
     if topic_header not in existing_text:
-        return existing_text.rstrip() + f"\n\n{topic_header}\n{new_bullet}\n"
+        return existing_text.rstrip() + f"\n\n{topic_header}\n\n{new_bullet}\n"
     
     topic_idx = existing_text.find(topic_header)
     next_topic_idx = existing_text.find("**🔹", topic_idx + len(topic_header))
     
     if next_topic_idx == -1:
-        return existing_text.rstrip() + f"\n{new_bullet}\n"
+        # End of document, append to the bottom with double newline spacing
+        return existing_text.rstrip() + f"\n\n{new_bullet}\n"
     else:
+        # Insert before the next topic block starts, keeping spacing clear
         before = existing_text[:next_topic_idx].rstrip()
         after = existing_text[next_topic_idx:]
-        return f"{before}\n{new_bullet}\n\n{after}"
+        return f"{before}\n\n{new_bullet}\n\n{after}"
 
 # --- 3. STATE MANAGER ---
 def process_state_updates():
@@ -427,7 +431,7 @@ with tab_live:
                         st.rerun()
                     else:
                         timestamp = current_ist.strftime("%I:%M %p")
-                        final_sub = new_sub if sel_sub == "➕ Add New..." else sel_sub
+                        final_sub = new_sub if sel_sub == "➕ Add New... " else sel_sub
                         
                         final_content = append_live_note_by_topic(active_note[4], final_sub, timestamp, live_content)
                         

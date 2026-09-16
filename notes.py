@@ -18,7 +18,6 @@ def init_connection():
         scopes=scopes,
     )
     client = gspread.authorize(credentials)
-    # Connecting to the new "NOTE APP" sheet and the "Notes" tab
     sheet = client.open("NOTE APP")
     ws_notes = sheet.worksheet("Notes") 
     return ws_notes
@@ -32,8 +31,8 @@ except Exception as e:
 # --- 2. SMART DATA CACHING ---
 def fetch_notes():
     raw_data = ws_notes.get_all_values()
-    # Ensure every row has exactly 5 columns to prevent index errors
-    padded_data = [row + [""] * (5 - len(row)) for row in raw_data]
+    # Expanded to 6 columns to support the new "Status" column (Planned vs Completed)
+    padded_data = [row + [""] * (6 - len(row)) for row in raw_data]
     return padded_data
 
 if "note_data" not in st.session_state:
@@ -46,11 +45,10 @@ if "note_data" not in st.session_state:
 # Helper to get unique categories for the dropdown
 def get_categories():
     if len(st.session_state.note_data) <= 1:
-        return ["General", "Work", "Ideas", "Personal"]
+        return ["General", "Work", "Ideas", "Personal", "Training"]
     
     categories = [str(row[3]).strip() for row in st.session_state.note_data[1:] if str(row[3]).strip()]
-    default_cats = ["General", "Work", "Ideas", "Personal"]
-    # Combine and remove duplicates
+    default_cats = ["General", "Work", "Ideas", "Personal", "Training"]
     return sorted(list(set(categories + default_cats)))
 
 # --- TIMEZONE CONFIGURATION ---
@@ -72,26 +70,33 @@ st.markdown("""
         color: #666;
         margin-bottom: 8px;
     }
+    .planned-context {
+        background-color: #e3f2fd;
+        padding: 10px;
+        border-radius: 5px;
+        border-left: 4px solid #2196f3;
+        margin-bottom: 15px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
 # --- 3. USER INTERFACE ---
 st.title("📝 My Quick Notes")
 
-tab1, tab2 = st.tabs(["📚 View Notes", "➕ Add New Note"])
+tab_view, tab_add, tab_plan, tab_live = st.tabs(["📚 View Notes", "➕ Quick Note", "🗓️ Plan Training", "🎙️ Live Notes"])
 
 # ==========================================
 # TAB 1: VIEW & SEARCH NOTES
 # ==========================================
-with tab1:
-    search_query = st.text_input("🔍 Search notes by title, category, or content...")
+with tab_view:
+    search_query = st.text_input("🔍 Search completed notes by title, category, or content...")
     st.divider()
     
     if len(st.session_state.note_data) > 1:
-        # Get all notes except header, reverse so newest are first
-        all_notes = list(reversed(st.session_state.note_data[1:]))
+        # Filter out "Planned" notes so they only show up in the Live Notes tab
+        all_notes = [n for n in st.session_state.note_data[1:] if str(n[5]).strip() != "Planned"]
+        all_notes = list(reversed(all_notes)) # Newest first
         
-        # Filter logic
         if search_query:
             query = search_query.lower()
             filtered_notes = [
@@ -102,25 +107,21 @@ with tab1:
             filtered_notes = all_notes
             
         if not filtered_notes:
-            st.info("No notes found matching your search.")
+            st.info("No completed notes found matching your search.")
         else:
             for note in filtered_notes:
-                date_val = note[0]
-                time_val = note[1]
-                title_val = note[2]
-                category_val = note[3]
-                content_val = note[4]
+                date_val, time_val, title_val, category_val, content_val = note[0], note[1], note[2], note[3], note[4]
                 
                 with st.expander(f"📌 {title_val}  —  🏷️ {category_val}"):
                     st.markdown(f"<div class='note-meta'>🕒 {date_val} at {time_val}</div>", unsafe_allow_html=True)
                     st.write(content_val)
     else:
-        st.info("No notes saved yet. Go to the 'Add New Note' tab to create your first one!")
+        st.info("No notes saved yet. Create a Quick Note or complete a Training!")
 
 # ==========================================
-# TAB 2: ADD NEW NOTE
+# TAB 2: ADD QUICK NOTE
 # ==========================================
-with tab2:
+with tab_add:
     with st.form("add_note_form", clear_on_submit=True):
         note_title = st.text_input("Note Title*", placeholder="Enter a clear title...")
         
@@ -132,7 +133,6 @@ with tab2:
             cat_new = st.text_input("Type New Category", disabled=(cat_sel != "➕ Add New..."))
             
         note_content = st.text_area("Note Content*", height=200, placeholder="Write your note here...")
-        
         submitted = st.form_submit_button("💾 Save Note", type="primary")
         
         if submitted:
@@ -140,14 +140,8 @@ with tab2:
                 st.error("Title and Content are required fields!")
             else:
                 final_category = cat_new if cat_sel == "➕ Add New..." else cat_sel
-                
-                new_row = [
-                    str(current_ist.date()), 
-                    str(current_ist.strftime("%H:%M:%S")), 
-                    note_title.strip(), 
-                    final_category.strip(), 
-                    note_content.strip()
-                ]
+                # Column 6 is marked as "Completed"
+                new_row = [str(current_ist.date()), str(current_ist.strftime("%H:%M:%S")), note_title.strip(), final_category.strip(), note_content.strip(), "Completed"]
                 
                 try:
                     ws_notes.append_row(new_row)
@@ -156,3 +150,94 @@ with tab2:
                     st.rerun()
                 except Exception as e:
                     st.error(f"Failed to save note: {e}")
+
+# ==========================================
+# TAB 3: PLAN TRAINING (PRE-EVENT)
+# ==========================================
+with tab_plan:
+    st.markdown("### Pre-Plan a Training Session")
+    st.info("Enter the context here so you don't have to type it while the speaker is talking.")
+    
+    with st.form("plan_training_form", clear_on_submit=True):
+        train_title = st.text_input("Event/Training Title*", placeholder="e.g., NEP 2020 Implementation Workshop")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            trainer_name = st.text_input("Trainer/Speaker Name")
+        with col2:
+            planned_date = st.date_input("Scheduled Date", value=current_ist.date())
+            
+        topic = st.text_input("Core Topic / Subject")
+        
+        plan_submitted = st.form_submit_button("🗓️ Save to Planned Trainings", type="primary")
+        
+        if plan_submitted:
+            if not train_title:
+                st.error("Event Title is required!")
+            else:
+                # Compile the context into the top of the content block
+                context_block = f"**🗓️ Date:** {planned_date}\n**👤 Speaker:** {trainer_name}\n**🎯 Topic:** {topic}\n\n---\n**Live Notes:**\n"
+                
+                # Column 6 is marked as "Planned"
+                new_row = [str(current_ist.date()), str(current_ist.strftime("%H:%M:%S")), train_title.strip(), "Training", context_block, "Planned"]
+                
+                try:
+                    ws_notes.append_row(new_row)
+                    st.session_state.note_data.append(new_row)
+                    st.success("Training Planned! It is now waiting for you in the 'Live Notes' tab.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to save planned training: {e}")
+
+# ==========================================
+# TAB 4: LIVE NOTE-TAKING (EVENT DAY)
+# ==========================================
+with tab_live:
+    # Find all notes marked as "Planned" keeping track of their exact row index
+    planned_notes = [(idx, note) for idx, note in enumerate(st.session_state.note_data) if str(note[5]).strip() == "Planned"]
+    
+    if not planned_notes:
+        st.success("🎉 You have no pending planned trainings! Plan one in the previous tab.")
+    else:
+        st.markdown("### Select a Planned Training to Begin")
+        
+        # Dropdown to select which planned training you are attending right now
+        selected_idx = st.selectbox("Active Training Session:", options=[idx for idx, _ in planned_notes], format_func=lambda x: st.session_state.note_data[x][2])
+        
+        if selected_idx is not None:
+            active_note = st.session_state.note_data[selected_idx]
+            
+            # Show the pre-planned context so user remembers what they set up
+            st.markdown(f"<div class='planned-context'>{active_note[4]}</div>", unsafe_allow_html=True)
+            
+            with st.form("live_notes_form"):
+                st.markdown("**Start typing your live notes below:**")
+                live_content = st.text_area("Live Notes", height=300, label_visibility="collapsed")
+                
+                finish_submitted = st.form_submit_button("✅ Finish & Save to Completed Notes", type="primary", use_container_width=True)
+                
+                if finish_submitted:
+                    if not live_content.strip():
+                        st.warning("You didn't type any notes! If you want to finish anyway, type something brief.")
+                    else:
+                        # Merge old context with new live notes
+                        final_content = active_note[4] + "\n" + live_content.strip()
+                        
+                        # Calculate exact row in Google Sheets (List Index + 1 for 1-based indexing)
+                        sheet_row = selected_idx + 1
+                        
+                        try:
+                            # Update Content (Col E) and Status (Col F) to 'Completed'
+                            try:
+                                ws_notes.update(range_name=f"E{sheet_row}:F{sheet_row}", values=[[final_content, "Completed"]], value_input_option="USER_ENTERED")
+                            except TypeError:
+                                ws_notes.update(f"E{sheet_row}:F{sheet_row}", [[final_content, "Completed"]], value_input_option="USER_ENTERED")
+                            
+                            # Clear cache to force a fresh pull of data next load
+                            st.session_state.pop('note_data', None)
+                            fetch_notes.clear()
+                            
+                            st.success("Training notes successfully finalized and moved to 'View Notes'!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed to finalize notes: {e}")

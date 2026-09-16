@@ -34,7 +34,6 @@ except Exception as e:
 @st.cache_resource(show_spinner="Loading dictionary...")
 def init_spellchecker():
     spell = SpellChecker()
-    # Added personal and local context names to prevent false typos
     spell.word_frequency.load_words([
         'nep', 'pedagogy', 'streamlit', 'pandas', 'jio', 'jiopc', 
         'bhagyabantapur', 'khanjanchak', 'sukhamay', 'kisku', 'suborno'
@@ -59,8 +58,18 @@ def apply_fixes(text, typos_dict):
             corrected_text = re.sub(rf'\b{typo}\b', suggestion, corrected_text, flags=re.IGNORECASE)
     return corrected_text
 
-# --- 3. STATE MANAGER (Fixes the Instantiated Error) ---
-# Modifies widget values BEFORE they are rendered on screen
+def get_highlighted_text(text, typos_dict):
+    """Generates an HTML preview of the text with typos highlighted in red."""
+    highlighted = text
+    # Replace newlines with HTML breaks so formatting is preserved
+    highlighted = highlighted.replace('\n', '<br>')
+    for typo in typos_dict.keys():
+        # Wraps the exact typo in a red highlight block
+        highlight_style = '<mark style="background-color: #ffcccc; color: #cc0000; padding: 0 3px; border-radius: 3px; font-weight: bold;">\\1</mark>'
+        highlighted = re.sub(rf'\b({typo})\b', highlight_style, highlighted, flags=re.IGNORECASE)
+    return f'<div style="background-color: #f8f9fa; padding: 15px; border: 1px solid #ffcccc; border-radius: 5px; margin-bottom: 15px; font-size: 14px;">{highlighted}</div>'
+
+# --- 3. STATE MANAGER ---
 def process_state_updates():
     # Quick Note Updates
     if st.session_state.get("do_quick_fix"):
@@ -86,7 +95,7 @@ def process_state_updates():
         st.session_state.live_typos = {}
         st.session_state.do_live_clear = False
 
-    # Edit Note Clears (Finds dynamic keys and deletes them)
+    # Edit Note Clears
     keys_to_del = []
     for key in st.session_state.keys():
         if key.startswith("do_edit_clear_") and st.session_state[key]:
@@ -216,6 +225,11 @@ with tab_view:
                                 warning_msg += f"- `{typo}` *(Did you mean: **{suggestion}**?)*\n"
                             st.warning(warning_msg)
                             
+                            # NEW: Visual Highlight Preview
+                            st.markdown("**Visual Preview of Typos:**")
+                            highlighted_html = get_highlighted_text(st.session_state[f"content_{orig_idx}"], st.session_state[f"typos_{orig_idx}"])
+                            st.markdown(highlighted_html, unsafe_allow_html=True)
+                            
                             c1, c2 = st.columns(2)
                             with c1:
                                 if st.button("🪄 Fix Typos & Update", key=f"fix_{orig_idx}", type="primary", use_container_width=True):
@@ -290,6 +304,11 @@ with tab_add:
         for typo, suggestion in st.session_state.quick_typos.items():
             warning_msg += f"- `{typo}` *(Did you mean: **{suggestion}**?)*\n"
         st.warning(warning_msg)
+        
+        # NEW: Visual Highlight Preview
+        st.markdown("**Visual Preview of Typos:**")
+        highlighted_html = get_highlighted_text(st.session_state.quick_content, st.session_state.quick_typos)
+        st.markdown(highlighted_html, unsafe_allow_html=True)
         
         c1, c2 = st.columns(2)
         with c1:
@@ -401,6 +420,11 @@ with tab_live:
                 for typo, suggestion in st.session_state.live_typos.items():
                     warning_msg += f"- `{typo}` *(Did you mean: **{suggestion}**?)*\n"
                 st.warning(warning_msg)
+                
+                # NEW: Visual Highlight Preview
+                st.markdown("**Visual Preview of Typos:**")
+                highlighted_html = get_highlighted_text(st.session_state.live_content, st.session_state.live_typos)
+                st.markdown(highlighted_html, unsafe_allow_html=True)
                 
                 c1, c2 = st.columns(2)
                 with c1:

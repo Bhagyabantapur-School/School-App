@@ -3,6 +3,8 @@ import gspread
 from google.oauth2.service_account import Credentials
 import pytz
 from datetime import datetime
+import re
+from spellchecker import SpellChecker
 
 st.set_page_config(page_title="My Notes", page_icon="📝", layout="centered")
 
@@ -28,7 +30,35 @@ except Exception as e:
     st.error(f"Connection failed. Please ensure the sheet is named exactly 'NOTE APP' and the service account is invited. Details: {e}")
     st.stop()
 
-# --- 2. SMART DATA CACHING ---
+# --- 2. SPELLCHECKER INITIALIZATION ---
+@st.cache_resource(show_spinner="Loading dictionary...")
+def init_spellchecker():
+    spell = SpellChecker()
+    # Loaded custom technical and local vocabulary to prevent false warnings
+    spell.word_frequency.load_words([
+        'nep', 'pedagogy', 'streamlit', 'pandas', 'jio', 'jiopc', 
+        'bhagyabantapur', 'khanjanchak'
+    ]) 
+    return spell
+
+spell = init_spellchecker()
+
+def check_spelling(text):
+    """Returns a dictionary of {typo: suggested_correction}"""
+    if not text:
+        return {}
+        
+    # Find all words (ignoring numbers and punctuation)
+    words = re.findall(r'\b[a-zA-Z]+\b', text)
+    misspelled = spell.unknown(words)
+    
+    typo_details = {}
+    for word in misspelled:
+        typo_details[word] = spell.correction(word)
+        
+    return typo_details
+
+# --- 3. SMART DATA CACHING ---
 def fetch_notes():
     raw_data = ws_notes.get_all_values()
     # Expanded to 6 columns to support the new "Status" column (Planned vs Completed)
@@ -42,7 +72,7 @@ if "note_data" not in st.session_state:
         st.error(f"Failed to fetch Notes data: {e}")
         st.session_state.note_data = []
 
-# FIX: Self-healing data padder. Ensures any old cached session data gets pushed to 6 columns automatically.
+# Self-healing data padder
 st.session_state.note_data = [row + [""] * (6 - len(row)) for row in st.session_state.note_data]
 
 # Helper to get unique categories for the dropdown
@@ -85,7 +115,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. USER INTERFACE ---
+# --- 4. USER INTERFACE ---
 st.title("📝 My Quick Notes")
 
 tab_view, tab_add, tab_plan, tab_live = st.tabs(["📚 View Notes", "➕ Quick Note", "🗓️ Plan Training", "🎙️ Live Notes"])
@@ -98,7 +128,6 @@ with tab_view:
     st.divider()
     
     if len(st.session_state.note_data) > 1:
-        # Filter out "Planned" notes so they only show up in the Live Notes tab
         all_notes = [n for n in st.session_state.note_data[1:] if len(n) <= 5 or str(n[5]).strip() != "Planned"]
         all_notes = list(reversed(all_notes)) # Newest first
         
@@ -127,7 +156,8 @@ with tab_view:
 # TAB 2: ADD QUICK NOTE
 # ==========================================
 with tab_add:
-    with st.form("add_note_form", clear_on_submit=True):
+    # clear_on_submit set to False so text isn't lost when warnings appear
+    with st.form("add_note_form", clear_on_submit=False): 
         note_title = st.text_input("Note Title*", placeholder="Enter a clear title...")
         
         col1, col2 = st.columns(2)
@@ -138,23 +168,35 @@ with tab_add:
             cat_new = st.text_input("Type New Category", disabled=(cat_sel != "➕ Add New..."))
             
         note_content = st.text_area("Note Content*", height=200, placeholder="Write your note here...")
+        
+        ignore_warnings = st.checkbox("✅ Ignore spelling warnings and save anyway", value=False)
         submitted = st.form_submit_button("💾 Save Note", type="primary")
         
         if submitted:
             if not note_title or not note_content:
                 st.error("Title and Content are required fields!")
             else:
-                final_category = cat_new if cat_sel == "➕ Add New..." else cat_sel
-                # Column 6 is marked as "Completed"
-                new_row = [str(current_ist.date()), str(current_ist.strftime("%H:%M:%S")), note_title.strip(), final_category.strip(), note_content.strip(), "Completed"]
+                typos = check_spelling(note_content)
                 
-                try:
-                    ws_notes.append_row(new_row)
-                    st.session_state.note_data.append(new_row)
-                    st.success("Note saved successfully!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Failed to save note: {e}")
+                # Warning Gate
+                if typos and not ignore_warnings:
+                    warning_msg = "**Hold on! Potential typos detected:**\n"
+                    for typo, suggestion in typos.items():
+                        warning_msg += f"- `{typo}` *(Did you mean: **{suggestion}**?)*\n"
+                    warning_msg += "\n**Please fix them in the text box, OR check 'Ignore spelling warnings' and click Save again.**"
+                    st.warning(warning_msg)
+                
+                # Save Execution
+                else:
+                    final_category = cat_new if cat_sel == "➕ Add New..." else cat_sel
+                    new_row = [str(current_ist.date()), str(current_ist.strftime("%H:%M:%S")), note_title.strip(), final_category.strip(), note_content.strip(), "Completed"]
+                    
+                    try:
+                        ws_notes.append_row(new_row)
+                        st.session_state.pop('note_data', None)
+                        st.success("Note saved successfully! (You can type over the boxes to write a new note).")
+                    except Exception as e:
+                        st.error(f"Failed to save note: {e}")
 
 # ==========================================
 # TAB 3: PLAN TRAINING (PRE-EVENT)
@@ -180,10 +222,7 @@ with tab_plan:
             if not train_title:
                 st.error("Event Title is required!")
             else:
-                # Compile the context into the top of the content block
                 context_block = f"**🗓️ Date:** {planned_date}\n**👤 Speaker:** {trainer_name}\n**🎯 Topic:** {topic}\n\n---\n**Live Notes:**\n"
-                
-                # Column 6 is marked as "Planned"
                 new_row = [str(current_ist.date()), str(current_ist.strftime("%H:%M:%S")), train_title.strip(), "Training", context_block, "Planned"]
                 
                 try:
@@ -198,7 +237,6 @@ with tab_plan:
 # TAB 4: LIVE NOTE-TAKING (EVENT DAY)
 # ==========================================
 with tab_live:
-    # Bulletproof filtering for planned notes
     planned_notes = [(idx, note) for idx, note in enumerate(st.session_state.note_data) if len(note) > 5 and str(note[5]).strip() == "Planned"]
     
     if not planned_notes:
@@ -206,23 +244,23 @@ with tab_live:
     else:
         st.markdown("### Active Training Session")
         
-        # Dropdown to select which planned training you are attending right now
         selected_idx = st.selectbox("Select Training:", options=[idx for idx, _ in planned_notes], format_func=lambda x: st.session_state.note_data[x][2])
         
         if selected_idx is not None:
             active_note = st.session_state.note_data[selected_idx]
-            sheet_row = selected_idx + 1 # Exact row in Google Sheets (List Index + 1)
+            sheet_row = selected_idx + 1
             
-            # Show the pre-planned context and all notes saved so far
             st.markdown(f"<div class='planned-context'>{active_note[4]}</div>", unsafe_allow_html=True)
             
             st.markdown("---")
             st.markdown("#### Add New Note")
             
-            # Form for continuous note addition
-            with st.form("live_notes_append_form", clear_on_submit=True):
+            # clear_on_submit set to False for the warning gate
+            with st.form("live_notes_append_form", clear_on_submit=False):
                 sub_topic = st.text_input("Sub-Topic / Category (Optional)", placeholder="e.g., Pedagogy, Q&A, Speaker 2...")
                 live_content = st.text_area("Note Content*", height=150, placeholder="Type your live notes here...")
+                
+                ignore_live_warnings = st.checkbox("✅ Ignore spelling warnings", value=False)
                 
                 col_save, col_empty = st.columns([2, 1])
                 with col_save:
@@ -232,31 +270,37 @@ with tab_live:
                     if not live_content.strip():
                         st.warning("Note content cannot be empty!")
                     else:
-                        # Format the new entry
-                        timestamp = current_ist.strftime("%I:%M %p")
-                        topic_header = f"**🔹 {sub_topic.strip()}**" if sub_topic.strip() else "**🔹 Note**"
-                        new_entry = f"\n\n{topic_header} *({timestamp})*:\n{live_content.strip()}"
+                        typos = check_spelling(live_content)
                         
-                        # Merge old content with new entry
-                        final_content = active_note[4] + new_entry
-                        
-                        try:
-                            # Append to Content (Col E) directly
-                            try:
-                                ws_notes.update(range_name=f"E{sheet_row}", values=[[final_content]], value_input_option="USER_ENTERED")
-                            except TypeError:
-                                ws_notes.update(f"E{sheet_row}", [[final_content]], value_input_option="USER_ENTERED")
+                        # Warning Gate
+                        if typos and not ignore_live_warnings:
+                            warning_msg = "**Potential typos detected:**\n"
+                            for typo, suggestion in typos.items():
+                                warning_msg += f"- `{typo}` *(Did you mean: **{suggestion}**?)*\n"
+                            st.warning(warning_msg)
                             
-                            st.session_state.pop('note_data', None)
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Failed to append note: {e}")
+                        # Save Execution
+                        else:
+                            timestamp = current_ist.strftime("%I:%M %p")
+                            topic_header = f"**🔹 {sub_topic.strip()}**" if sub_topic.strip() else "**🔹 Note**"
+                            new_entry = f"\n\n{topic_header} *({timestamp})*:\n{live_content.strip()}"
+                            
+                            final_content = active_note[4] + new_entry
+                            
+                            try:
+                                try:
+                                    ws_notes.update(range_name=f"E{sheet_row}", values=[[final_content]], value_input_option="USER_ENTERED")
+                                except TypeError:
+                                    ws_notes.update(f"E{sheet_row}", [[final_content]], value_input_option="USER_ENTERED")
+                                
+                                st.session_state.pop('note_data', None)
+                                st.rerun() # This forces a page refresh, which updates the view block above
+                            except Exception as e:
+                                st.error(f"Failed to append note: {e}")
             
-            # Button to finalize the training and move it out of the Live queue
             st.markdown("<br><br>", unsafe_allow_html=True)
             if st.button("✅ Finish & Archive Training", type="secondary", use_container_width=True):
                 try:
-                    # Update Status (Col F) to 'Completed'
                     try:
                         ws_notes.update(range_name=f"F{sheet_row}", values=[["Completed"]], value_input_option="USER_ENTERED")
                     except TypeError:

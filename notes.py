@@ -75,10 +75,12 @@ st.markdown("""
     }
     .planned-context {
         background-color: #e3f2fd;
-        padding: 10px;
-        border-radius: 5px;
-        border-left: 4px solid #2196f3;
-        margin-bottom: 15px;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 5px solid #2196f3;
+        margin-bottom: 20px;
+        font-size: 15px;
+        line-height: 1.6;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -202,44 +204,66 @@ with tab_live:
     if not planned_notes:
         st.success("🎉 You have no pending planned trainings! Plan one in the previous tab.")
     else:
-        st.markdown("### Select a Planned Training to Begin")
+        st.markdown("### Active Training Session")
         
         # Dropdown to select which planned training you are attending right now
-        selected_idx = st.selectbox("Active Training Session:", options=[idx for idx, _ in planned_notes], format_func=lambda x: st.session_state.note_data[x][2])
+        selected_idx = st.selectbox("Select Training:", options=[idx for idx, _ in planned_notes], format_func=lambda x: st.session_state.note_data[x][2])
         
         if selected_idx is not None:
             active_note = st.session_state.note_data[selected_idx]
+            sheet_row = selected_idx + 1 # Exact row in Google Sheets (List Index + 1)
             
-            # Show the pre-planned context so user remembers what they set up
+            # Show the pre-planned context and all notes saved so far
             st.markdown(f"<div class='planned-context'>{active_note[4]}</div>", unsafe_allow_html=True)
             
-            with st.form("live_notes_form"):
-                st.markdown("**Start typing your live notes below:**")
-                live_content = st.text_area("Live Notes", height=300, label_visibility="collapsed")
+            st.markdown("---")
+            st.markdown("#### Add New Note")
+            
+            # Form for continuous note addition
+            with st.form("live_notes_append_form", clear_on_submit=True):
+                sub_topic = st.text_input("Sub-Topic / Category (Optional)", placeholder="e.g., Pedagogy, Q&A, Speaker 2...")
+                live_content = st.text_area("Note Content*", height=150, placeholder="Type your live notes here...")
                 
-                finish_submitted = st.form_submit_button("✅ Finish & Save to Completed Notes", type="primary", use_container_width=True)
+                col_save, col_empty = st.columns([2, 1])
+                with col_save:
+                    append_submitted = st.form_submit_button("💾 Save Note & Continue", type="primary", use_container_width=True)
                 
-                if finish_submitted:
+                if append_submitted:
                     if not live_content.strip():
-                        st.warning("You didn't type any notes! If you want to finish anyway, type something brief.")
+                        st.warning("Note content cannot be empty!")
                     else:
-                        # Merge old context with new live notes
-                        final_content = active_note[4] + "\n" + live_content.strip()
+                        # Format the new entry
+                        timestamp = current_ist.strftime("%I:%M %p")
+                        topic_header = f"**🔹 {sub_topic.strip()}**" if sub_topic.strip() else "**🔹 Note**"
+                        new_entry = f"\n\n{topic_header} *({timestamp})*:\n{live_content.strip()}"
                         
-                        # Calculate exact row in Google Sheets (List Index + 1 for 1-based indexing)
-                        sheet_row = selected_idx + 1
+                        # Merge old content with new entry
+                        final_content = active_note[4] + new_entry
                         
                         try:
-                            # Update Content (Col E) and Status (Col F) to 'Completed'
+                            # Append to Content (Col E) directly
                             try:
-                                ws_notes.update(range_name=f"E{sheet_row}:F{sheet_row}", values=[[final_content, "Completed"]], value_input_option="USER_ENTERED")
+                                ws_notes.update(range_name=f"E{sheet_row}", values=[[final_content]], value_input_option="USER_ENTERED")
                             except TypeError:
-                                ws_notes.update(f"E{sheet_row}:F{sheet_row}", [[final_content, "Completed"]], value_input_option="USER_ENTERED")
+                                ws_notes.update(f"E{sheet_row}", [[final_content]], value_input_option="USER_ENTERED")
                             
-                            # Clear cache to force a fresh pull of data next load
                             st.session_state.pop('note_data', None)
-                            
-                            st.success("Training notes successfully finalized and moved to 'View Notes'!")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Failed to finalize notes: {e}")
+                            st.error(f"Failed to append note: {e}")
+            
+            # Button to finalize the training and move it out of the Live queue
+            st.markdown("<br><br>", unsafe_allow_html=True)
+            if st.button("✅ Finish & Archive Training", type="secondary", use_container_width=True):
+                try:
+                    # Update Status (Col F) to 'Completed'
+                    try:
+                        ws_notes.update(range_name=f"F{sheet_row}", values=[["Completed"]], value_input_option="USER_ENTERED")
+                    except TypeError:
+                        ws_notes.update(f"F{sheet_row}", [["Completed"]], value_input_option="USER_ENTERED")
+                    
+                    st.session_state.pop('note_data', None)
+                    st.success("Training finalized and archived to 'View Notes'!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to archive training: {e}")

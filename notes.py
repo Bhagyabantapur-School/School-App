@@ -42,6 +42,9 @@ if "note_data" not in st.session_state:
         st.error(f"Failed to fetch Notes data: {e}")
         st.session_state.note_data = []
 
+# FIX: Self-healing data padder. Ensures any old cached session data gets pushed to 6 columns automatically.
+st.session_state.note_data = [row + [""] * (6 - len(row)) for row in st.session_state.note_data]
+
 # Helper to get unique categories for the dropdown
 def get_categories():
     if len(st.session_state.note_data) <= 1:
@@ -94,7 +97,7 @@ with tab_view:
     
     if len(st.session_state.note_data) > 1:
         # Filter out "Planned" notes so they only show up in the Live Notes tab
-        all_notes = [n for n in st.session_state.note_data[1:] if str(n[5]).strip() != "Planned"]
+        all_notes = [n for n in st.session_state.note_data[1:] if len(n) <= 5 or str(n[5]).strip() != "Planned"]
         all_notes = list(reversed(all_notes)) # Newest first
         
         if search_query:
@@ -193,8 +196,8 @@ with tab_plan:
 # TAB 4: LIVE NOTE-TAKING (EVENT DAY)
 # ==========================================
 with tab_live:
-    # Find all notes marked as "Planned" keeping track of their exact row index
-    planned_notes = [(idx, note) for idx, note in enumerate(st.session_state.note_data) if str(note[5]).strip() == "Planned"]
+    # Bulletproof filtering for planned notes
+    planned_notes = [(idx, note) for idx, note in enumerate(st.session_state.note_data) if len(note) > 5 and str(note[5]).strip() == "Planned"]
     
     if not planned_notes:
         st.success("🎉 You have no pending planned trainings! Plan one in the previous tab.")

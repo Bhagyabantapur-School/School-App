@@ -59,7 +59,6 @@ def apply_fixes(text, typos_dict):
     return corrected_text
 
 def get_highlighted_text(text, typos_dict):
-    """Generates an HTML preview of the text with typos highlighted in red."""
     highlighted = text
     highlighted = highlighted.replace('\n', '<br>')
     for typo in typos_dict.keys():
@@ -67,9 +66,41 @@ def get_highlighted_text(text, typos_dict):
         highlighted = re.sub(rf'\b({typo})\b', highlight_style, highlighted, flags=re.IGNORECASE)
     return f'<div style="background-color: #f8f9fa; padding: 15px; border: 1px solid #ffcccc; border-radius: 5px; margin-bottom: 15px; font-size: 14px;">{highlighted}</div>'
 
+# --- NEW HELPERS FOR LIVE NOTES GROUPING ---
+def get_live_sub_topics(existing_text):
+    """Scans the text block and extracts existing sub-topics for the dropdown."""
+    matches = re.findall(r'\*\*🔹 (.*?)\*\*', existing_text)
+    unique_matches = []
+    for m in matches:
+        if m.strip() and m.strip() not in unique_matches:
+            unique_matches.append(m.strip())
+    return unique_matches
+
+def append_live_note_by_topic(existing_text, sub_topic, timestamp, content):
+    """Inserts a note under its respective sub-topic header, or creates a new header."""
+    sub_topic = sub_topic.strip() if sub_topic.strip() else "Note"
+    topic_header = f"**🔹 {sub_topic}**"
+    new_bullet = f"• *({timestamp})*: {content.strip()}"
+    
+    # If the sub-topic doesn't exist yet, append a new section to the bottom
+    if topic_header not in existing_text:
+        return existing_text.rstrip() + f"\n\n{topic_header}\n{new_bullet}\n"
+    
+    # If it DOES exist, find it and insert the new note at the bottom of its section
+    topic_idx = existing_text.find(topic_header)
+    next_topic_idx = existing_text.find("**🔹", topic_idx + len(topic_header))
+    
+    if next_topic_idx == -1:
+        # It's the last topic in the document, just append
+        return existing_text.rstrip() + f"\n{new_bullet}\n"
+    else:
+        # Insert before the next topic starts
+        before = existing_text[:next_topic_idx].rstrip()
+        after = existing_text[next_topic_idx:]
+        return f"{before}\n{new_bullet}\n\n{after}"
+
 # --- 3. STATE MANAGER ---
 def process_state_updates():
-    # Quick Note Updates
     if st.session_state.get("do_quick_fix"):
         st.session_state.quick_content = apply_fixes(st.session_state.get("quick_content", ""), st.session_state.get("quick_typos", {}))
         st.session_state.quick_typos = {}
@@ -81,19 +112,17 @@ def process_state_updates():
         st.session_state.quick_typos = {}
         st.session_state.do_quick_clear = False
 
-    # Live Note Updates
     if st.session_state.get("do_live_fix"):
         st.session_state.live_content = apply_fixes(st.session_state.get("live_content", ""), st.session_state.get("live_typos", {}))
         st.session_state.live_typos = {}
         st.session_state.do_live_fix = False
         
     if st.session_state.get("do_live_clear"):
-        st.session_state.live_sub = ""
         st.session_state.live_content = ""
+        if "live_new_sub" in st.session_state: st.session_state.live_new_sub = ""
         st.session_state.live_typos = {}
         st.session_state.do_live_clear = False
 
-    # Edit Note Clears
     keys_to_del = []
     for key in st.session_state.keys():
         if key.startswith("do_edit_clear_") and st.session_state[key]:
@@ -211,7 +240,6 @@ with tab_view:
                                     
                         with col_del:
                             if st.button("🗑️ Delete Note", key=f"delete_{orig_idx}", use_container_width=True):
-                                # UPDATED: delete_row changed to delete_rows
                                 ws_notes.delete_rows(sheet_row)
                                 st.session_state.pop('note_data', None)
                                 st.session_state[f"do_edit_clear_{orig_idx}"] = True
@@ -383,7 +411,15 @@ with tab_live:
             
             if "live_typos" not in st.session_state: st.session_state.live_typos = {}
             
-            sub_topic = st.text_input("Sub-Topic / Category (Optional)", placeholder="e.g., Pedagogy, Q&A, Speaker 2...", key="live_sub")
+            # --- NEW UI: Sub-Topic Dropdown System ---
+            sub_opts = get_live_sub_topics(active_note[4]) + ["➕ Add New..."]
+            
+            col_sub1, col_sub2 = st.columns(2)
+            with col_sub1:
+                sel_sub = st.selectbox("Sub-Topic / Category", sub_opts, key="live_sel_sub")
+            with col_sub2:
+                new_sub = st.text_input("Type New Sub-Topic", disabled=(sel_sub != "➕ Add New..."), key="live_new_sub")
+                
             live_content = st.text_area("Note Content*", height=150, placeholder="Type your live notes here...", key="live_content")
             
             if st.button("💾 Save Note & Continue", type="primary", use_container_width=True):
@@ -396,9 +432,10 @@ with tab_live:
                         st.rerun()
                     else:
                         timestamp = current_ist.strftime("%I:%M %p")
-                        topic_header = f"**🔹 {sub_topic.strip()}**" if sub_topic.strip() else "**🔹 Note**"
-                        new_entry = f"\n\n{topic_header} *({timestamp})*:\n{live_content.strip()}"
-                        final_content = active_note[4] + new_entry
+                        final_sub = new_sub if sel_sub == "➕ Add New..." else sel_sub
+                        
+                        # --- Uses new grouping engine ---
+                        final_content = append_live_note_by_topic(active_note[4], final_sub, timestamp, live_content)
                         
                         try:
                             try:
@@ -430,9 +467,10 @@ with tab_live:
                 with c2:
                     if st.button("✅ Ignore & Save", use_container_width=True):
                         timestamp = current_ist.strftime("%I:%M %p")
-                        topic_header = f"**🔹 {st.session_state.live_sub.strip()}**" if st.session_state.live_sub.strip() else "**🔹 Note**"
-                        new_entry = f"\n\n{topic_header} *({timestamp})*:\n{st.session_state.live_content.strip()}"
-                        final_content = active_note[4] + new_entry
+                        final_sub = st.session_state.live_new_sub if st.session_state.live_sel_sub == "➕ Add New..." else st.session_state.live_sel_sub
+                        
+                        # --- Uses new grouping engine ---
+                        final_content = append_live_note_by_topic(active_note[4], final_sub, timestamp, st.session_state.live_content)
                         
                         try:
                             ws_notes.update(range_name=f"E{sheet_row}", values=[[final_content]], value_input_option="USER_ENTERED")

@@ -61,10 +61,8 @@ def apply_fixes(text, typos_dict):
 def get_highlighted_text(text, typos_dict):
     """Generates an HTML preview of the text with typos highlighted in red."""
     highlighted = text
-    # Replace newlines with HTML breaks so formatting is preserved
     highlighted = highlighted.replace('\n', '<br>')
     for typo in typos_dict.keys():
-        # Wraps the exact typo in a red highlight block
         highlight_style = '<mark style="background-color: #ffcccc; color: #cc0000; padding: 0 3px; border-radius: 3px; font-weight: bold;">\\1</mark>'
         highlighted = re.sub(rf'\b({typo})\b', highlight_style, highlighted, flags=re.IGNORECASE)
     return f'<div style="background-color: #f8f9fa; padding: 15px; border: 1px solid #ffcccc; border-radius: 5px; margin-bottom: 15px; font-size: 14px;">{highlighted}</div>'
@@ -213,7 +211,8 @@ with tab_view:
                                     
                         with col_del:
                             if st.button("🗑️ Delete Note", key=f"delete_{orig_idx}", use_container_width=True):
-                                ws_notes.delete_row(sheet_row)
+                                # UPDATED: delete_row changed to delete_rows
+                                ws_notes.delete_rows(sheet_row)
                                 st.session_state.pop('note_data', None)
                                 st.session_state[f"do_edit_clear_{orig_idx}"] = True
                                 st.session_state.view_msg = "🗑️ Note deleted."
@@ -225,7 +224,6 @@ with tab_view:
                                 warning_msg += f"- `{typo}` *(Did you mean: **{suggestion}**?)*\n"
                             st.warning(warning_msg)
                             
-                            # NEW: Visual Highlight Preview
                             st.markdown("**Visual Preview of Typos:**")
                             highlighted_html = get_highlighted_text(st.session_state[f"content_{orig_idx}"], st.session_state[f"typos_{orig_idx}"])
                             st.markdown(highlighted_html, unsafe_allow_html=True)
@@ -305,7 +303,6 @@ with tab_add:
             warning_msg += f"- `{typo}` *(Did you mean: **{suggestion}**?)*\n"
         st.warning(warning_msg)
         
-        # NEW: Visual Highlight Preview
         st.markdown("**Visual Preview of Typos:**")
         highlighted_html = get_highlighted_text(st.session_state.quick_content, st.session_state.quick_typos)
         st.markdown(highlighted_html, unsafe_allow_html=True)
@@ -421,7 +418,6 @@ with tab_live:
                     warning_msg += f"- `{typo}` *(Did you mean: **{suggestion}**?)*\n"
                 st.warning(warning_msg)
                 
-                # NEW: Visual Highlight Preview
                 st.markdown("**Visual Preview of Typos:**")
                 highlighted_html = get_highlighted_text(st.session_state.live_content, st.session_state.live_typos)
                 st.markdown(highlighted_html, unsafe_allow_html=True)

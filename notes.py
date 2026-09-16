@@ -82,19 +82,15 @@ def append_live_note_by_topic(existing_text, sub_topic, timestamp, content):
     topic_header = f"**🔹 {sub_topic}**"
     new_bullet = f"• *({timestamp})*: {content.strip()}"
     
-    # If the sub-topic doesn't exist yet, append a new section to the bottom
     if topic_header not in existing_text:
         return existing_text.rstrip() + f"\n\n{topic_header}\n{new_bullet}\n"
     
-    # If it DOES exist, find it and insert the new note at the bottom of its section
     topic_idx = existing_text.find(topic_header)
     next_topic_idx = existing_text.find("**🔹", topic_idx + len(topic_header))
     
     if next_topic_idx == -1:
-        # It's the last topic in the document, just append
         return existing_text.rstrip() + f"\n{new_bullet}\n"
     else:
-        # Insert before the next topic starts
         before = existing_text[:next_topic_idx].rstrip()
         after = existing_text[next_topic_idx:]
         return f"{before}\n{new_bullet}\n\n{after}"
@@ -130,6 +126,11 @@ def process_state_updates():
             if f"title_{orig_idx}" in st.session_state: del st.session_state[f"title_{orig_idx}"]
             if f"content_{orig_idx}" in st.session_state: del st.session_state[f"content_{orig_idx}"]
             if f"typos_{orig_idx}" in st.session_state: del st.session_state[f"typos_{orig_idx}"]
+            if f"edit_append_{orig_idx}" in st.session_state: del st.session_state[f"edit_append_{orig_idx}"]
+            if f"cat_{orig_idx}" in st.session_state: del st.session_state[f"cat_{orig_idx}"]
+            if f"new_cat_{orig_idx}" in st.session_state: del st.session_state[f"new_cat_{orig_idx}"]
+            if f"edit_sel_sub_{orig_idx}" in st.session_state: del st.session_state[f"edit_sel_sub_{orig_idx}"]
+            if f"edit_new_sub_{orig_idx}" in st.session_state: del st.session_state[f"edit_new_sub_{orig_idx}"]
             keys_to_del.append(key)
     for k in keys_to_del:
         del st.session_state[k]
@@ -218,7 +219,51 @@ with tab_view:
                         if f"typos_{orig_idx}" not in st.session_state: st.session_state[f"typos_{orig_idx}"] = {}
 
                         edit_title = st.text_input("Edit Title", key=f"title_{orig_idx}")
-                        edit_content = st.text_area("Edit Content", key=f"content_{orig_idx}", height=150)
+                        
+                        # --- Main Category Dropdown in Edit Tab ---
+                        cat_opts = get_categories() + ["➕ Add New..."]
+                        try: default_cat_idx = cat_opts.index(category_val)
+                        except ValueError: default_cat_idx = 0
+                        
+                        col_cat1, col_cat2 = st.columns(2)
+                        with col_cat1:
+                            edit_cat_sel = st.selectbox("Main Category", cat_opts, index=default_cat_idx, key=f"cat_{orig_idx}")
+                        with col_cat2:
+                            edit_cat_new = st.text_input("New Category", disabled=(edit_cat_sel != "➕ Add New..."), key=f"new_cat_{orig_idx}")
+                        
+                        final_edit_cat = edit_cat_new if edit_cat_sel == "➕ Add New..." else edit_cat_sel
+
+                        edit_content = st.text_area("Edit Content", key=f"content_{orig_idx}", height=250)
+                        
+                        # --- Structured Sub-Topic Appender ---
+                        with st.expander("➕ Append Structured Sub-Topic Note (Like Live Notes)", expanded=False):
+                            sub_opts = get_live_sub_topics(st.session_state[f"content_{orig_idx}"]) + ["➕ Add New..."]
+                            c_sub1, c_sub2 = st.columns(2)
+                            with c_sub1:
+                                edit_sel_sub = st.selectbox("Sub-Topic / Category", sub_opts, key=f"edit_sel_sub_{orig_idx}")
+                            with c_sub2:
+                                edit_new_sub = st.text_input("Type New Sub-Topic", disabled=(edit_sel_sub != "➕ Add New..."), key=f"edit_new_sub_{orig_idx}")
+                            
+                            edit_append_content = st.text_area("Note to Append", height=100, key=f"edit_append_{orig_idx}")
+                            
+                            if st.button("⬇️ Insert into Content Above", key=f"insert_{orig_idx}"):
+                                if st.session_state[f"edit_append_{orig_idx}"].strip():
+                                    append_sub = edit_new_sub if edit_sel_sub == "➕ Add New..." else edit_sel_sub
+                                    timestamp = current_ist.strftime("%I:%M %p")
+                                    # Formats the note and inserts it logically into the content box
+                                    new_full_text = append_live_note_by_topic(
+                                        st.session_state[f"content_{orig_idx}"], 
+                                        append_sub, 
+                                        timestamp, 
+                                        st.session_state[f"edit_append_{orig_idx}"]
+                                    )
+                                    st.session_state[f"content_{orig_idx}"] = new_full_text
+                                    st.session_state[f"edit_append_{orig_idx}"] = ""
+                                    st.rerun()
+                                else:
+                                    st.warning("Please type a note to append.")
+                        
+                        st.markdown("<br>", unsafe_allow_html=True)
                         
                         col_save, col_del = st.columns(2)
                         with col_save:
@@ -228,7 +273,7 @@ with tab_view:
                                     st.session_state[f"typos_{orig_idx}"] = typos
                                     st.rerun()
                                 else:
-                                    update_vals = [[st.session_state[f"title_{orig_idx}"], category_val, st.session_state[f"content_{orig_idx}"]]]
+                                    update_vals = [[st.session_state[f"title_{orig_idx}"], final_edit_cat, st.session_state[f"content_{orig_idx}"]]]
                                     try:
                                         ws_notes.update(range_name=f"C{sheet_row}:E{sheet_row}", values=update_vals, value_input_option="USER_ENTERED")
                                     except TypeError:
@@ -260,7 +305,7 @@ with tab_view:
                             with c1:
                                 if st.button("🪄 Fix Typos & Update", key=f"fix_{orig_idx}", type="primary", use_container_width=True):
                                     fixed = apply_fixes(st.session_state[f"content_{orig_idx}"], st.session_state[f"typos_{orig_idx}"])
-                                    update_vals = [[st.session_state[f"title_{orig_idx}"], category_val, fixed]]
+                                    update_vals = [[st.session_state[f"title_{orig_idx}"], final_edit_cat, fixed]]
                                     try:
                                         ws_notes.update(range_name=f"C{sheet_row}:E{sheet_row}", values=update_vals, value_input_option="USER_ENTERED")
                                     except TypeError:
@@ -271,7 +316,7 @@ with tab_view:
                                     st.rerun()
                             with c2:
                                 if st.button("✅ Ignore & Update", key=f"ignore_{orig_idx}", use_container_width=True):
-                                    update_vals = [[st.session_state[f"title_{orig_idx}"], category_val, st.session_state[f"content_{orig_idx}"]]]
+                                    update_vals = [[st.session_state[f"title_{orig_idx}"], final_edit_cat, st.session_state[f"content_{orig_idx}"]]]
                                     try:
                                         ws_notes.update(range_name=f"C{sheet_row}:E{sheet_row}", values=update_vals, value_input_option="USER_ENTERED")
                                     except TypeError:
@@ -411,7 +456,6 @@ with tab_live:
             
             if "live_typos" not in st.session_state: st.session_state.live_typos = {}
             
-            # --- NEW UI: Sub-Topic Dropdown System ---
             sub_opts = get_live_sub_topics(active_note[4]) + ["➕ Add New..."]
             
             col_sub1, col_sub2 = st.columns(2)
@@ -434,7 +478,6 @@ with tab_live:
                         timestamp = current_ist.strftime("%I:%M %p")
                         final_sub = new_sub if sel_sub == "➕ Add New..." else sel_sub
                         
-                        # --- Uses new grouping engine ---
                         final_content = append_live_note_by_topic(active_note[4], final_sub, timestamp, live_content)
                         
                         try:
@@ -469,7 +512,6 @@ with tab_live:
                         timestamp = current_ist.strftime("%I:%M %p")
                         final_sub = st.session_state.live_new_sub if st.session_state.live_sel_sub == "➕ Add New..." else st.session_state.live_sel_sub
                         
-                        # --- Uses new grouping engine ---
                         final_content = append_live_note_by_topic(active_note[4], final_sub, timestamp, st.session_state.live_content)
                         
                         try:

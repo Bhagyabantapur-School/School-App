@@ -27,25 +27,24 @@ def init_connection():
 try:
     ws_notes = init_connection()
 except Exception as e:
-    st.error(f"Connection failed. Please ensure the sheet is named exactly 'NOTE APP' and the service account is invited. Details: {e}")
+    st.error(f"Connection failed. Details: {e}")
     st.stop()
 
 # --- 2. SPELLCHECKER ENGINE ---
 @st.cache_resource(show_spinner="Loading dictionary...")
 def init_spellchecker():
     spell = SpellChecker()
+    # Added personal and local context names to prevent false typos
     spell.word_frequency.load_words([
         'nep', 'pedagogy', 'streamlit', 'pandas', 'jio', 'jiopc', 
-        'bhagyabantapur', 'khanjanchak'
+        'bhagyabantapur', 'khanjanchak', 'sukhamay', 'kisku', 'suborno'
     ]) 
     return spell
 
 spell = init_spellchecker()
 
 def check_spelling(text):
-    """Returns a dictionary of {typo: suggested_correction}"""
-    if not text:
-        return {}
+    if not text: return {}
     words = re.findall(r'\b[a-zA-Z]+\b', text)
     misspelled = spell.unknown(words)
     typo_details = {}
@@ -54,14 +53,54 @@ def check_spelling(text):
     return typo_details
 
 def apply_fixes(text, typos_dict):
-    """Automatically replaces typos with their suggestions in the text."""
     corrected_text = text
     for typo, suggestion in typos_dict.items():
         if suggestion:
             corrected_text = re.sub(rf'\b{typo}\b', suggestion, corrected_text, flags=re.IGNORECASE)
     return corrected_text
 
-# --- 3. SMART DATA CACHING ---
+# --- 3. STATE MANAGER (Fixes the Instantiated Error) ---
+# Modifies widget values BEFORE they are rendered on screen
+def process_state_updates():
+    # Quick Note Updates
+    if st.session_state.get("do_quick_fix"):
+        st.session_state.quick_content = apply_fixes(st.session_state.get("quick_content", ""), st.session_state.get("quick_typos", {}))
+        st.session_state.quick_typos = {}
+        st.session_state.do_quick_fix = False
+        
+    if st.session_state.get("do_quick_clear"):
+        st.session_state.quick_title = ""
+        st.session_state.quick_content = ""
+        st.session_state.quick_typos = {}
+        st.session_state.do_quick_clear = False
+
+    # Live Note Updates
+    if st.session_state.get("do_live_fix"):
+        st.session_state.live_content = apply_fixes(st.session_state.get("live_content", ""), st.session_state.get("live_typos", {}))
+        st.session_state.live_typos = {}
+        st.session_state.do_live_fix = False
+        
+    if st.session_state.get("do_live_clear"):
+        st.session_state.live_sub = ""
+        st.session_state.live_content = ""
+        st.session_state.live_typos = {}
+        st.session_state.do_live_clear = False
+
+    # Edit Note Clears (Finds dynamic keys and deletes them)
+    keys_to_del = []
+    for key in st.session_state.keys():
+        if key.startswith("do_edit_clear_") and st.session_state[key]:
+            orig_idx = key.split("_")[-1]
+            if f"title_{orig_idx}" in st.session_state: del st.session_state[f"title_{orig_idx}"]
+            if f"content_{orig_idx}" in st.session_state: del st.session_state[f"content_{orig_idx}"]
+            if f"typos_{orig_idx}" in st.session_state: del st.session_state[f"typos_{orig_idx}"]
+            keys_to_del.append(key)
+    for k in keys_to_del:
+        del st.session_state[k]
+
+process_state_updates()
+
+# --- 4. SMART DATA CACHING ---
 def fetch_notes():
     raw_data = ws_notes.get_all_values()
     padded_data = [row + [""] * (6 - len(row)) for row in raw_data]
@@ -97,7 +136,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 4. USER INTERFACE ---
+# --- 5. USER INTERFACE ---
 st.title("📝 My Quick Notes")
 
 tab_view, tab_add, tab_plan, tab_live = st.tabs(["📚 View Notes", "➕ Quick Note", "🗓️ Plan Training", "🎙️ Live Notes"])
@@ -106,24 +145,20 @@ tab_view, tab_add, tab_plan, tab_live = st.tabs(["📚 View Notes", "➕ Quick N
 # TAB 1: VIEW, EDIT & SEARCH NOTES
 # ==========================================
 with tab_view:
+    if st.session_state.get("view_msg"):
+        st.success(st.session_state.view_msg)
+        st.session_state.view_msg = ""
+
     search_query = st.text_input("🔍 Search completed notes by title, category, or content...")
     st.divider()
     
     if len(st.session_state.note_data) > 1:
-        all_notes = []
-        for idx, row in enumerate(st.session_state.note_data):
-            if idx == 0: continue 
-            if len(row) <= 5 or str(row[5]).strip() != "Planned":
-                all_notes.append((idx, row))
-                
+        all_notes = [(idx, row) for idx, row in enumerate(st.session_state.note_data) if idx != 0 and (len(row) <= 5 or str(row[5]).strip() != "Planned")]
         all_notes = list(reversed(all_notes)) 
         
         if search_query:
             query = search_query.lower()
-            filtered_notes = [
-                (orig_idx, n) for (orig_idx, n) in all_notes 
-                if query in str(n[2]).lower() or query in str(n[3]).lower() or query in str(n[4]).lower()
-            ]
+            filtered_notes = [(orig_idx, n) for (orig_idx, n) in all_notes if query in str(n[2]).lower() or query in str(n[3]).lower() or query in str(n[4]).lower()]
         else:
             filtered_notes = all_notes
             
@@ -138,18 +173,13 @@ with tab_view:
                     st.markdown(f"<div class='note-meta'>🕒 {date_val} at {time_val}</div>", unsafe_allow_html=True)
                     
                     read_tab, edit_tab = st.tabs(["📖 Read", "✏️ Edit / Delete"])
-                    
                     with read_tab:
                         st.write(content_val)
                         
                     with edit_tab:
-                        # Ensure state keys exist
-                        if f"title_{orig_idx}" not in st.session_state:
-                            st.session_state[f"title_{orig_idx}"] = title_val
-                        if f"content_{orig_idx}" not in st.session_state:
-                            st.session_state[f"content_{orig_idx}"] = content_val
-                        if f"typos_{orig_idx}" not in st.session_state:
-                            st.session_state[f"typos_{orig_idx}"] = {}
+                        if f"title_{orig_idx}" not in st.session_state: st.session_state[f"title_{orig_idx}"] = title_val
+                        if f"content_{orig_idx}" not in st.session_state: st.session_state[f"content_{orig_idx}"] = content_val
+                        if f"typos_{orig_idx}" not in st.session_state: st.session_state[f"typos_{orig_idx}"] = {}
 
                         edit_title = st.text_input("Edit Title", key=f"title_{orig_idx}")
                         edit_content = st.text_area("Edit Content", key=f"content_{orig_idx}", height=150)
@@ -162,24 +192,26 @@ with tab_view:
                                     st.session_state[f"typos_{orig_idx}"] = typos
                                     st.rerun()
                                 else:
-                                    # Execute Update
                                     update_vals = [[st.session_state[f"title_{orig_idx}"], category_val, st.session_state[f"content_{orig_idx}"]]]
                                     try:
                                         ws_notes.update(range_name=f"C{sheet_row}:E{sheet_row}", values=update_vals, value_input_option="USER_ENTERED")
                                     except TypeError:
                                         ws_notes.update(f"C{sheet_row}:E{sheet_row}", update_vals, value_input_option="USER_ENTERED")
                                     st.session_state.pop('note_data', None)
+                                    st.session_state[f"do_edit_clear_{orig_idx}"] = True
+                                    st.session_state.view_msg = "✅ Note updated successfully!"
                                     st.rerun()
                                     
                         with col_del:
                             if st.button("🗑️ Delete Note", key=f"delete_{orig_idx}", use_container_width=True):
                                 ws_notes.delete_row(sheet_row)
                                 st.session_state.pop('note_data', None)
+                                st.session_state[f"do_edit_clear_{orig_idx}"] = True
+                                st.session_state.view_msg = "🗑️ Note deleted."
                                 st.rerun()
                                 
-                        # Edit Warning Gate
                         if st.session_state[f"typos_{orig_idx}"]:
-                            warning_msg = "**Hold on! Potential typos detected:**\n"
+                            warning_msg = "**Potential typos detected:**\n"
                             for typo, suggestion in st.session_state[f"typos_{orig_idx}"].items():
                                 warning_msg += f"- `{typo}` *(Did you mean: **{suggestion}**?)*\n"
                             st.warning(warning_msg)
@@ -187,7 +219,6 @@ with tab_view:
                             c1, c2 = st.columns(2)
                             with c1:
                                 if st.button("🪄 Fix Typos & Update", key=f"fix_{orig_idx}", type="primary", use_container_width=True):
-                                    # Fix text, update sheets, clear warnings
                                     fixed = apply_fixes(st.session_state[f"content_{orig_idx}"], st.session_state[f"typos_{orig_idx}"])
                                     update_vals = [[st.session_state[f"title_{orig_idx}"], category_val, fixed]]
                                     try:
@@ -195,7 +226,8 @@ with tab_view:
                                     except TypeError:
                                         ws_notes.update(f"C{sheet_row}:E{sheet_row}", update_vals, value_input_option="USER_ENTERED")
                                     st.session_state.pop('note_data', None)
-                                    st.session_state[f"typos_{orig_idx}"] = {}
+                                    st.session_state[f"do_edit_clear_{orig_idx}"] = True
+                                    st.session_state.view_msg = "✅ Typos fixed and note updated!"
                                     st.rerun()
                             with c2:
                                 if st.button("✅ Ignore & Update", key=f"ignore_{orig_idx}", use_container_width=True):
@@ -205,7 +237,8 @@ with tab_view:
                                     except TypeError:
                                         ws_notes.update(f"C{sheet_row}:E{sheet_row}", update_vals, value_input_option="USER_ENTERED")
                                     st.session_state.pop('note_data', None)
-                                    st.session_state[f"typos_{orig_idx}"] = {}
+                                    st.session_state[f"do_edit_clear_{orig_idx}"] = True
+                                    st.session_state.view_msg = "✅ Note updated (warnings ignored)."
                                     st.rerun()
     else:
         st.info("No notes saved yet. Create a Quick Note or complete a Training!")
@@ -214,8 +247,11 @@ with tab_view:
 # TAB 2: ADD QUICK NOTE
 # ==========================================
 with tab_add:
-    if "quick_typos" not in st.session_state:
-        st.session_state.quick_typos = {}
+    if st.session_state.get("quick_msg"):
+        st.success(st.session_state.quick_msg)
+        st.session_state.quick_msg = ""
+
+    if "quick_typos" not in st.session_state: st.session_state.quick_typos = {}
 
     note_title = st.text_input("Note Title*", placeholder="Enter a clear title...", key="quick_title")
     
@@ -243,16 +279,14 @@ with tab_add:
                 try:
                     ws_notes.append_row(new_row)
                     st.session_state.pop('note_data', None)
-                    st.session_state.quick_title = ""
-                    st.session_state.quick_content = ""
-                    st.success("Note saved successfully!")
+                    st.session_state.do_quick_clear = True
+                    st.session_state.quick_msg = "✅ Note saved successfully!"
                     st.rerun()
                 except Exception as e:
                     st.error(f"Failed to save note: {e}")
 
-    # Warning Gate
     if st.session_state.quick_typos:
-        warning_msg = "**Hold on! Potential typos detected:**\n"
+        warning_msg = "**Potential typos detected:**\n"
         for typo, suggestion in st.session_state.quick_typos.items():
             warning_msg += f"- `{typo}` *(Did you mean: **{suggestion}**?)*\n"
         st.warning(warning_msg)
@@ -260,10 +294,7 @@ with tab_add:
         c1, c2 = st.columns(2)
         with c1:
             if st.button("🪄 Auto-Fix Typos", type="primary", use_container_width=True):
-                # 1-Click Fix applies to the text box instantly
-                fixed = apply_fixes(st.session_state.quick_content, st.session_state.quick_typos)
-                st.session_state.quick_content = fixed
-                st.session_state.quick_typos = {}
+                st.session_state.do_quick_fix = True
                 st.rerun()
         with c2:
             if st.button("✅ Ignore & Save Anyway", use_container_width=True):
@@ -271,29 +302,28 @@ with tab_add:
                 new_row = [str(current_ist.date()), str(current_ist.strftime("%H:%M:%S")), st.session_state.quick_title.strip(), final_category.strip(), st.session_state.quick_content.strip(), "Completed"]
                 ws_notes.append_row(new_row)
                 st.session_state.pop('note_data', None)
-                st.session_state.quick_typos = {}
-                st.session_state.quick_title = ""
-                st.session_state.quick_content = ""
+                st.session_state.do_quick_clear = True
+                st.session_state.quick_msg = "✅ Note saved (warnings ignored)."
                 st.rerun()
 
 # ==========================================
 # TAB 3: PLAN TRAINING (PRE-EVENT)
 # ==========================================
 with tab_plan:
+    if st.session_state.get("plan_msg"):
+        st.success(st.session_state.plan_msg)
+        st.session_state.plan_msg = ""
+
     st.markdown("### Pre-Plan a Training Session")
     st.info("Enter the context here so you don't have to type it while the speaker is talking.")
     
     with st.form("plan_training_form", clear_on_submit=True):
         train_title = st.text_input("Event/Training Title*", placeholder="e.g., NEP 2020 Implementation Workshop")
-        
         col1, col2 = st.columns(2)
-        with col1:
-            trainer_name = st.text_input("Trainer/Speaker Name")
-        with col2:
-            planned_date = st.date_input("Scheduled Date", value=current_ist.date())
+        with col1: trainer_name = st.text_input("Trainer/Speaker Name")
+        with col2: planned_date = st.date_input("Scheduled Date", value=current_ist.date())
             
         topic = st.text_input("Core Topic / Subject")
-        
         plan_submitted = st.form_submit_button("🗓️ Save to Planned Trainings", type="primary")
         
         if plan_submitted:
@@ -305,8 +335,8 @@ with tab_plan:
                 
                 try:
                     ws_notes.append_row(new_row)
-                    st.session_state.note_data.append(new_row)
-                    st.success("Training Planned! It is now waiting for you in the 'Live Notes' tab.")
+                    st.session_state.pop('note_data', None)
+                    st.session_state.plan_msg = "🗓️ Training Planned! It is waiting for you in the 'Live Notes' tab."
                     st.rerun()
                 except Exception as e:
                     st.error(f"Failed to save planned training: {e}")
@@ -315,6 +345,10 @@ with tab_plan:
 # TAB 4: LIVE NOTE-TAKING (EVENT DAY)
 # ==========================================
 with tab_live:
+    if st.session_state.get("live_msg"):
+        st.success(st.session_state.live_msg)
+        st.session_state.live_msg = ""
+
     planned_notes = [(idx, note) for idx, note in enumerate(st.session_state.note_data) if len(note) > 5 and str(note[5]).strip() == "Planned"]
     
     if not planned_notes:
@@ -331,8 +365,7 @@ with tab_live:
             st.markdown("---")
             st.markdown("#### Add New Note")
             
-            if "live_typos" not in st.session_state:
-                st.session_state.live_typos = {}
+            if "live_typos" not in st.session_state: st.session_state.live_typos = {}
             
             sub_topic = st.text_input("Sub-Topic / Category (Optional)", placeholder="e.g., Pedagogy, Q&A, Speaker 2...", key="live_sub")
             live_content = st.text_area("Note Content*", height=150, placeholder="Type your live notes here...", key="live_content")
@@ -357,13 +390,12 @@ with tab_live:
                             except TypeError:
                                 ws_notes.update(f"E{sheet_row}", [[final_content]], value_input_option="USER_ENTERED")
                             st.session_state.pop('note_data', None)
-                            st.session_state.live_content = ""
-                            st.session_state.live_sub = ""
+                            st.session_state.do_live_clear = True
+                            st.session_state.live_msg = "💾 Note appended successfully!"
                             st.rerun()
                         except Exception as e:
                             st.error(f"Failed to append note: {e}")
 
-            # Warning Gate
             if st.session_state.live_typos:
                 warning_msg = "**Potential typos detected:**\n"
                 for typo, suggestion in st.session_state.live_typos.items():
@@ -373,10 +405,7 @@ with tab_live:
                 c1, c2 = st.columns(2)
                 with c1:
                     if st.button("🪄 Auto-Fix Typos", type="primary", use_container_width=True):
-                        # 1-Click Fix applies to the text box instantly
-                        fixed = apply_fixes(st.session_state.live_content, st.session_state.live_typos)
-                        st.session_state.live_content = fixed
-                        st.session_state.live_typos = {}
+                        st.session_state.do_live_fix = True
                         st.rerun()
                 with c2:
                     if st.button("✅ Ignore & Save", use_container_width=True):
@@ -391,9 +420,8 @@ with tab_live:
                             ws_notes.update(f"E{sheet_row}", [[final_content]], value_input_option="USER_ENTERED")
                             
                         st.session_state.pop('note_data', None)
-                        st.session_state.live_content = ""
-                        st.session_state.live_sub = ""
-                        st.session_state.live_typos = {}
+                        st.session_state.do_live_clear = True
+                        st.session_state.live_msg = "💾 Note appended (warnings ignored)."
                         st.rerun()
             
             st.markdown("<br><br>", unsafe_allow_html=True)
@@ -405,7 +433,7 @@ with tab_live:
                         ws_notes.update(f"F{sheet_row}", [["Completed"]], value_input_option="USER_ENTERED")
                     
                     st.session_state.pop('note_data', None)
-                    st.success("Training finalized and archived to 'View Notes'!")
+                    st.session_state.live_msg = "✅ Training finalized and archived to 'View Notes'!"
                     st.rerun()
                 except Exception as e:
                     st.error(f"Failed to archive training: {e}")

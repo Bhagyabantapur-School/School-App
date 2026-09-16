@@ -238,7 +238,6 @@ with tab_live:
                             
                             # Clear cache to force a fresh pull of data next load
                             st.session_state.pop('note_data', None)
-                            fetch_notes.clear()
                             
                             st.success("Training notes successfully finalized and moved to 'View Notes'!")
                             st.rerun()

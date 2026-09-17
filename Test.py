@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import re
 from datetime import datetime
 import pytz
 import gspread
@@ -48,7 +49,6 @@ def get_worksheet():
 def fetch_existing_data():
     ws = get_worksheet()
     try:
-        # Use get_all_values() first to prevent IndexError on completely empty sheets
         vals = ws.get_all_values()
         if not vals:
             return pd.DataFrame(columns=[
@@ -105,63 +105,91 @@ existing_data = fetch_existing_data()
 st.markdown('<div class="form-container">', unsafe_allow_html=True)
 
 st.markdown("### 🏫 School Information")
+st.info("💡 **Edit Option:** If you have already submitted, simply enter your **UDISE Code** below. Your previously submitted data will load automatically for editing.")
+
 col1, col2 = st.columns([1, 2])
 with col1:
     udise_code = st.text_input("UDISE Code*", max_chars=11, help="Enter 11-digit UDISE code")
+
+# --- 🔍 AUTO-FILL LOOKUP LOGIC ---
+is_editing = False
+matched_row = {}
+
+if udise_code and len(udise_code) == 11 and udise_code.isdigit():
+    if not existing_data.empty and 'UDISE Code' in existing_data.columns:
+        mask = existing_data['UDISE Code'].astype(str).str.strip() == udise_code.strip()
+        if mask.any():
+            is_editing = True
+            matched_row = existing_data[mask].iloc[-1].to_dict() 
+            st.success(f"✅ Existing data found for UDISE {udise_code}. You can now edit and update it.")
+
+# --- 🎯 SET DEFAULT VALUES ---
+default_school = matched_row.get('Name  & Location of the PRIMARY SCHOOL', '')
+raw_roof = str(matched_row.get('Total usable shadow free roof space available for solar installation', '0'))
+nums = re.findall(r'\d+', raw_roof)
+default_roof = int(nums[0]) if nums else 0
+
+raw_solar = str(matched_row.get('Whether any Solar PV system already exists. If exists, its capacity', 'No'))
+default_has_solar = "Yes" if "Yes" in raw_solar else "No"
+default_capacity = raw_solar.split(", ")[1] if "Yes, " in raw_solar else ""
+
+raw_req = str(matched_row.get('If exists, whether additional requirement is there', 'N/A'))
+
+# --- 📝 RENDER REMAINING INPUTS ---
 with col2:
-    school_name_loc = st.text_input("Name & Location of the Primary School*", help="E.g., Bhagyabantapur Primary School, Vill+PO - Haldia...")
+    school_name_loc = st.text_input("Name & Location of the Primary School*", value=default_school, help="E.g., Bhagyabantapur Primary School, Vill+PO - Haldia...")
 
 st.markdown("### ☀️ Solar & Roof Details")
-roof_space = st.text_input("Total usable shadow free roof space available for solar installation*", help="E.g., 1500 square feet")
+roof_space = st.number_input(
+    "Total usable shadow free roof space available (in square feet)*", 
+    min_value=0, 
+    value=default_roof,
+    step=100,
+    help="Enter the numeric value only, e.g., 1500"
+)
 
 st.markdown("---")
-
 col3, col4 = st.columns(2)
 
 with col3:
-    has_solar = st.radio("Whether any Solar PV system already exists?*", ["No", "Yes"])
+    has_solar_idx = 1 if default_has_solar == "Yes" else 0
+    has_solar = st.radio("Whether any Solar PV system already exists?*", ["No", "Yes"], index=has_solar_idx)
+    
     solar_capacity = ""
     if has_solar == "Yes":
-        solar_capacity = st.text_input("If exists, its capacity:", help="E.g., 2 kW")
+        solar_capacity = st.text_input("If exists, its capacity:", value=default_capacity, help="E.g., 2 kW")
         
 with col4:
     if has_solar == "No":
-        # Locks the selection to only "N/A" and disables the button
-        add_req = st.radio(
-            "If exists, whether additional requirement is there?*", 
-            options=["N/A"], 
-            disabled=True
-        )
+        add_req = st.radio("If exists, whether additional requirement is there?*", options=["N/A"], disabled=True)
     else:
-        # Removes "N/A" entirely, forcing the user to pick Yes or No
-        add_req = st.radio(
-            "If exists, whether additional requirement is there?*", 
-            options=["Yes", "No"]
-        )
+        req_idx = 0 if raw_req == "Yes" else (1 if raw_req == "No" else 0)
+        add_req = st.radio("If exists, whether additional requirement is there?*", options=["Yes", "No"], index=req_idx)
 
 st.markdown("<small style='color: gray;'>* Mandatory fields</small>", unsafe_allow_html=True)
-st.write("") # Spacer
+st.write("") 
 
-submit_btn = st.button("📤 Submit Proposal", type="primary", use_container_width=True)
+btn_label = "🔄 Update Existing Proposal" if is_editing else "📤 Submit Proposal"
+submit_btn = st.button(btn_label, type="primary", use_container_width=True)
 
 st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
-# 🚀 SUBMIT LOGIC (Concurrency-Proof)
+# 🚀 SUBMIT / UPDATE LOGIC
 # ==========================================
 if submit_btn:
-    if not udise_code or not school_name_loc or not roof_space:
-        st.error("🚨 Please fill in all mandatory fields (UDISE Code, Name/Location, and Roof Space).")
+    if not udise_code or not school_name_loc:
+        st.error("🚨 Please fill in all mandatory fields (UDISE Code and Name/Location).")
     elif len(udise_code) != 11 or not udise_code.isdigit():
         st.error("🚨 UDISE Code must be exactly 11 digits.")
+    elif roof_space != 0 and roof_space < 50:
+        st.error("🚨 Please enter a valid roof space area (at least 50 sq ft). If absolutely no space is available, leave it as 0.")
     elif has_solar == "Yes" and not solar_capacity:
         st.error("🚨 Please mention the capacity of the existing solar system.")
     else:
-        with st.spinner("Verifying and submitting to secure database..."):
+        with st.spinner("Verifying and saving to secure database..."):
             try:
                 ws = get_worksheet()
-                
-                # 1. FETCH LIVE DATA SAFELY (Prevents IndexError on empty sheet)
                 live_values = ws.get_all_values()
                 
                 if not live_values:
@@ -172,45 +200,49 @@ if submit_btn:
                         'If exists, whether additional requirement is there'
                     ]
                     ws.append_row(headers)
-                    live_df = pd.DataFrame(columns=headers)
-                else:
-                    live_df = pd.DataFrame(ws.get_all_records())
+                    live_values = [headers]
                 
-                # 2. LIVE DUPLICATE CHECK (Prevents ValueError on blank cells)
-                if not live_df.empty and 'UDISE Code' in live_df.columns:
-                    existing_udises = live_df['UDISE Code'].astype(str).str.strip().values
-                    if str(udise_code).strip() in existing_udises:
-                        st.warning(f"⚠️ A proposal for UDISE {udise_code} has already been submitted.")
-                        st.stop()
-                
-                # 3. SAFE SERIAL NUMBER CALCULATION (Handles deleted rows)
-                if not live_df.empty and 'Sl. No.' in live_df.columns:
-                    max_sl = pd.to_numeric(live_df['Sl. No.'], errors='coerce').max()
-                    next_sl_no = int(max_sl) + 1 if pd.notna(max_sl) else 1
-                else:
-                    next_sl_no = 1
-                    
-                # 4. PREPARE & APPEND ROW
+                row_to_update = None
+                for i, row in enumerate(live_values):
+                    if i > 0 and len(row) > 1 and str(row[1]).strip() == str(udise_code).strip():
+                        row_to_update = i + 1 
+                        break
+                        
                 system_status = f"Yes, {solar_capacity}" if has_solar == "Yes" else "No"
-                row_data = [
-                    next_sl_no,
-                    str(udise_code).strip(),
-                    school_name_loc.strip(),
-                    roof_space.strip(),
-                    system_status,
-                    add_req
-                ]
+                formatted_roof_space = "0 sq ft (No space)" if roof_space == 0 else f"{roof_space} sq ft"
                 
-                ws.append_row(row_data)
-                fetch_existing_data.clear() # Clear dashboard cache to show new data
-                st.success(f"🎉 Proposal for {school_name_loc} submitted successfully! You can view it in the dashboard below.")
-                st.balloons()
+                if row_to_update:
+                    existing_sl = live_values[row_to_update - 1][0]
+                    row_data = [existing_sl, str(udise_code).strip(), school_name_loc.strip(), formatted_roof_space, system_status, add_req]
+                    
+                    try:
+                        ws.update(values=[row_data], range_name=f"A{row_to_update}:F{row_to_update}")
+                    except TypeError:
+                        ws.update(f"A{row_to_update}:F{row_to_update}", [row_data]) 
+                        
+                    fetch_existing_data.clear() 
+                    st.success(f"✏️ Proposal for {school_name_loc} updated successfully!")
+                    st.balloons()
+                    
+                else:
+                    live_df = pd.DataFrame(live_values[1:], columns=live_values[0])
+                    if not live_df.empty and 'Sl. No.' in live_df.columns:
+                        max_sl = pd.to_numeric(live_df['Sl. No.'], errors='coerce').max()
+                        next_sl_no = int(max_sl) + 1 if pd.notna(max_sl) else 1
+                    else:
+                        next_sl_no = 1
+                        
+                    row_data = [next_sl_no, str(udise_code).strip(), school_name_loc.strip(), formatted_roof_space, system_status, add_req]
+                    ws.append_row(row_data)
+                    fetch_existing_data.clear()
+                    st.success(f"🎉 Proposal for {school_name_loc} submitted successfully!")
+                    st.balloons()
                 
             except Exception as e:
-                st.error(f"⚠️ Failed to save to Google Sheets. The server might be busy. Please try again in a moment. Error: {e}")
+                st.error(f"⚠️ Failed to save to Google Sheets. Error: {e}")
 
 # ==========================================
-# 📊 SUBMISSION DASHBOARD
+# 📊 SUBMISSION DASHBOARD & ERROR TRACKING
 # ==========================================
 st.markdown("---")
 st.markdown("### 📋 Submitted Proposals (Haldia Circle)")
@@ -220,16 +252,44 @@ refreshed_data = fetch_existing_data()
 if refreshed_data.empty:
     st.info("No proposals have been submitted yet.")
 else:
-    # Display total count
-    st.write(f"**Total Submissions:** {len(refreshed_data)}")
+    # --- 🔎 MISTAKE TRACKING LOGIC ---
+    def is_mistake(val):
+        val_str = str(val).strip()
+        if not val_str or val_str.lower() == "nan":
+            return True
+        nums = re.findall(r'\d+', val_str)
+        if not nums:
+            return True # e.g., "Yes" or text without numbers
+        num = int(nums[0])
+        if num != 0 and num < 50:
+            return True # e.g., "3", "1"
+        return False
+        
+    roof_col = 'Total usable shadow free roof space available for solar installation'
+    if roof_col in refreshed_data.columns:
+        mistakes_df = refreshed_data[refreshed_data[roof_col].apply(is_mistake)]
+        
+        # Display the warning box only if mistakes are found
+        if not mistakes_df.empty:
+            st.error(f"⚠️ **Action Required:** {len(mistakes_df)} school(s) previously submitted invalid roof space data. They must enter their UDISE code above to fix their entry.")
+            with st.expander("🚨 View Schools Requiring Correction", expanded=True):
+                for _, row in mistakes_df.iterrows():
+                    st.markdown(f"🔴 **{row.get('Name  & Location of the PRIMARY SCHOOL', 'Unknown')}** (UDISE: `{row.get('UDISE Code', 'N/A')}`)  \n*Mistake Entry:* `{row.get(roof_col, 'N/A')}`")
+            st.markdown("---")
+
+    # --- 📱 REGULAR MOBILE-FRIENDLY DISPLAY ---
+    st.write(f"**Total Valid Submissions:** {len(refreshed_data) - len(mistakes_df) if roof_col in refreshed_data.columns else len(refreshed_data)}")
     
-    # Show dataframe (hide index for cleaner look, set UDISE Code to TextColumn to prevent truncation)
-    st.dataframe(
-        refreshed_data, 
-        hide_index=True, 
-        use_container_width=True,
-        column_config={
-            "Sl. No.": st.column_config.NumberColumn("Sl. No.", format="%d"),
-            "UDISE Code": st.column_config.TextColumn("UDISE Code")
-        }
-    )
+    for index, row in refreshed_data.iterrows():
+        sl_no = row.get('Sl. No.', '?')
+        school_name = row.get('Name  & Location of the PRIMARY SCHOOL', 'Unknown School')
+        udise = row.get('UDISE Code', 'N/A')
+        
+        # Add a warning emoji to the list if they are in the mistake category
+        is_bad_row = is_mistake(row.get(roof_col, '')) if roof_col in refreshed_data.columns else False
+        status_icon = "🔴" if is_bad_row else "✅"
+        
+        with st.expander(f"{sl_no}. {status_icon} {school_name} (UDISE: {udise})"):
+            st.markdown(f"**☀️ Roof Space:** {row.get('Total usable shadow free roof space available for solar installation', 'N/A')}")
+            st.markdown(f"**🔋 Existing System:** {row.get('Whether any Solar PV system already exists. If exists, its capacity', 'N/A')}")
+            st.markdown(f"**➕ Additional Requirement:** {row.get('If exists, whether additional requirement is there', 'N/A')}")

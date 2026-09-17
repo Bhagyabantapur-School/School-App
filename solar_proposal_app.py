@@ -17,6 +17,18 @@ IST = pytz.timezone('Asia/Kolkata')
 SHEET_NAME = "PROPOSAL FOR ROOF TOP  SOLAR PANEL FOR GOVT. PRIMARY SCHOOLS UNDER HALDIA CIRCLE"
 
 # ==========================================
+# 🧠 SESSION STATE INITIALIZATION
+# ==========================================
+if 'checked_udise' not in st.session_state:
+    st.session_state.checked_udise = None
+if 'is_editing' not in st.session_state:
+    st.session_state.is_editing = False
+if 'matched_row' not in st.session_state:
+    st.session_state.matched_row = {}
+if 'success_msg' not in st.session_state:
+    st.session_state.success_msg = ""
+
+# ==========================================
 # 🔌 GOOGLE SHEETS CONNECTOR
 # ==========================================
 @st.cache_resource
@@ -91,148 +103,183 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 📝 SUBMISSION FORM (Dynamic Live Updates)
+# 📝 SUBMISSION FORM
 # ==========================================
 existing_data = fetch_existing_data()
 
 st.markdown('<div class="form-container">', unsafe_allow_html=True)
 
+# Show Success Message if a form was just submitted
+if st.session_state.success_msg:
+    st.success(st.session_state.success_msg)
+    st.balloons()
+    st.session_state.success_msg = "" # Clear after showing
+
 st.markdown("### 🏫 School Information (স্কুলের তথ্য)")
-st.info("💡 **Edit Option (তথ্য সংশোধনের উপায়):** আপনি যদি আগে সাবমিট করে থাকেন এবং কোনো ভুল থাকে, তবে নিচে আপনার **UDISE Code** দিন। আপনার দেওয়া পুরনো তথ্য এডিট করার জন্য স্বয়ংক্রিয়ভাবে খুলে যাবে।")
+st.info("💡 **Instruction:** প্রথমে আপনার স্কুলের ১১ ডিজিটের UDISE Code দিন এবং **'Check UDISE'** বাটনে ক্লিক করুন।")
 
-col1, col2 = st.columns([1, 2])
+# --- 🔍 UDISE CHECKING BLOCK ---
+col1, col2 = st.columns([2, 1])
 with col1:
-    udise_code = st.text_input("UDISE Code*", max_chars=11, help="আপনার স্কুলের ১১ ডিজিটের সঠিক UDISE কোড লিখুন")
-
-# --- 🔍 AUTO-FILL LOOKUP LOGIC ---
-is_editing = False
-matched_row = {}
-
-if udise_code and len(udise_code) == 11 and udise_code.isdigit():
-    if not existing_data.empty and 'UDISE Code' in existing_data.columns:
-        mask = existing_data['UDISE Code'].astype(str).str.strip() == udise_code.strip()
-        if mask.any():
-            is_editing = True
-            matched_row = existing_data[mask].iloc[-1].to_dict() 
-            st.success(f"✅ UDISE {udise_code}-এর পুরনো তথ্য পাওয়া গেছে। আপনি এখন এটি পরিবর্তন করে আপডেট করতে পারেন।")
-
-# --- 🎯 SET DEFAULT VALUES ---
-default_school = matched_row.get('Name  & Location of the PRIMARY SCHOOL', '')
-raw_roof = str(matched_row.get('Total usable shadow free roof space available for solar installation', '0'))
-nums = re.findall(r'\d+', raw_roof)
-default_roof = int(nums[0]) if nums else 0
-
-raw_solar = str(matched_row.get('Whether any Solar PV system already exists. If exists, its capacity', 'No'))
-default_has_solar = "Yes" if "Yes" in raw_solar else "No"
-default_capacity = raw_solar.split(", ")[1] if "Yes, " in raw_solar else ""
-
-raw_req = str(matched_row.get('If exists, whether additional requirement is there', 'N/A'))
-
-# --- 📝 RENDER REMAINING INPUTS ---
+    udise_input = st.text_input("UDISE Code*", max_chars=11, help="আপনার স্কুলের ১১ ডিজিটের সঠিক UDISE কোড লিখুন")
 with col2:
+    st.write("") # Spacer to align button with text input
+    st.write("")
+    if st.button("🔍 Check UDISE (চেক করুন)", use_container_width=True):
+        if udise_input and len(udise_input) == 11 and udise_input.isdigit():
+            st.session_state.checked_udise = udise_input
+            # Lookup in database
+            if not existing_data.empty and 'UDISE Code' in existing_data.columns:
+                mask = existing_data['UDISE Code'].astype(str).str.strip() == udise_input.strip()
+                if mask.any():
+                    st.session_state.is_editing = True
+                    st.session_state.matched_row = existing_data[mask].iloc[-1].to_dict()
+                else:
+                    st.session_state.is_editing = False
+                    st.session_state.matched_row = {}
+            else:
+                st.session_state.is_editing = False
+                st.session_state.matched_row = {}
+        else:
+            st.error("🚨 অনুগ্রহ করে সঠিক ১১ ডিজিটের UDISE কোড দিন।")
+            st.session_state.checked_udise = None
+
+# --- 📝 RENDER REST OF FORM ONLY IF UDISE IS CHECKED ---
+if st.session_state.checked_udise:
+    st.markdown("---")
+    
+    # Display Status Message
+    if st.session_state.is_editing:
+        st.success(f"✅ **Old Entry Found:** UDISE {st.session_state.checked_udise}-এর পুরনো এন্ট্রি পাওয়া গেছে। আপনার আগের দেওয়া তথ্য নিচে লোড হয়েছে, আপনি চাইলে তা সংশোধন (Edit) করতে পারেন।")
+    else:
+        st.info(f"✨ **New Entry:** UDISE {st.session_state.checked_udise}-এর কোনো তথ্য আগে দেওয়া হয়নি। এটি একটি নতুন এন্ট্রি, অনুগ্রহ করে নিচের তথ্যগুলো পূরণ করুন।")
+
+    # --- 🎯 SET DEFAULT VALUES ---
+    matched_row = st.session_state.matched_row
+    udise_code = st.session_state.checked_udise
+    
+    default_school = matched_row.get('Name  & Location of the PRIMARY SCHOOL', '')
+    raw_roof = str(matched_row.get('Total usable shadow free roof space available for solar installation', '0'))
+    nums = re.findall(r'\d+', raw_roof)
+    default_roof = int(nums[0]) if nums else 0
+
+    raw_solar = str(matched_row.get('Whether any Solar PV system already exists. If exists, its capacity', 'No'))
+    default_has_solar = "Yes" if "Yes" in raw_solar else "No"
+    default_capacity = raw_solar.split(", ")[1] if "Yes, " in raw_solar else ""
+
+    raw_req = str(matched_row.get('If exists, whether additional requirement is there', 'N/A'))
+
     school_name_loc = st.text_input("Name & Location of the Primary School*", value=default_school, help="স্কুলের নাম ও ঠিকানা লিখুন, যেমন: Bhagyabantapur Primary School, Vill+PO - Haldia...")
 
-st.markdown("### ☀️ Solar & Roof Details (সোলার এবং ছাদের বিবরণ)")
-roof_space = st.number_input(
-    "Total usable shadow free roof space available (in square feet)* - ছাদের ব্যবহারযোগ্য ফাঁকা জায়গা (বর্গফুটে)", 
-    min_value=0, 
-    value=default_roof,
-    step=100,
-    help="শুধুমাত্র সংখ্যা লিখুন (যেমন: 1500)। যদি একেবারেই জায়গা না থাকে তবে 0 রাখুন।"
-)
+    st.markdown("### ☀️ Solar & Roof Details (সোলার এবং ছাদের বিবরণ)")
+    roof_space = st.number_input(
+        "Total usable shadow free roof space available (in square feet)* - ছাদের ব্যবহারযোগ্য ফাঁকা জায়গা (বর্গফুটে)", 
+        min_value=0, 
+        value=default_roof,
+        step=100,
+        help="শুধুমাত্র সংখ্যা লিখুন (যেমন: 1500)। যদি একেবারেই জায়গা না থাকে তবে 0 রাখুন।"
+    )
 
-st.markdown("---")
-col3, col4 = st.columns(2)
+    st.markdown("---")
+    col3, col4 = st.columns(2)
 
-with col3:
-    has_solar_idx = 1 if default_has_solar == "Yes" else 0
-    has_solar = st.radio("Whether any Solar PV system already exists?* (আগে থেকে সোলার আছে কি?)", ["No", "Yes"], index=has_solar_idx)
-    
-    solar_capacity = ""
-    if has_solar == "Yes":
-        solar_capacity = st.text_input("If exists, its capacity (থাকলে তার ধারণক্ষমতা):", value=default_capacity, help="যেমন: 2 kW")
+    with col3:
+        has_solar_idx = 1 if default_has_solar == "Yes" else 0
+        has_solar = st.radio("Whether any Solar PV system already exists?* (আগে থেকে সোলার আছে কি?)", ["No", "Yes"], index=has_solar_idx)
         
-with col4:
-    if has_solar == "No":
-        add_req = st.radio("If exists, whether additional requirement is there?* (আরও সোলার প্রয়োজন কি?)", options=["N/A"], disabled=True)
-    else:
-        req_idx = 0 if raw_req == "Yes" else (1 if raw_req == "No" else 0)
-        add_req = st.radio("If exists, whether additional requirement is there?* (আরও সোলার প্রয়োজন কি?)", options=["Yes", "No"], index=req_idx)
+        solar_capacity = ""
+        if has_solar == "Yes":
+            solar_capacity = st.text_input("If exists, its capacity (থাকলে তার ধারণক্ষমতা):", value=default_capacity, help="যেমন: 2 kW")
+            
+    with col4:
+        if has_solar == "No":
+            add_req = st.radio("If exists, whether additional requirement is there?* (আরও সোলার প্রয়োজন কি?)", options=["N/A"], disabled=True)
+        else:
+            req_idx = 0 if raw_req == "Yes" else (1 if raw_req == "No" else 0)
+            add_req = st.radio("If exists, whether additional requirement is there?* (আরও সোলার প্রয়োজন কি?)", options=["Yes", "No"], index=req_idx)
 
-st.markdown("<small style='color: gray;'>* Mandatory fields (আবশ্যক ঘরগুলি পূরণ করতে হবে)</small>", unsafe_allow_html=True)
-st.write("") 
+    st.markdown("<small style='color: gray;'>* Mandatory fields (আবশ্যক ঘরগুলি পূরণ করতে হবে)</small>", unsafe_allow_html=True)
+    st.write("") 
 
-btn_label = "🔄 Update Existing Proposal (আপডেট করুন)" if is_editing else "📤 Submit Proposal (সাবমিট করুন)"
-submit_btn = st.button(btn_label, type="primary", use_container_width=True)
+    btn_label = "🔄 Update Existing Proposal (আপডেট করুন)" if st.session_state.is_editing else "📤 Submit Proposal (সাবমিট করুন)"
+    submit_btn = st.button(btn_label, type="primary", use_container_width=True)
+
+    # ==========================================
+    # 🚀 SUBMIT / UPDATE LOGIC
+    # ==========================================
+    if submit_btn:
+        if not school_name_loc:
+            st.error("🚨 অনুগ্রহ করে স্কুলের নাম ও ঠিকানা (Name/Location) পূরণ করুন।")
+        elif roof_space != 0 and roof_space < 50:
+            st.error("🚨 অনুগ্রহ করে ছাদের সঠিক জায়গা লিখুন (অন্তত 50 sq ft)। যদি একেবারেই জায়গা না থাকে, তবে 0 লিখুন।")
+        elif has_solar == "Yes" and not solar_capacity:
+            st.error("🚨 অনুগ্রহ করে বর্তমান সোলার সিস্টেমের ক্যাপাসিটি (capacity) উল্লেখ করুন।")
+        else:
+            with st.spinner("Verifying and saving to secure database... (তথ্য সেভ করা হচ্ছে)"):
+                try:
+                    ws = get_worksheet()
+                    live_values = ws.get_all_values()
+                    
+                    if not live_values:
+                        headers = [
+                            'Sl. No.', 'UDISE Code', 'Name  & Location of the PRIMARY SCHOOL',
+                            'Total usable shadow free roof space available for solar installation',
+                            'Whether any Solar PV system already exists. If exists, its capacity',
+                            'If exists, whether additional requirement is there'
+                        ]
+                        ws.append_row(headers)
+                        live_values = [headers]
+                    
+                    row_to_update = None
+                    for i, row in enumerate(live_values):
+                        if i > 0 and len(row) > 1 and str(row[1]).strip() == str(udise_code).strip():
+                            row_to_update = i + 1 
+                            break
+                            
+                    system_status = f"Yes, {solar_capacity}" if has_solar == "Yes" else "No"
+                    formatted_roof_space = "0 sq ft (No space)" if roof_space == 0 else f"{roof_space} sq ft"
+                    
+                    if row_to_update:
+                        existing_sl = live_values[row_to_update - 1][0]
+                        row_data = [existing_sl, str(udise_code).strip(), school_name_loc.strip(), formatted_roof_space, system_status, add_req]
+                        
+                        try:
+                            ws.update(values=[row_data], range_name=f"A{row_to_update}:F{row_to_update}")
+                        except TypeError:
+                            ws.update(f"A{row_to_update}:F{row_to_update}", [row_data]) 
+                            
+                        fetch_existing_data.clear()
+                        
+                        # Set success message and reset form state
+                        st.session_state.success_msg = f"✏️ {school_name_loc}-এর তথ্য সফলভাবে আপডেট হয়েছে!"
+                        st.session_state.checked_udise = None
+                        st.session_state.is_editing = False
+                        st.session_state.matched_row = {}
+                        st.rerun()
+                        
+                    else:
+                        live_df = pd.DataFrame(live_values[1:], columns=live_values[0])
+                        if not live_df.empty and 'Sl. No.' in live_df.columns:
+                            max_sl = pd.to_numeric(live_df['Sl. No.'], errors='coerce').max()
+                            next_sl_no = int(max_sl) + 1 if pd.notna(max_sl) else 1
+                        else:
+                            next_sl_no = 1
+                            
+                        row_data = [next_sl_no, str(udise_code).strip(), school_name_loc.strip(), formatted_roof_space, system_status, add_req]
+                        ws.append_row(row_data)
+                        fetch_existing_data.clear()
+                        
+                        # Set success message and reset form state
+                        st.session_state.success_msg = f"🎉 {school_name_loc}-এর তথ্য সফলভাবে সাবমিট হয়েছে!"
+                        st.session_state.checked_udise = None
+                        st.session_state.is_editing = False
+                        st.session_state.matched_row = {}
+                        st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"⚠️ Google Sheets-এ সেভ করতে সমস্যা হয়েছে। Error: {e}")
 
 st.markdown('</div>', unsafe_allow_html=True)
-
-# ==========================================
-# 🚀 SUBMIT / UPDATE LOGIC
-# ==========================================
-if submit_btn:
-    if not udise_code or not school_name_loc:
-        st.error("🚨 অনুগ্রহ করে সমস্ত আবশ্যক ঘরগুলি (UDISE Code এবং Name/Location) পূরণ করুন।")
-    elif len(udise_code) != 11 or not udise_code.isdigit():
-        st.error("🚨 UDISE Code অবশ্যই ১১ ডিজিটের হতে হবে।")
-    elif roof_space != 0 and roof_space < 50:
-        st.error("🚨 অনুগ্রহ করে ছাদের সঠিক জায়গা লিখুন (অন্তত 50 sq ft)। যদি একেবারেই জায়গা না থাকে, তবে 0 লিখুন।")
-    elif has_solar == "Yes" and not solar_capacity:
-        st.error("🚨 অনুগ্রহ করে বর্তমান সোলার সিস্টেমের ক্যাপাসিটি (capacity) উল্লেখ করুন।")
-    else:
-        with st.spinner("Verifying and saving to secure database... (তথ্য সেভ করা হচ্ছে)"):
-            try:
-                ws = get_worksheet()
-                live_values = ws.get_all_values()
-                
-                if not live_values:
-                    headers = [
-                        'Sl. No.', 'UDISE Code', 'Name  & Location of the PRIMARY SCHOOL',
-                        'Total usable shadow free roof space available for solar installation',
-                        'Whether any Solar PV system already exists. If exists, its capacity',
-                        'If exists, whether additional requirement is there'
-                    ]
-                    ws.append_row(headers)
-                    live_values = [headers]
-                
-                row_to_update = None
-                for i, row in enumerate(live_values):
-                    if i > 0 and len(row) > 1 and str(row[1]).strip() == str(udise_code).strip():
-                        row_to_update = i + 1 
-                        break
-                        
-                system_status = f"Yes, {solar_capacity}" if has_solar == "Yes" else "No"
-                formatted_roof_space = "0 sq ft (No space)" if roof_space == 0 else f"{roof_space} sq ft"
-                
-                if row_to_update:
-                    existing_sl = live_values[row_to_update - 1][0]
-                    row_data = [existing_sl, str(udise_code).strip(), school_name_loc.strip(), formatted_roof_space, system_status, add_req]
-                    
-                    try:
-                        ws.update(values=[row_data], range_name=f"A{row_to_update}:F{row_to_update}")
-                    except TypeError:
-                        ws.update(f"A{row_to_update}:F{row_to_update}", [row_data]) 
-                        
-                    fetch_existing_data.clear() 
-                    st.success(f"✏️ {school_name_loc}-এর তথ্য সফলভাবে আপডেট হয়েছে!")
-                    st.balloons()
-                    
-                else:
-                    live_df = pd.DataFrame(live_values[1:], columns=live_values[0])
-                    if not live_df.empty and 'Sl. No.' in live_df.columns:
-                        max_sl = pd.to_numeric(live_df['Sl. No.'], errors='coerce').max()
-                        next_sl_no = int(max_sl) + 1 if pd.notna(max_sl) else 1
-                    else:
-                        next_sl_no = 1
-                        
-                    row_data = [next_sl_no, str(udise_code).strip(), school_name_loc.strip(), formatted_roof_space, system_status, add_req]
-                    ws.append_row(row_data)
-                    fetch_existing_data.clear()
-                    st.success(f"🎉 {school_name_loc}-এর তথ্য সফলভাবে সাবমিট হয়েছে!")
-                    st.balloons()
-                
-            except Exception as e:
-                st.error(f"⚠️ Google Sheets-এ সেভ করতে সমস্যা হয়েছে। Error: {e}")
 
 # ==========================================
 # 📊 SUBMISSION DASHBOARD & ERROR TRACKING
@@ -263,7 +310,7 @@ else:
         mistakes_df = refreshed_data[refreshed_data[roof_col].apply(is_mistake)]
         
         if not mistakes_df.empty:
-            st.error(f"⚠️ **Action Required (পদক্ষেপ প্রয়োজন):** {len(mistakes_df)} টি স্কুল ছাদের জায়গার ভুল তথ্য দিয়েছে। তথ্য ঠিক করতে উপরে UDISE কোড দিয়ে এডিট করুন।")
+            st.error(f"⚠️ **Action Required (পদক্ষেপ প্রয়োজন):** {len(mistakes_df)} টি স্কুল ছাদের জায়গার ভুল তথ্য দিয়েছে। তথ্য ঠিক করতে উপরে UDISE কোড দিয়ে চেক করুন এবং আপডেট করুন।")
             with st.expander("🚨 View Schools Requiring Correction (যে স্কুলগুলোর তথ্য ঠিক করা প্রয়োজন)", expanded=True):
                 for _, row in mistakes_df.iterrows():
                     st.markdown(f"🔴 **{row.get('Name  & Location of the PRIMARY SCHOOL', 'Unknown')}** (UDISE: `{row.get('UDISE Code', 'N/A')}`)  \n*ভুল এন্ট্রি:* `{row.get(roof_col, 'N/A')}`")

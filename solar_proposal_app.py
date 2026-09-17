@@ -39,7 +39,6 @@ def init_sheet():
 def get_worksheet():
     sh = init_sheet()
     try:
-        # Assuming the data is on the first sheet
         return sh.sheet1
     except Exception as e:
         st.error(f"⚠️ Could not open the first worksheet. Error: {e}")
@@ -116,17 +115,16 @@ with st.form("solar_proposal_form"):
     
     st.markdown("---")
     
-    has_solar = st.radio("Does the school already have a Solar PV system installed?", ["No", "Yes"])
+    col3, col4 = st.columns(2)
     
-    solar_capacity = ""
-    add_req = ""
-    
-    if has_solar == "Yes":
-        col3, col4 = st.columns(2)
-        with col3:
-            solar_capacity = st.text_input("If Yes, what is its capacity?", help="E.g., 2 kW")
-        with col4:
-            add_req = st.radio("If exists, is there an additional requirement?", ["No", "Yes"])
+    with col3:
+        has_solar = st.radio("Whether any Solar PV system already exists?*", ["No", "Yes"])
+        solar_capacity = ""
+        if has_solar == "Yes":
+            solar_capacity = st.text_input("If exists, its capacity:", help="E.g., 2 kW")
+            
+    with col4:
+        add_req = st.radio("If exists, whether additional requirement is there?*", ["Not Applicable", "Yes", "No"])
 
     st.markdown("<small style='color: gray;'>* Mandatory fields</small>", unsafe_allow_html=True)
     
@@ -137,6 +135,8 @@ with st.form("solar_proposal_form"):
             st.error("🚨 Please fill in all mandatory fields (UDISE Code, Name/Location, and Roof Space).")
         elif len(udise_code) != 11 or not udise_code.isdigit():
             st.error("🚨 UDISE Code must be exactly 11 digits.")
+        elif has_solar == "Yes" and not solar_capacity:
+            st.error("🚨 Please mention the capacity of the existing solar system.")
         else:
             with st.spinner("Verifying and submitting to secure database..."):
                 try:
@@ -162,7 +162,7 @@ with st.form("solar_proposal_form"):
                         school_name_loc,
                         roof_space,
                         solar_capacity if has_solar == "Yes" else "No",
-                        add_req if has_solar == "Yes" else "N/A"
+                        add_req
                     ]
                     
                     # If sheet is totally empty, write headers first

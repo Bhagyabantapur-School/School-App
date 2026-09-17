@@ -121,7 +121,7 @@ st.info("💡 **Instruction:** প্রথমে আপনার স্কু�
 # --- 🔍 UDISE CHECKING BLOCK ---
 col1, col2 = st.columns([2, 1])
 with col1:
-    udise_input = st.text_input("UDISE Code*", max_chars=11, help="আপনার স্কুলের ১১ ডিজিটের সঠিক UDISE কোড লিখুন")
+    udise_input = st.text_input("1. UDISE Code*", max_chars=11, help="আপনার স্কুলের ১১ ডিজিটের সঠিক UDISE কোড লিখুন")
 with col2:
     st.write("") # Spacer to align button with text input
     st.write("")
@@ -169,11 +169,11 @@ if st.session_state.checked_udise:
 
     raw_req = str(matched_row.get('If exists, whether additional requirement is there', 'N/A'))
 
-    school_name_loc = st.text_input("Name & Location of the Primary School*", value=default_school, help="স্কুলের নাম ও ঠিকানা লিখুন, যেমন: Bhagyabantapur Primary School, Vill+PO - Haldia...")
+    school_name_loc = st.text_input("2. Name & Location of the Primary School*", value=default_school, help="স্কুলের নাম ও ঠিকানা লিখুন, যেমন: Bhagyabantapur Primary School, Vill+PO - Haldia...")
 
     st.markdown("### ☀️ Solar & Roof Details (সোলার এবং ছাদের বিবরণ)")
     roof_space = st.number_input(
-        "Total usable shadow free roof space available (in square feet)* - ছাদের ব্যবহারযোগ্য ফাঁকা জায়গা (বর্গফুটে)", 
+        "3. Total usable shadow free roof space available (in square feet)* - ছাদের ব্যবহারযোগ্য ফাঁকা জায়গা (বর্গফুটে)", 
         min_value=0, 
         value=default_roof,
         step=100,
@@ -185,18 +185,18 @@ if st.session_state.checked_udise:
 
     with col3:
         has_solar_idx = 1 if default_has_solar == "Yes" else 0
-        has_solar = st.radio("Whether any Solar PV system already exists?* (আগে থেকে সোলার আছে কি?)", ["No", "Yes"], index=has_solar_idx)
+        has_solar = st.radio("4. Whether any Solar PV system already exists?* (আগে থেকে সোলার আছে কি?)", ["No", "Yes"], index=has_solar_idx)
         
         solar_capacity = ""
         if has_solar == "Yes":
-            solar_capacity = st.text_input("If exists, its capacity (থাকলে তার ধারণক্ষমতা):", value=default_capacity, help="যেমন: 2 kW")
+            solar_capacity = st.text_input("5. If exists, its capacity (থাকলে তার ধারণক্ষমতা):", value=default_capacity, help="যেমন: 2 kW")
             
     with col4:
         if has_solar == "No":
-            add_req = st.radio("If exists, whether additional requirement is there?* (আরও সোলার প্রয়োজন কি?)", options=["N/A"], disabled=True)
+            add_req = st.radio("6. If exists, whether additional requirement is there?* (আরও সোলার প্রয়োজন কি?)", options=["N/A"], disabled=True)
         else:
             req_idx = 0 if raw_req == "Yes" else (1 if raw_req == "No" else 0)
-            add_req = st.radio("If exists, whether additional requirement is there?* (আরও সোলার প্রয়োজন কি?)", options=["Yes", "No"], index=req_idx)
+            add_req = st.radio("6. If exists, whether additional requirement is there?* (আরও সোলার প্রয়োজন কি?)", options=["Yes", "No"], index=req_idx)
 
     st.markdown("<small style='color: gray;'>* Mandatory fields (আবশ্যক ঘরগুলি পূরণ করতে হবে)</small>", unsafe_allow_html=True)
     st.write("") 
@@ -310,10 +310,10 @@ else:
         mistakes_df = refreshed_data[refreshed_data[roof_col].apply(is_mistake)]
         
         if not mistakes_df.empty:
-            st.error(f"⚠️ **Action Required (পদক্ষেপ প্রয়োজন):** {len(mistakes_df)} টি স্কুল ছাদের জায়গার ভুল তথ্য দিয়েছে। তথ্য ঠিক করতে উপরে UDISE কোড দিয়ে চেক করুন এবং আপডেট করুন।")
+            st.error(f"⚠️ **Action Required (পদক্ষেপ প্রয়োজন):** {len(mistakes_df)} টি স্কুল **Question 3** (ছাদের জায়গা)-এ ভুল তথ্য দিয়েছে। তথ্য ঠিক করতে উপরে UDISE কোড দিয়ে চেক করুন এবং **Question 3** আপডেট করুন।")
             with st.expander("🚨 View Schools Requiring Correction (যে স্কুলগুলোর তথ্য ঠিক করা প্রয়োজন)", expanded=True):
                 for _, row in mistakes_df.iterrows():
-                    st.markdown(f"🔴 **{row.get('Name  & Location of the PRIMARY SCHOOL', 'Unknown')}** (UDISE: `{row.get('UDISE Code', 'N/A')}`)  \n*ভুল এন্ট্রি:* `{row.get(roof_col, 'N/A')}`")
+                    st.markdown(f"🔴 **{row.get('Name  & Location of the PRIMARY SCHOOL', 'Unknown')}** (UDISE: `{row.get('UDISE Code', 'N/A')}`)  \n*Question 3 ভুল এন্ট্রি:* `{row.get(roof_col, 'N/A')}`")
             st.markdown("---")
 
     # --- 📱 REGULAR MOBILE-FRIENDLY DISPLAY ---

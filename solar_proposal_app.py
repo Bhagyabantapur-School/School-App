@@ -16,13 +16,16 @@ IST = pytz.timezone('Asia/Kolkata')
 SHEET_NAME = "PROPOSAL FOR ROOF TOP  SOLAR PANEL FOR GOVT. PRIMARY SCHOOLS UNDER HALDIA CIRCLE"
 
 # ==========================================
-# 🔌 GOOGLE SHEETS CONNECTOR
+# 🔌 GOOGLE SHEETS CONNECTOR (WITH DRIVE SCOPE FIXED)
 # ==========================================
 @st.cache_resource
 def get_google_credentials():
     return Credentials.from_service_account_info(
         dict(st.secrets["gcp_service_account"]),
-        scopes=["https://www.googleapis.com/auth/spreadsheets"]
+        scopes=[
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive.readonly"
+        ]
     )
 
 @st.cache_resource

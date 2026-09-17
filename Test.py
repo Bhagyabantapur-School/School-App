@@ -125,13 +125,19 @@ with col3:
         solar_capacity = st.text_input("If exists, its capacity:", help="E.g., 2 kW")
         
 with col4:
-    # 🔴 Dynamic Logic: Disabled and locked to "N/A" if has_solar is "No"
-    is_locked = (has_solar == "No")
-    add_req = st.radio(
-        "If exists, whether additional requirement is there?*", 
-        ["N/A", "Yes", "No"], 
-        disabled=is_locked
-    )
+    if has_solar == "No":
+        # Locks the selection to only "N/A" and disables the button
+        add_req = st.radio(
+            "If exists, whether additional requirement is there?*", 
+            options=["N/A"], 
+            disabled=True
+        )
+    else:
+        # Removes "N/A" entirely, forcing the user to pick Yes or No
+        add_req = st.radio(
+            "If exists, whether additional requirement is there?*", 
+            options=["Yes", "No"]
+        )
 
 st.markdown("<small style='color: gray;'>* Mandatory fields</small>", unsafe_allow_html=True)
 st.write("") # Spacer
@@ -192,7 +198,7 @@ if submit_btn:
                     school_name_loc.strip(),
                     roof_space.strip(),
                     system_status,
-                    add_req if has_solar == "Yes" else "N/A"
+                    add_req
                 ]
                 
                 ws.append_row(row_data)

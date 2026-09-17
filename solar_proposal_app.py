@@ -210,8 +210,6 @@ if st.session_state.checked_udise:
     if submit_btn:
         if not school_name_loc:
             st.error("🚨 অনুগ্রহ করে স্কুলের নাম ও ঠিকানা (Name/Location) পূরণ করুন।")
-        elif roof_space != 0 and roof_space < 50:
-            st.error("🚨 অনুগ্রহ করে ছাদের সঠিক জায়গা লিখুন (অন্তত 50 sq ft)। যদি একেবারেই জায়গা না থাকে, তবে 0 লিখুন।")
         elif has_solar == "Yes" and not solar_capacity:
             st.error("🚨 অনুগ্রহ করে বর্তমান সোলার সিস্টেমের ক্যাপাসিটি (capacity) উল্লেখ করুন।")
         else:
@@ -299,9 +297,6 @@ else:
             return True
         nums = re.findall(r'\d+', val_str)
         if not nums:
-            return True 
-        num = int(nums[0])
-        if num != 0 and num < 50:
             return True 
         return False
         

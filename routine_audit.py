@@ -705,19 +705,12 @@ try:
             for p_row in prev_rows:
                 p_act = str(p_row['Activity']).strip().upper()
                 p_sub = str(p_row.get('Sub_Activities', '')).strip() or "Routine Tasks"
-                p_time = f"{p_row['Start_Time']} - {p_row['End_Time']}"
                 p_dur = str(p_row.get('Duration', ''))
+                p_start = str(p_row.get('Start_Time', '')).strip()
                 
                 st.markdown(f'''
-                <div style="background-color: #e2e3e5; color: #495057; padding: 8px 12px; border-radius: 6px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; opacity: 0.8;">
-                    <div style="flex-grow: 1; padding-right: 10px; overflow: hidden;">
-                        <strong style="font-size: 15px; display: block; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;">{p_act}</strong>
-                        <span style="font-size: 12px; opacity: 0.9; display: block; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;">{p_sub}</span>
-                    </div>
-                    <div style="text-align: right; min-width: 75px;">
-                        <span style="font-size: 11px; opacity: 0.9; display: block; margin-bottom: 2px;">{p_time}</span>
-                        <strong style="font-size: 16px; display: block;">{p_dur}</strong>
-                    </div>
+                <div style="background-color: #e2e3e5; color: #495057; padding: 10px 12px; border-radius: 6px; margin-bottom: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); opacity: 0.8; font-size: 14px;">
+                    {p_act}, {p_sub}, {p_dur}, <strong style="font-size: 16px;">{p_start}</strong>
                 </div>
                 ''', unsafe_allow_html=True)
                 
@@ -726,19 +719,12 @@ try:
             curr_row = day_schedule[current_index]
             c_act = str(curr_row['Activity']).strip().upper()
             c_sub = str(curr_row.get('Sub_Activities', '')).strip() or "No specific sub-activities"
-            c_time = f"{curr_row['Start_Time']} - {curr_row['End_Time']}"
             c_dur = str(curr_row.get('Duration', ''))
+            c_start = str(curr_row.get('Start_Time', '')).strip()
             
             st.markdown(f'''
-            <div style="background-color: #2e7b32; color: white; padding: 8px 12px; border-radius: 6px; margin-top: 10px; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); display: flex; justify-content: space-between; align-items: center;">
-                <div style="flex-grow: 1; padding-right: 10px; overflow: hidden;">
-                    <strong style="font-size: 15px; display: block; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;">{c_act}</strong>
-                    <span style="font-size: 12px; opacity: 0.9; display: block; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;">{c_sub}</span>
-                </div>
-                <div style="text-align: right; min-width: 75px;">
-                    <span style="font-size: 11px; opacity: 0.9; display: block; margin-bottom: 2px;">{c_time}</span>
-                    <strong style="font-size: 16px; display: block;">{c_dur}</strong>
-                </div>
+            <div style="background-color: #2e7b32; color: white; padding: 12px; border-radius: 6px; margin-top: 10px; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); font-size: 15px;">
+                {c_act}, {c_sub}, {c_dur}, <strong style="font-size: 18px;">{c_start}</strong>
             </div>
             ''', unsafe_allow_html=True)
             
@@ -748,19 +734,12 @@ try:
             for n_row in next_rows:
                 n_act = str(n_row['Activity']).strip().upper()
                 n_sub = str(n_row.get('Sub_Activities', '')).strip() or "Routine Tasks"
-                n_time = f"{n_row['Start_Time']} - {n_row['End_Time']}"
                 n_dur = str(n_row.get('Duration', ''))
+                n_start = str(n_row.get('Start_Time', '')).strip()
                 
                 st.markdown(f'''
-                <div style="background-color: #0ea5e9; color: white; padding: 8px 12px; border-radius: 6px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center;">
-                    <div style="flex-grow: 1; padding-right: 10px; overflow: hidden;">
-                        <strong style="font-size: 15px; display: block; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;">{n_act}</strong>
-                        <span style="font-size: 12px; opacity: 0.9; display: block; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;">{n_sub}</span>
-                    </div>
-                    <div style="text-align: right; min-width: 75px;">
-                        <span style="font-size: 11px; opacity: 0.9; display: block; margin-bottom: 2px;">{n_time}</span>
-                        <strong style="font-size: 16px; display: block;">{n_dur}</strong>
-                    </div>
+                <div style="background-color: #0ea5e9; color: white; padding: 10px 12px; border-radius: 6px; margin-bottom: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); font-size: 14px;">
+                    {n_act}, {n_sub}, {n_dur}, <strong style="font-size: 16px;">{n_start}</strong>
                 </div>
                 ''', unsafe_allow_html=True)
 

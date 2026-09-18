@@ -669,93 +669,24 @@ try:
 
         day_schedule = master_df[master_df['Day'].str.strip().str.title() == schedule_day.title()].to_dict('records')
         
-        current_time = now.time()
-        current_index = -1
-        next_start_index = 0
-        is_today = (selected_timeline_date == now.date())
-
-        if is_today:
-            for i, row in enumerate(day_schedule):
-                try:
-                    start_str = str(row['Start_Time']).strip()
-                    end_str = str(row['End_Time']).strip()
-                    start_t = datetime.strptime(start_str, '%H:%M').time()
-                    end_t = datetime.strptime('23:59:59', '%H:%M:%S').time() if end_str in ['0:00', '00:00', '24:00'] else datetime.strptime(end_str, '%H:%M').time()
-
-                    is_current = (start_t <= current_time <= end_t) if start_t <= end_t else (current_time >= start_t or current_time <= end_t)
-
-                    if is_current:
-                        current_index = i
-                        next_start_index = i + 1
-                        break
-                    elif current_time < start_t:
-                        next_start_index = i
-                        break
-                except ValueError: continue
+        if day_schedule:
+            for row in day_schedule:
+                r_act = str(row.get('Activity', '')).strip().upper()
+                r_sub = str(row.get('Sub_Activities', '')).strip() or "Routine Tasks"
+                r_dur = str(row.get('Duration', ''))
+                r_start = str(row.get('Start_Time', '')).strip()
+                
+                st.markdown(f'''
+                <div style="background-color: #f8f9fa; color: #333; padding: 10px 12px; border-radius: 6px; margin-bottom: 6px; border-left: 4px solid #ccc; box-shadow: 0 1px 2px rgba(0,0,0,0.05); font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
+                    <div style="display: flex; gap: 11px; align-items: center;">
+                        <strong>{r_act}</strong> 
+                        <span style="color: #555;">{r_sub}</span> 
+                        <span style="opacity: 0.8; color: #777;">⏱️ {r_dur}</span>
+                    </div>
+                    <strong style="font-size: 16px; color: #222;">{r_start}</strong>
+                </div>
+                ''', unsafe_allow_html=True)
         else:
-            # If reviewing a past/future day, list all items natively
-            next_start_index = 0
-
-        # --- PREVIOUS ACTIVITIES (ASH) ---
-        end_idx = current_index if current_index != -1 else next_start_index
-        start_idx = max(0, end_idx - 5) if is_today else 0
-        prev_rows = day_schedule[start_idx : end_idx]
-        
-        if prev_rows and is_today:
-            for p_row in prev_rows:
-                p_act = str(p_row['Activity']).strip().upper()
-                p_sub = str(p_row.get('Sub_Activities', '')).strip() or "Routine Tasks"
-                p_dur = str(p_row.get('Duration', ''))
-                p_start = str(p_row.get('Start_Time', '')).strip()
-                
-                st.markdown(f'''
-                <div style="background-color: #e2e3e5; color: #495057; padding: 10px 12px; border-radius: 6px; margin-bottom: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); opacity: 0.8; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
-                    <div style="display: flex; gap: 11px; align-items: center;">
-                        <strong>{p_act}</strong> 
-                        <span>{p_sub}</span> 
-                        <span style="opacity: 0.8;">⏱️ {p_dur}</span>
-                    </div>
-                    <strong style="font-size: 16px;">{p_start}</strong>
-                </div>
-                ''', unsafe_allow_html=True)
-                
-        # --- CURRENT ACTIVITY (GREEN) ---
-        if current_index != -1 and is_today:
-            curr_row = day_schedule[current_index]
-            c_act = str(curr_row['Activity']).strip().upper()
-            c_sub = str(curr_row.get('Sub_Activities', '')).strip() or "No specific sub-activities"
-            c_dur = str(curr_row.get('Duration', ''))
-            c_start = str(curr_row.get('Start_Time', '')).strip()
-            
-            st.markdown(f'''
-            <div style="background-color: #2e7b32; color: white; padding: 12px; border-radius: 6px; margin-top: 10px; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); font-size: 15px; display: flex; justify-content: space-between; align-items: center;">
-                <div style="display: flex; gap: 11px; align-items: center;">
-                    <strong>{c_act}</strong> 
-                    <span>{c_sub}</span> 
-                    <span style="opacity: 0.9;">⏱️ {c_dur}</span>
-                </div>
-                <strong style="font-size: 18px;">{c_start}</strong>
-            </div>
-            ''', unsafe_allow_html=True)
-            
-        # --- NEXT ACTIVITIES (BLUE) ---
-        next_rows = day_schedule[next_start_index : next_start_index+10] if is_today else day_schedule
-        if next_rows:
-            for n_row in next_rows:
-                n_act = str(n_row['Activity']).strip().upper()
-                n_sub = str(n_row.get('Sub_Activities', '')).strip() or "Routine Tasks"
-                n_dur = str(n_row.get('Duration', ''))
-                n_start = str(n_row.get('Start_Time', '')).strip()
-                
-                st.markdown(f'''
-                <div style="background-color: #0ea5e9; color: white; padding: 10px 12px; border-radius: 6px; margin-bottom: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
-                    <div style="display: flex; gap: 11px; align-items: center;">
-                        <strong>{n_act}</strong> 
-                        <span>{n_sub}</span> 
-                        <span style="opacity: 0.9;">⏱️ {n_dur}</span>
-                    </div>
-                    <strong style="font-size: 16px;">{n_start}</strong>
-                </div>
-                ''', unsafe_allow_html=True)
+            st.info(f"No master schedule found for {schedule_day}.")
 
 except Exception as e: st.error(f"System Error: {e}")

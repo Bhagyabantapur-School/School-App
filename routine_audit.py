@@ -1,4 +1,5 @@
 import streamlit as st
+import hashlib
 
 # --- BACK BUTTON ---
 if st.button("⬅️ Back to Hub", type="secondary"):
@@ -109,6 +110,37 @@ def parse_duration_to_minutes(dur_str):
         h, m = map(int, str(dur_str).strip().split(':'))
         return (h * 60) + m
     except: return 0
+
+# --- DYNAMIC COLOR ENGINE ---
+def get_activity_color(activity_name):
+    cat = str(activity_name).strip().upper()
+    
+    # 1. Preserve Familiar Core Colors
+    if cat in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"]: return "#ff4b4b" # Red
+    if cat in ["WORK", "REPORT", "TASK"]: return "#0068c9" # Blue
+    if cat == "HEALTH": return "#2e7b32" # Green
+    if cat in ["SLEEP", "PRE", "TEA", "OUT"]: return "#ff9f36" # Orange
+    if cat == "FREE TIME": return "#29b6f6" # Light Blue
+    
+    # 2. Dynamic Assignment for UNKNOWN/NEW Categories
+    # We use a mathematical hash of the activity name so that any text 
+    # automatically gets the *exact same* color every single time.
+    COLOR_PALETTE = [
+        "#8e24aa", # Purple
+        "#fbc02d", # Yellow
+        "#e91e63", # Pink
+        "#009688", # Teal
+        "#3949ab", # Indigo
+        "#7cb342", # Light Green
+        "#d81b60", # Deep Pink
+        "#039be5", # Bright Blue
+        "#43a047", # Med Green
+        "#f4511e", # Deep Orange
+        "#5e35b1", # Deep Purple
+        "#00acc1"  # Cyan
+    ]
+    hash_int = int(hashlib.md5(cat.encode()).hexdigest(), 16)
+    return COLOR_PALETTE[hash_int % len(COLOR_PALETTE)]
 
 # ==========================================
 # Main App UI
@@ -381,8 +413,8 @@ try:
                     )
                 st.markdown(html, unsafe_allow_html=True)
             else:
-                cat = event['activity']
-                border_color = "#ff4b4b" if cat in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"] else ("#0068c9" if cat in ["WORK", "REPORT", "TASK"] else ("#2e7b32" if cat == "HEALTH" else ("#ff9f36" if cat in ["SLEEP", "PRE", "TEA", "OUT"] else ("#29b6f6" if cat == "FREE TIME" else "#555555"))))
+                # Apply Dynamic Color Engine
+                border_color = get_activity_color(event['activity'])
                 
                 sub_text = f"<span style='color: #555; font-size: 14px; font-weight: 500;'>{event['sub']}</span>" if event['sub'] else ""
                 note_val = str(event.get('notes', '')).strip()
@@ -676,9 +708,8 @@ try:
                 r_dur = str(row.get('Duration', ''))
                 r_start = str(row.get('Start_Time', '')).strip()
                 
-                # Apply consistent color-coding based on the Activity category
-                cat = r_act
-                border_color = "#ff4b4b" if cat in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"] else ("#0068c9" if cat in ["WORK", "REPORT", "TASK"] else ("#2e7b32" if cat == "HEALTH" else ("#ff9f36" if cat in ["SLEEP", "PRE", "TEA", "OUT"] else ("#29b6f6" if cat == "FREE TIME" else "#888888"))))
+                # Apply Dynamic Color Engine
+                border_color = get_activity_color(r_act)
                 
                 st.markdown(f'''
                 <div style="background-color: white; padding: 10px 12px; border-radius: 6px; margin-bottom: 6px; border-left: 5px solid {border_color}; box-shadow: 0 1px 2px rgba(0,0,0,0.1); font-size: 14px; display: flex; justify-content: space-between; align-items: center;">

@@ -709,8 +709,9 @@ try:
                 p_start = str(p_row.get('Start_Time', '')).strip()
                 
                 st.markdown(f'''
-                <div style="background-color: #e2e3e5; color: #495057; padding: 10px 12px; border-radius: 6px; margin-bottom: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); opacity: 0.8; font-size: 14px;">
-                    {p_act}, {p_sub}, {p_dur}, <strong style="font-size: 16px;">{p_start}</strong>
+                <div style="background-color: #e2e3e5; color: #495057; padding: 10px 12px; border-radius: 6px; margin-bottom: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); opacity: 0.8; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
+                    <div><strong>{p_act}</strong> {p_sub} {p_dur}</div>
+                    <strong style="font-size: 16px;">{p_start}</strong>
                 </div>
                 ''', unsafe_allow_html=True)
                 
@@ -723,8 +724,9 @@ try:
             c_start = str(curr_row.get('Start_Time', '')).strip()
             
             st.markdown(f'''
-            <div style="background-color: #2e7b32; color: white; padding: 12px; border-radius: 6px; margin-top: 10px; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); font-size: 15px;">
-                {c_act}, {c_sub}, {c_dur}, <strong style="font-size: 18px;">{c_start}</strong>
+            <div style="background-color: #2e7b32; color: white; padding: 12px; border-radius: 6px; margin-top: 10px; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); font-size: 15px; display: flex; justify-content: space-between; align-items: center;">
+                <div><strong>{c_act}</strong> {c_sub} {c_dur}</div>
+                <strong style="font-size: 18px;">{c_start}</strong>
             </div>
             ''', unsafe_allow_html=True)
             
@@ -738,8 +740,9 @@ try:
                 n_start = str(n_row.get('Start_Time', '')).strip()
                 
                 st.markdown(f'''
-                <div style="background-color: #0ea5e9; color: white; padding: 10px 12px; border-radius: 6px; margin-bottom: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); font-size: 14px;">
-                    {n_act}, {n_sub}, {n_dur}, <strong style="font-size: 16px;">{n_start}</strong>
+                <div style="background-color: #0ea5e9; color: white; padding: 10px 12px; border-radius: 6px; margin-bottom: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
+                    <div><strong>{n_act}</strong> {n_sub} {n_dur}</div>
+                    <strong style="font-size: 16px;">{n_start}</strong>
                 </div>
                 ''', unsafe_allow_html=True)
 

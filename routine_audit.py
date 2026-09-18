@@ -709,16 +709,16 @@ try:
                 r_start = str(row.get('Start_Time', '')).strip()
                 
                 # Apply Dynamic Color Engine
-                border_color = get_activity_color(r_act)
+                bg_color = get_activity_color(r_act)
                 
                 st.markdown(f'''
-                <div style="background-color: white; padding: 10px 12px; border-radius: 6px; margin-bottom: 6px; border-left: 5px solid {border_color}; box-shadow: 0 1px 2px rgba(0,0,0,0.1); font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
+                <div style="background-color: {bg_color}; color: white; padding: 10px 12px; border-radius: 6px; margin-bottom: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
                     <div style="display: flex; gap: 11px; align-items: center;">
-                        <strong style="color: {border_color};">{r_act}</strong> 
-                        <span style="color: #555;">{r_sub}</span> 
-                        <span style="opacity: 0.8; color: #777;">⏱️ {r_dur}</span>
+                        <strong style="font-weight: bold;">{r_act}</strong> 
+                        <span style="opacity: 0.95;">{r_sub}</span> 
+                        <span style="opacity: 0.85;">⏱️ {r_dur}</span>
                     </div>
-                    <strong style="font-size: 16px; color: #222;">{r_start}</strong>
+                    <strong style="font-size: 16px;">{r_start}</strong>
                 </div>
                 ''', unsafe_allow_html=True)
         else:

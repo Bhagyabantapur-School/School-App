@@ -676,10 +676,14 @@ try:
                 r_dur = str(row.get('Duration', ''))
                 r_start = str(row.get('Start_Time', '')).strip()
                 
+                # Apply consistent color-coding based on the Activity category
+                cat = r_act
+                border_color = "#ff4b4b" if cat in ["SUBORNO CARE", "BRING SUBORNO", "FAMILY", "PEOPLE"] else ("#0068c9" if cat in ["WORK", "REPORT", "TASK"] else ("#2e7b32" if cat == "HEALTH" else ("#ff9f36" if cat in ["SLEEP", "PRE", "TEA", "OUT"] else ("#29b6f6" if cat == "FREE TIME" else "#888888"))))
+                
                 st.markdown(f'''
-                <div style="background-color: #f8f9fa; color: #333; padding: 10px 12px; border-radius: 6px; margin-bottom: 6px; border-left: 4px solid #ccc; box-shadow: 0 1px 2px rgba(0,0,0,0.05); font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
+                <div style="background-color: white; padding: 10px 12px; border-radius: 6px; margin-bottom: 6px; border-left: 5px solid {border_color}; box-shadow: 0 1px 2px rgba(0,0,0,0.1); font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
                     <div style="display: flex; gap: 11px; align-items: center;">
-                        <strong>{r_act}</strong> 
+                        <strong style="color: {border_color};">{r_act}</strong> 
                         <span style="color: #555;">{r_sub}</span> 
                         <span style="opacity: 0.8; color: #777;">⏱️ {r_dur}</span>
                     </div>

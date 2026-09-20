@@ -75,19 +75,33 @@ def fetch_existing_data():
         st.error(f"⚠️ Error fetching data (ডেটা লোড করতে সমস্যা): {e}")
         return pd.DataFrame()
 
-# --- NEW: Fetch Action Required Data ---
+# --- BULLETPROOF ACTION REQUIRED FETCH ---
 @st.cache_data(ttl=60)
 def fetch_action_required():
     sh = init_sheet()
     try:
         ws = sh.worksheet("Action Required")
         raw_values = ws.get_all_values()
-        if not raw_values:
+        
+        # If sheet is empty or only has headers
+        if len(raw_values) <= 1:
             return pd.DataFrame()
-        return pd.DataFrame(ws.get_all_records())
+            
+        # Parse data robustly to ignore trailing empty cells and mismatched rows
+        df = pd.DataFrame(raw_values)
+        df.columns = df.iloc[0].astype(str).str.strip() # Set headers and remove accidental spaces
+        df = df[1:].copy()
+        
+        # Filter out rows where UDISE Code is completely blank
+        if 'UDISE Code' in df.columns:
+            df = df[df['UDISE Code'].astype(str).str.strip() != '']
+            
+        return df
     except WorksheetNotFound:
         return pd.DataFrame()
     except Exception as e:
+        # Show the error in the app so you know exactly what is wrong
+        st.error(f"⚠️ Action Tab Error: {e}") 
         return pd.DataFrame()
 
 # ==========================================
@@ -130,6 +144,7 @@ if not action_df.empty:
     disp_action = action_df.copy()
     
     if 'UDISE Code' in disp_action.columns:
+        # Convert scientific notation or .0 decimals gracefully
         disp_action['UDISE Code'] = pd.to_numeric(disp_action['UDISE Code'], errors='coerce').fillna(0).astype(int).astype(str)
         disp_action['UDISE Code'] = disp_action['UDISE Code'].replace('0', '')
         

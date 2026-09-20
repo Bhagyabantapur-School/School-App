@@ -148,7 +148,7 @@ def is_default(app_name, system_category):
 # --- Personal Pages ---
 routine_hub = st.Page("routine_app.py", title="Live Routine Hub", icon="⏱️", default=is_default("Live Routine Hub", "Personal Hub"))
 money_app = st.Page("money_app.py", title="Money App", icon="💰", default=is_default("Money App", "Personal Hub"))
-money_incomplete_app = st.Page("money_incomplete.py", title="Money Incomplete", icon="⏳", default=is_default("Money Incomplete", "Personal Hub")) # <-- Defined here
+money_incomplete_app = st.Page("money_incomplete.py", title="Money Incomplete", icon="⏳", default=is_default("Money Incomplete", "Personal Hub"))
 location_app = st.Page("location_app.py", title="Location App", icon="📍", default=is_default("Location App", "Personal Hub"))
 money_utilities = st.Page("money_utilities.py", title="Money Utilities", icon="💳", default=is_default("Money Utilities", "Personal Hub")) 
 strong = st.Page("strong.py", title="Strong Tracker", icon="💪", default=is_default("Strong Tracker", "Personal Hub"))
@@ -191,12 +191,12 @@ staff_portal = st.Page("app.py", title="Staff Portal", icon="🔐", default=is_d
 grocery_app = st.Page("bps_grocery_ad.py", title="Grocery Manager", icon="🥦", default=is_default("Grocery Manager", "BPS Digital System"))
 
 # ==========================================
-# 7. NAVIGATION
+# 7. NAVIGATION WITH DYNAMIC APP COUNTERS
 # ==========================================
 if system_choice == 'Personal Hub':
-    # Updated Sidebar Grouping to match the Routine Hub Launchpad
-    pg = st.navigation({
-        "MONEY": [money_app, money_incomplete_app, money_utilities, money_tracker, product_inventory], # <-- Added here
+    # 1. Define Dictionary
+    personal_nav = {
+        "MONEY": [money_app, money_incomplete_app, money_utilities, money_tracker, product_inventory],
         "LOCATION": [location_app, packing_tracker],
         "ROUTINE": [routine_hub, routine_audit, routine_editor, project, ai_video_tracker, courses_app], 
         "HEALTH": [health, sleep_water],
@@ -206,16 +206,34 @@ if system_choice == 'Personal Hub':
         "BALANCE": [strong],
         "ONES": [election, app_updater, notes_app],
         "DASHBOARD": [visual_dashboard]
-    })
+    }
+    
+    # 2. Count Total Apps
+    total_personal_apps = sum(len(apps) for apps in personal_nav.values())
+    st.sidebar.markdown(f"#### 🚀 Personal Hub ({total_personal_apps} Apps)")
+    
+    # 3. Format Section Headers with Counters
+    pg = st.navigation({f"{k} ({len(v)})": v for k, v in personal_nav.items()})
+    
     st.sidebar.caption("🔒 Personal Workspace Active")
+
 else:
-    pg = st.navigation({
+    # 1. Define Dictionary
+    bps_nav = {
         "System Home": [bps_dashboard],
         "Staff & Admin": [staff_portal],
         "Student Management": [admission, student_profile, id_card],
         "Academics & Finance": [school_data, exam_fees, library_app],
         "Operations": [leave, distribution, returns, form_manager, grocery_app]
-    })
+    }
+    
+    # 2. Count Total Apps
+    total_bps_apps = sum(len(apps) for apps in bps_nav.values())
+    st.sidebar.markdown(f"#### 🏫 BPS System ({total_bps_apps} Apps)")
+    
+    # 3. Format Section Headers with Counters
+    pg = st.navigation({f"{k} ({len(v)})": v for k, v in bps_nav.items()})
+    
     st.sidebar.markdown("#### Bhagyabantapur Primary School")
     st.sidebar.caption("Head Teacher Dashboard Active")
 

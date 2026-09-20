@@ -52,9 +52,10 @@ def init_sheet():
 def get_worksheet():
     sh = init_sheet()
     try:
-        return sh.sheet1
+        # 🔴 FIXED: Explicitly target "Sheet1" by name instead of the leftmost tab
+        return sh.worksheet("Sheet1")
     except Exception as e:
-        st.error(f"⚠️ Could not open the first worksheet. Error: {e}")
+        st.error(f"⚠️ Could not open 'Sheet1'. Ensure your main data tab is named exactly 'Sheet1'. Error: {e}")
         st.stop()
 
 @st.cache_data(ttl=60)
@@ -87,7 +88,7 @@ def fetch_action_required():
         if len(raw_values) <= 1:
             return pd.DataFrame()
             
-        # Parse data robustly to ignore trailing empty cells and mismatched rows
+        # Parse data robustly
         df = pd.DataFrame(raw_values)
         df.columns = df.iloc[0].astype(str).str.strip() # Set headers and remove accidental spaces
         df = df[1:].copy()
@@ -100,7 +101,6 @@ def fetch_action_required():
     except WorksheetNotFound:
         return pd.DataFrame()
     except Exception as e:
-        # Show the error in the app so you know exactly what is wrong
         st.error(f"⚠️ Action Tab Error: {e}") 
         return pd.DataFrame()
 
@@ -134,6 +134,10 @@ st.markdown("""
 # ==========================================
 # 🚨 ACTION REQUIRED NOTICE BOARD
 # ==========================================
+# Refresh button to bypass the 60-second cache
+if st.button("🔄 Refresh Notice Board", help="শিটে আপডেট করার পর এখানে ক্লিক করে নতুন নোটিশ লোড করুন"):
+    fetch_action_required.clear()
+
 action_df = fetch_action_required()
 
 if not action_df.empty:
@@ -151,7 +155,7 @@ if not action_df.empty:
     def get_bengali_instruction(reason):
         r_lower = str(reason).lower()
         if "0" in r_lower or "sq ft" in r_lower or "zero" in r_lower or "space" in r_lower:
-            return "আপনি ছাঁদে ০ স্কয়ার ফিট জায়গা আছে বলেছেন। যদি এটি সত্যি হয়, তবে আপনার আর কিছু করার প্রয়োজন নেই। যদি এটি টাইপিং ভুল হয়, তবে সঠিক আয়তন দিয়ে পুনরায় সাবমিট করুন।"
+            return "আপনি ছাঁদে ০ স্কয়ার ফিট জায়গা আছে বলেছেন। যদি এটি সত্যি হয়, তবে আপনার আর কিছু করার প্রয়োজন নেই। যদি এটি টাইপিং ভুল হয়, তবে সঠিক আয়তন দিয়ে পুনরায় আপডেট করুন।"
         elif "invalid" in r_lower or "incorrect" in r_lower or "wrong" in r_lower or "error" in r_lower:
             return "আপনার দেওয়া তথ্যটি অসম্পূর্ণ বা ভুল। দয়া করে সঠিক তথ্য দিয়ে পুনরায় ফর্মটি আপডেট করুন।"
         else:

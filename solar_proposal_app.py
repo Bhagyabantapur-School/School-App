@@ -52,7 +52,7 @@ def init_sheet():
 def get_worksheet():
     sh = init_sheet()
     try:
-        # 🔴 FIXED: Explicitly target "Sheet1" by name instead of the leftmost tab
+        # 🔴 Explicitly target "Sheet1" by name instead of the leftmost tab
         return sh.worksheet("Sheet1")
     except Exception as e:
         st.error(f"⚠️ Could not open 'Sheet1'. Ensure your main data tab is named exactly 'Sheet1'. Error: {e}")
@@ -141,10 +141,6 @@ if st.button("🔄 Refresh Notice Board", help="শিটে আপডেট ক
 action_df = fetch_action_required()
 
 if not action_df.empty:
-    st.markdown('<div class="action-box">', unsafe_allow_html=True)
-    st.markdown("<h4 style='margin-top:0; color: #856404;'>🚨 ACTION REQUIRED: Attention Head Teachers</h4>", unsafe_allow_html=True)
-    st.markdown("<p style='color: #856404; font-size: 14px;'>নিচের স্কুলগুলোর তথ্যে ভুল থাকায় তালিকা থেকে মুছে দেওয়া হয়েছে। দয়া করে UDISE কোড দিয়ে পুনরায় সঠিক তথ্য আপডেট করুন।</p>", unsafe_allow_html=True)
-    
     disp_action = action_df.copy()
     
     if 'UDISE Code' in disp_action.columns:
@@ -162,13 +158,34 @@ if not action_df.empty:
             return "দয়া করে সঠিক তথ্য দিয়ে পুনরায় ফর্মটি আপডেট করুন।"
             
     if 'Reason' in disp_action.columns:
-        disp_action['Instruction (করণীয়)'] = disp_action['Reason'].apply(get_bengali_instruction)
+        disp_action['Instruction'] = disp_action['Reason'].apply(get_bengali_instruction)
+    else:
+        disp_action['Instruction'] = "দয়া করে সঠিক তথ্য দিয়ে পুনরায় ফর্মটি আপডেট করুন।"
         
-    # Select columns to display if they exist
-    cols_to_show = [c for c in ['UDISE Code', 'School Name', 'Instruction (করণীয়)'] if c in disp_action.columns]
+    # --- BUILD A SINGLE HTML STRING FOR PERFECT RENDERING INSIDE THE BOX ---
+    html_content = """
+    <div class="action-box">
+        <h4 style='margin-top:0; color: #856404;'>🚨 ACTION REQUIRED: Attention HOI</h4>
+        <p style='color: #856404; font-size: 14px;'>নিচের স্কুলগুলোর তথ্যে ভুল থাকায় তালিকা থেকে মুছে দেওয়া হয়েছে। দয়া করে UDISE কোড দিয়ে পুনরায় সঠিক তথ্য আপডেট করুন।</p>
+        <hr style='border-color: #ffeeba; margin: 15px 0;'>
+    """
     
-    st.dataframe(disp_action[cols_to_show] if cols_to_show else disp_action, hide_index=True, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    # Group schools by Instruction
+    grouped_action = disp_action.groupby('Instruction')
+    
+    for instruction, group in grouped_action:
+        html_content += f"<p style='color: #856404; font-weight: bold; margin-bottom: 5px;'>📌 {instruction}</p>"
+        html_content += "<ul style='color: #856404; margin-top: 0; margin-bottom: 20px; font-size: 14px;'>"
+        for _, row in group.iterrows():
+            school_name = row.get('School Name', 'Unknown School')
+            udise = row.get('UDISE Code', 'N/A')
+            html_content += f"<li><strong>{school_name}</strong> (UDISE: {udise})</li>"
+        html_content += "</ul>"
+        
+    html_content += "</div>"
+    
+    # Render the entire Notice Board in one go
+    st.markdown(html_content, unsafe_allow_html=True)
 
 # ==========================================
 # 📝 SUBMISSION FORM

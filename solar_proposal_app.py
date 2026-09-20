@@ -13,8 +13,9 @@ from google.oauth2.service_account import Credentials
 st.set_page_config(page_title="Rooftop Solar Proposal", page_icon="☀️", layout="centered")
 IST = pytz.timezone('Asia/Kolkata')
 
-# ⚠️ VERY IMPORTANT: The exact name of your Google Sheet
-SHEET_NAME = "PROPOSAL FOR RTSP 2"
+# ⚠️ DUAL SHEET CONFIGURATION
+MAIN_SHEET_NAME = "PROPOSAL FOR ROOF TOP  SOLAR PANEL FOR GOVT. PRIMARY SCHOOLS UNDER HALDIA CIRCLE"
+NOTICE_SHEET_NAME = "PROPOSAL FOR RTSP 2"
 
 # ==========================================
 # 🧠 SESSION STATE INITIALIZATION
@@ -29,7 +30,7 @@ if 'success_msg' not in st.session_state:
     st.session_state.success_msg = ""
 
 # ==========================================
-# 🔌 GOOGLE SHEETS CONNECTOR
+# 🔌 GOOGLE SHEETS CONNECTOR (DUAL CONNECTION)
 # ==========================================
 @st.cache_resource
 def get_google_credentials():
@@ -42,19 +43,27 @@ def get_google_credentials():
     )
 
 @st.cache_resource
-def init_sheet():
+def init_main_sheet():
     try: 
-        return gspread.authorize(get_google_credentials()).open(SHEET_NAME)
+        return gspread.authorize(get_google_credentials()).open(MAIN_SHEET_NAME)
     except Exception as e: 
-        st.error(f"⚠️ Connection Error: {e}. Ensure the sheet name is exact and shared with your service account email.")
+        st.error(f"⚠️ Main DB Connection Error: {e}")
+        st.stop()
+
+@st.cache_resource
+def init_notice_sheet():
+    try: 
+        return gspread.authorize(get_google_credentials()).open(NOTICE_SHEET_NAME)
+    except Exception as e: 
+        st.error(f"⚠️ Notice DB Connection Error: {e}")
         st.stop()
 
 def get_worksheet():
-    sh = init_sheet()
+    sh = init_main_sheet()
     try:
         return sh.worksheet("Sheet1")
     except Exception as e:
-        st.error(f"⚠️ Could not open 'Sheet1'. Ensure your main data tab is named exactly 'Sheet1'. Error: {e}")
+        st.error(f"⚠️ Could not open 'Sheet1' in Main DB. Error: {e}")
         st.stop()
 
 @st.cache_data(ttl=60)
@@ -72,12 +81,12 @@ def fetch_existing_data():
         else:
             return pd.DataFrame(ws.get_all_records())
     except Exception as e:
-        st.error(f"⚠️ Error fetching data (ডেটা লোড করতে সমস্যা): {e}")
+        st.error(f"⚠️ Error fetching data: {e}")
         return pd.DataFrame()
 
 @st.cache_data(ttl=60)
 def fetch_action_required():
-    sh = init_sheet()
+    sh = init_notice_sheet()
     try:
         ws = sh.worksheet("Action Required")
         raw_values = ws.get_all_values()
@@ -129,7 +138,6 @@ st.markdown("""
 # ==========================================
 # 🚨 ACTION REQUIRED NOTICE BOARD
 # ==========================================
-# Refresh button to bypass cache for both sheets
 if st.button("🔄 Refresh Notice Board", help="শিটে আপডেট করার পর এখানে ক্লিক করে নতুন নোটিশ লোড করুন"):
     fetch_action_required.clear()
     fetch_existing_data.clear()
@@ -141,17 +149,15 @@ if not action_df.empty:
     disp_action = action_df.copy()
     
     if 'UDISE Code' in disp_action.columns:
-        # 1. Clean Notice Board UDISE Codes
+        # Clean Notice Board UDISE Codes
         disp_action['UDISE Code'] = pd.to_numeric(disp_action['UDISE Code'], errors='coerce').fillna(0).astype(int).astype(str)
         disp_action['UDISE Code'] = disp_action['UDISE Code'].replace('0', '').str.strip()
         
-        # 2. Get list of UDISE codes already submitted in Sheet1
+        # Cross-reference with Main Data to Auto-Disappear
         if not existing_data.empty and 'UDISE Code' in existing_data.columns:
             existing_udises = existing_data['UDISE Code'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().tolist()
-            # 3. AUTO-DISAPPEAR LOGIC: Remove schools that have already submitted
             disp_action = disp_action[~disp_action['UDISE Code'].isin(existing_udises)]
             
-    # Proceed ONLY if there are still schools left after filtering
     if not disp_action.empty:
         def get_bengali_instruction(reason):
             r_lower = str(reason).lower()
@@ -186,17 +192,15 @@ if not action_df.empty:
             html_content += "</ul>"
             
         html_content += "</div>"
-        
         st.markdown(html_content, unsafe_allow_html=True)
 
 # ==========================================
 # 📝 SUBMISSION FORM
 # ==========================================
-# Show Success Message if a form was just submitted
 if st.session_state.success_msg:
     st.success(st.session_state.success_msg)
     st.balloons()
-    st.session_state.success_msg = "" # Clear after showing
+    st.session_state.success_msg = "" 
 
 st.markdown("### 🏫 School Information (স্কুলের তথ্য)")
 st.info("💡 **Instruction:** প্রথমে আপনার স্কুলের ১১ ডিজিটের UDISE Code দিন এবং **'Check UDISE'** বাটনে ক্লিক করুন।")
@@ -322,7 +326,7 @@ if st.session_state.checked_udise:
                             ws.update(f"A{row_to_update}:F{row_to_update}", [row_data]) 
                             
                         fetch_existing_data.clear()
-                        fetch_action_required.clear() # Clear notice board cache as well
+                        fetch_action_required.clear() 
                         
                         st.session_state.success_msg = f"✏️ {school_name_loc}-এর তথ্য সফলভাবে আপডেট হয়েছে!"
                         st.session_state.checked_udise = None
@@ -341,7 +345,7 @@ if st.session_state.checked_udise:
                         row_data = [next_sl_no, str(udise_code).strip(), school_name_loc.strip(), formatted_roof_space, system_status, add_req]
                         ws.append_row(row_data)
                         fetch_existing_data.clear()
-                        fetch_action_required.clear() # Clear notice board cache as well
+                        fetch_action_required.clear() 
                         
                         st.session_state.success_msg = f"🎉 {school_name_loc}-এর তথ্য সফলভাবে সাবমিট হয়েছে!"
                         st.session_state.checked_udise = None

@@ -105,7 +105,6 @@ st.markdown("""
     }
     .gov-title { color: #0056b3; margin-bottom: 5px; font-weight: 900; }
     .gov-sub { color: #333; font-size: 14px; margin-bottom: 0; }
-    .form-container { border: 1px solid #ced4da; border-radius: 8px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); background-color: #ffffff;}
     .action-box { background-color: #fff3cd; border-left: 5px solid #ffc107; padding: 20px; border-radius: 4px; margin-bottom: 25px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);}
 </style>
 """, unsafe_allow_html=True)
@@ -156,8 +155,6 @@ if not action_df.empty:
 # 📝 SUBMISSION FORM
 # ==========================================
 existing_data = fetch_existing_data()
-
-st.markdown('<div class="form-container">', unsafe_allow_html=True)
 
 # Show Success Message if a form was just submitted
 if st.session_state.success_msg:
@@ -326,8 +323,6 @@ if st.session_state.checked_udise:
                     
                 except Exception as e:
                     st.error(f"⚠️ Google Sheets-এ সেভ করতে সমস্যা হয়েছে। Error: {e}")
-
-st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
 # 📊 SUBMISSION DASHBOARD & ERROR TRACKING

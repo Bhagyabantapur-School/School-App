@@ -208,14 +208,17 @@ if system_choice == 'Personal Hub':
         "DASHBOARD": [visual_dashboard]
     }
     
-    # 2. Count Total Apps
+    # 2. Attractive Grand Total Display
     total_personal_apps = sum(len(apps) for apps in personal_nav.values())
-    st.sidebar.markdown(f"#### 🚀 Personal Hub ({total_personal_apps} Apps)")
+    st.sidebar.markdown(f"""
+        <div style="background: linear-gradient(135deg, #1e3c72, #2a5298); padding: 15px; border-radius: 10px; text-align: center; color: white; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <h2 style="margin: 0; font-size: 26px; font-weight: 800; color: white;">🚀 {total_personal_apps} Apps</h2>
+            <p style="margin: 0; font-size: 14px; opacity: 0.9; font-weight: 500;">Personal Hub Active</p>
+        </div>
+    """, unsafe_allow_html=True)
     
     # 3. Format Section Headers with Counters
     pg = st.navigation({f"{k} ({len(v)})": v for k, v in personal_nav.items()})
-    
-    st.sidebar.caption("🔒 Personal Workspace Active")
 
 else:
     # 1. Define Dictionary
@@ -227,9 +230,14 @@ else:
         "Operations": [leave, distribution, returns, form_manager, grocery_app]
     }
     
-    # 2. Count Total Apps
+    # 2. Attractive Grand Total Display
     total_bps_apps = sum(len(apps) for apps in bps_nav.values())
-    st.sidebar.markdown(f"#### 🏫 BPS System ({total_bps_apps} Apps)")
+    st.sidebar.markdown(f"""
+        <div style="background: linear-gradient(135deg, #11998e, #38ef7d); padding: 15px; border-radius: 10px; text-align: center; color: white; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <h2 style="margin: 0; font-size: 26px; font-weight: 800; color: white;">🏫 {total_bps_apps} Apps</h2>
+            <p style="margin: 0; font-size: 14px; opacity: 0.9; font-weight: 500;">BPS System Active</p>
+        </div>
+    """, unsafe_allow_html=True)
     
     # 3. Format Section Headers with Counters
     pg = st.navigation({f"{k} ({len(v)})": v for k, v in bps_nav.items()})

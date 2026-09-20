@@ -52,7 +52,6 @@ def init_sheet():
 def get_worksheet():
     sh = init_sheet()
     try:
-        # 🔴 Explicitly target "Sheet1" by name instead of the leftmost tab
         return sh.worksheet("Sheet1")
     except Exception as e:
         st.error(f"⚠️ Could not open 'Sheet1'. Ensure your main data tab is named exactly 'Sheet1'. Error: {e}")
@@ -76,7 +75,6 @@ def fetch_existing_data():
         st.error(f"⚠️ Error fetching data (ডেটা লোড করতে সমস্যা): {e}")
         return pd.DataFrame()
 
-# --- BULLETPROOF ACTION REQUIRED FETCH ---
 @st.cache_data(ttl=60)
 def fetch_action_required():
     sh = init_sheet()
@@ -84,16 +82,13 @@ def fetch_action_required():
         ws = sh.worksheet("Action Required")
         raw_values = ws.get_all_values()
         
-        # If sheet is empty or only has headers
         if len(raw_values) <= 1:
             return pd.DataFrame()
             
-        # Parse data robustly
         df = pd.DataFrame(raw_values)
-        df.columns = df.iloc[0].astype(str).str.strip() # Set headers and remove accidental spaces
+        df.columns = df.iloc[0].astype(str).str.strip() 
         df = df[1:].copy()
         
-        # Filter out rows where UDISE Code is completely blank
         if 'UDISE Code' in df.columns:
             df = df[df['UDISE Code'].astype(str).str.strip() != '']
             
@@ -134,64 +129,69 @@ st.markdown("""
 # ==========================================
 # 🚨 ACTION REQUIRED NOTICE BOARD
 # ==========================================
-# Refresh button to bypass the 60-second cache
+# Refresh button to bypass cache for both sheets
 if st.button("🔄 Refresh Notice Board", help="শিটে আপডেট করার পর এখানে ক্লিক করে নতুন নোটিশ লোড করুন"):
     fetch_action_required.clear()
+    fetch_existing_data.clear()
 
+existing_data = fetch_existing_data()
 action_df = fetch_action_required()
 
 if not action_df.empty:
     disp_action = action_df.copy()
     
     if 'UDISE Code' in disp_action.columns:
-        # Convert scientific notation or .0 decimals gracefully
+        # 1. Clean Notice Board UDISE Codes
         disp_action['UDISE Code'] = pd.to_numeric(disp_action['UDISE Code'], errors='coerce').fillna(0).astype(int).astype(str)
-        disp_action['UDISE Code'] = disp_action['UDISE Code'].replace('0', '')
+        disp_action['UDISE Code'] = disp_action['UDISE Code'].replace('0', '').str.strip()
         
-    def get_bengali_instruction(reason):
-        r_lower = str(reason).lower()
-        if "0" in r_lower or "sq ft" in r_lower or "zero" in r_lower or "space" in r_lower:
-            return "আপনি ছাঁদে ০ স্কয়ার ফিট জায়গা আছে বলেছেন। যদি এটি সত্যি হয়, তবে আপনার আর কিছু করার প্রয়োজন নেই। যদি এটি টাইপিং ভুল হয়, তবে সঠিক আয়তন দিয়ে পুনরায় আপডেট করুন।"
-        elif "invalid" in r_lower or "incorrect" in r_lower or "wrong" in r_lower or "error" in r_lower:
-            return "আপনার দেওয়া তথ্যটি অসম্পূর্ণ বা ভুল। দয়া করে সঠিক তথ্য দিয়ে পুনরায় ফর্মটি আপডেট করুন।"
-        else:
-            return "দয়া করে সঠিক তথ্য দিয়ে পুনরায় ফর্মটি আপডেট করুন।"
+        # 2. Get list of UDISE codes already submitted in Sheet1
+        if not existing_data.empty and 'UDISE Code' in existing_data.columns:
+            existing_udises = existing_data['UDISE Code'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().tolist()
+            # 3. AUTO-DISAPPEAR LOGIC: Remove schools that have already submitted
+            disp_action = disp_action[~disp_action['UDISE Code'].isin(existing_udises)]
             
-    if 'Reason' in disp_action.columns:
-        disp_action['Instruction'] = disp_action['Reason'].apply(get_bengali_instruction)
-    else:
-        disp_action['Instruction'] = "দয়া করে সঠিক তথ্য দিয়ে পুনরায় ফর্মটি আপডেট করুন।"
+    # Proceed ONLY if there are still schools left after filtering
+    if not disp_action.empty:
+        def get_bengali_instruction(reason):
+            r_lower = str(reason).lower()
+            if "0" in r_lower or "sq ft" in r_lower or "zero" in r_lower or "space" in r_lower:
+                return "আপনি ছাঁদে ০ স্কয়ার ফিট জায়গা আছে বলেছেন। যদি এটি সত্যি হয়, তবে আপনার আর কিছু করার প্রয়োজন নেই। যদি এটি টাইপিং ভুল হয়, তবে সঠিক আয়তন দিয়ে পুনরায় আপডেট করুন।"
+            elif "invalid" in r_lower or "incorrect" in r_lower or "wrong" in r_lower or "error" in r_lower:
+                return "আপনার দেওয়া তথ্যটি অসম্পূর্ণ বা ভুল। দয়া করে সঠিক তথ্য দিয়ে পুনরায় ফর্মটি আপডেট করুন।"
+            else:
+                return "দয়া করে সঠিক তথ্য দিয়ে পুনরায় ফর্মটি আপডেট করুন।"
+                
+        if 'Reason' in disp_action.columns:
+            disp_action['Instruction'] = disp_action['Reason'].apply(get_bengali_instruction)
+        else:
+            disp_action['Instruction'] = "দয়া করে সঠিক তথ্য দিয়ে পুনরায় ফর্মটি আপডেট করুন।"
+            
+        html_content = """
+        <div class="action-box">
+            <h4 style='margin-top:0; color: #856404;'>🚨 ACTION REQUIRED: Attention HOI</h4>
+            <p style='color: #856404; font-size: 14px;'>নিচের স্কুলগুলোর তথ্যে ভুল থাকায় তালিকা থেকে মুছে দেওয়া হয়েছে। দয়া করে UDISE কোড দিয়ে পুনরায় সঠিক তথ্য আপডেট করুন।</p>
+            <hr style='border-color: #ffeeba; margin: 15px 0;'>
+        """
         
-    # --- BUILD A SINGLE HTML STRING FOR PERFECT RENDERING INSIDE THE BOX ---
-    html_content = """
-    <div class="action-box">
-        <h4 style='margin-top:0; color: #856404;'>🚨 ACTION REQUIRED: Attention HOI</h4>
-        <p style='color: #856404; font-size: 14px;'>নিচের স্কুলগুলোর তথ্যে ভুল থাকায় তালিকা থেকে মুছে দেওয়া হয়েছে। দয়া করে UDISE কোড দিয়ে পুনরায় সঠিক তথ্য আপডেট করুন।</p>
-        <hr style='border-color: #ffeeba; margin: 15px 0;'>
-    """
-    
-    # Group schools by Instruction
-    grouped_action = disp_action.groupby('Instruction')
-    
-    for instruction, group in grouped_action:
-        html_content += f"<p style='color: #856404; font-weight: bold; margin-bottom: 5px;'>📌 {instruction}</p>"
-        html_content += "<ul style='color: #856404; margin-top: 0; margin-bottom: 20px; font-size: 14px;'>"
-        for _, row in group.iterrows():
-            school_name = row.get('School Name', 'Unknown School')
-            udise = row.get('UDISE Code', 'N/A')
-            html_content += f"<li><strong>{school_name}</strong> (UDISE: {udise})</li>"
-        html_content += "</ul>"
+        grouped_action = disp_action.groupby('Instruction')
         
-    html_content += "</div>"
-    
-    # Render the entire Notice Board in one go
-    st.markdown(html_content, unsafe_allow_html=True)
+        for instruction, group in grouped_action:
+            html_content += f"<p style='color: #856404; font-weight: bold; margin-bottom: 5px;'>📌 {instruction}</p>"
+            html_content += "<ul style='color: #856404; margin-top: 0; margin-bottom: 20px; font-size: 14px;'>"
+            for _, row in group.iterrows():
+                school_name = row.get('School Name', 'Unknown School')
+                udise = row.get('UDISE Code', 'N/A')
+                html_content += f"<li><strong>{school_name}</strong> (UDISE: {udise})</li>"
+            html_content += "</ul>"
+            
+        html_content += "</div>"
+        
+        st.markdown(html_content, unsafe_allow_html=True)
 
 # ==========================================
 # 📝 SUBMISSION FORM
 # ==========================================
-existing_data = fetch_existing_data()
-
 # Show Success Message if a form was just submitted
 if st.session_state.success_msg:
     st.success(st.session_state.success_msg)
@@ -201,17 +201,15 @@ if st.session_state.success_msg:
 st.markdown("### 🏫 School Information (স্কুলের তথ্য)")
 st.info("💡 **Instruction:** প্রথমে আপনার স্কুলের ১১ ডিজিটের UDISE Code দিন এবং **'Check UDISE'** বাটনে ক্লিক করুন।")
 
-# --- 🔍 UDISE CHECKING BLOCK ---
 col1, col2 = st.columns([2, 1])
 with col1:
     udise_input = st.text_input("1. UDISE Code*", max_chars=11, help="আপনার স্কুলের ১১ ডিজিটের সঠিক UDISE কোড লিখুন")
 with col2:
-    st.write("") # Spacer to align button with text input
+    st.write("") 
     st.write("")
     if st.button("🔍 Check UDISE (চেক করুন)", use_container_width=True):
         if udise_input and len(udise_input) == 11 and udise_input.isdigit():
             st.session_state.checked_udise = udise_input
-            # Lookup in database
             if not existing_data.empty and 'UDISE Code' in existing_data.columns:
                 mask = existing_data['UDISE Code'].astype(str).str.strip() == udise_input.strip()
                 if mask.any():
@@ -227,17 +225,14 @@ with col2:
             st.error("🚨 অনুগ্রহ করে সঠিক ১১ ডিজিটের UDISE কোড দিন।")
             st.session_state.checked_udise = None
 
-# --- 📝 RENDER REST OF FORM ONLY IF UDISE IS CHECKED ---
 if st.session_state.checked_udise:
     st.markdown("---")
     
-    # Display Status Message
     if st.session_state.is_editing:
         st.success(f"✅ **Old Entry Found:** UDISE {st.session_state.checked_udise}-এর পুরনো এন্ট্রি পাওয়া গেছে। আপনার আগের দেওয়া তথ্য নিচে লোড হয়েছে, আপনি চাইলে তা সংশোধন (Edit) করতে পারেন।")
     else:
         st.info(f"✨ **New Entry:** UDISE {st.session_state.checked_udise}-এর কোনো তথ্য আগে দেওয়া হয়নি। এটি একটি নতুন এন্ট্রি, অনুগ্রহ করে নিচের তথ্যগুলো পূরণ করুন।")
 
-    # --- 🎯 SET DEFAULT VALUES ---
     matched_row = st.session_state.matched_row
     udise_code = st.session_state.checked_udise
     
@@ -287,9 +282,6 @@ if st.session_state.checked_udise:
     btn_label = "🔄 Update Existing Proposal (আপডেট করুন)" if st.session_state.is_editing else "📤 Submit Proposal (সাবমিট করুন)"
     submit_btn = st.button(btn_label, type="primary", use_container_width=True)
 
-    # ==========================================
-    # 🚀 SUBMIT / UPDATE LOGIC
-    # ==========================================
     if submit_btn:
         if not school_name_loc:
             st.error("🚨 অনুগ্রহ করে স্কুলের নাম ও ঠিকানা (Name/Location) পূরণ করুন।")
@@ -330,8 +322,8 @@ if st.session_state.checked_udise:
                             ws.update(f"A{row_to_update}:F{row_to_update}", [row_data]) 
                             
                         fetch_existing_data.clear()
+                        fetch_action_required.clear() # Clear notice board cache as well
                         
-                        # Set success message and reset form state
                         st.session_state.success_msg = f"✏️ {school_name_loc}-এর তথ্য সফলভাবে আপডেট হয়েছে!"
                         st.session_state.checked_udise = None
                         st.session_state.is_editing = False
@@ -349,8 +341,8 @@ if st.session_state.checked_udise:
                         row_data = [next_sl_no, str(udise_code).strip(), school_name_loc.strip(), formatted_roof_space, system_status, add_req]
                         ws.append_row(row_data)
                         fetch_existing_data.clear()
+                        fetch_action_required.clear() # Clear notice board cache as well
                         
-                        # Set success message and reset form state
                         st.session_state.success_msg = f"🎉 {school_name_loc}-এর তথ্য সফলভাবে সাবমিট হয়েছে!"
                         st.session_state.checked_udise = None
                         st.session_state.is_editing = False
@@ -371,7 +363,6 @@ refreshed_data = fetch_existing_data()
 if refreshed_data.empty:
     st.info("এখনও কোনো তথ্য সাবমিট করা হয়নি।")
 else:
-    # --- 🔎 MISTAKE TRACKING LOGIC ---
     def is_mistake(val):
         val_str = str(val).strip()
         if not val_str or val_str.lower() == "nan":
@@ -392,7 +383,6 @@ else:
                     st.markdown(f"🔴 **{row.get('Name  & Location of the PRIMARY SCHOOL', 'Unknown')}** (UDISE: `{row.get('UDISE Code', 'N/A')}`)  \n*Question 3 ভুল এন্ট্রি:* `{row.get(roof_col, 'N/A')}`")
             st.markdown("---")
 
-    # --- 📱 REGULAR MOBILE-FRIENDLY DISPLAY ---
     st.write(f"**Total Valid Submissions (মোট সঠিক সাবমিশন):** {len(refreshed_data) - len(mistakes_df) if roof_col in refreshed_data.columns else len(refreshed_data)}")
     
     for index, row in refreshed_data.iterrows():

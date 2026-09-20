@@ -16,7 +16,7 @@ st.set_page_config(
 
 # 2. APP DICTIONARIES
 personal_apps = [
-    "Live Routine Hub", "Money App", "Location App", "Money Utilities", "Strong Tracker", 
+    "Live Routine Hub", "Money App", "Money Incomplete", "Location App", "Money Utilities", "Strong Tracker", 
     "Project App", "AI Video Tracker", "Courses", "Election Duty", "Notes", "Monthly Tracker", "Money Tracker", 
     "Product Inventory", "Health Hub", "Backup Tracker", "Routine Audit", 
     "Routine Editor", "MDM Returns", "Video Manager", "Speech Mastery", "Portal Registry", "Image Resizer", "Trace Inventory", 
@@ -148,6 +148,7 @@ def is_default(app_name, system_category):
 # --- Personal Pages ---
 routine_hub = st.Page("routine_app.py", title="Live Routine Hub", icon="⏱️", default=is_default("Live Routine Hub", "Personal Hub"))
 money_app = st.Page("money_app.py", title="Money App", icon="💰", default=is_default("Money App", "Personal Hub"))
+money_incomplete_app = st.Page("money_incomplete.py", title="Money Incomplete", icon="⏳", default=is_default("Money Incomplete", "Personal Hub")) # <-- Defined here
 location_app = st.Page("location_app.py", title="Location App", icon="📍", default=is_default("Location App", "Personal Hub"))
 money_utilities = st.Page("money_utilities.py", title="Money Utilities", icon="💳", default=is_default("Money Utilities", "Personal Hub")) 
 strong = st.Page("strong.py", title="Strong Tracker", icon="💪", default=is_default("Strong Tracker", "Personal Hub"))
@@ -155,7 +156,7 @@ project = st.Page("project_app.py", title="Project App", icon="🚀", default=is
 ai_video_tracker = st.Page("ai_video_tracker.py", title="AI Video Tracker", icon="🤖", default=is_default("AI Video Tracker", "Personal Hub"))
 courses_app = st.Page("courses.py", title="Courses", icon="🎓", default=is_default("Courses", "Personal Hub")) 
 election = st.Page("election_duty.py", title="Election Duty", icon="🗳️", default=is_default("Election Duty", "Personal Hub"))
-notes_app = st.Page("notes.py", title="Notes", icon="📝", default=is_default("Notes", "Personal Hub")) # <-- Defined here
+notes_app = st.Page("notes.py", title="Notes", icon="📝", default=is_default("Notes", "Personal Hub"))
 monthly = st.Page("monthly_app.py", title="Monthly Tracker", icon="📆", default=is_default("Monthly Tracker", "Personal Hub"))
 money_tracker = st.Page("money_tracker.py", title="Money Tracker", icon="💵", default=is_default("Money Tracker", "Personal Hub"))
 product_inventory = st.Page("product_inventory.py", title="Product Inventory", icon="📦", default=is_default("Product Inventory", "Personal Hub"))
@@ -195,7 +196,7 @@ grocery_app = st.Page("bps_grocery_ad.py", title="Grocery Manager", icon="🥦",
 if system_choice == 'Personal Hub':
     # Updated Sidebar Grouping to match the Routine Hub Launchpad
     pg = st.navigation({
-        "MONEY": [money_app, money_utilities, money_tracker, product_inventory],
+        "MONEY": [money_app, money_incomplete_app, money_utilities, money_tracker, product_inventory], # <-- Added here
         "LOCATION": [location_app, packing_tracker],
         "ROUTINE": [routine_hub, routine_audit, routine_editor, project, ai_video_tracker, courses_app], 
         "HEALTH": [health, sleep_water],
@@ -203,7 +204,7 @@ if system_choice == 'Personal Hub':
         "HOME": [trace_app, monthly],
         "HARDWARE": [backup],
         "BALANCE": [strong],
-        "ONES": [election, app_updater, notes_app], # <-- Added here
+        "ONES": [election, app_updater, notes_app],
         "DASHBOARD": [visual_dashboard]
     })
     st.sidebar.caption("🔒 Personal Workspace Active")

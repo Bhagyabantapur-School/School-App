@@ -14,7 +14,7 @@ st.set_page_config(page_title="Rooftop Solar Proposal", page_icon="☀️", layo
 IST = pytz.timezone('Asia/Kolkata')
 
 # ⚠️ VERY IMPORTANT: The exact name of your Google Sheet
-SHEET_NAME = "PROPOSAL FOR ROOF TOP  SOLAR PANEL FOR GOVT. PRIMARY SCHOOLS UNDER HALDIA CIRCLE"
+SHEET_NAME = "PROPOSAL FOR RTSP 2"
 
 # ==========================================
 # 🧠 SESSION STATE INITIALIZATION
@@ -75,6 +75,21 @@ def fetch_existing_data():
         st.error(f"⚠️ Error fetching data (ডেটা লোড করতে সমস্যা): {e}")
         return pd.DataFrame()
 
+# --- NEW: Fetch Action Required Data ---
+@st.cache_data(ttl=60)
+def fetch_action_required():
+    sh = init_sheet()
+    try:
+        ws = sh.worksheet("Action Required")
+        raw_values = ws.get_all_values()
+        if not raw_values:
+            return pd.DataFrame()
+        return pd.DataFrame(ws.get_all_records())
+    except WorksheetNotFound:
+        return pd.DataFrame()
+    except Exception as e:
+        return pd.DataFrame()
+
 # ==========================================
 # 🎨 CUSTOM UI & HEADER
 # ==========================================
@@ -91,6 +106,7 @@ st.markdown("""
     .gov-title { color: #0056b3; margin-bottom: 5px; font-weight: 900; }
     .gov-sub { color: #333; font-size: 14px; margin-bottom: 0; }
     .form-container { border: 1px solid #ced4da; border-radius: 8px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); background-color: #ffffff;}
+    .action-box { background-color: #fff3cd; border-left: 5px solid #ffc107; padding: 20px; border-radius: 4px; margin-bottom: 25px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);}
 </style>
 """, unsafe_allow_html=True)
 
@@ -101,6 +117,40 @@ st.markdown("""
     <p class="gov-sub">Proposal for Installation of Roof Top Solar (RTS) Panels at Govt. Primary Schools (Haldia Circle)</p>
 </div>
 """, unsafe_allow_html=True)
+
+# ==========================================
+# 🚨 ACTION REQUIRED NOTICE BOARD
+# ==========================================
+action_df = fetch_action_required()
+
+if not action_df.empty:
+    st.markdown('<div class="action-box">', unsafe_allow_html=True)
+    st.markdown("<h4 style='margin-top:0; color: #856404;'>🚨 ACTION REQUIRED: Attention Head Teachers</h4>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #856404; font-size: 14px;'>নিচের স্কুলগুলোর তথ্যে ভুল থাকায় তালিকা থেকে মুছে দেওয়া হয়েছে। দয়া করে UDISE কোড দিয়ে পুনরায় সঠিক তথ্য আপডেট করুন।</p>", unsafe_allow_html=True)
+    
+    disp_action = action_df.copy()
+    
+    if 'UDISE Code' in disp_action.columns:
+        disp_action['UDISE Code'] = pd.to_numeric(disp_action['UDISE Code'], errors='coerce').fillna(0).astype(int).astype(str)
+        disp_action['UDISE Code'] = disp_action['UDISE Code'].replace('0', '')
+        
+    def get_bengali_instruction(reason):
+        r_lower = str(reason).lower()
+        if "0" in r_lower or "sq ft" in r_lower or "zero" in r_lower or "space" in r_lower:
+            return "আপনি ছাঁদে ০ স্কয়ার ফিট জায়গা আছে বলেছেন। যদি এটি সত্যি হয়, তবে আপনার আর কিছু করার প্রয়োজন নেই। যদি এটি টাইপিং ভুল হয়, তবে সঠিক আয়তন দিয়ে পুনরায় সাবমিট করুন।"
+        elif "invalid" in r_lower or "incorrect" in r_lower or "wrong" in r_lower or "error" in r_lower:
+            return "আপনার দেওয়া তথ্যটি অসম্পূর্ণ বা ভুল। দয়া করে সঠিক তথ্য দিয়ে পুনরায় ফর্মটি আপডেট করুন।"
+        else:
+            return "দয়া করে সঠিক তথ্য দিয়ে পুনরায় ফর্মটি আপডেট করুন।"
+            
+    if 'Reason' in disp_action.columns:
+        disp_action['Instruction (করণীয়)'] = disp_action['Reason'].apply(get_bengali_instruction)
+        
+    # Select columns to display if they exist
+    cols_to_show = [c for c in ['UDISE Code', 'School Name', 'Instruction (করণীয়)'] if c in disp_action.columns]
+    
+    st.dataframe(disp_action[cols_to_show] if cols_to_show else disp_action, hide_index=True, use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
 # 📝 SUBMISSION FORM

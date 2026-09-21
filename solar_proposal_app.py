@@ -17,8 +17,7 @@ IST = pytz.timezone('Asia/Kolkata')
 MAIN_SHEET_NAME = "PROPOSAL FOR ROOF TOP  SOLAR PANEL FOR GOVT. PRIMARY SCHOOLS UNDER HALDIA CIRCLE"
 NOTICE_SHEET_NAME = "PROPOSAL FOR RTSP 2"
 
-# ⏱️ DEADLINE SETTING (Year, Month, Day, Hour, Minute, Second)
-# Set to 23.09.2026 at 23:59:00
+# ⏱️ DEADLINE SETTING
 DEADLINE = IST.localize(datetime(2026, 9, 23, 23, 59, 0))
 
 # ==========================================
@@ -34,7 +33,7 @@ if 'success_msg' not in st.session_state:
     st.session_state.success_msg = ""
 
 # ==========================================
-# 🔌 GOOGLE SHEETS CONNECTOR (DUAL CONNECTION)
+# 🔌 GOOGLE SHEETS CONNECTOR
 # ==========================================
 @st.cache_resource
 def get_google_credentials():
@@ -102,8 +101,8 @@ def fetch_action_required():
         df.columns = df.iloc[0].astype(str).str.strip() 
         df = df[1:].copy()
         
-        if 'UDISE Code' in df.columns:
-            df = df[df['UDISE Code'].astype(str).str.strip() != '']
+        # Keep rows that have at least some data in UDISE or School Name
+        df = df.dropna(subset=[col for col in ['UDISE Code', 'School Name'] if col in df.columns], how='all')
             
         return df
     except WorksheetNotFound:
@@ -141,10 +140,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Fetch Main Data Globally so Dashboard can always use it
 existing_data = fetch_existing_data()
-
-# Check current time
 current_time = datetime.now(IST)
 is_active = current_time <= DEADLINE
 
@@ -152,7 +148,6 @@ is_active = current_time <= DEADLINE
 # ⏳ CONDITIONAL RENDERING (ACTIVE vs CLOSED)
 # ==========================================
 if is_active:
-    # --- DISPLAY COUNTDOWN TIMER ---
     time_left = DEADLINE - current_time
     days = time_left.days
     hours = time_left.seconds // 3600
@@ -175,13 +170,31 @@ if is_active:
     if not action_df.empty:
         disp_action = action_df.copy()
         
+        # Format UDISE for display only
         if 'UDISE Code' in disp_action.columns:
             disp_action['UDISE Code'] = pd.to_numeric(disp_action['UDISE Code'], errors='coerce').fillna(0).astype(int).astype(str)
             disp_action['UDISE Code'] = disp_action['UDISE Code'].replace('0', '').str.strip()
             
-            if not existing_data.empty and 'UDISE Code' in existing_data.columns:
-                existing_udises = existing_data['UDISE Code'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().tolist()
-                disp_action = disp_action[~disp_action['UDISE Code'].isin(existing_udises)]
+        # 🧠 SMART NAME-BASED AUTO DISAPPEAR LOGIC
+        if not existing_data.empty and 'Name  & Location of the PRIMARY SCHOOL' in existing_data.columns and 'School Name' in disp_action.columns:
+            # 1. Get all submitted names and normalize them (lowercase, replace multiple spaces with one, strip edge spaces)
+            main_names = existing_data['Name  & Location of the PRIMARY SCHOOL'].astype(str).str.lower().str.replace(r'\s+', ' ', regex=True).str.strip().tolist()
+            
+            def is_already_submitted_by_name(notice_name):
+                n_name = str(notice_name).lower().strip()
+                n_name = re.sub(r'\s+', ' ', n_name)
+                
+                if not n_name or n_name == 'nan': 
+                    return False
+                
+                # 2. Check if the notice board name is a substring inside any submitted name
+                for m_name in main_names:
+                    if n_name in m_name:
+                        return True
+                return False
+                
+            # Filter out schools whose names match
+            disp_action = disp_action[~disp_action['School Name'].apply(is_already_submitted_by_name)]
                 
         if not disp_action.empty:
             def get_bengali_instruction(reason):
@@ -411,7 +424,6 @@ else:
     if roof_col in existing_data.columns:
         mistakes_df = existing_data[existing_data[roof_col].apply(is_mistake)]
         
-        # Only show the correction warning if the portal is still active
         if is_active and not mistakes_df.empty:
             st.error(f"⚠️ **Action Required (পদক্ষেপ প্রয়োজন):** {len(mistakes_df)} টি স্কুল **Question 3** (ছাদের জায়গা)-এ ভুল তথ্য দিয়েছে। তথ্য ঠিক করতে উপরে UDISE কোড দিয়ে চেক করুন এবং **Question 3** আপডেট করুন।")
             with st.expander("🚨 View Schools Requiring Correction (যে স্কুলগুলোর তথ্য ঠিক করা প্রয়োজন)", expanded=True):

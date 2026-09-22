@@ -517,18 +517,27 @@ def admin_dashboard():
 if not st.session_state.logged_in:
     login_page()
 else:
-    # 🔄 Added Sync Button alongside Logout
-    col1, col2, col3 = st.columns([7, 1, 1])
+    # 🚪 Logout Button (Top Right)
+    col1, col2 = st.columns([9, 1])
     with col2:
-        if st.button("🔄 Sync", use_container_width=True):
-            get_clean_dataframe.clear()
-            st.rerun()
-    with col3:
         if st.button("Logout", use_container_width=True):
             for key in st.session_state.keys():
                 del st.session_state[key]
             st.rerun()
             
-    if st.session_state.user_role == "Admin": admin_dashboard()
-    elif st.session_state.user_role == "Faculty": faculty_dashboard()
-    else: standard_user_dashboard()
+    # 🖥️ Render the respective dashboard
+    if st.session_state.user_role == "Admin": 
+        admin_dashboard()
+    elif st.session_state.user_role == "Faculty": 
+        faculty_dashboard()
+    else: 
+        standard_user_dashboard()
+        
+    # 🔄 Sync Button (Very Bottom)
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    st.markdown("---")
+    col_s1, col_s2, col_s3 = st.columns([4, 2, 4])
+    with col_s2:
+        if st.button("🔄 Sync Application Data", use_container_width=True):
+            get_clean_dataframe.clear()
+            st.rerun()

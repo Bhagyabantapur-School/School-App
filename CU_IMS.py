@@ -34,7 +34,6 @@ def highlight_rows(row):
     """Applies CSS background colors to a pandas row based on Booking Status."""
     status = str(row.get('Booking Status', ''))
     
-    # Define color scheme
     if status in ['Instrument Assigned', 'Completed']:
         color = '#d4edda' # Light Green
     elif status == 'Expired':
@@ -50,7 +49,7 @@ def highlight_rows(row):
     elif status == 'Waitlisted':
         color = '#e2e3e5' # Light Gray
     else:
-        color = '' # Default transparent
+        color = '' 
         
     if color:
         return [f'background-color: {color}; color: #000000'] * len(row)
@@ -139,18 +138,17 @@ def get_processed_bookings():
                     time_slot = str(row['Time Slot']).strip()
                     
                     if " - " in time_slot:
-                        # Extract the end time (e.g., "11:00 AM" from "10:00 AM - 11:00 AM")
-                        end_time_str = time_slot.split(" - ")[1].strip()
+                        # Extract end time and cleanly strip out the "IST" label for datetime parsing
+                        end_time_str = time_slot.split(" - ")[1].replace("IST", "").strip()
                         dt_str = f"{date_str} {end_time_str}"
                         
-                        # Parse naive datetime and make it timezone aware
                         naive_dt = datetime.strptime(dt_str, "%Y-%m-%d %I:%M %p")
                         aware_dt = IST.localize(naive_dt)
                         
                         if current_time > aware_dt:
                             df.at[idx, 'Booking Status'] = 'Expired'
                 except Exception:
-                    pass # Silently skip improperly formatted dates
+                    pass
     return df
 
 def col_letter(n):
@@ -248,7 +246,13 @@ def render_booking_form():
         selected_display = st.selectbox("Select Instrument", inst_options)
         selected_inst = inst_map[selected_display]
         date = st.date_input("Select Date")
-        slot = st.selectbox("Select Time Slot", ["10:00 AM - 11:00 AM", "11:00 AM - 12:00 PM", "02:00 PM - 03:00 PM"])
+        
+        # Explicit IST added to dropdown options
+        slot = st.selectbox("Select Time Slot", [
+            "10:00 AM - 11:00 AM IST", 
+            "11:00 AM - 12:00 PM IST", 
+            "02:00 PM - 03:00 PM IST"
+        ])
         
         selected_faculty = None
         if is_scholar:
@@ -269,7 +273,8 @@ def render_booking_form():
                 st.error("🚨 This time slot is already booked or pending. Please select another.")
             else:
                 booking_id = f"BKG-{int(datetime.now(IST).timestamp())}"
-                timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
+                # Explicit IST appended to database timestamp
+                timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST")
                 
                 if is_scholar:
                     rec_faculty = selected_faculty
@@ -340,9 +345,7 @@ def render_my_status():
             desired_cols = ['Date', 'Instrument', 'Price (₹/hr)', 'Time Slot', 'Payment Reference', 'Payment Status', 'Booking Status']
             safe_cols = [col for col in desired_cols if col in my_bookings.columns]
             
-            # 🎨 APPLY COLOR STYLING HERE
             styled_df = my_bookings[safe_cols].style.apply(highlight_rows, axis=1)
-            
             st.dataframe(styled_df, hide_index=True, use_container_width=True)
         else:
             st.info("You have no booking history.")

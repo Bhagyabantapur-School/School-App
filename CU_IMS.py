@@ -59,22 +59,19 @@ def setup_database():
     sh = init_sheet()
     
     # 1. Instruments Tab
-    try: 
-        sh.worksheet("Instruments")
+    try: sh.worksheet("Instruments")
     except WorksheetNotFound: 
         ws_inst = sh.add_worksheet(title="Instruments", rows="100", cols="20")
         ws_inst.append_row(['Instrument ID', 'Name', 'Price Rate (₹)', 'Available Slots', 'Status'])
 
-    # 2. Bookings Tab 
-    try: 
-        sh.worksheet("Bookings")
+    # 2. Bookings Tab (UPDATED WITH PAYMENT TRACKING)
+    try: sh.worksheet("Bookings")
     except WorksheetNotFound: 
-        ws_book = sh.add_worksheet(title="Bookings", rows="1000", cols="20")
-        ws_book.append_row(['Booking ID', 'Timestamp', 'User Name', 'Role', 'Instrument', 'Date', 'Time Slot', 'Recommending Faculty', 'Payment Status', 'Booking Status'])
+        ws_book = sh.add_worksheet(title="Bookings", rows="1000", cols="25")
+        ws_book.append_row(['Booking ID', 'Timestamp', 'User Name', 'Role', 'Instrument', 'Date', 'Time Slot', 'Recommending Faculty', 'Payment Reference', 'Payment Date', 'Payment Status', 'Booking Status'])
 
     # 3. Users Tab
-    try: 
-        sh.worksheet("Users")
+    try: sh.worksheet("Users")
     except WorksheetNotFound: 
         ws_users = sh.add_worksheet(title="Users", rows="100", cols="20")
         ws_users.append_row(['User ID', 'Password', 'Role'])
@@ -110,7 +107,8 @@ def col_letter(n):
         string = chr(65 + remainder) + string
     return string
 
-def update_booking_in_sheet(booking_id, new_payment=None, new_status=None):
+def update_booking_in_sheet(booking_id, updates_dict):
+    """Dynamically updates multiple columns for a specific booking based on a dictionary of column names."""
     ws_book = sh.worksheet("Bookings")
     live_values = ws_book.get_all_values()
     headers = [str(c).strip() for c in live_values[0]]
@@ -122,12 +120,10 @@ def update_booking_in_sheet(booking_id, new_payment=None, new_status=None):
             break
             
     if row_to_update:
-        if new_payment and "Payment Status" in headers:
-            pay_col = col_letter(headers.index("Payment Status") + 1)
-            ws_book.update(values=[[new_payment]], range_name=f"{pay_col}{row_to_update}")
-        if new_status and "Booking Status" in headers:
-            stat_col = col_letter(headers.index("Booking Status") + 1)
-            ws_book.update(values=[[new_status]], range_name=f"{stat_col}{row_to_update}")
+        for col_name, new_val in updates_dict.items():
+            if col_name in headers:
+                col_letter_val = col_letter(headers.index(col_name) + 1)
+                ws_book.update(values=[[new_val]], range_name=f"{col_letter_val}{row_to_update}")
         get_clean_dataframe.clear()
         return True
     return False
@@ -169,7 +165,7 @@ def login_page():
                 st.error("⚠️ Database Error: 'Users' tab is empty or invalid.")
 
 # ==========================================
-# 🛠️ SHARED BOOKING INTERFACE
+# 🛠️ SHARED USER INTERFACES
 # ==========================================
 def render_booking_form():
     st.subheader("New Booking Request")
@@ -187,7 +183,6 @@ def render_booking_form():
         st.warning("No Faculty members found in the system. You cannot request recommendations until an Admin adds Faculty users.")
         return
         
-    # Format Instruments with Prices for the Dropdown
     inst_options = []
     inst_map = {}
     for _, row in inst_df.iterrows():
@@ -195,12 +190,11 @@ def render_booking_form():
         price = row.get('Price Rate (₹)', '0')
         display_str = f"{name} - ₹{price}/hr"
         inst_options.append(display_str)
-        inst_map[display_str] = name # Keep track of actual name to save in DB
+        inst_map[display_str] = name 
         
     with st.form("booking_form"):
         selected_display = st.selectbox("Select Instrument", inst_options)
-        selected_inst = inst_map[selected_display] # Extract clean name for database
-        
+        selected_inst = inst_map[selected_display]
         date = st.date_input("Select Date")
         slot = st.selectbox("Select Time Slot", ["10:00 AM - 11:00 AM", "11:00 AM - 12:00 PM", "02:00 PM - 03:00 PM"])
         
@@ -216,7 +210,7 @@ def render_booking_form():
                 existing = all_bookings[(all_bookings['Instrument'] == selected_inst) & 
                                         (all_bookings['Date'] == str(date)) & 
                                         (all_bookings['Time Slot'] == slot) &
-                                        (all_bookings['Booking Status'].isin(['Awaiting Faculty Recommendation', 'Pending Admin Approval', 'Approved']))]
+                                        (all_bookings['Booking Status'].isin(['Awaiting Faculty Recommendation', 'Pending Admin Approval', 'Approved, Awaiting Payment', 'Payment Submitted, Awaiting Verification', 'Instrument Assigned']))]
                 if not existing.empty: conflict = True
             
             if conflict:
@@ -234,8 +228,9 @@ def render_booking_form():
                     init_status = "Pending Admin Approval"
                     msg = "✅ Booking submitted directly to Admin for approval!"
                     
+                # New Columns initialized as "N/A"
                 row_data = [booking_id, timestamp, st.session_state.user_name, st.session_state.user_role, 
-                            selected_inst, str(date), slot, rec_faculty, "Pending", init_status]
+                            selected_inst, str(date), slot, rec_faculty, "N/A", "N/A", "Pending", init_status]
                 
                 sh.worksheet("Bookings").append_row(row_data)
                 st.success(msg)
@@ -243,12 +238,46 @@ def render_booking_form():
                 time.sleep(1)
                 st.rerun()
 
+def render_payment_form():
+    st.subheader("💳 Submit Payment Details")
+    st.info("💡 You can only submit payment details for bookings that an Admin has already Approved.")
+    
+    all_bookings = get_clean_dataframe("Bookings")
+    if not all_bookings.empty and 'User Name' in all_bookings.columns:
+        my_approved = all_bookings[(all_bookings['User Name'] == st.session_state.user_name) & 
+                                   (all_bookings['Booking Status'] == 'Approved, Awaiting Payment')].copy()
+        
+        if not my_approved.empty:
+            st.dataframe(my_approved[['Booking ID', 'Instrument', 'Date', 'Time Slot', 'Booking Status']], hide_index=True)
+            
+            with st.form("payment_submission"):
+                target_bkg = st.selectbox("Select Booking ID", my_approved['Booking ID'].tolist())
+                pay_ref = st.text_input("Payment Reference Number (Transaction ID)")
+                pay_date = st.date_input("Date of Payment")
+                
+                if st.form_submit_button("Submit Payment", type="primary"):
+                    if not pay_ref:
+                        st.error("🚨 Payment Reference Number is required.")
+                    else:
+                        updates = {
+                            "Payment Reference": pay_ref,
+                            "Payment Date": str(pay_date),
+                            "Booking Status": "Payment Submitted, Awaiting Verification"
+                        }
+                        if update_booking_in_sheet(target_bkg, updates):
+                            st.success(f"✅ Payment details sent to Admin for {target_bkg}.")
+                            time.sleep(1)
+                            st.rerun()
+        else:
+            st.success("You have no pending payments at this time.")
+    else:
+        st.info("System has no booking history.")
+
 def render_my_status():
     st.subheader("My Booking History")
     all_bookings = get_clean_dataframe("Bookings")
     inst_df = get_clean_dataframe("Instruments")
     
-    # Create a pricing dictionary to map into the queue
     price_map = {}
     if not inst_df.empty and 'Name' in inst_df.columns:
         price_map = dict(zip(inst_df['Name'], inst_df.get('Price Rate (₹)', ['0']*len(inst_df))))
@@ -257,10 +286,8 @@ def render_my_status():
         my_bookings = all_bookings[all_bookings['User Name'] == st.session_state.user_name].copy()
         if not my_bookings.empty:
             my_bookings['Price (₹/hr)'] = my_bookings['Instrument'].map(price_map).fillna("N/A")
-            
-            desired_cols = ['Date', 'Instrument', 'Price (₹/hr)', 'Time Slot', 'Recommending Faculty', 'Payment Status', 'Booking Status']
+            desired_cols = ['Date', 'Instrument', 'Price (₹/hr)', 'Time Slot', 'Payment Reference', 'Payment Status', 'Booking Status']
             safe_cols = [col for col in desired_cols if col in my_bookings.columns]
-            
             st.dataframe(my_bookings[safe_cols], hide_index=True)
         else:
             st.info("You have no booking history.")
@@ -272,16 +299,17 @@ def render_my_status():
 # ==========================================
 def standard_user_dashboard():
     st.title(f"Portal: {st.session_state.user_name} | {st.session_state.user_role} ({st.session_state.user_category})")
-    tab1, tab2 = st.tabs(["📝 Book an Instrument", "🔔 My Status"])
+    tab1, tab2, tab3 = st.tabs(["📝 Book an Instrument", "💳 Make Payment", "🔔 My Status"])
     with tab1: render_booking_form()
-    with tab2: render_my_status()
+    with tab2: render_payment_form()
+    with tab3: render_my_status()
 
 # ==========================================
 # 🧑‍🏫 FACULTY DASHBOARD (Bookings + Approvals)
 # ==========================================
 def faculty_dashboard():
     st.title(f"Faculty Portal: {st.session_state.user_name} ({st.session_state.user_category})")
-    tab1, tab2, tab3 = st.tabs(["✅ Review Scholars", "📝 Book for Myself", "🔔 My Status"])
+    tab1, tab2, tab3, tab4 = st.tabs(["✅ Review Scholars", "📝 Book for Myself", "💳 Make Payment", "🔔 My Status"])
     
     with tab1:
         st.subheader("Research Scholar Requests Awaiting Your Recommendation")
@@ -307,7 +335,7 @@ def faculty_dashboard():
                     
                     if st.form_submit_button("Submit Decision", type="primary"):
                         new_status = "Pending Admin Approval" if decision == "Recommend to Admin" else "Rejected by Faculty"
-                        if update_booking_in_sheet(target_bkg, new_status=new_status):
+                        if update_booking_in_sheet(target_bkg, {"Booking Status": new_status}):
                             st.success(f"✅ {target_bkg} updated to: {new_status}")
                             time.sleep(1)
                             st.rerun()
@@ -317,14 +345,15 @@ def faculty_dashboard():
             st.info("No bookings found in the system.")
             
     with tab2: render_booking_form()
-    with tab3: render_my_status()
+    with tab3: render_payment_form()
+    with tab4: render_my_status()
 
 # ==========================================
 # ⚙️ ADMIN DASHBOARD
 # ==========================================
 def admin_dashboard():
     st.title("Admin Control Panel")
-    tab1, tab2, tab3 = st.tabs(["🚦 Queue & Payment", "🔬 Manage Instruments", "👥 Manage Users"])
+    tab1, tab2, tab3 = st.tabs(["🚦 Approvals & Assignment Queue", "🔬 Manage Instruments", "👥 Manage Users"])
     
     with tab1:
         bookings_df = get_clean_dataframe("Bookings")
@@ -335,29 +364,41 @@ def admin_dashboard():
             price_map = dict(zip(inst_df['Name'], inst_df.get('Price Rate (₹)', ['0']*len(inst_df))))
             
         if not bookings_df.empty:
-            st.write("**Queue Overview (Awaiting Payment/Admin Approval)**")
-            actionable = bookings_df[bookings_df['Booking Status'].isin(["Pending Admin Approval", "Approved", "Waitlisted"])].copy()
+            st.subheader("Task Queue (Approvals & Payment Verifications)")
+            # Admin needs to see items awaiting initial approval OR awaiting payment verification
+            action_statuses = ["Pending Admin Approval", "Payment Submitted, Awaiting Verification", "Waitlisted"]
+            actionable = bookings_df[bookings_df['Booking Status'].isin(action_statuses)].copy()
             
             if not actionable.empty:
                 actionable['Price (₹/hr)'] = actionable['Instrument'].map(price_map).fillna("N/A")
                 
-                # Reorder columns to put price cleanly next to the instrument
-                cols = list(actionable.columns)
-                if 'Instrument' in cols and 'Price (₹/hr)' in cols:
-                    cols.insert(cols.index('Instrument') + 1, cols.pop(cols.index('Price (₹/hr)')))
-                    
-                st.dataframe(actionable[cols].sort_values(by=['Date', 'Timestamp']), hide_index=True)
+                safe_display_cols = [c for c in ['Booking ID', 'User Name', 'Instrument', 'Price (₹/hr)', 'Date', 'Time Slot', 'Payment Reference', 'Payment Date', 'Booking Status'] if c in actionable.columns]
+                st.dataframe(actionable[safe_display_cols].sort_values(by=['Date']), hide_index=True)
             else:
-                st.info("Queue is currently empty.")
+                st.info("Task Queue is currently empty.")
             
             st.markdown("---")
+            st.subheader("Process a Booking")
             with st.form("admin_approval_form"):
                 target_bkg = st.selectbox("Select Booking ID", bookings_df['Booking ID'].tolist())
-                new_payment = st.selectbox("Payment Status", ["Pending", "Paid", "Failed/Refunded"])
-                new_status = st.selectbox("Booking Status", ["Pending Admin Approval", "Approved", "Waitlisted", "Rejected", "Completed"])
                 
-                if st.form_submit_button("Process Payment & Update Status", type="primary"):
-                    if update_booking_in_sheet(target_bkg, new_payment, new_status):
+                col1, col2 = st.columns(2)
+                with col1:
+                    new_payment = st.selectbox("Update Payment Status", ["Pending", "Paid", "Failed/Refunded"])
+                with col2:
+                    new_status = st.selectbox(
+                        "Update Booking Status", 
+                        ["Pending Admin Approval", "Approved, Awaiting Payment", "Payment Submitted, Awaiting Verification", "Waitlisted", "Rejected", "Instrument Assigned", "Completed"]
+                    )
+                
+                st.info("💡 **Workflow Tips:** \n1. To ask for payment, change status to **'Approved, Awaiting Payment'**.\n2. Once you verify their Payment Reference, set Payment Status to **'Paid'** and Booking Status to **'Instrument Assigned'**.")
+                
+                if st.form_submit_button("Apply Updates", type="primary"):
+                    updates = {
+                        "Payment Status": new_payment,
+                        "Booking Status": new_status
+                    }
+                    if update_booking_in_sheet(target_bkg, updates):
                         st.success(f"✅ Booking {target_bkg} securely updated.")
                         time.sleep(1)
                         st.rerun()

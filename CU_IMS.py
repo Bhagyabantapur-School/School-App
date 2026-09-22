@@ -385,7 +385,6 @@ def faculty_dashboard():
                 pending_reqs['Price (₹/hr)'] = pending_reqs['Instrument'].map(price_map).fillna("N/A")
                 safe_cols = [c for c in ['Booking ID', 'User Name', 'Instrument', 'Price (₹/hr)', 'Date', 'Time Slot'] if c in pending_reqs.columns]
                 
-                # Apply styles to faculty review queue too
                 styled_reqs = pending_reqs[safe_cols].style.apply(highlight_rows, axis=1)
                 st.dataframe(styled_reqs, hide_index=True)
                 
@@ -432,7 +431,6 @@ def admin_dashboard():
                 actionable['Price (₹/hr)'] = actionable['Instrument'].map(price_map).fillna("N/A")
                 safe_display_cols = [c for c in ['Booking ID', 'User Name', 'Instrument', 'Price (₹/hr)', 'Date', 'Time Slot', 'Payment Reference', 'Payment Date', 'Booking Status'] if c in actionable.columns]
                 
-                # Apply styles to Admin queue too
                 styled_actionable = actionable[safe_display_cols].sort_values(by=['Date']).style.apply(highlight_rows, axis=1)
                 st.dataframe(styled_actionable, hide_index=True)
             else:
@@ -519,9 +517,14 @@ def admin_dashboard():
 if not st.session_state.logged_in:
     login_page()
 else:
-    col1, col2 = st.columns([8, 1])
+    # 🔄 Added Sync Button alongside Logout
+    col1, col2, col3 = st.columns([7, 1, 1])
     with col2:
-        if st.button("Logout"):
+        if st.button("🔄 Sync", use_container_width=True):
+            get_clean_dataframe.clear()
+            st.rerun()
+    with col3:
+        if st.button("Logout", use_container_width=True):
             for key in st.session_state.keys():
                 del st.session_state[key]
             st.rerun()

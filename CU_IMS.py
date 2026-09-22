@@ -96,6 +96,7 @@ def get_clean_dataframe(sheet_tab_name):
         df = pd.DataFrame(raw_data[1:], columns=[str(c).strip() for c in raw_data[0]])
         return df
     elif len(raw_data) == 1:
+        # Only headers exist, return empty dataframe with proper columns
         return pd.DataFrame(columns=[str(c).strip() for c in raw_data[0]])
     return pd.DataFrame()
 
@@ -115,21 +116,27 @@ def login_page():
         if submit:
             users_df = get_clean_dataframe("Users")
             
-            if not users_df.empty and 'User ID' in users_df.columns and 'Password' in users_df.columns:
-                users_df['User ID'] = users_df['User ID'].astype(str).str.strip()
-                users_df['Password'] = users_df['Password'].astype(str).str.strip()
+            # 1. চেক করবে হেডারগুলো ঠিকঠাক আছে কি না
+            if 'User ID' in users_df.columns and 'Password' in users_df.columns:
                 
-                user_match = users_df[(users_df['User ID'] == str(user_id).strip()) & (users_df['Password'] == str(password).strip())]
-                
-                if not user_match.empty:
-                    st.session_state.logged_in = True
-                    st.session_state.user_role = user_match.iloc[0]['Role']
-                    st.session_state.user_name = user_id
-                    st.rerun()
+                # 2. চেক করবে শিটে কোনো ইউজার আছে কি না
+                if not users_df.empty:
+                    users_df['User ID'] = users_df['User ID'].astype(str).str.strip()
+                    users_df['Password'] = users_df['Password'].astype(str).str.strip()
+                    
+                    user_match = users_df[(users_df['User ID'] == str(user_id).strip()) & (users_df['Password'] == str(password).strip())]
+                    
+                    if not user_match.empty:
+                        st.session_state.logged_in = True
+                        st.session_state.user_role = user_match.iloc[0]['Role']
+                        st.session_state.user_name = user_id
+                        st.rerun()
+                    else:
+                        st.error("🚨 Invalid User ID or Password")
                 else:
-                    st.error("🚨 Invalid User ID or Password")
+                    st.error("⚠️ No users found! গুগল শিটের 'Users' ট্যাবে অন্তত একটি ইউজার অ্যাকাউন্ট (admin) অ্যাড করুন।")
             else:
-                st.error("⚠️ Database Setup Error: Check your 'Users' tab in Google Sheets.")
+                st.error("⚠️ Database Setup Error: গুগল শিটের 'Users' ট্যাবের 1st Row-তে 'User ID', 'Password' এবং 'Role' হেডারগুলো ঠিকমতো লেখা নেই।")
 
 # ==========================================
 # 🎓 USER DASHBOARD

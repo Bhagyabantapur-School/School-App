@@ -242,6 +242,7 @@ def update_instrument_in_sheet(inst_id, updates_dict):
     
     row_to_update = None
     for i, row in enumerate(live_values):
+        # Always assumes ID is in the first column (index 0)
         if i > 0 and str(row[0]).strip() == str(inst_id).strip():
             row_to_update = i + 1 
             break
@@ -601,7 +602,6 @@ def admin_dashboard():
             status_col_name = next((c for c in inst_df.columns if 'status' in str(c).lower()), None)
             id_col = inst_df.columns[0]
             
-            # Displays key columns so the table doesn't get overwhelmingly wide
             safe_inst_cols = [c for c in [id_col, 'Name', 'Make / Manufacturer', 'Department / Centre', 'Instrument Incharge', 'Price Rate (₹)', status_col_name] if c in inst_df.columns]
             styled_inst_admin = inst_df[safe_inst_cols].style.apply(highlight_instruments, axis=1)
             st.dataframe(styled_inst_admin, hide_index=True, use_container_width=True)
@@ -610,23 +610,29 @@ def admin_dashboard():
 
         st.markdown("---")
         st.subheader("➕ Add New Instrument")
+        
+        # Structure changed to horizontal rows to force left-to-right stacking on mobile phones
         with st.form("add_instrument"):
-            col1, col2, col3 = st.columns(3)
-            with col1: 
-                inst_id = st.text_input("Instrument ID*")
-                inst_make = st.text_input("Make / Manufacturer")
-                inst_dept = st.text_input("Department / Centre")
-                inst_incharge = st.text_input("Instrument Incharge")
-            with col2: 
-                inst_name = st.text_input("Instrument Name*")
-                inst_serial = st.text_input("Serial No.")
-                inst_room = st.text_input("Building / Floor / Room No.")
-                inst_desig = st.text_input("Designation of In-charge")
-            with col3: 
-                inst_price = st.number_input("Price Rate/hr (₹)*", min_value=0)
-                inst_unit = st.text_input("Unit No.")
-                inst_campus = st.text_input("Campus Name")
-                inst_email = st.text_input("Contact Email")
+            
+            r1c1, r1c2, r1c3 = st.columns(3)
+            with r1c1: inst_id = st.text_input("Instrument ID*")
+            with r1c2: inst_name = st.text_input("Instrument Name*")
+            with r1c3: inst_price = st.number_input("Price Rate/hr (₹)*", min_value=0)
+            
+            r2c1, r2c2, r2c3 = st.columns(3)
+            with r2c1: inst_make = st.text_input("Make / Manufacturer")
+            with r2c2: inst_serial = st.text_input("Serial No.")
+            with r2c3: inst_unit = st.text_input("Unit No.")
+            
+            r3c1, r3c2, r3c3 = st.columns(3)
+            with r3c1: inst_campus = st.text_input("Campus Name")
+            with r3c2: inst_dept = st.text_input("Department / Centre")
+            with r3c3: inst_room = st.text_input("Building / Floor / Room No.")
+            
+            r4c1, r4c2, r4c3 = st.columns(3)
+            with r4c1: inst_incharge = st.text_input("Instrument Incharge")
+            with r4c2: inst_desig = st.text_input("Designation of In-charge")
+            with r4c3: inst_email = st.text_input("Contact Email")
             
             if st.form_submit_button("Add Instrument", type="primary"):
                 if inst_id and inst_name:

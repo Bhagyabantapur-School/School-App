@@ -50,26 +50,29 @@ def init_sheet():
         st.error(f"⚠️ Connection Error: {e}")
         st.stop()
 
-@st.cache_resource
 def setup_database():
+    """Self-healing database setup: Recreates tabs if deleted without hitting API quotas."""
     sh = init_sheet()
     
     # 1. Instruments Tab
-    try: ws_inst = sh.worksheet("Instruments")
-    except WorksheetNotFound: ws_inst = sh.add_worksheet(title="Instruments", rows="100", cols="20")
-    if not ws_inst.get_all_values():
+    try: 
+        sh.worksheet("Instruments")
+    except WorksheetNotFound: 
+        ws_inst = sh.add_worksheet(title="Instruments", rows="100", cols="20")
         ws_inst.append_row(['Instrument ID', 'Name', 'Price Rate (₹)', 'Available Slots', 'Status'])
 
-    # 2. Bookings Tab (UPDATED WITH RECOMMENDING TEACHER)
-    try: ws_book = sh.worksheet("Bookings")
-    except WorksheetNotFound: ws_book = sh.add_worksheet(title="Bookings", rows="1000", cols="20")
-    if not ws_book.get_all_values():
+    # 2. Bookings Tab (Contains Recommending Teacher column)
+    try: 
+        sh.worksheet("Bookings")
+    except WorksheetNotFound: 
+        ws_book = sh.add_worksheet(title="Bookings", rows="1000", cols="20")
         ws_book.append_row(['Booking ID', 'Timestamp', 'User Name', 'Role', 'Instrument', 'Date', 'Time Slot', 'Recommending Teacher', 'Payment Status', 'Booking Status'])
 
     # 3. Users Tab
-    try: ws_users = sh.worksheet("Users")
-    except WorksheetNotFound: ws_users = sh.add_worksheet(title="Users", rows="100", cols="20")
-    if not ws_users.get_all_values():
+    try: 
+        sh.worksheet("Users")
+    except WorksheetNotFound: 
+        ws_users = sh.add_worksheet(title="Users", rows="100", cols="20")
         ws_users.append_row(['User ID', 'Password', 'Role'])
         ws_users.append_row(['admin', hash_password('admin123'), 'Admin'])
         ws_users.append_row(['teacher1', hash_password('teach123'), 'Teacher'])
@@ -77,6 +80,7 @@ def setup_database():
         
     return sh
 
+# 🚀 Run the Auto-Setup silently on load
 sh = setup_database()
 
 @st.cache_data(ttl=60)
@@ -95,6 +99,7 @@ def get_clean_dataframe(sheet_tab_name):
         return pd.DataFrame()
 
 def col_letter(n):
+    """Converts column index to letter (e.g., 1 -> A, 2 -> B)"""
     string = ""
     while n > 0:
         n, remainder = divmod(n - 1, 26)
@@ -195,12 +200,19 @@ def student_dashboard():
                         sh.worksheet("Bookings").append_row(row_data)
                         st.success("✅ Request sent to teacher for recommendation!")
                         get_clean_dataframe.clear()
+                        time.sleep(1)
+                        st.rerun()
 
     with tab2:
         all_bookings = get_clean_dataframe("Bookings")
         if not all_bookings.empty and 'User Name' in all_bookings.columns:
             my_bookings = all_bookings[all_bookings['User Name'] == st.session_state.user_name]
-            st.dataframe(my_bookings[['Date', 'Instrument', 'Recommending Teacher', 'Payment Status', 'Booking Status']], hide_index=True)
+            if not my_bookings.empty:
+                st.dataframe(my_bookings[['Date', 'Instrument', 'Time Slot', 'Recommending Teacher', 'Payment Status', 'Booking Status']], hide_index=True)
+            else:
+                st.info("You have no booking history.")
+        else:
+            st.info("You have no booking history.")
 
 # ==========================================
 # 🧑‍🏫 TEACHER DASHBOARD
@@ -243,7 +255,6 @@ def admin_dashboard():
     with tab1:
         bookings_df = get_clean_dataframe("Bookings")
         if not bookings_df.empty:
-            # Highlight items ready for admin action
             st.write("**Queue Overview (Awaiting Payment/Admin Approval)**")
             actionable = bookings_df[bookings_df['Booking Status'].isin(["Pending Admin Approval", "Approved", "Waitlisted"])]
             st.dataframe(actionable.sort_values(by=['Date', 'Timestamp']), hide_index=True)
@@ -270,11 +281,22 @@ def admin_dashboard():
             with col3: inst_price = st.number_input("Price/hr (₹)", min_value=0)
             
             if st.form_submit_button("Add Instrument"):
-                sh.worksheet("Instruments").append_row([inst_id, inst_name, inst_price, "Open", "Active"])
-                st.success(f"✅ {inst_name} added.")
-                get_clean_dataframe.clear()
+                if inst_id and inst_name:
+                    sh.worksheet("Instruments").append_row([inst_id, inst_name, inst_price, "Open", "Active"])
+                    st.success(f"✅ {inst_name} added.")
+                    get_clean_dataframe.clear()
+                else:
+                    st.error("Please provide an ID and Name.")
 
     with tab3:
+        users_df = get_clean_dataframe("Users")
+        if not users_df.empty:
+            display_users = users_df.copy()
+            if 'Password' in display_users.columns:
+                display_users['Password'] = '******'
+            st.dataframe(display_users, use_container_width=True, hide_index=True)
+            
+        st.markdown("---")
         with st.form("add_new_user"):
             new_uid = st.text_input("New User ID")
             new_pass = st.text_input("Temporary Password")
@@ -289,6 +311,8 @@ def admin_dashboard():
                     ws_users.append_row([new_uid.strip(), hash_password(new_pass.strip()), new_role])
                     st.success(f"🎉 {new_uid} added!")
                     get_clean_dataframe.clear()
+                    time.sleep(1)
+                    st.rerun()
 
 # ==========================================
 # 🚀 APP ROUTING

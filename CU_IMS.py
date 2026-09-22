@@ -176,7 +176,7 @@ def render_booking_form():
     inst_df = get_clean_dataframe("Instruments")
     users_df = get_clean_dataframe("Users")
     
-    if inst_df.empty:
+    if inst_df.empty or 'Name' not in inst_df.columns:
         st.info("System not ready. Admin must add instruments.")
         return
         
@@ -187,8 +187,20 @@ def render_booking_form():
         st.warning("No Faculty members found in the system. You cannot request recommendations until an Admin adds Faculty users.")
         return
         
+    # Format Instruments with Prices for the Dropdown
+    inst_options = []
+    inst_map = {}
+    for _, row in inst_df.iterrows():
+        name = row['Name']
+        price = row.get('Price Rate (₹)', '0')
+        display_str = f"{name} - ₹{price}/hr"
+        inst_options.append(display_str)
+        inst_map[display_str] = name # Keep track of actual name to save in DB
+        
     with st.form("booking_form"):
-        selected_inst = st.selectbox("Select Instrument", inst_df['Name'].tolist())
+        selected_display = st.selectbox("Select Instrument", inst_options)
+        selected_inst = inst_map[selected_display] # Extract clean name for database
+        
         date = st.date_input("Select Date")
         slot = st.selectbox("Select Time Slot", ["10:00 AM - 11:00 AM", "11:00 AM - 12:00 PM", "02:00 PM - 03:00 PM"])
         
@@ -213,7 +225,6 @@ def render_booking_form():
                 booking_id = f"BKG-{int(datetime.now(IST).timestamp())}"
                 timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
                 
-                # Role-based logic for Status and Faculty routing
                 if is_scholar:
                     rec_faculty = selected_faculty
                     init_status = "Awaiting Faculty Recommendation"
@@ -235,11 +246,19 @@ def render_booking_form():
 def render_my_status():
     st.subheader("My Booking History")
     all_bookings = get_clean_dataframe("Bookings")
+    inst_df = get_clean_dataframe("Instruments")
+    
+    # Create a pricing dictionary to map into the queue
+    price_map = {}
+    if not inst_df.empty and 'Name' in inst_df.columns:
+        price_map = dict(zip(inst_df['Name'], inst_df.get('Price Rate (₹)', ['0']*len(inst_df))))
+        
     if not all_bookings.empty and 'User Name' in all_bookings.columns:
-        my_bookings = all_bookings[all_bookings['User Name'] == st.session_state.user_name]
+        my_bookings = all_bookings[all_bookings['User Name'] == st.session_state.user_name].copy()
         if not my_bookings.empty:
-            # Dynamic Failsafe: Ensures it only displays columns that actually exist in the Sheet
-            desired_cols = ['Date', 'Instrument', 'Time Slot', 'Recommending Faculty', 'Payment Status', 'Booking Status']
+            my_bookings['Price (₹/hr)'] = my_bookings['Instrument'].map(price_map).fillna("N/A")
+            
+            desired_cols = ['Date', 'Instrument', 'Price (₹/hr)', 'Time Slot', 'Recommending Faculty', 'Payment Status', 'Booking Status']
             safe_cols = [col for col in desired_cols if col in my_bookings.columns]
             
             st.dataframe(my_bookings[safe_cols], hide_index=True)
@@ -267,13 +286,20 @@ def faculty_dashboard():
     with tab1:
         st.subheader("Research Scholar Requests Awaiting Your Recommendation")
         bookings_df = get_clean_dataframe("Bookings")
+        inst_df = get_clean_dataframe("Instruments")
+        
+        price_map = {}
+        if not inst_df.empty and 'Name' in inst_df.columns:
+            price_map = dict(zip(inst_df['Name'], inst_df.get('Price Rate (₹)', ['0']*len(inst_df))))
         
         if not bookings_df.empty and 'Recommending Faculty' in bookings_df.columns:
             pending_reqs = bookings_df[(bookings_df['Recommending Faculty'] == st.session_state.user_name) & 
-                                       (bookings_df['Booking Status'] == 'Awaiting Faculty Recommendation')]
+                                       (bookings_df['Booking Status'] == 'Awaiting Faculty Recommendation')].copy()
             
             if not pending_reqs.empty:
-                st.dataframe(pending_reqs[['Booking ID', 'User Name', 'Instrument', 'Date', 'Time Slot']], hide_index=True)
+                pending_reqs['Price (₹/hr)'] = pending_reqs['Instrument'].map(price_map).fillna("N/A")
+                safe_cols = [c for c in ['Booking ID', 'User Name', 'Instrument', 'Price (₹/hr)', 'Date', 'Time Slot'] if c in pending_reqs.columns]
+                st.dataframe(pending_reqs[safe_cols], hide_index=True)
                 
                 with st.form("faculty_review"):
                     target_bkg = st.selectbox("Select Booking ID to Review", pending_reqs['Booking ID'].tolist())
@@ -302,10 +328,27 @@ def admin_dashboard():
     
     with tab1:
         bookings_df = get_clean_dataframe("Bookings")
+        inst_df = get_clean_dataframe("Instruments")
+        
+        price_map = {}
+        if not inst_df.empty and 'Name' in inst_df.columns:
+            price_map = dict(zip(inst_df['Name'], inst_df.get('Price Rate (₹)', ['0']*len(inst_df))))
+            
         if not bookings_df.empty:
             st.write("**Queue Overview (Awaiting Payment/Admin Approval)**")
-            actionable = bookings_df[bookings_df['Booking Status'].isin(["Pending Admin Approval", "Approved", "Waitlisted"])]
-            st.dataframe(actionable.sort_values(by=['Date', 'Timestamp']), hide_index=True)
+            actionable = bookings_df[bookings_df['Booking Status'].isin(["Pending Admin Approval", "Approved", "Waitlisted"])].copy()
+            
+            if not actionable.empty:
+                actionable['Price (₹/hr)'] = actionable['Instrument'].map(price_map).fillna("N/A")
+                
+                # Reorder columns to put price cleanly next to the instrument
+                cols = list(actionable.columns)
+                if 'Instrument' in cols and 'Price (₹/hr)' in cols:
+                    cols.insert(cols.index('Instrument') + 1, cols.pop(cols.index('Price (₹/hr)')))
+                    
+                st.dataframe(actionable[cols].sort_values(by=['Date', 'Timestamp']), hide_index=True)
+            else:
+                st.info("Queue is currently empty.")
             
             st.markdown("---")
             with st.form("admin_approval_form"):
@@ -351,7 +394,6 @@ def admin_dashboard():
             new_pass = st.text_input("Temporary Password")
             new_role = st.selectbox("Select Role", ALL_ROLES)
             
-            # Show categorization help dynamically based on selection
             if new_role in CU_USERS: st.caption("🗂️ This role is categorized as a **CU User**.")
             elif new_role in NON_CU_USERS: st.caption("🗂️ This role is categorized as a **Non-CU User**.")
             

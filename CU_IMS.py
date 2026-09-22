@@ -37,6 +37,8 @@ def highlight_rows(row):
     # Define color scheme
     if status in ['Instrument Assigned', 'Completed']:
         color = '#d4edda' # Light Green
+    elif status == 'Expired':
+        color = '#b2babb' # Ash Gray
     elif status == 'Rejected':
         color = '#f8d7da' # Light Red
     elif status == 'Approved, Awaiting Payment':
@@ -51,7 +53,6 @@ def highlight_rows(row):
         color = '' # Default transparent
         
     if color:
-        # Returning a list of CSS styles for each cell in the row
         return [f'background-color: {color}; color: #000000'] * len(row)
     return [''] * len(row)
 
@@ -124,6 +125,33 @@ def get_clean_dataframe(sheet_tab_name):
     except Exception as e:
         st.error(f"⚠️ Error fetching from '{sheet_tab_name}' tab: {e}")
         return pd.DataFrame()
+
+def get_processed_bookings():
+    """Dynamically checks if an Assigned Instrument time slot has passed and marks it Expired."""
+    df = get_clean_dataframe("Bookings").copy()
+    if not df.empty and 'Date' in df.columns and 'Time Slot' in df.columns and 'Booking Status' in df.columns:
+        current_time = datetime.now(IST)
+        
+        for idx, row in df.iterrows():
+            if str(row['Booking Status']).strip() == 'Instrument Assigned':
+                try:
+                    date_str = str(row['Date']).strip()
+                    time_slot = str(row['Time Slot']).strip()
+                    
+                    if " - " in time_slot:
+                        # Extract the end time (e.g., "11:00 AM" from "10:00 AM - 11:00 AM")
+                        end_time_str = time_slot.split(" - ")[1].strip()
+                        dt_str = f"{date_str} {end_time_str}"
+                        
+                        # Parse naive datetime and make it timezone aware
+                        naive_dt = datetime.strptime(dt_str, "%Y-%m-%d %I:%M %p")
+                        aware_dt = IST.localize(naive_dt)
+                        
+                        if current_time > aware_dt:
+                            df.at[idx, 'Booking Status'] = 'Expired'
+                except Exception:
+                    pass # Silently skip improperly formatted dates
+    return df
 
 def col_letter(n):
     string = ""
@@ -227,7 +255,7 @@ def render_booking_form():
             selected_faculty = st.selectbox("Send Recommendation Request To (Faculty)", faculty_list)
             
         if st.form_submit_button("Submit Request", type="primary"):
-            all_bookings = get_clean_dataframe("Bookings")
+            all_bookings = get_processed_bookings()
             conflict = False
             
             if not all_bookings.empty and 'Date' in all_bookings.columns:
@@ -265,7 +293,7 @@ def render_payment_form():
     st.subheader("💳 Submit Payment Details")
     st.info("💡 You can only submit payment details for bookings that an Admin has already Approved.")
     
-    all_bookings = get_clean_dataframe("Bookings")
+    all_bookings = get_processed_bookings()
     if not all_bookings.empty and 'User Name' in all_bookings.columns:
         my_approved = all_bookings[(all_bookings['User Name'] == st.session_state.user_name) & 
                                    (all_bookings['Booking Status'] == 'Approved, Awaiting Payment')].copy()
@@ -298,7 +326,7 @@ def render_payment_form():
 
 def render_my_status():
     st.subheader("My Booking History")
-    all_bookings = get_clean_dataframe("Bookings")
+    all_bookings = get_processed_bookings()
     inst_df = get_clean_dataframe("Instruments")
     
     price_map = {}
@@ -340,7 +368,7 @@ def faculty_dashboard():
     
     with tab1:
         st.subheader("Research Scholar Requests Awaiting Your Recommendation")
-        bookings_df = get_clean_dataframe("Bookings")
+        bookings_df = get_processed_bookings()
         inst_df = get_clean_dataframe("Instruments")
         
         price_map = {}
@@ -383,7 +411,7 @@ def admin_dashboard():
     tab1, tab2, tab3 = st.tabs(["🚦 Approvals & Assignment Queue", "🔬 Manage Instruments", "👥 Manage Users"])
     
     with tab1:
-        bookings_df = get_clean_dataframe("Bookings")
+        bookings_df = get_processed_bookings()
         inst_df = get_clean_dataframe("Instruments")
         
         price_map = {}
@@ -413,7 +441,7 @@ def admin_dashboard():
                 with col2:
                     new_status = st.selectbox(
                         "Update Booking Status", 
-                        ["Pending Admin Approval", "Approved, Awaiting Payment", "Payment Submitted, Awaiting Verification", "Waitlisted", "Rejected", "Instrument Assigned", "Completed"]
+                        ["Pending Admin Approval", "Approved, Awaiting Payment", "Payment Submitted, Awaiting Verification", "Waitlisted", "Rejected", "Instrument Assigned", "Completed", "Expired"]
                     )
                 
                 st.info("💡 **Workflow Tips:** \n1. To ask for payment, change status to **'Approved, Awaiting Payment'**.\n2. Once you verify their Payment Reference, set Payment Status to **'Paid'** and Booking Status to **'Instrument Assigned'**.")

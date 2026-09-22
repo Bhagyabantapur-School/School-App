@@ -5,11 +5,12 @@ import pytz
 import gspread
 from gspread.exceptions import WorksheetNotFound
 from google.oauth2.service_account import Credentials
+import time
 
 # ==========================================
 # ⚙️ CONFIGURATION & SETUP
 # ==========================================
-st.set_page_config(page_title="CU Instruments", page_icon="🔬", layout="wide")
+st.set_page_config(page_title="CU IMS", page_icon="🔬", layout="wide")
 IST = pytz.timezone('Asia/Kolkata')
 
 SHEET_NAME = "CU Instruments Order"
@@ -47,7 +48,7 @@ def init_sheet():
 
 @st.cache_resource
 def setup_database():
-    """স্বয়ংক্রিয়ভাবে গুগল শিটে প্রয়োজনীয় ট্যাব ও হেডার তৈরি করবে"""
+    """Automatically creates necessary tabs and headers in Google Sheets"""
     sh = init_sheet()
     
     # 1. Instruments Tab
@@ -88,17 +89,21 @@ sh = setup_database()
 
 # --- HELPER FUNCTION TO PREVENT KEYERRORS ---
 def get_clean_dataframe(sheet_tab_name):
-    """গুগল শিট থেকে ডেটা পড়ার সময় হেডারের স্পেস মুছে ক্লিন DataFrame তৈরি করবে"""
-    ws = sh.worksheet(sheet_tab_name)
-    raw_data = ws.get_all_values()
-    if len(raw_data) > 1:
-        # Strip spaces from headers
-        df = pd.DataFrame(raw_data[1:], columns=[str(c).strip() for c in raw_data[0]])
-        return df
-    elif len(raw_data) == 1:
-        # Only headers exist, return empty dataframe with proper columns
-        return pd.DataFrame(columns=[str(c).strip() for c in raw_data[0]])
-    return pd.DataFrame()
+    """safely fetches data from Google Sheet and strips any accidental spaces from headers"""
+    try:
+        ws = sh.worksheet(sheet_tab_name)
+        raw_data = ws.get_all_values()
+        if len(raw_data) > 1:
+            # Strip spaces from headers
+            df = pd.DataFrame(raw_data[1:], columns=[str(c).strip() for c in raw_data[0]])
+            return df
+        elif len(raw_data) == 1:
+            # Only headers exist, return empty dataframe with proper columns
+            return pd.DataFrame(columns=[str(c).strip() for c in raw_data[0]])
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"⚠️ Error fetching from '{sheet_tab_name}' tab: {e}")
+        return pd.DataFrame()
 
 # ==========================================
 # 🖥️ LOGIN SYSTEM
@@ -116,10 +121,10 @@ def login_page():
         if submit:
             users_df = get_clean_dataframe("Users")
             
-            # 1. চেক করবে হেডারগুলো ঠিকঠাক আছে কি না
+            # 1. Check if headers are correct
             if 'User ID' in users_df.columns and 'Password' in users_df.columns:
                 
-                # 2. চেক করবে শিটে কোনো ইউজার আছে কি না
+                # 2. Check if the sheet is empty
                 if not users_df.empty:
                     users_df['User ID'] = users_df['User ID'].astype(str).str.strip()
                     users_df['Password'] = users_df['Password'].astype(str).str.strip()
@@ -134,9 +139,9 @@ def login_page():
                     else:
                         st.error("🚨 Invalid User ID or Password")
                 else:
-                    st.error("⚠️ No users found! গুগল শিটের 'Users' ট্যাবে অন্তত একটি ইউজার অ্যাকাউন্ট (admin) অ্যাড করুন।")
+                    st.error("⚠️ No users found! Please log into the Google Sheet's 'Users' tab and add at least one Admin account.")
             else:
-                st.error("⚠️ Database Setup Error: গুগল শিটের 'Users' ট্যাবের 1st Row-তে 'User ID', 'Password' এবং 'Role' হেডারগুলো ঠিকমতো লেখা নেই।")
+                st.error("⚠️ Database Setup Error: The headers in the 'Users' tab (Row 1) must be 'User ID', 'Password', and 'Role'.")
 
 # ==========================================
 # 🎓 USER DASHBOARD
@@ -192,7 +197,8 @@ def user_dashboard():
 def admin_dashboard():
     st.title("Admin Control Panel")
     
-    tab1, tab2 = st.tabs(["🚦 Queue Management (First-Come, First-Served)", "🔬 Manage Instruments"])
+    # ⚠️ New Tab "Manage Users" Added Here
+    tab1, tab2, tab3 = st.tabs(["🚦 Queue Management (FCFS)", "🔬 Manage Instruments", "👥 Manage Users"])
     
     with tab1:
         st.subheader("Booking Queue")
@@ -248,6 +254,55 @@ def admin_dashboard():
                     st.success(f"✅ {inst_name} added to the database.")
                 else:
                     st.error("Please provide both Instrument ID and Name.")
+
+    # 👥 New "Manage Users" Functionality
+    with tab3:
+        st.subheader("Current System Users")
+        users_df = get_clean_dataframe("Users")
+        
+        if not users_df.empty:
+            # Hide passwords from display
+            display_users = users_df.copy()
+            if 'Password' in display_users.columns:
+                display_users['Password'] = '******'
+            st.dataframe(display_users, use_container_width=True, hide_index=True)
+        else:
+            st.info("No users found in the system.")
+            
+        st.markdown("---")
+        st.subheader("➕ Add New User")
+        st.info("💡 **Note:** Users added here are immediately active. Remind them to change their default password via the Google Sheet if necessary.")
+        
+        with st.form("add_new_user"):
+            new_uid = st.text_input("New User ID (e.g., prof_amit)")
+            new_pass = st.text_input("Temporary Password")
+            new_role = st.selectbox("Select Role", ["Student", "Teacher", "Admin"])
+            submit_user = st.form_submit_button("Add User to System", type="primary")
+            
+            if submit_user:
+                if not new_uid or not new_pass:
+                    st.error("🚨 Both User ID and Password are required.")
+                elif len(new_uid.strip()) < 3 or len(new_pass.strip()) < 4:
+                    st.error("🚨 User ID must be at least 3 characters and Password at least 4 characters.")
+                else:
+                    ws_users = sh.worksheet("Users")
+                    existing_users = pd.DataFrame(ws_users.get_all_records())
+                    
+                    # Prevent Duplicate Users
+                    if not existing_users.empty and str(new_uid).strip() in existing_users['User ID'].astype(str).str.strip().tolist():
+                        st.error(f"🚨 The User ID '{new_uid}' already exists. Please choose a different ID.")
+                    else:
+                        with st.spinner("Adding user to secure database..."):
+                            try:
+                                # Append Row: ID, Password, Role
+                                ws_users.append_row([new_uid.strip(), new_pass.strip(), new_role])
+                                st.success(f"🎉 Account for **{new_uid}** ({new_role}) created successfully!")
+                                # Clear cache and rerun to show updated table
+                                get_clean_dataframe.clear()
+                                time.sleep(1)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"⚠️ Error saving to Google Sheet: {e}")
 
 # ==========================================
 # 🚀 APP ROUTING

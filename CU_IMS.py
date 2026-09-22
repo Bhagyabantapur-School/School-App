@@ -295,7 +295,6 @@ def render_booking_form():
         st.info("System not ready. Admin must add instruments.")
         return
         
-    # Read-Only Live Instrument Status (Visible to all users)
     st.write("**📡 Live Instrument Status Overview**")
     safe_inst_cols = [c for c in ['Instrument ID', 'Name', 'Price Rate (₹)', 'Status'] if c in inst_df.columns]
     styled_inst = inst_df[safe_inst_cols].style.apply(highlight_instruments, axis=1)
@@ -309,7 +308,6 @@ def render_booking_form():
         st.warning("No Faculty members found in the system. You cannot request recommendations until an Admin adds Faculty users.")
         return
         
-    # Filter to strictly allow ONLY 'Working' or 'Active' instruments
     working_insts = inst_df[~inst_df['Status'].isin(['Not Working'])]
     
     if working_insts.empty:
@@ -496,7 +494,8 @@ def incharge_dashboard():
     st.title(f"Instrument Incharge Portal: {st.session_state.user_name} ({st.session_state.user_category})")
     
     inst_df = get_clean_dataframe("Instruments")
-    if not inst_df.empty:
+    # ✅ FAILSAFE ADDED: Ensure dataframe is not empty AND the necessary column exists
+    if not inst_df.empty and 'Instrument ID' in inst_df.columns:
         st.subheader("Manage Instrument Conditions")
         st.write("Marking an instrument as 'Not Working' instantly blocks users from booking it.")
         
@@ -515,7 +514,7 @@ def incharge_dashboard():
                     time.sleep(1)
                     st.rerun()
     else:
-        st.info("No instruments currently in the database.")
+        st.info("No instruments currently in the database, or the 'Instrument ID' column is missing from the Google Sheet.")
 
 # ==========================================
 # ⚙️ ADMIN DASHBOARD

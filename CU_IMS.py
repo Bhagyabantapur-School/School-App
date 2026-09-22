@@ -6,6 +6,7 @@ import gspread
 from gspread.exceptions import WorksheetNotFound
 from google.oauth2.service_account import Credentials
 import time
+import hashlib
 
 # ==========================================
 # ⚙️ CONFIGURATION & SETUP
@@ -14,6 +15,13 @@ st.set_page_config(page_title="CU IMS", page_icon="🔬", layout="wide")
 IST = pytz.timezone('Asia/Kolkata')
 
 SHEET_NAME = "CU Instruments Order"
+
+# ==========================================
+# 🔒 SECURITY HELPER
+# ==========================================
+def hash_password(password):
+    """Hashes passwords using SHA-256 for secure storage."""
+    return hashlib.sha256(password.encode()).hexdigest()
 
 # ==========================================
 # 🧠 SESSION STATE
@@ -78,20 +86,22 @@ def setup_database():
     users_data = ws_users.get_all_values()
     if not users_data:
         ws_users.append_row(['User ID', 'Password', 'Role'])
-        # 🔑 Auto-inject default accounts
-        ws_users.append_row(['admin', 'admin123', 'Admin'])
-        ws_users.append_row(['student1', 'pass123', 'Student'])
+        # 🔑 Auto-inject default accounts securely
+        ws_users.append_row(['admin', hash_password('admin123'), 'Admin'])
+        ws_users.append_row(['student1', hash_password('pass123'), 'Student'])
         
     return sh
 
 # 🚀 Run the Auto-Setup silently
 sh = setup_database()
 
-# --- HELPER FUNCTION TO PREVENT KEYERRORS ---
+# --- HELPER FUNCTION TO PREVENT KEYERRORS & API QUOTA EXHAUSTION ---
+@st.cache_data(ttl=60)
 def get_clean_dataframe(sheet_tab_name):
     """Safely fetches data from Google Sheet and strips any accidental spaces from headers"""
     try:
-        ws = sh.worksheet(sheet_tab_name)
+        local_sh = init_sheet() # Use locally instantiated sheet to ensure thread safety
+        ws = local_sh.worksheet(sheet_tab_name)
         raw_data = ws.get_all_values()
         if len(raw_data) > 1:
             # Strip spaces from headers
@@ -104,6 +114,14 @@ def get_clean_dataframe(sheet_tab_name):
     except Exception as e:
         st.error(f"⚠️ Error fetching from '{sheet_tab_name}' tab: {e}")
         return pd.DataFrame()
+
+# Helper to map column index to letter (1 -> A, 2 -> B...) for dynamic updates
+def col_letter(n):
+    string = ""
+    while n > 0:
+        n, remainder = divmod(n - 1, 26)
+        string = chr(65 + remainder) + string
+    return string
 
 # ==========================================
 # 🖥️ LOGIN SYSTEM
@@ -129,7 +147,13 @@ def login_page():
                     users_df['User ID'] = users_df['User ID'].astype(str).str.strip()
                     users_df['Password'] = users_df['Password'].astype(str).str.strip()
                     
-                    user_match = users_df[(users_df['User ID'] == str(user_id).strip()) & (users_df['Password'] == str(password).strip())]
+                    hashed_input = hash_password(str(password).strip())
+                    
+                    # Authenticate (Allows plaintext fallback for legacy accounts already in the sheet)
+                    user_match = users_df[
+                        (users_df['User ID'] == str(user_id).strip()) & 
+                        ((users_df['Password'] == hashed_input) | (users_df['Password'] == str(password).strip()))
+                    ]
                     
                     if not user_match.empty:
                         st.session_state.logged_in = True
@@ -170,13 +194,31 @@ def user_dashboard():
                 
                 if book_btn:
                     ws_book = sh.worksheet("Bookings")
-                    booking_id = f"BKG-{int(datetime.now(IST).timestamp())}"
-                    timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
+                    all_bookings = get_clean_dataframe("Bookings")
                     
-                    row_data = [booking_id, timestamp, st.session_state.user_name, st.session_state.user_role, selected_inst, str(date), slot, "Pending", "Pending"]
-                    ws_book.append_row(row_data)
+                    # Conflict Prevention: Ensure no one already has this slot
+                    conflict = False
+                    if not all_bookings.empty and 'Date' in all_bookings.columns:
+                        existing = all_bookings[
+                            (all_bookings['Instrument'] == selected_inst) & 
+                            (all_bookings['Date'] == str(date)) & 
+                            (all_bookings['Time Slot'] == slot) &
+                            (all_bookings['Booking Status'].isin(['Pending', 'Approved', 'Waitlisted']))
+                        ]
+                        if not existing.empty:
+                            conflict = True
                     
-                    st.success(f"✅ Booking request sent! Your precise timestamp is **{timestamp}**. Priority is strictly First-Come, First-Served.")
+                    if conflict:
+                        st.error("🚨 This time slot is already booked or pending for this instrument. Please select another slot.")
+                    else:
+                        booking_id = f"BKG-{int(datetime.now(IST).timestamp())}"
+                        timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
+                        
+                        row_data = [booking_id, timestamp, st.session_state.user_name, st.session_state.user_role, selected_inst, str(date), slot, "Pending", "Pending"]
+                        ws_book.append_row(row_data)
+                        
+                        st.success(f"✅ Booking request sent! Your precise timestamp is **{timestamp}**. Priority is strictly First-Come, First-Served.")
+                        get_clean_dataframe.clear() # Clear cache so update shows immediately
 
     with tab2:
         st.subheader("Booking Status (Live Updates)")
@@ -233,6 +275,18 @@ def admin_dashboard():
                     if st.form_submit_button("Update System", type="primary"):
                         ws_book = sh.worksheet("Bookings")
                         live_values = ws_book.get_all_values()
+                        headers = [str(c).strip() for c in live_values[0]]
+                        
+                        try:
+                            # Dynamic Column Finding
+                            pay_col_idx = headers.index("Payment Status") + 1
+                            stat_col_idx = headers.index("Booking Status") + 1
+                        except ValueError:
+                            st.error("🚨 'Payment Status' or 'Booking Status' columns not found. Did the headers change?")
+                            st.stop()
+                            
+                        pay_col = col_letter(pay_col_idx)
+                        stat_col = col_letter(stat_col_idx)
                         
                         row_to_update = None
                         for i, row in enumerate(live_values):
@@ -241,7 +295,14 @@ def admin_dashboard():
                                 break
                         
                         if row_to_update:
-                            ws_book.update(values=[[new_payment, new_status]], range_name=f"H{row_to_update}:I{row_to_update}")
+                            if pay_col_idx + 1 == stat_col_idx:
+                                # They are adjacent, update in one batch
+                                ws_book.update(values=[[new_payment, new_status]], range_name=f"{pay_col}{row_to_update}:{stat_col}{row_to_update}")
+                            else:
+                                # They are separated, update individually
+                                ws_book.update(values=[[new_payment]], range_name=f"{pay_col}{row_to_update}")
+                                ws_book.update(values=[[new_status]], range_name=f"{stat_col}{row_to_update}")
+                                
                             st.success(f"✅ Booking {target_bkg} updated successfully. User will see this in their portal.")
                             get_clean_dataframe.clear()
                             st.rerun()
@@ -303,8 +364,8 @@ def admin_dashboard():
                     else:
                         with st.spinner("Adding user to secure database..."):
                             try:
-                                # Append Row: ID, Password, Role
-                                ws_users.append_row([new_uid.strip(), new_pass.strip(), new_role])
+                                # Append Row: ID, Hashed Password, Role
+                                ws_users.append_row([new_uid.strip(), hash_password(new_pass.strip()), new_role])
                                 st.success(f"🎉 Account for **{new_uid}** ({new_role}) created successfully!")
                                 get_clean_dataframe.clear()
                                 time.sleep(1)

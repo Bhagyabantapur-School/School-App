@@ -50,7 +50,7 @@ def setup_database():
     """স্বয়ংক্রিয়ভাবে গুগল শিটে প্রয়োজনীয় ট্যাব ও হেডার তৈরি করবে"""
     sh = init_sheet()
     
-    # 1. Instruments Tab (Checking headers)
+    # 1. Instruments Tab
     try:
         ws_inst = sh.worksheet("Instruments")
     except WorksheetNotFound:
@@ -59,7 +59,7 @@ def setup_database():
     if not ws_inst.get_all_values():
         ws_inst.append_row(['Instrument ID', 'Name', 'Price Rate (₹)', 'Available Slots', 'Status'])
 
-    # 2. Bookings Tab (Auto-create and add headers)
+    # 2. Bookings Tab
     try:
         ws_book = sh.worksheet("Bookings")
     except WorksheetNotFound:
@@ -68,7 +68,7 @@ def setup_database():
     if not ws_book.get_all_values():
         ws_book.append_row(['Booking ID', 'Timestamp', 'User Name', 'Role', 'Instrument', 'Date', 'Time Slot', 'Payment Status', 'Booking Status'])
 
-    # 3. Users Tab (Auto-create, add headers, and inject default logins)
+    # 3. Users Tab
     try:
         ws_users = sh.worksheet("Users")
     except WorksheetNotFound:
@@ -77,17 +77,30 @@ def setup_database():
     users_data = ws_users.get_all_values()
     if not users_data:
         ws_users.append_row(['User ID', 'Password', 'Role'])
-        # 🔑 Auto-inject default accounts so you can log in immediately
+        # 🔑 Auto-inject default accounts
         ws_users.append_row(['admin', 'admin123', 'Admin'])
         ws_users.append_row(['student1', 'pass123', 'Student'])
         
     return sh
 
-# 🚀 Run the Auto-Setup silently when the app starts
+# 🚀 Run the Auto-Setup silently
 sh = setup_database()
 
+# --- HELPER FUNCTION TO PREVENT KEYERRORS ---
+def get_clean_dataframe(sheet_tab_name):
+    """গুগল শিট থেকে ডেটা পড়ার সময় হেডারের স্পেস মুছে ক্লিন DataFrame তৈরি করবে"""
+    ws = sh.worksheet(sheet_tab_name)
+    raw_data = ws.get_all_values()
+    if len(raw_data) > 1:
+        # Strip spaces from headers
+        df = pd.DataFrame(raw_data[1:], columns=[str(c).strip() for c in raw_data[0]])
+        return df
+    elif len(raw_data) == 1:
+        return pd.DataFrame(columns=[str(c).strip() for c in raw_data[0]])
+    return pd.DataFrame()
+
 # ==========================================
-# 🖥️ LOGIN SYSTEM (Reads from Users Tab)
+# 🖥️ LOGIN SYSTEM
 # ==========================================
 def login_page():
     st.markdown("<h2 style='text-align: center; color: #002147;'>University of Calcutta</h2>", unsafe_allow_html=True)
@@ -100,20 +113,23 @@ def login_page():
         submit = st.form_submit_button("Login", use_container_width=True)
         
         if submit:
-            # Fetch live users from Google Sheet
-            ws_users = sh.worksheet("Users")
-            users_df = pd.DataFrame(ws_users.get_all_records())
+            users_df = get_clean_dataframe("Users")
             
-            # Match credentials
-            user_match = users_df[(users_df['User ID'] == user_id) & (users_df['Password'] == password)]
-            
-            if not user_match.empty:
-                st.session_state.logged_in = True
-                st.session_state.user_role = user_match.iloc[0]['Role']
-                st.session_state.user_name = user_id
-                st.rerun()
+            if not users_df.empty and 'User ID' in users_df.columns and 'Password' in users_df.columns:
+                users_df['User ID'] = users_df['User ID'].astype(str).str.strip()
+                users_df['Password'] = users_df['Password'].astype(str).str.strip()
+                
+                user_match = users_df[(users_df['User ID'] == str(user_id).strip()) & (users_df['Password'] == str(password).strip())]
+                
+                if not user_match.empty:
+                    st.session_state.logged_in = True
+                    st.session_state.user_role = user_match.iloc[0]['Role']
+                    st.session_state.user_name = user_id
+                    st.rerun()
+                else:
+                    st.error("🚨 Invalid User ID or Password")
             else:
-                st.error("🚨 Invalid User ID or Password")
+                st.error("⚠️ Database Setup Error: Check your 'Users' tab in Google Sheets.")
 
 # ==========================================
 # 🎓 USER DASHBOARD
@@ -126,11 +142,9 @@ def user_dashboard():
     with tab1:
         st.subheader("New Booking Request")
         
-        # Fetch available instruments directly from Sheet
-        ws_inst = sh.worksheet("Instruments")
-        inst_df = pd.DataFrame(ws_inst.get_all_records())
+        inst_df = get_clean_dataframe("Instruments")
         
-        if inst_df.empty:
+        if inst_df.empty or 'Name' not in inst_df.columns:
             st.info("No instruments are currently available. Admin needs to add them first.")
         else:
             inst_list = inst_df['Name'].tolist()
@@ -144,7 +158,6 @@ def user_dashboard():
                 
                 if book_btn:
                     ws_book = sh.worksheet("Bookings")
-                    # Generate Unique ID & Timestamp
                     booking_id = f"BKG-{int(datetime.now(IST).timestamp())}"
                     timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
                     
@@ -155,10 +168,9 @@ def user_dashboard():
 
     with tab2:
         st.subheader("Booking Status (Live Updates)")
-        ws_book = sh.worksheet("Bookings")
-        all_bookings = pd.DataFrame(ws_book.get_all_records())
+        all_bookings = get_clean_dataframe("Bookings")
         
-        if not all_bookings.empty:
+        if not all_bookings.empty and 'User Name' in all_bookings.columns:
             my_bookings = all_bookings[all_bookings['User Name'] == st.session_state.user_name]
             if not my_bookings.empty:
                 st.dataframe(my_bookings[['Date', 'Time Slot', 'Instrument', 'Payment Status', 'Booking Status']], use_container_width=True, hide_index=True)
@@ -178,11 +190,10 @@ def admin_dashboard():
     with tab1:
         st.subheader("Booking Queue")
         
-        ws_book = sh.worksheet("Bookings")
-        bookings_df = pd.DataFrame(ws_book.get_all_records())
+        bookings_df = get_clean_dataframe("Bookings")
         
-        if not bookings_df.empty:
-            # Sort by Date, Time Slot, and then EXACT Timestamp for absolute priority
+        if not bookings_df.empty and 'Timestamp' in bookings_df.columns:
+            # Sort by Date, Time Slot, and exact Timestamp
             bookings_df = bookings_df.sort_values(by=['Date', 'Time Slot', 'Timestamp'])
             
             st.dataframe(bookings_df, use_container_width=True, hide_index=True)
@@ -190,7 +201,6 @@ def admin_dashboard():
             st.markdown("---")
             st.write("**Process Next User in Queue**")
             
-            # Update Engine
             with st.form("update_booking"):
                 col1, col2, col3 = st.columns(3)
                 with col1:
@@ -201,11 +211,12 @@ def admin_dashboard():
                     new_status = st.selectbox("Booking Status", ["Pending", "Approved", "Waitlisted", "Rejected", "Completed"])
                 
                 if st.form_submit_button("Update System", type="primary"):
-                    # Find exact row in Google Sheets
+                    ws_book = sh.worksheet("Bookings")
                     live_values = ws_book.get_all_values()
+                    
                     row_to_update = None
                     for i, row in enumerate(live_values):
-                        if i > 0 and str(row[0]) == str(target_bkg):
+                        if i > 0 and str(row[0]).strip() == str(target_bkg).strip():
                             row_to_update = i + 1 
                             break
                     
@@ -224,9 +235,12 @@ def admin_dashboard():
             inst_price = st.number_input("Price Rate per hour (₹)", min_value=0)
             
             if st.form_submit_button("Add to Database"):
-                ws_inst = sh.worksheet("Instruments")
-                ws_inst.append_row([inst_id, inst_name, inst_price, "Open", "Active"])
-                st.success(f"✅ {inst_name} added to the database.")
+                if inst_id and inst_name:
+                    ws_inst = sh.worksheet("Instruments")
+                    ws_inst.append_row([inst_id, inst_name, inst_price, "Open", "Active"])
+                    st.success(f"✅ {inst_name} added to the database.")
+                else:
+                    st.error("Please provide both Instrument ID and Name.")
 
 # ==========================================
 # 🚀 APP ROUTING

@@ -141,8 +141,13 @@ def setup_database():
     
     try: sh.worksheet("Instruments")
     except WorksheetNotFound: 
-        ws_inst = sh.add_worksheet(title="Instruments", rows="100", cols="20")
-        ws_inst.append_row(['Instrument ID', 'Name', 'Price Rate (₹)', 'Available Slots', 'Status'])
+        ws_inst = sh.add_worksheet(title="Instruments", rows="100", cols="25")
+        ws_inst.append_row([
+            'Instrument ID', 'Name', 'Make / Manufacturer', 'Serial No.', 'Unit No.', 
+            'Campus Name', 'Department / Centre', 'Building / Floor / Room No.', 
+            'Instrument Incharge', 'Designation of In-charge', 'Contact Email', 
+            'Price Rate (₹)', 'Available Slots', 'Status'
+        ])
 
     try: sh.worksheet("Bookings")
     except WorksheetNotFound: 
@@ -237,7 +242,6 @@ def update_instrument_in_sheet(inst_id, updates_dict):
     
     row_to_update = None
     for i, row in enumerate(live_values):
-        # Always assumes ID is in the first column (index 0)
         if i > 0 and str(row[0]).strip() == str(inst_id).strip():
             row_to_update = i + 1 
             break
@@ -315,7 +319,6 @@ def render_booking_form():
         st.warning("No Faculty members found in the system. You cannot request recommendations until an Admin adds Faculty users.")
         return
         
-    # Dynamically filter out 'Not Working' based on whatever the status column is named
     if status_col_name:
         working_insts = inst_df[~inst_df[status_col_name].isin(['Not Working'])]
     else:
@@ -507,9 +510,7 @@ def incharge_dashboard():
     inst_df = get_clean_dataframe("Instruments")
     
     if not inst_df.empty:
-        # Dynamically map the ID column (assuming it's always the first column in the sheet)
         id_col = inst_df.columns[0]
-        # Dynamically locate the status column even if there are extra spaces
         status_col = next((c for c in inst_df.columns if 'status' in str(c).lower()), None)
         
         if status_col:
@@ -600,7 +601,8 @@ def admin_dashboard():
             status_col_name = next((c for c in inst_df.columns if 'status' in str(c).lower()), None)
             id_col = inst_df.columns[0]
             
-            safe_inst_cols = [c for c in [id_col, 'Name', 'Price Rate (₹)', 'Available Slots', status_col_name] if c in inst_df.columns]
+            # Displays key columns so the table doesn't get overwhelmingly wide
+            safe_inst_cols = [c for c in [id_col, 'Name', 'Make / Manufacturer', 'Department / Centre', 'Instrument Incharge', 'Price Rate (₹)', status_col_name] if c in inst_df.columns]
             styled_inst_admin = inst_df[safe_inst_cols].style.apply(highlight_instruments, axis=1)
             st.dataframe(styled_inst_admin, hide_index=True, use_container_width=True)
         else:
@@ -610,19 +612,35 @@ def admin_dashboard():
         st.subheader("➕ Add New Instrument")
         with st.form("add_instrument"):
             col1, col2, col3 = st.columns(3)
-            with col1: inst_id = st.text_input("Instrument ID")
-            with col2: inst_name = st.text_input("Instrument Name")
-            with col3: inst_price = st.number_input("Price/hr (₹)", min_value=0)
+            with col1: 
+                inst_id = st.text_input("Instrument ID*")
+                inst_make = st.text_input("Make / Manufacturer")
+                inst_dept = st.text_input("Department / Centre")
+                inst_incharge = st.text_input("Instrument Incharge")
+            with col2: 
+                inst_name = st.text_input("Instrument Name*")
+                inst_serial = st.text_input("Serial No.")
+                inst_room = st.text_input("Building / Floor / Room No.")
+                inst_desig = st.text_input("Designation of In-charge")
+            with col3: 
+                inst_price = st.number_input("Price Rate/hr (₹)*", min_value=0)
+                inst_unit = st.text_input("Unit No.")
+                inst_campus = st.text_input("Campus Name")
+                inst_email = st.text_input("Contact Email")
             
             if st.form_submit_button("Add Instrument", type="primary"):
                 if inst_id and inst_name:
-                    sh.worksheet("Instruments").append_row([inst_id, inst_name, inst_price, "Open", "Working"])
+                    sh.worksheet("Instruments").append_row([
+                        inst_id, inst_name, inst_make, inst_serial, inst_unit, 
+                        inst_campus, inst_dept, inst_room, inst_incharge, 
+                        inst_desig, inst_email, inst_price, "Open", "Working"
+                    ])
                     st.success(f"✅ {inst_name} added to the system.")
                     get_clean_dataframe.clear()
                     time.sleep(1)
                     st.rerun()
                 else:
-                    st.error("Please provide an ID and Name.")
+                    st.error("Please provide at least an Instrument ID and Name.")
 
     with tab3:
         users_df = get_clean_dataframe("Users")

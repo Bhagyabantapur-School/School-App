@@ -32,19 +32,21 @@ def hash_password(password):
 # ==========================================
 def highlight_rows(row):
     """Applies CSS background colors to a pandas row based on Booking Status."""
-    status = str(row.get('Booking Status', ''))
+    status = str(row.get('Booking Status', '')).strip()
     
     if status in ['Instrument Assigned', 'Completed']:
         color = '#d4edda' # Light Green
     elif status == 'Expired':
         color = '#b2babb' # Ash Gray
-    elif status == 'Rejected':
+    elif status in ['Rejected', 'Rejected by Faculty']:
         color = '#f8d7da' # Light Red
     elif status == 'Approved, Awaiting Payment':
         color = '#cce5ff' # Light Blue
     elif status == 'Payment Submitted, Awaiting Verification':
         color = '#ffe8a1' # Light Gold/Orange
-    elif status in ['Pending Admin Approval', 'Awaiting Faculty Recommendation']:
+    elif status == 'Awaiting Faculty Recommendation':
+        color = '#e8daef' # Light Purple
+    elif status == 'Pending Admin Approval':
         color = '#fff3cd' # Light Yellow
     elif status == 'Waitlisted':
         color = '#e2e3e5' # Light Gray
@@ -138,7 +140,6 @@ def get_processed_bookings():
                     time_slot = str(row['Time Slot']).strip()
                     
                     if " - " in time_slot:
-                        # Extract end time and cleanly strip out the "IST" label for datetime parsing
                         end_time_str = time_slot.split(" - ")[1].replace("IST", "").strip()
                         dt_str = f"{date_str} {end_time_str}"
                         
@@ -247,7 +248,6 @@ def render_booking_form():
         selected_inst = inst_map[selected_display]
         date = st.date_input("Select Date")
         
-        # Explicit IST added to dropdown options
         slot = st.selectbox("Select Time Slot", [
             "10:00 AM - 11:00 AM IST", 
             "11:00 AM - 12:00 PM IST", 
@@ -273,7 +273,6 @@ def render_booking_form():
                 st.error("🚨 This time slot is already booked or pending. Please select another.")
             else:
                 booking_id = f"BKG-{int(datetime.now(IST).timestamp())}"
-                # Explicit IST appended to database timestamp
                 timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST")
                 
                 if is_scholar:
@@ -385,7 +384,10 @@ def faculty_dashboard():
             if not pending_reqs.empty:
                 pending_reqs['Price (₹/hr)'] = pending_reqs['Instrument'].map(price_map).fillna("N/A")
                 safe_cols = [c for c in ['Booking ID', 'User Name', 'Instrument', 'Price (₹/hr)', 'Date', 'Time Slot'] if c in pending_reqs.columns]
-                st.dataframe(pending_reqs[safe_cols], hide_index=True)
+                
+                # Apply styles to faculty review queue too
+                styled_reqs = pending_reqs[safe_cols].style.apply(highlight_rows, axis=1)
+                st.dataframe(styled_reqs, hide_index=True)
                 
                 with st.form("faculty_review"):
                     target_bkg = st.selectbox("Select Booking ID to Review", pending_reqs['Booking ID'].tolist())
@@ -429,7 +431,10 @@ def admin_dashboard():
             if not actionable.empty:
                 actionable['Price (₹/hr)'] = actionable['Instrument'].map(price_map).fillna("N/A")
                 safe_display_cols = [c for c in ['Booking ID', 'User Name', 'Instrument', 'Price (₹/hr)', 'Date', 'Time Slot', 'Payment Reference', 'Payment Date', 'Booking Status'] if c in actionable.columns]
-                st.dataframe(actionable[safe_display_cols].sort_values(by=['Date']), hide_index=True)
+                
+                # Apply styles to Admin queue too
+                styled_actionable = actionable[safe_display_cols].sort_values(by=['Date']).style.apply(highlight_rows, axis=1)
+                st.dataframe(styled_actionable, hide_index=True)
             else:
                 st.info("Task Queue is currently empty.")
             

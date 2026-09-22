@@ -20,18 +20,14 @@ SHEET_NAME = "CU Instruments Order"
 # 🔒 SECURITY HELPER
 # ==========================================
 def hash_password(password):
-    """Hashes passwords using SHA-256 for secure storage."""
     return hashlib.sha256(password.encode()).hexdigest()
 
 # ==========================================
 # 🧠 SESSION STATE
 # ==========================================
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-if 'user_role' not in st.session_state:
-    st.session_state.user_role = None
-if 'user_name' not in st.session_state:
-    st.session_state.user_name = None
+for state in ['logged_in', 'user_role', 'user_name']:
+    if state not in st.session_state:
+        st.session_state[state] = False if state == 'logged_in' else None
 
 # ==========================================
 # 🔌 GOOGLE SHEETS CONNECTOR & AUTO-SETUP
@@ -56,72 +52,77 @@ def init_sheet():
 
 @st.cache_resource
 def setup_database():
-    """Automatically creates necessary tabs and headers in Google Sheets"""
     sh = init_sheet()
     
     # 1. Instruments Tab
-    try:
-        ws_inst = sh.worksheet("Instruments")
-    except WorksheetNotFound:
-        ws_inst = sh.add_worksheet(title="Instruments", rows="100", cols="20")
-    
+    try: ws_inst = sh.worksheet("Instruments")
+    except WorksheetNotFound: ws_inst = sh.add_worksheet(title="Instruments", rows="100", cols="20")
     if not ws_inst.get_all_values():
         ws_inst.append_row(['Instrument ID', 'Name', 'Price Rate (₹)', 'Available Slots', 'Status'])
 
-    # 2. Bookings Tab
-    try:
-        ws_book = sh.worksheet("Bookings")
-    except WorksheetNotFound:
-        ws_book = sh.add_worksheet(title="Bookings", rows="1000", cols="20")
-        
+    # 2. Bookings Tab (UPDATED WITH RECOMMENDING TEACHER)
+    try: ws_book = sh.worksheet("Bookings")
+    except WorksheetNotFound: ws_book = sh.add_worksheet(title="Bookings", rows="1000", cols="20")
     if not ws_book.get_all_values():
-        ws_book.append_row(['Booking ID', 'Timestamp', 'User Name', 'Role', 'Instrument', 'Date', 'Time Slot', 'Payment Status', 'Booking Status'])
+        ws_book.append_row(['Booking ID', 'Timestamp', 'User Name', 'Role', 'Instrument', 'Date', 'Time Slot', 'Recommending Teacher', 'Payment Status', 'Booking Status'])
 
     # 3. Users Tab
-    try:
-        ws_users = sh.worksheet("Users")
-    except WorksheetNotFound:
-        ws_users = sh.add_worksheet(title="Users", rows="100", cols="20")
-        
-    users_data = ws_users.get_all_values()
-    if not users_data:
+    try: ws_users = sh.worksheet("Users")
+    except WorksheetNotFound: ws_users = sh.add_worksheet(title="Users", rows="100", cols="20")
+    if not ws_users.get_all_values():
         ws_users.append_row(['User ID', 'Password', 'Role'])
-        # 🔑 Auto-inject default accounts securely
         ws_users.append_row(['admin', hash_password('admin123'), 'Admin'])
+        ws_users.append_row(['teacher1', hash_password('teach123'), 'Teacher'])
         ws_users.append_row(['student1', hash_password('pass123'), 'Student'])
         
     return sh
 
-# 🚀 Run the Auto-Setup silently
 sh = setup_database()
 
-# --- HELPER FUNCTION TO PREVENT KEYERRORS & API QUOTA EXHAUSTION ---
 @st.cache_data(ttl=60)
 def get_clean_dataframe(sheet_tab_name):
-    """Safely fetches data from Google Sheet and strips any accidental spaces from headers"""
     try:
-        local_sh = init_sheet() # Use locally instantiated sheet to ensure thread safety
+        local_sh = init_sheet()
         ws = local_sh.worksheet(sheet_tab_name)
         raw_data = ws.get_all_values()
         if len(raw_data) > 1:
-            # Strip spaces from headers
-            df = pd.DataFrame(raw_data[1:], columns=[str(c).strip() for c in raw_data[0]])
-            return df
+            return pd.DataFrame(raw_data[1:], columns=[str(c).strip() for c in raw_data[0]])
         elif len(raw_data) == 1:
-            # Only headers exist, return empty dataframe with proper columns
             return pd.DataFrame(columns=[str(c).strip() for c in raw_data[0]])
         return pd.DataFrame()
     except Exception as e:
         st.error(f"⚠️ Error fetching from '{sheet_tab_name}' tab: {e}")
         return pd.DataFrame()
 
-# Helper to map column index to letter (1 -> A, 2 -> B...) for dynamic updates
 def col_letter(n):
     string = ""
     while n > 0:
         n, remainder = divmod(n - 1, 26)
         string = chr(65 + remainder) + string
     return string
+
+def update_booking_in_sheet(booking_id, new_payment=None, new_status=None):
+    """Helper to dynamically update specific cells without breaking if columns move."""
+    ws_book = sh.worksheet("Bookings")
+    live_values = ws_book.get_all_values()
+    headers = [str(c).strip() for c in live_values[0]]
+    
+    row_to_update = None
+    for i, row in enumerate(live_values):
+        if i > 0 and str(row[0]).strip() == str(booking_id).strip():
+            row_to_update = i + 1 
+            break
+            
+    if row_to_update:
+        if new_payment and "Payment Status" in headers:
+            pay_col = col_letter(headers.index("Payment Status") + 1)
+            ws_book.update(values=[[new_payment]], range_name=f"{pay_col}{row_to_update}")
+        if new_status and "Booking Status" in headers:
+            stat_col = col_letter(headers.index("Booking Status") + 1)
+            ws_book.update(values=[[new_status]], range_name=f"{stat_col}{row_to_update}")
+        get_clean_dataframe.clear()
+        return True
+    return False
 
 # ==========================================
 # 🖥️ LOGIN SYSTEM
@@ -131,247 +132,163 @@ def login_page():
     st.markdown("<h4 style='text-align: center;'>Instrument Booking & Priority Portal</h4>", unsafe_allow_html=True)
     
     with st.form("login_form"):
-        st.write("### Login")
         user_id = st.text_input("User ID")
         password = st.text_input("Password", type="password")
-        submit = st.form_submit_button("Login", use_container_width=True)
-        
-        if submit:
+        if st.form_submit_button("Login", use_container_width=True):
             users_df = get_clean_dataframe("Users")
-            
-            # 1. Check if headers are correct
-            if 'User ID' in users_df.columns and 'Password' in users_df.columns:
+            if not users_df.empty and 'User ID' in users_df.columns:
+                users_df['User ID'] = users_df['User ID'].astype(str).str.strip()
+                users_df['Password'] = users_df['Password'].astype(str).str.strip()
+                hashed_input = hash_password(str(password).strip())
                 
-                # 2. Check if the sheet is empty
-                if not users_df.empty:
-                    users_df['User ID'] = users_df['User ID'].astype(str).str.strip()
-                    users_df['Password'] = users_df['Password'].astype(str).str.strip()
-                    
-                    hashed_input = hash_password(str(password).strip())
-                    
-                    # Authenticate (Allows plaintext fallback for legacy accounts already in the sheet)
-                    user_match = users_df[
-                        (users_df['User ID'] == str(user_id).strip()) & 
-                        ((users_df['Password'] == hashed_input) | (users_df['Password'] == str(password).strip()))
-                    ]
-                    
-                    if not user_match.empty:
-                        st.session_state.logged_in = True
-                        st.session_state.user_role = user_match.iloc[0]['Role']
-                        st.session_state.user_name = user_id
-                        st.rerun()
-                    else:
-                        st.error("🚨 Invalid User ID or Password")
+                user_match = users_df[(users_df['User ID'] == str(user_id).strip()) & 
+                                      ((users_df['Password'] == hashed_input) | (users_df['Password'] == str(password).strip()))]
+                
+                if not user_match.empty:
+                    st.session_state.logged_in = True
+                    st.session_state.user_role = user_match.iloc[0]['Role']
+                    st.session_state.user_name = user_id
+                    st.rerun()
                 else:
-                    st.error("⚠️ No users found! Please log into the Google Sheet's 'Users' tab and add at least one Admin account.")
+                    st.error("🚨 Invalid User ID or Password")
             else:
-                st.error("⚠️ Database Setup Error: The headers in the 'Users' tab (Row 1) must be 'User ID', 'Password', and 'Role'.")
+                st.error("⚠️ Database Error: 'Users' tab is empty or invalid.")
 
 # ==========================================
-# 🎓 USER DASHBOARD
+# 🎓 STUDENT DASHBOARD
 # ==========================================
-def user_dashboard():
-    st.title(f"Welcome, {st.session_state.user_name} ({st.session_state.user_role})")
-    
-    tab1, tab2 = st.tabs(["📝 Book an Instrument", "🔔 My Notifications & Status"])
+def student_dashboard():
+    st.title(f"Student Portal: {st.session_state.user_name}")
+    tab1, tab2 = st.tabs(["📝 Book an Instrument", "🔔 My Status"])
     
     with tab1:
-        st.subheader("New Booking Request")
-        
         inst_df = get_clean_dataframe("Instruments")
+        users_df = get_clean_dataframe("Users")
+        teachers = users_df[users_df['Role'] == 'Teacher']['User ID'].tolist() if not users_df.empty else []
         
-        if inst_df.empty or 'Name' not in inst_df.columns:
-            st.info("No instruments are currently available. Admin needs to add them first.")
+        if inst_df.empty or not teachers:
+            st.info("System not ready. Admin must add instruments and teachers.")
         else:
-            inst_list = inst_df['Name'].tolist()
-            slots = ["10:00 AM - 11:00 AM", "11:00 AM - 12:00 PM", "02:00 PM - 03:00 PM", "03:00 PM - 04:00 PM"]
-            
             with st.form("booking_form"):
-                selected_inst = st.selectbox("Select Instrument", inst_list)
+                selected_inst = st.selectbox("Select Instrument", inst_df['Name'].tolist())
                 date = st.date_input("Select Date")
-                slot = st.selectbox("Select Time Slot", slots)
-                book_btn = st.form_submit_button("Submit Booking Request")
+                slot = st.selectbox("Select Time Slot", ["10:00 AM - 11:00 AM", "11:00 AM - 12:00 PM", "02:00 PM - 03:00 PM"])
+                selected_teacher = st.selectbox("Send Recommendation Request To", teachers)
                 
-                if book_btn:
-                    ws_book = sh.worksheet("Bookings")
+                if st.form_submit_button("Submit Request"):
                     all_bookings = get_clean_dataframe("Bookings")
-                    
-                    # Conflict Prevention: Ensure no one already has this slot
                     conflict = False
                     if not all_bookings.empty and 'Date' in all_bookings.columns:
-                        existing = all_bookings[
-                            (all_bookings['Instrument'] == selected_inst) & 
-                            (all_bookings['Date'] == str(date)) & 
-                            (all_bookings['Time Slot'] == slot) &
-                            (all_bookings['Booking Status'].isin(['Pending', 'Approved', 'Waitlisted']))
-                        ]
-                        if not existing.empty:
-                            conflict = True
+                        existing = all_bookings[(all_bookings['Instrument'] == selected_inst) & 
+                                                (all_bookings['Date'] == str(date)) & 
+                                                (all_bookings['Time Slot'] == slot) &
+                                                (all_bookings['Booking Status'].isin(['Awaiting Teacher Recommendation', 'Pending Admin Approval', 'Approved']))]
+                        if not existing.empty: conflict = True
                     
                     if conflict:
-                        st.error("🚨 This time slot is already booked or pending for this instrument. Please select another slot.")
+                        st.error("🚨 This time slot is already booked or pending. Please select another.")
                     else:
                         booking_id = f"BKG-{int(datetime.now(IST).timestamp())}"
                         timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
-                        
-                        row_data = [booking_id, timestamp, st.session_state.user_name, st.session_state.user_role, selected_inst, str(date), slot, "Pending", "Pending"]
-                        ws_book.append_row(row_data)
-                        
-                        st.success(f"✅ Booking request sent! Your precise timestamp is **{timestamp}**. Priority is strictly First-Come, First-Served.")
-                        get_clean_dataframe.clear() # Clear cache so update shows immediately
+                        row_data = [booking_id, timestamp, st.session_state.user_name, st.session_state.user_role, 
+                                    selected_inst, str(date), slot, selected_teacher, "Pending", "Awaiting Teacher Recommendation"]
+                        sh.worksheet("Bookings").append_row(row_data)
+                        st.success("✅ Request sent to teacher for recommendation!")
+                        get_clean_dataframe.clear()
 
     with tab2:
-        st.subheader("Booking Status (Live Updates)")
         all_bookings = get_clean_dataframe("Bookings")
-        
         if not all_bookings.empty and 'User Name' in all_bookings.columns:
             my_bookings = all_bookings[all_bookings['User Name'] == st.session_state.user_name]
-            if not my_bookings.empty:
-                st.dataframe(my_bookings[['Date', 'Time Slot', 'Instrument', 'Payment Status', 'Booking Status']], use_container_width=True, hide_index=True)
-            else:
-                st.info("You have no booking history.")
+            st.dataframe(my_bookings[['Date', 'Instrument', 'Recommending Teacher', 'Payment Status', 'Booking Status']], hide_index=True)
+
+# ==========================================
+# 🧑‍🏫 TEACHER DASHBOARD
+# ==========================================
+def teacher_dashboard():
+    st.title(f"Teacher Portal: {st.session_state.user_name}")
+    st.subheader("Student Requests Awaiting Your Recommendation")
+    
+    bookings_df = get_clean_dataframe("Bookings")
+    
+    if not bookings_df.empty and 'Recommending Teacher' in bookings_df.columns:
+        pending_reqs = bookings_df[(bookings_df['Recommending Teacher'] == st.session_state.user_name) & 
+                                   (bookings_df['Booking Status'] == 'Awaiting Teacher Recommendation')]
+        
+        if not pending_reqs.empty:
+            st.dataframe(pending_reqs[['Booking ID', 'User Name', 'Instrument', 'Date', 'Time Slot']], hide_index=True)
+            
+            with st.form("teacher_review"):
+                target_bkg = st.selectbox("Select Booking ID to Review", pending_reqs['Booking ID'].tolist())
+                decision = st.selectbox("Action", ["Recommend to Admin", "Reject Request"])
+                
+                if st.form_submit_button("Submit Decision", type="primary"):
+                    new_status = "Pending Admin Approval" if decision == "Recommend to Admin" else "Rejected by Teacher"
+                    if update_booking_in_sheet(target_bkg, new_status=new_status):
+                        st.success(f"✅ {target_bkg} updated to: {new_status}")
+                        time.sleep(1)
+                        st.rerun()
         else:
-            st.info("You have no booking history.")
+            st.info("You have no pending student recommendations to review.")
+    else:
+        st.info("No bookings found in the system.")
 
 # ==========================================
 # ⚙️ ADMIN DASHBOARD
 # ==========================================
 def admin_dashboard():
     st.title("Admin Control Panel")
-    
-    tab1, tab2, tab3 = st.tabs(["🚦 Queue Management (FCFS)", "🔬 Manage Instruments", "👥 Manage Users"])
+    tab1, tab2, tab3 = st.tabs(["🚦 Queue & Payment", "🔬 Manage Instruments", "👥 Manage Users"])
     
     with tab1:
-        st.subheader("Booking Queue")
-        
         bookings_df = get_clean_dataframe("Bookings")
-        
         if not bookings_df.empty:
-            # 🛡️ SAFETY NET: Verify all required columns exist before processing
-            required_cols = ['Booking ID', 'Timestamp', 'Date', 'Time Slot']
-            missing_cols = [col for col in required_cols if col not in bookings_df.columns]
+            # Highlight items ready for admin action
+            st.write("**Queue Overview (Awaiting Payment/Admin Approval)**")
+            actionable = bookings_df[bookings_df['Booking Status'].isin(["Pending Admin Approval", "Approved", "Waitlisted"])]
+            st.dataframe(actionable.sort_values(by=['Date', 'Timestamp']), hide_index=True)
             
-            if missing_cols:
-                st.error(f"⚠️ **Google Sheet Header Error:** The 'Bookings' tab is missing the following exact headers: **{', '.join(missing_cols)}**.")
-                st.info("💡 Please open your Google Sheet, go to the 'Bookings' tab, and ensure Row 1 has the exact headers spelled correctly without extra spaces.")
-            else:
-                # Sort by Date, Time Slot, and exact Timestamp
-                bookings_df = bookings_df.sort_values(by=['Date', 'Time Slot', 'Timestamp'])
+            st.markdown("---")
+            with st.form("admin_approval_form"):
+                target_bkg = st.selectbox("Select Booking ID", bookings_df['Booking ID'].tolist())
+                new_payment = st.selectbox("Payment Status", ["Pending", "Paid", "Failed/Refunded"])
+                new_status = st.selectbox("Booking Status", ["Pending Admin Approval", "Approved", "Waitlisted", "Rejected", "Completed"])
                 
-                st.dataframe(bookings_df, use_container_width=True, hide_index=True)
-                
-                st.markdown("---")
-                st.write("**Process Next User in Queue**")
-                
-                with st.form("update_booking"):
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        target_bkg = st.selectbox("Select Booking ID", bookings_df['Booking ID'].tolist())
-                    with col2:
-                        new_payment = st.selectbox("Payment Status", ["Pending", "Paid", "Failed/Refunded"])
-                    with col3:
-                        new_status = st.selectbox("Booking Status", ["Pending", "Approved", "Waitlisted", "Rejected", "Completed"])
-                    
-                    if st.form_submit_button("Update System", type="primary"):
-                        ws_book = sh.worksheet("Bookings")
-                        live_values = ws_book.get_all_values()
-                        headers = [str(c).strip() for c in live_values[0]]
-                        
-                        try:
-                            # Dynamic Column Finding
-                            pay_col_idx = headers.index("Payment Status") + 1
-                            stat_col_idx = headers.index("Booking Status") + 1
-                        except ValueError:
-                            st.error("🚨 'Payment Status' or 'Booking Status' columns not found. Did the headers change?")
-                            st.stop()
-                            
-                        pay_col = col_letter(pay_col_idx)
-                        stat_col = col_letter(stat_col_idx)
-                        
-                        row_to_update = None
-                        for i, row in enumerate(live_values):
-                            if i > 0 and str(row[0]).strip() == str(target_bkg).strip():
-                                row_to_update = i + 1 
-                                break
-                        
-                        if row_to_update:
-                            if pay_col_idx + 1 == stat_col_idx:
-                                # They are adjacent, update in one batch
-                                ws_book.update(values=[[new_payment, new_status]], range_name=f"{pay_col}{row_to_update}:{stat_col}{row_to_update}")
-                            else:
-                                # They are separated, update individually
-                                ws_book.update(values=[[new_payment]], range_name=f"{pay_col}{row_to_update}")
-                                ws_book.update(values=[[new_status]], range_name=f"{stat_col}{row_to_update}")
-                                
-                            st.success(f"✅ Booking {target_bkg} updated successfully. User will see this in their portal.")
-                            get_clean_dataframe.clear()
-                            st.rerun()
+                if st.form_submit_button("Process Payment & Update Status", type="primary"):
+                    if update_booking_in_sheet(target_bkg, new_payment, new_status):
+                        st.success(f"✅ Booking {target_bkg} securely updated.")
+                        time.sleep(1)
+                        st.rerun()
         else:
-            st.info("No bookings currently in the system.")
+            st.info("No bookings in system.")
 
     with tab2:
-        st.subheader("Add New Instrument")
         with st.form("add_instrument"):
-            inst_id = st.text_input("Instrument ID (e.g., INST-01)")
-            inst_name = st.text_input("Instrument Name")
-            inst_price = st.number_input("Price Rate per hour (₹)", min_value=0)
+            col1, col2, col3 = st.columns(3)
+            with col1: inst_id = st.text_input("Instrument ID")
+            with col2: inst_name = st.text_input("Instrument Name")
+            with col3: inst_price = st.number_input("Price/hr (₹)", min_value=0)
             
-            if st.form_submit_button("Add to Database"):
-                if inst_id and inst_name:
-                    ws_inst = sh.worksheet("Instruments")
-                    ws_inst.append_row([inst_id, inst_name, inst_price, "Open", "Active"])
-                    st.success(f"✅ {inst_name} added to the database.")
-                    get_clean_dataframe.clear()
-                else:
-                    st.error("Please provide both Instrument ID and Name.")
+            if st.form_submit_button("Add Instrument"):
+                sh.worksheet("Instruments").append_row([inst_id, inst_name, inst_price, "Open", "Active"])
+                st.success(f"✅ {inst_name} added.")
+                get_clean_dataframe.clear()
 
-    # 👥 "Manage Users" Functionality
     with tab3:
-        st.subheader("Current System Users")
-        users_df = get_clean_dataframe("Users")
-        
-        if not users_df.empty:
-            # Hide passwords from display
-            display_users = users_df.copy()
-            if 'Password' in display_users.columns:
-                display_users['Password'] = '******'
-            st.dataframe(display_users, use_container_width=True, hide_index=True)
-        else:
-            st.info("No users found in the system.")
-            
-        st.markdown("---")
-        st.subheader("➕ Add New User")
-        st.info("💡 **Note:** Users added here are immediately active.")
-        
         with st.form("add_new_user"):
-            new_uid = st.text_input("New User ID (e.g., prof_amit)")
+            new_uid = st.text_input("New User ID")
             new_pass = st.text_input("Temporary Password")
             new_role = st.selectbox("Select Role", ["Student", "Teacher", "Admin"])
-            submit_user = st.form_submit_button("Add User to System", type="primary")
             
-            if submit_user:
-                if not new_uid or not new_pass:
-                    st.error("🚨 Both User ID and Password are required.")
-                elif len(new_uid.strip()) < 3 or len(new_pass.strip()) < 4:
-                    st.error("🚨 User ID must be at least 3 characters and Password at least 4 characters.")
+            if st.form_submit_button("Add User", type="primary"):
+                ws_users = sh.worksheet("Users")
+                existing = pd.DataFrame(ws_users.get_all_records())
+                if not existing.empty and str(new_uid).strip() in existing['User ID'].astype(str).str.strip().tolist():
+                    st.error("🚨 User ID already exists.")
                 else:
-                    ws_users = sh.worksheet("Users")
-                    existing_users = pd.DataFrame(ws_users.get_all_records())
-                    
-                    # Prevent Duplicate Users
-                    if not existing_users.empty and str(new_uid).strip() in existing_users['User ID'].astype(str).str.strip().tolist():
-                        st.error(f"🚨 The User ID '{new_uid}' already exists. Please choose a different ID.")
-                    else:
-                        with st.spinner("Adding user to secure database..."):
-                            try:
-                                # Append Row: ID, Hashed Password, Role
-                                ws_users.append_row([new_uid.strip(), hash_password(new_pass.strip()), new_role])
-                                st.success(f"🎉 Account for **{new_uid}** ({new_role}) created successfully!")
-                                get_clean_dataframe.clear()
-                                time.sleep(1)
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"⚠️ Error saving to Google Sheet: {e}")
+                    ws_users.append_row([new_uid.strip(), hash_password(new_pass.strip()), new_role])
+                    st.success(f"🎉 {new_uid} added!")
+                    get_clean_dataframe.clear()
 
 # ==========================================
 # 🚀 APP ROUTING
@@ -382,10 +299,10 @@ else:
     col1, col2 = st.columns([8, 1])
     with col2:
         if st.button("Logout"):
-            st.session_state.logged_in = False
+            for key in st.session_state.keys():
+                del st.session_state[key]
             st.rerun()
             
-    if st.session_state.user_role == "Admin":
-        admin_dashboard()
-    else:
-        user_dashboard()
+    if st.session_state.user_role == "Admin": admin_dashboard()
+    elif st.session_state.user_role == "Teacher": teacher_dashboard()
+    else: student_dashboard()

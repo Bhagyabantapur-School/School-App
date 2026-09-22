@@ -28,6 +28,34 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 # ==========================================
+# 🎨 STYLING HELPER
+# ==========================================
+def highlight_rows(row):
+    """Applies CSS background colors to a pandas row based on Booking Status."""
+    status = str(row.get('Booking Status', ''))
+    
+    # Define color scheme
+    if status in ['Instrument Assigned', 'Completed']:
+        color = '#d4edda' # Light Green
+    elif status == 'Rejected':
+        color = '#f8d7da' # Light Red
+    elif status == 'Approved, Awaiting Payment':
+        color = '#cce5ff' # Light Blue
+    elif status == 'Payment Submitted, Awaiting Verification':
+        color = '#ffe8a1' # Light Gold/Orange
+    elif status in ['Pending Admin Approval', 'Awaiting Faculty Recommendation']:
+        color = '#fff3cd' # Light Yellow
+    elif status == 'Waitlisted':
+        color = '#e2e3e5' # Light Gray
+    else:
+        color = '' # Default transparent
+        
+    if color:
+        # Returning a list of CSS styles for each cell in the row
+        return [f'background-color: {color}; color: #000000'] * len(row)
+    return [''] * len(row)
+
+# ==========================================
 # 🧠 SESSION STATE
 # ==========================================
 for state in ['logged_in', 'user_role', 'user_name', 'user_category']:
@@ -58,19 +86,16 @@ def init_sheet():
 def setup_database():
     sh = init_sheet()
     
-    # 1. Instruments Tab
     try: sh.worksheet("Instruments")
     except WorksheetNotFound: 
         ws_inst = sh.add_worksheet(title="Instruments", rows="100", cols="20")
         ws_inst.append_row(['Instrument ID', 'Name', 'Price Rate (₹)', 'Available Slots', 'Status'])
 
-    # 2. Bookings Tab (UPDATED WITH PAYMENT TRACKING)
     try: sh.worksheet("Bookings")
     except WorksheetNotFound: 
         ws_book = sh.add_worksheet(title="Bookings", rows="1000", cols="25")
         ws_book.append_row(['Booking ID', 'Timestamp', 'User Name', 'Role', 'Instrument', 'Date', 'Time Slot', 'Recommending Faculty', 'Payment Reference', 'Payment Date', 'Payment Status', 'Booking Status'])
 
-    # 3. Users Tab
     try: sh.worksheet("Users")
     except WorksheetNotFound: 
         ws_users = sh.add_worksheet(title="Users", rows="100", cols="20")
@@ -108,7 +133,6 @@ def col_letter(n):
     return string
 
 def update_booking_in_sheet(booking_id, updates_dict):
-    """Dynamically updates multiple columns for a specific booking based on a dictionary of column names."""
     ws_book = sh.worksheet("Bookings")
     live_values = ws_book.get_all_values()
     headers = [str(c).strip() for c in live_values[0]]
@@ -228,7 +252,6 @@ def render_booking_form():
                     init_status = "Pending Admin Approval"
                     msg = "✅ Booking submitted directly to Admin for approval!"
                     
-                # New Columns initialized as "N/A"
                 row_data = [booking_id, timestamp, st.session_state.user_name, st.session_state.user_role, 
                             selected_inst, str(date), slot, rec_faculty, "N/A", "N/A", "Pending", init_status]
                 
@@ -288,7 +311,11 @@ def render_my_status():
             my_bookings['Price (₹/hr)'] = my_bookings['Instrument'].map(price_map).fillna("N/A")
             desired_cols = ['Date', 'Instrument', 'Price (₹/hr)', 'Time Slot', 'Payment Reference', 'Payment Status', 'Booking Status']
             safe_cols = [col for col in desired_cols if col in my_bookings.columns]
-            st.dataframe(my_bookings[safe_cols], hide_index=True)
+            
+            # 🎨 APPLY COLOR STYLING HERE
+            styled_df = my_bookings[safe_cols].style.apply(highlight_rows, axis=1)
+            
+            st.dataframe(styled_df, hide_index=True, use_container_width=True)
         else:
             st.info("You have no booking history.")
     else:
@@ -365,13 +392,11 @@ def admin_dashboard():
             
         if not bookings_df.empty:
             st.subheader("Task Queue (Approvals & Payment Verifications)")
-            # Admin needs to see items awaiting initial approval OR awaiting payment verification
             action_statuses = ["Pending Admin Approval", "Payment Submitted, Awaiting Verification", "Waitlisted"]
             actionable = bookings_df[bookings_df['Booking Status'].isin(action_statuses)].copy()
             
             if not actionable.empty:
                 actionable['Price (₹/hr)'] = actionable['Instrument'].map(price_map).fillna("N/A")
-                
                 safe_display_cols = [c for c in ['Booking ID', 'User Name', 'Instrument', 'Price (₹/hr)', 'Date', 'Time Slot', 'Payment Reference', 'Payment Date', 'Booking Status'] if c in actionable.columns]
                 st.dataframe(actionable[safe_display_cols].sort_values(by=['Date']), hide_index=True)
             else:

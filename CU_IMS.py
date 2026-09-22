@@ -16,6 +16,11 @@ IST = pytz.timezone('Asia/Kolkata')
 
 SHEET_NAME = "CU Instruments Order"
 
+# Role Definitions
+CU_USERS = ["Faculty", "Research Scholar"]
+NON_CU_USERS = ["Research Institute", "Industry partner"]
+ALL_ROLES = ["Admin"] + CU_USERS + NON_CU_USERS
+
 # ==========================================
 # 🔒 SECURITY HELPER
 # ==========================================
@@ -25,7 +30,7 @@ def hash_password(password):
 # ==========================================
 # 🧠 SESSION STATE
 # ==========================================
-for state in ['logged_in', 'user_role', 'user_name']:
+for state in ['logged_in', 'user_role', 'user_name', 'user_category']:
     if state not in st.session_state:
         st.session_state[state] = False if state == 'logged_in' else None
 
@@ -51,7 +56,6 @@ def init_sheet():
         st.stop()
 
 def setup_database():
-    """Self-healing database setup: Recreates tabs if deleted without hitting API quotas."""
     sh = init_sheet()
     
     # 1. Instruments Tab
@@ -61,12 +65,12 @@ def setup_database():
         ws_inst = sh.add_worksheet(title="Instruments", rows="100", cols="20")
         ws_inst.append_row(['Instrument ID', 'Name', 'Price Rate (₹)', 'Available Slots', 'Status'])
 
-    # 2. Bookings Tab (Contains Recommending Teacher column)
+    # 2. Bookings Tab 
     try: 
         sh.worksheet("Bookings")
     except WorksheetNotFound: 
         ws_book = sh.add_worksheet(title="Bookings", rows="1000", cols="20")
-        ws_book.append_row(['Booking ID', 'Timestamp', 'User Name', 'Role', 'Instrument', 'Date', 'Time Slot', 'Recommending Teacher', 'Payment Status', 'Booking Status'])
+        ws_book.append_row(['Booking ID', 'Timestamp', 'User Name', 'Role', 'Instrument', 'Date', 'Time Slot', 'Recommending Faculty', 'Payment Status', 'Booking Status'])
 
     # 3. Users Tab
     try: 
@@ -75,12 +79,13 @@ def setup_database():
         ws_users = sh.add_worksheet(title="Users", rows="100", cols="20")
         ws_users.append_row(['User ID', 'Password', 'Role'])
         ws_users.append_row(['admin', hash_password('admin123'), 'Admin'])
-        ws_users.append_row(['teacher1', hash_password('teach123'), 'Teacher'])
-        ws_users.append_row(['student1', hash_password('pass123'), 'Student'])
+        ws_users.append_row(['faculty1', hash_password('fac123'), 'Faculty'])
+        ws_users.append_row(['scholar1', hash_password('sch123'), 'Research Scholar'])
+        ws_users.append_row(['institute1', hash_password('inst123'), 'Research Institute'])
+        ws_users.append_row(['industry1', hash_password('ind123'), 'Industry partner'])
         
     return sh
 
-# 🚀 Run the Auto-Setup silently on load
 sh = setup_database()
 
 @st.cache_data(ttl=60)
@@ -99,7 +104,6 @@ def get_clean_dataframe(sheet_tab_name):
         return pd.DataFrame()
 
 def col_letter(n):
-    """Converts column index to letter (e.g., 1 -> A, 2 -> B)"""
     string = ""
     while n > 0:
         n, remainder = divmod(n - 1, 26)
@@ -107,7 +111,6 @@ def col_letter(n):
     return string
 
 def update_booking_in_sheet(booking_id, new_payment=None, new_status=None):
-    """Helper to dynamically update specific cells without breaking if columns move."""
     ws_book = sh.worksheet("Bookings")
     live_values = ws_book.get_all_values()
     headers = [str(c).strip() for c in live_values[0]]
@@ -150,9 +153,15 @@ def login_page():
                                       ((users_df['Password'] == hashed_input) | (users_df['Password'] == str(password).strip()))]
                 
                 if not user_match.empty:
+                    role = user_match.iloc[0]['Role']
                     st.session_state.logged_in = True
-                    st.session_state.user_role = user_match.iloc[0]['Role']
+                    st.session_state.user_role = role
                     st.session_state.user_name = user_id
+                    
+                    if role in CU_USERS: st.session_state.user_category = "CU User"
+                    elif role in NON_CU_USERS: st.session_state.user_category = "Non-CU User"
+                    else: st.session_state.user_category = "System Admin"
+                    
                     st.rerun()
                 else:
                     st.error("🚨 Invalid User ID or Password")
@@ -160,90 +169,125 @@ def login_page():
                 st.error("⚠️ Database Error: 'Users' tab is empty or invalid.")
 
 # ==========================================
-# 🎓 STUDENT DASHBOARD
+# 🛠️ SHARED BOOKING INTERFACE
 # ==========================================
-def student_dashboard():
-    st.title(f"Student Portal: {st.session_state.user_name}")
-    tab1, tab2 = st.tabs(["📝 Book an Instrument", "🔔 My Status"])
+def render_booking_form():
+    st.subheader("New Booking Request")
+    inst_df = get_clean_dataframe("Instruments")
+    users_df = get_clean_dataframe("Users")
     
-    with tab1:
-        inst_df = get_clean_dataframe("Instruments")
-        users_df = get_clean_dataframe("Users")
-        teachers = users_df[users_df['Role'] == 'Teacher']['User ID'].tolist() if not users_df.empty else []
+    if inst_df.empty:
+        st.info("System not ready. Admin must add instruments.")
+        return
         
-        if inst_df.empty or not teachers:
-            st.info("System not ready. Admin must add instruments and teachers.")
-        else:
-            with st.form("booking_form"):
-                selected_inst = st.selectbox("Select Instrument", inst_df['Name'].tolist())
-                date = st.date_input("Select Date")
-                slot = st.selectbox("Select Time Slot", ["10:00 AM - 11:00 AM", "11:00 AM - 12:00 PM", "02:00 PM - 03:00 PM"])
-                selected_teacher = st.selectbox("Send Recommendation Request To", teachers)
-                
-                if st.form_submit_button("Submit Request"):
-                    all_bookings = get_clean_dataframe("Bookings")
-                    conflict = False
-                    if not all_bookings.empty and 'Date' in all_bookings.columns:
-                        existing = all_bookings[(all_bookings['Instrument'] == selected_inst) & 
-                                                (all_bookings['Date'] == str(date)) & 
-                                                (all_bookings['Time Slot'] == slot) &
-                                                (all_bookings['Booking Status'].isin(['Awaiting Teacher Recommendation', 'Pending Admin Approval', 'Approved']))]
-                        if not existing.empty: conflict = True
-                    
-                    if conflict:
-                        st.error("🚨 This time slot is already booked or pending. Please select another.")
-                    else:
-                        booking_id = f"BKG-{int(datetime.now(IST).timestamp())}"
-                        timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
-                        row_data = [booking_id, timestamp, st.session_state.user_name, st.session_state.user_role, 
-                                    selected_inst, str(date), slot, selected_teacher, "Pending", "Awaiting Teacher Recommendation"]
-                        sh.worksheet("Bookings").append_row(row_data)
-                        st.success("✅ Request sent to teacher for recommendation!")
-                        get_clean_dataframe.clear()
-                        time.sleep(1)
-                        st.rerun()
-
-    with tab2:
-        all_bookings = get_clean_dataframe("Bookings")
-        if not all_bookings.empty and 'User Name' in all_bookings.columns:
-            my_bookings = all_bookings[all_bookings['User Name'] == st.session_state.user_name]
-            if not my_bookings.empty:
-                st.dataframe(my_bookings[['Date', 'Instrument', 'Time Slot', 'Recommending Teacher', 'Payment Status', 'Booking Status']], hide_index=True)
+    is_scholar = st.session_state.user_role == "Research Scholar"
+    faculty_list = users_df[users_df['Role'] == 'Faculty']['User ID'].tolist() if not users_df.empty else []
+    
+    if is_scholar and not faculty_list:
+        st.warning("No Faculty members found in the system. You cannot request recommendations until an Admin adds Faculty users.")
+        return
+        
+    with st.form("booking_form"):
+        selected_inst = st.selectbox("Select Instrument", inst_df['Name'].tolist())
+        date = st.date_input("Select Date")
+        slot = st.selectbox("Select Time Slot", ["10:00 AM - 11:00 AM", "11:00 AM - 12:00 PM", "02:00 PM - 03:00 PM"])
+        
+        selected_faculty = None
+        if is_scholar:
+            selected_faculty = st.selectbox("Send Recommendation Request To (Faculty)", faculty_list)
+            
+        if st.form_submit_button("Submit Request", type="primary"):
+            all_bookings = get_clean_dataframe("Bookings")
+            conflict = False
+            
+            if not all_bookings.empty and 'Date' in all_bookings.columns:
+                existing = all_bookings[(all_bookings['Instrument'] == selected_inst) & 
+                                        (all_bookings['Date'] == str(date)) & 
+                                        (all_bookings['Time Slot'] == slot) &
+                                        (all_bookings['Booking Status'].isin(['Awaiting Faculty Recommendation', 'Pending Admin Approval', 'Approved']))]
+                if not existing.empty: conflict = True
+            
+            if conflict:
+                st.error("🚨 This time slot is already booked or pending. Please select another.")
             else:
-                st.info("You have no booking history.")
+                booking_id = f"BKG-{int(datetime.now(IST).timestamp())}"
+                timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
+                
+                # Role-based logic for Status and Faculty routing
+                if is_scholar:
+                    rec_faculty = selected_faculty
+                    init_status = "Awaiting Faculty Recommendation"
+                    msg = f"✅ Request sent to {rec_faculty} for recommendation!"
+                else:
+                    rec_faculty = "N/A - Direct"
+                    init_status = "Pending Admin Approval"
+                    msg = "✅ Booking submitted directly to Admin for approval!"
+                    
+                row_data = [booking_id, timestamp, st.session_state.user_name, st.session_state.user_role, 
+                            selected_inst, str(date), slot, rec_faculty, "Pending", init_status]
+                
+                sh.worksheet("Bookings").append_row(row_data)
+                st.success(msg)
+                get_clean_dataframe.clear()
+                time.sleep(1)
+                st.rerun()
+
+def render_my_status():
+    st.subheader("My Booking History")
+    all_bookings = get_clean_dataframe("Bookings")
+    if not all_bookings.empty and 'User Name' in all_bookings.columns:
+        my_bookings = all_bookings[all_bookings['User Name'] == st.session_state.user_name]
+        if not my_bookings.empty:
+            st.dataframe(my_bookings[['Date', 'Instrument', 'Time Slot', 'Recommending Faculty', 'Payment Status', 'Booking Status']], hide_index=True)
         else:
             st.info("You have no booking history.")
+    else:
+        st.info("You have no booking history.")
 
 # ==========================================
-# 🧑‍🏫 TEACHER DASHBOARD
+# 🎓 STANDARD USER DASHBOARD (Scholars, Inst, Ind)
 # ==========================================
-def teacher_dashboard():
-    st.title(f"Teacher Portal: {st.session_state.user_name}")
-    st.subheader("Student Requests Awaiting Your Recommendation")
+def standard_user_dashboard():
+    st.title(f"Portal: {st.session_state.user_name} | {st.session_state.user_role} ({st.session_state.user_category})")
+    tab1, tab2 = st.tabs(["📝 Book an Instrument", "🔔 My Status"])
+    with tab1: render_booking_form()
+    with tab2: render_my_status()
+
+# ==========================================
+# 🧑‍🏫 FACULTY DASHBOARD (Bookings + Approvals)
+# ==========================================
+def faculty_dashboard():
+    st.title(f"Faculty Portal: {st.session_state.user_name} ({st.session_state.user_category})")
+    tab1, tab2, tab3 = st.tabs(["✅ Review Scholars", "📝 Book for Myself", "🔔 My Status"])
     
-    bookings_df = get_clean_dataframe("Bookings")
-    
-    if not bookings_df.empty and 'Recommending Teacher' in bookings_df.columns:
-        pending_reqs = bookings_df[(bookings_df['Recommending Teacher'] == st.session_state.user_name) & 
-                                   (bookings_df['Booking Status'] == 'Awaiting Teacher Recommendation')]
+    with tab1:
+        st.subheader("Research Scholar Requests Awaiting Your Recommendation")
+        bookings_df = get_clean_dataframe("Bookings")
         
-        if not pending_reqs.empty:
-            st.dataframe(pending_reqs[['Booking ID', 'User Name', 'Instrument', 'Date', 'Time Slot']], hide_index=True)
+        if not bookings_df.empty and 'Recommending Faculty' in bookings_df.columns:
+            pending_reqs = bookings_df[(bookings_df['Recommending Faculty'] == st.session_state.user_name) & 
+                                       (bookings_df['Booking Status'] == 'Awaiting Faculty Recommendation')]
             
-            with st.form("teacher_review"):
-                target_bkg = st.selectbox("Select Booking ID to Review", pending_reqs['Booking ID'].tolist())
-                decision = st.selectbox("Action", ["Recommend to Admin", "Reject Request"])
+            if not pending_reqs.empty:
+                st.dataframe(pending_reqs[['Booking ID', 'User Name', 'Instrument', 'Date', 'Time Slot']], hide_index=True)
                 
-                if st.form_submit_button("Submit Decision", type="primary"):
-                    new_status = "Pending Admin Approval" if decision == "Recommend to Admin" else "Rejected by Teacher"
-                    if update_booking_in_sheet(target_bkg, new_status=new_status):
-                        st.success(f"✅ {target_bkg} updated to: {new_status}")
-                        time.sleep(1)
-                        st.rerun()
+                with st.form("faculty_review"):
+                    target_bkg = st.selectbox("Select Booking ID to Review", pending_reqs['Booking ID'].tolist())
+                    decision = st.selectbox("Action", ["Recommend to Admin", "Reject Request"])
+                    
+                    if st.form_submit_button("Submit Decision", type="primary"):
+                        new_status = "Pending Admin Approval" if decision == "Recommend to Admin" else "Rejected by Faculty"
+                        if update_booking_in_sheet(target_bkg, new_status=new_status):
+                            st.success(f"✅ {target_bkg} updated to: {new_status}")
+                            time.sleep(1)
+                            st.rerun()
+            else:
+                st.info("No pending scholar recommendations.")
         else:
-            st.info("You have no pending student recommendations to review.")
-    else:
-        st.info("No bookings found in the system.")
+            st.info("No bookings found in the system.")
+            
+    with tab2: render_booking_form()
+    with tab3: render_my_status()
 
 # ==========================================
 # ⚙️ ADMIN DASHBOARD
@@ -298,18 +342,25 @@ def admin_dashboard():
             
         st.markdown("---")
         with st.form("add_new_user"):
+            st.subheader("Add New System User")
             new_uid = st.text_input("New User ID")
             new_pass = st.text_input("Temporary Password")
-            new_role = st.selectbox("Select Role", ["Student", "Teacher", "Admin"])
+            new_role = st.selectbox("Select Role", ALL_ROLES)
+            
+            # Show categorization help dynamically based on selection
+            if new_role in CU_USERS: st.caption("🗂️ This role is categorized as a **CU User**.")
+            elif new_role in NON_CU_USERS: st.caption("🗂️ This role is categorized as a **Non-CU User**.")
             
             if st.form_submit_button("Add User", type="primary"):
                 ws_users = sh.worksheet("Users")
                 existing = pd.DataFrame(ws_users.get_all_records())
                 if not existing.empty and str(new_uid).strip() in existing['User ID'].astype(str).str.strip().tolist():
                     st.error("🚨 User ID already exists.")
+                elif not new_uid or not new_pass:
+                    st.error("🚨 ID and Password required.")
                 else:
                     ws_users.append_row([new_uid.strip(), hash_password(new_pass.strip()), new_role])
-                    st.success(f"🎉 {new_uid} added!")
+                    st.success(f"🎉 {new_uid} added as {new_role}!")
                     get_clean_dataframe.clear()
                     time.sleep(1)
                     st.rerun()
@@ -328,5 +379,5 @@ else:
             st.rerun()
             
     if st.session_state.user_role == "Admin": admin_dashboard()
-    elif st.session_state.user_role == "Teacher": teacher_dashboard()
-    else: student_dashboard()
+    elif st.session_state.user_role == "Faculty": faculty_dashboard()
+    else: standard_user_dashboard()

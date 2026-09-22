@@ -19,14 +19,15 @@ SHEET_NAME = "CU Instruments Order"
 # Role Definitions
 CU_USERS = ["Faculty", "Research Scholar"]
 NON_CU_USERS = ["Research Institute", "Industry partner"]
-ALL_ROLES = ["Admin"] + CU_USERS + NON_CU_USERS
+STAFF_USERS = ["Instrument Incharge"]
+ALL_ROLES = ["Admin"] + CU_USERS + NON_CU_USERS + STAFF_USERS
 
 # ==========================================
 # 🎨 CUSTOM BUTTON CSS
 # ==========================================
 st.markdown("""
 <style>
-/* 🔴 Logout Button Styling (Red with White Text) */
+/* 🔴 Logout Button Styling */
 div.element-container:has(#logout_marker) + div.element-container button {
     background-color: #dc3545 !important;
     color: white !important;
@@ -39,7 +40,7 @@ div.element-container:has(#logout_marker) + div.element-container button:hover {
     color: white !important;
 }
 
-/* 🔵 Sync Button Styling (Blue with White Text) */
+/* 🔵 Sync Button Styling */
 div.element-container:has(#sync_marker) + div.element-container button {
     background-color: #007bff !important;
     color: white !important;
@@ -61,7 +62,7 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 # ==========================================
-# 🎨 TABLE STYLING HELPER
+# 🎨 TABLE STYLING HELPERS
 # ==========================================
 def highlight_rows(row):
     """Applies CSS background colors to a pandas row based on Booking Status."""
@@ -83,6 +84,19 @@ def highlight_rows(row):
         color = '#fff3cd' # Light Yellow
     elif status == 'Waitlisted':
         color = '#e2e3e5' # Light Gray
+    else:
+        color = '' 
+        
+    if color:
+        return [f'background-color: {color}; color: #000000'] * len(row)
+    return [''] * len(row)
+
+def highlight_instruments(row):
+    """Applies CSS background colors to Instruments based on Working condition."""
+    status = str(row.get('Status', '')).strip()
+    
+    if status == 'Not Working':
+        color = '#f8d7da' # Light Red
     else:
         color = '' 
         
@@ -140,6 +154,7 @@ def setup_database():
         ws_users.append_row(['scholar1', hash_password('sch123'), 'Research Scholar'])
         ws_users.append_row(['institute1', hash_password('inst123'), 'Research Institute'])
         ws_users.append_row(['industry1', hash_password('ind123'), 'Industry partner'])
+        ws_users.append_row(['incharge1', hash_password('inc123'), 'Instrument Incharge'])
         
     return sh
 
@@ -161,7 +176,6 @@ def get_clean_dataframe(sheet_tab_name):
         return pd.DataFrame()
 
 def get_processed_bookings():
-    """Dynamically checks if an Assigned Instrument time slot has passed and marks it Expired."""
     df = get_clean_dataframe("Bookings").copy()
     if not df.empty and 'Date' in df.columns and 'Time Slot' in df.columns and 'Booking Status' in df.columns:
         current_time = datetime.now(IST)
@@ -212,6 +226,26 @@ def update_booking_in_sheet(booking_id, updates_dict):
         return True
     return False
 
+def update_instrument_in_sheet(inst_id, updates_dict):
+    ws_inst = sh.worksheet("Instruments")
+    live_values = ws_inst.get_all_values()
+    headers = [str(c).strip() for c in live_values[0]]
+    
+    row_to_update = None
+    for i, row in enumerate(live_values):
+        if i > 0 and str(row[0]).strip() == str(inst_id).strip():
+            row_to_update = i + 1 
+            break
+            
+    if row_to_update:
+        for col_name, new_val in updates_dict.items():
+            if col_name in headers:
+                col_letter_val = col_letter(headers.index(col_name) + 1)
+                ws_inst.update(values=[[new_val]], range_name=f"{col_letter_val}{row_to_update}")
+        get_clean_dataframe.clear()
+        return True
+    return False
+
 # ==========================================
 # 🖥️ LOGIN SYSTEM
 # ==========================================
@@ -240,6 +274,7 @@ def login_page():
                     
                     if role in CU_USERS: st.session_state.user_category = "CU User"
                     elif role in NON_CU_USERS: st.session_state.user_category = "Non-CU User"
+                    elif role in STAFF_USERS: st.session_state.user_category = "Staff"
                     else: st.session_state.user_category = "System Admin"
                     
                     st.rerun()
@@ -260,6 +295,13 @@ def render_booking_form():
         st.info("System not ready. Admin must add instruments.")
         return
         
+    # Read-Only Live Instrument Status (Visible to all users)
+    st.write("**📡 Live Instrument Status Overview**")
+    safe_inst_cols = [c for c in ['Instrument ID', 'Name', 'Price Rate (₹)', 'Status'] if c in inst_df.columns]
+    styled_inst = inst_df[safe_inst_cols].style.apply(highlight_instruments, axis=1)
+    st.dataframe(styled_inst, hide_index=True, use_container_width=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+        
     is_scholar = st.session_state.user_role == "Research Scholar"
     faculty_list = users_df[users_df['Role'] == 'Faculty']['User ID'].tolist() if not users_df.empty else []
     
@@ -267,9 +309,16 @@ def render_booking_form():
         st.warning("No Faculty members found in the system. You cannot request recommendations until an Admin adds Faculty users.")
         return
         
+    # Filter to strictly allow ONLY 'Working' or 'Active' instruments
+    working_insts = inst_df[~inst_df['Status'].isin(['Not Working'])]
+    
+    if working_insts.empty:
+        st.error("🛑 All instruments are currently marked as 'Not Working'. Bookings are temporarily paused.")
+        return
+        
     inst_options = []
     inst_map = {}
-    for _, row in inst_df.iterrows():
+    for _, row in working_insts.iterrows():
         name = row['Name']
         price = row.get('Price Rate (₹)', '0')
         display_str = f"{name} - ₹{price}/hr"
@@ -277,7 +326,7 @@ def render_booking_form():
         inst_map[display_str] = name 
         
     with st.form("booking_form"):
-        selected_display = st.selectbox("Select Instrument", inst_options)
+        selected_display = st.selectbox("Select Instrument (Only Working Instruments Shown)", inst_options)
         selected_inst = inst_map[selected_display]
         date = st.date_input("Select Date")
         
@@ -385,7 +434,7 @@ def render_my_status():
         st.info("You have no booking history.")
 
 # ==========================================
-# 🎓 STANDARD USER DASHBOARD (Scholars, Inst, Ind)
+# 🎓 STANDARD USER DASHBOARD
 # ==========================================
 def standard_user_dashboard():
     st.title(f"Portal: {st.session_state.user_name} | {st.session_state.user_role} ({st.session_state.user_category})")
@@ -395,7 +444,7 @@ def standard_user_dashboard():
     with tab3: render_my_status()
 
 # ==========================================
-# 🧑‍🏫 FACULTY DASHBOARD (Bookings + Approvals)
+# 🧑‍🏫 FACULTY DASHBOARD
 # ==========================================
 def faculty_dashboard():
     st.title(f"Faculty Portal: {st.session_state.user_name} ({st.session_state.user_category})")
@@ -441,6 +490,34 @@ def faculty_dashboard():
     with tab4: render_my_status()
 
 # ==========================================
+# 🔧 INSTRUMENT INCHARGE DASHBOARD
+# ==========================================
+def incharge_dashboard():
+    st.title(f"Instrument Incharge Portal: {st.session_state.user_name} ({st.session_state.user_category})")
+    
+    inst_df = get_clean_dataframe("Instruments")
+    if not inst_df.empty:
+        st.subheader("Manage Instrument Conditions")
+        st.write("Marking an instrument as 'Not Working' instantly blocks users from booking it.")
+        
+        safe_inst_cols = [c for c in ['Instrument ID', 'Name', 'Price Rate (₹)', 'Status'] if c in inst_df.columns]
+        styled_inst = inst_df[safe_inst_cols].style.apply(highlight_instruments, axis=1)
+        st.dataframe(styled_inst, hide_index=True, use_container_width=True)
+        
+        st.markdown("---")
+        with st.form("update_inst_status"):
+            target_inst = st.selectbox("Select Instrument ID to Update", inst_df['Instrument ID'].tolist())
+            new_status = st.selectbox("Update Condition Status", ["Working", "Not Working"])
+            
+            if st.form_submit_button("Apply Status Update", type="primary"):
+                if update_instrument_in_sheet(target_inst, {"Status": new_status}):
+                    st.success(f"✅ Instrument {target_inst} successfully marked as {new_status}.")
+                    time.sleep(1)
+                    st.rerun()
+    else:
+        st.info("No instruments currently in the database.")
+
+# ==========================================
 # ⚙️ ADMIN DASHBOARD
 # ==========================================
 def admin_dashboard():
@@ -483,8 +560,6 @@ def admin_dashboard():
                         ["Pending Admin Approval", "Approved, Awaiting Payment", "Payment Submitted, Awaiting Verification", "Waitlisted", "Rejected", "Instrument Assigned", "Completed", "Expired"]
                     )
                 
-                st.info("💡 **Workflow Tips:** \n1. To ask for payment, change status to **'Approved, Awaiting Payment'**.\n2. Once you verify their Payment Reference, set Payment Status to **'Paid'** and Booking Status to **'Instrument Assigned'**.")
-                
                 if st.form_submit_button("Apply Updates", type="primary"):
                     updates = {
                         "Payment Status": new_payment,
@@ -498,17 +573,30 @@ def admin_dashboard():
             st.info("No bookings in system.")
 
     with tab2:
+        st.subheader("Current Instruments Database")
+        inst_df = get_clean_dataframe("Instruments")
+        if not inst_df.empty:
+            safe_inst_cols = [c for c in ['Instrument ID', 'Name', 'Price Rate (₹)', 'Available Slots', 'Status'] if c in inst_df.columns]
+            styled_inst_admin = inst_df[safe_inst_cols].style.apply(highlight_instruments, axis=1)
+            st.dataframe(styled_inst_admin, hide_index=True, use_container_width=True)
+        else:
+            st.info("No instruments found.")
+
+        st.markdown("---")
+        st.subheader("➕ Add New Instrument")
         with st.form("add_instrument"):
             col1, col2, col3 = st.columns(3)
             with col1: inst_id = st.text_input("Instrument ID")
             with col2: inst_name = st.text_input("Instrument Name")
             with col3: inst_price = st.number_input("Price/hr (₹)", min_value=0)
             
-            if st.form_submit_button("Add Instrument"):
+            if st.form_submit_button("Add Instrument", type="primary"):
                 if inst_id and inst_name:
-                    sh.worksheet("Instruments").append_row([inst_id, inst_name, inst_price, "Open", "Active"])
-                    st.success(f"✅ {inst_name} added.")
+                    sh.worksheet("Instruments").append_row([inst_id, inst_name, inst_price, "Open", "Working"])
+                    st.success(f"✅ {inst_name} added to the system.")
                     get_clean_dataframe.clear()
+                    time.sleep(1)
+                    st.rerun()
                 else:
                     st.error("Please provide an ID and Name.")
 
@@ -529,6 +617,7 @@ def admin_dashboard():
             
             if new_role in CU_USERS: st.caption("🗂️ This role is categorized as a **CU User**.")
             elif new_role in NON_CU_USERS: st.caption("🗂️ This role is categorized as a **Non-CU User**.")
+            elif new_role in STAFF_USERS: st.caption("🗂️ This role is categorized as **Staff**.")
             
             if st.form_submit_button("Add User", type="primary"):
                 ws_users = sh.worksheet("Users")
@@ -553,7 +642,6 @@ else:
     # 🚪 Logout Button (Top Right)
     col1, col2 = st.columns([9, 1])
     with col2:
-        # Invisible marker to attach CSS styling
         st.markdown('<div id="logout_marker"></div>', unsafe_allow_html=True)
         if st.button("Logout", use_container_width=True):
             for key in st.session_state.keys():
@@ -565,6 +653,8 @@ else:
         admin_dashboard()
     elif st.session_state.user_role == "Faculty": 
         faculty_dashboard()
+    elif st.session_state.user_role == "Instrument Incharge":
+        incharge_dashboard()
     else: 
         standard_user_dashboard()
         
@@ -573,7 +663,6 @@ else:
     st.markdown("---")
     col_s1, col_s2, col_s3 = st.columns([4, 2, 4])
     with col_s2:
-        # Invisible marker to attach CSS styling
         st.markdown('<div id="sync_marker"></div>', unsafe_allow_html=True)
         if st.button("🔄 Sync Application Data", use_container_width=True):
             get_clean_dataframe.clear()

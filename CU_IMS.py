@@ -238,7 +238,11 @@ def render_my_status():
     if not all_bookings.empty and 'User Name' in all_bookings.columns:
         my_bookings = all_bookings[all_bookings['User Name'] == st.session_state.user_name]
         if not my_bookings.empty:
-            st.dataframe(my_bookings[['Date', 'Instrument', 'Time Slot', 'Recommending Faculty', 'Payment Status', 'Booking Status']], hide_index=True)
+            # Dynamic Failsafe: Ensures it only displays columns that actually exist in the Sheet
+            desired_cols = ['Date', 'Instrument', 'Time Slot', 'Recommending Faculty', 'Payment Status', 'Booking Status']
+            safe_cols = [col for col in desired_cols if col in my_bookings.columns]
+            
+            st.dataframe(my_bookings[safe_cols], hide_index=True)
         else:
             st.info("You have no booking history.")
     else:

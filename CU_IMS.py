@@ -22,13 +22,46 @@ NON_CU_USERS = ["Research Institute", "Industry partner"]
 ALL_ROLES = ["Admin"] + CU_USERS + NON_CU_USERS
 
 # ==========================================
+# 🎨 CUSTOM BUTTON CSS
+# ==========================================
+st.markdown("""
+<style>
+/* 🔴 Logout Button Styling (Red with White Text) */
+div.element-container:has(#logout_marker) + div.element-container button {
+    background-color: #dc3545 !important;
+    color: white !important;
+    border-color: #dc3545 !important;
+    font-weight: bold !important;
+}
+div.element-container:has(#logout_marker) + div.element-container button:hover {
+    background-color: #c82333 !important;
+    border-color: #bd2130 !important;
+    color: white !important;
+}
+
+/* 🔵 Sync Button Styling (Blue with White Text) */
+div.element-container:has(#sync_marker) + div.element-container button {
+    background-color: #007bff !important;
+    color: white !important;
+    border-color: #007bff !important;
+    font-weight: bold !important;
+}
+div.element-container:has(#sync_marker) + div.element-container button:hover {
+    background-color: #0069d9 !important;
+    border-color: #0062cc !important;
+    color: white !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ==========================================
 # 🔒 SECURITY HELPER
 # ==========================================
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 # ==========================================
-# 🎨 STYLING HELPER
+# 🎨 TABLE STYLING HELPER
 # ==========================================
 def highlight_rows(row):
     """Applies CSS background colors to a pandas row based on Booking Status."""
@@ -520,6 +553,8 @@ else:
     # 🚪 Logout Button (Top Right)
     col1, col2 = st.columns([9, 1])
     with col2:
+        # Invisible marker to attach CSS styling
+        st.markdown('<div id="logout_marker"></div>', unsafe_allow_html=True)
         if st.button("Logout", use_container_width=True):
             for key in st.session_state.keys():
                 del st.session_state[key]
@@ -538,6 +573,8 @@ else:
     st.markdown("---")
     col_s1, col_s2, col_s3 = st.columns([4, 2, 4])
     with col_s2:
+        # Invisible marker to attach CSS styling
+        st.markdown('<div id="sync_marker"></div>', unsafe_allow_html=True)
         if st.button("🔄 Sync Application Data", use_container_width=True):
             get_clean_dataframe.clear()
             st.rerun()

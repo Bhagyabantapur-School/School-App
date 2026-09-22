@@ -89,7 +89,7 @@ sh = setup_database()
 
 # --- HELPER FUNCTION TO PREVENT KEYERRORS ---
 def get_clean_dataframe(sheet_tab_name):
-    """safely fetches data from Google Sheet and strips any accidental spaces from headers"""
+    """Safely fetches data from Google Sheet and strips any accidental spaces from headers"""
     try:
         ws = sh.worksheet(sheet_tab_name)
         raw_data = ws.get_all_values()
@@ -197,7 +197,6 @@ def user_dashboard():
 def admin_dashboard():
     st.title("Admin Control Panel")
     
-    # ⚠️ New Tab "Manage Users" Added Here
     tab1, tab2, tab3 = st.tabs(["🚦 Queue Management (FCFS)", "🔬 Manage Instruments", "👥 Manage Users"])
     
     with tab1:
@@ -205,38 +204,47 @@ def admin_dashboard():
         
         bookings_df = get_clean_dataframe("Bookings")
         
-        if not bookings_df.empty and 'Timestamp' in bookings_df.columns:
-            # Sort by Date, Time Slot, and exact Timestamp
-            bookings_df = bookings_df.sort_values(by=['Date', 'Time Slot', 'Timestamp'])
+        if not bookings_df.empty:
+            # 🛡️ SAFETY NET: Verify all required columns exist before processing
+            required_cols = ['Booking ID', 'Timestamp', 'Date', 'Time Slot']
+            missing_cols = [col for col in required_cols if col not in bookings_df.columns]
             
-            st.dataframe(bookings_df, use_container_width=True, hide_index=True)
-            
-            st.markdown("---")
-            st.write("**Process Next User in Queue**")
-            
-            with st.form("update_booking"):
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    target_bkg = st.selectbox("Select Booking ID", bookings_df['Booking ID'].tolist())
-                with col2:
-                    new_payment = st.selectbox("Payment Status", ["Pending", "Paid", "Failed/Refunded"])
-                with col3:
-                    new_status = st.selectbox("Booking Status", ["Pending", "Approved", "Waitlisted", "Rejected", "Completed"])
+            if missing_cols:
+                st.error(f"⚠️ **Google Sheet Header Error:** The 'Bookings' tab is missing the following exact headers: **{', '.join(missing_cols)}**.")
+                st.info("💡 Please open your Google Sheet, go to the 'Bookings' tab, and ensure Row 1 has the exact headers spelled correctly without extra spaces.")
+            else:
+                # Sort by Date, Time Slot, and exact Timestamp
+                bookings_df = bookings_df.sort_values(by=['Date', 'Time Slot', 'Timestamp'])
                 
-                if st.form_submit_button("Update System", type="primary"):
-                    ws_book = sh.worksheet("Bookings")
-                    live_values = ws_book.get_all_values()
+                st.dataframe(bookings_df, use_container_width=True, hide_index=True)
+                
+                st.markdown("---")
+                st.write("**Process Next User in Queue**")
+                
+                with st.form("update_booking"):
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        target_bkg = st.selectbox("Select Booking ID", bookings_df['Booking ID'].tolist())
+                    with col2:
+                        new_payment = st.selectbox("Payment Status", ["Pending", "Paid", "Failed/Refunded"])
+                    with col3:
+                        new_status = st.selectbox("Booking Status", ["Pending", "Approved", "Waitlisted", "Rejected", "Completed"])
                     
-                    row_to_update = None
-                    for i, row in enumerate(live_values):
-                        if i > 0 and str(row[0]).strip() == str(target_bkg).strip():
-                            row_to_update = i + 1 
-                            break
-                    
-                    if row_to_update:
-                        ws_book.update(values=[[new_payment, new_status]], range_name=f"H{row_to_update}:I{row_to_update}")
-                        st.success(f"✅ Booking {target_bkg} updated successfully. User will see this in their portal.")
-                        st.rerun()
+                    if st.form_submit_button("Update System", type="primary"):
+                        ws_book = sh.worksheet("Bookings")
+                        live_values = ws_book.get_all_values()
+                        
+                        row_to_update = None
+                        for i, row in enumerate(live_values):
+                            if i > 0 and str(row[0]).strip() == str(target_bkg).strip():
+                                row_to_update = i + 1 
+                                break
+                        
+                        if row_to_update:
+                            ws_book.update(values=[[new_payment, new_status]], range_name=f"H{row_to_update}:I{row_to_update}")
+                            st.success(f"✅ Booking {target_bkg} updated successfully. User will see this in their portal.")
+                            get_clean_dataframe.clear()
+                            st.rerun()
         else:
             st.info("No bookings currently in the system.")
 
@@ -252,10 +260,11 @@ def admin_dashboard():
                     ws_inst = sh.worksheet("Instruments")
                     ws_inst.append_row([inst_id, inst_name, inst_price, "Open", "Active"])
                     st.success(f"✅ {inst_name} added to the database.")
+                    get_clean_dataframe.clear()
                 else:
                     st.error("Please provide both Instrument ID and Name.")
 
-    # 👥 New "Manage Users" Functionality
+    # 👥 "Manage Users" Functionality
     with tab3:
         st.subheader("Current System Users")
         users_df = get_clean_dataframe("Users")
@@ -271,7 +280,7 @@ def admin_dashboard():
             
         st.markdown("---")
         st.subheader("➕ Add New User")
-        st.info("💡 **Note:** Users added here are immediately active. Remind them to change their default password via the Google Sheet if necessary.")
+        st.info("💡 **Note:** Users added here are immediately active.")
         
         with st.form("add_new_user"):
             new_uid = st.text_input("New User ID (e.g., prof_amit)")
@@ -297,7 +306,6 @@ def admin_dashboard():
                                 # Append Row: ID, Password, Role
                                 ws_users.append_row([new_uid.strip(), new_pass.strip(), new_role])
                                 st.success(f"🎉 Account for **{new_uid}** ({new_role}) created successfully!")
-                                # Clear cache and rerun to show updated table
                                 get_clean_dataframe.clear()
                                 time.sleep(1)
                                 st.rerun()

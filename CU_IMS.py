@@ -92,9 +92,13 @@ def highlight_rows(row):
     return [''] * len(row)
 
 def highlight_instruments(row):
-    """Applies CSS background colors to Instruments based on Working condition."""
-    status = str(row.get('Status', '')).strip()
-    
+    """Dynamically checks for 'Status' in any column name and applies red if Not Working."""
+    status = ''
+    for col in row.index:
+        if 'status' in str(col).lower():
+            status = str(row.get(col, '')).strip()
+            break
+            
     if status == 'Not Working':
         color = '#f8d7da' # Light Red
     else:
@@ -233,6 +237,7 @@ def update_instrument_in_sheet(inst_id, updates_dict):
     
     row_to_update = None
     for i, row in enumerate(live_values):
+        # Always assumes ID is in the first column (index 0)
         if i > 0 and str(row[0]).strip() == str(inst_id).strip():
             row_to_update = i + 1 
             break
@@ -291,12 +296,14 @@ def render_booking_form():
     inst_df = get_clean_dataframe("Instruments")
     users_df = get_clean_dataframe("Users")
     
-    if inst_df.empty or 'Name' not in inst_df.columns:
+    if inst_df.empty:
         st.info("System not ready. Admin must add instruments.")
         return
         
     st.write("**📡 Live Instrument Status Overview**")
-    safe_inst_cols = [c for c in ['Instrument ID', 'Name', 'Price Rate (₹)', 'Status'] if c in inst_df.columns]
+    status_col_name = next((c for c in inst_df.columns if 'status' in str(c).lower()), None)
+    
+    safe_inst_cols = [c for c in ['Instrument ID', 'Name', 'Price Rate (₹)', status_col_name] if c in inst_df.columns]
     styled_inst = inst_df[safe_inst_cols].style.apply(highlight_instruments, axis=1)
     st.dataframe(styled_inst, hide_index=True, use_container_width=True)
     st.markdown("<br>", unsafe_allow_html=True)
@@ -308,7 +315,11 @@ def render_booking_form():
         st.warning("No Faculty members found in the system. You cannot request recommendations until an Admin adds Faculty users.")
         return
         
-    working_insts = inst_df[~inst_df['Status'].isin(['Not Working'])]
+    # Dynamically filter out 'Not Working' based on whatever the status column is named
+    if status_col_name:
+        working_insts = inst_df[~inst_df[status_col_name].isin(['Not Working'])]
+    else:
+        working_insts = inst_df
     
     if working_insts.empty:
         st.error("🛑 All instruments are currently marked as 'Not Working'. Bookings are temporarily paused.")
@@ -317,7 +328,7 @@ def render_booking_form():
     inst_options = []
     inst_map = {}
     for _, row in working_insts.iterrows():
-        name = row['Name']
+        name = row.get('Name', 'Unknown')
         price = row.get('Price Rate (₹)', '0')
         display_str = f"{name} - ₹{price}/hr"
         inst_options.append(display_str)
@@ -494,27 +505,38 @@ def incharge_dashboard():
     st.title(f"Instrument Incharge Portal: {st.session_state.user_name} ({st.session_state.user_category})")
     
     inst_df = get_clean_dataframe("Instruments")
-    # ✅ FAILSAFE ADDED: Ensure dataframe is not empty AND the necessary column exists
-    if not inst_df.empty and 'Instrument ID' in inst_df.columns:
-        st.subheader("Manage Instrument Conditions")
-        st.write("Marking an instrument as 'Not Working' instantly blocks users from booking it.")
+    
+    if not inst_df.empty:
+        # Dynamically map the ID column (assuming it's always the first column in the sheet)
+        id_col = inst_df.columns[0]
+        # Dynamically locate the status column even if there are extra spaces
+        status_col = next((c for c in inst_df.columns if 'status' in str(c).lower()), None)
         
-        safe_inst_cols = [c for c in ['Instrument ID', 'Name', 'Price Rate (₹)', 'Status'] if c in inst_df.columns]
-        styled_inst = inst_df[safe_inst_cols].style.apply(highlight_instruments, axis=1)
-        st.dataframe(styled_inst, hide_index=True, use_container_width=True)
-        
-        st.markdown("---")
-        with st.form("update_inst_status"):
-            target_inst = st.selectbox("Select Instrument ID to Update", inst_df['Instrument ID'].tolist())
-            new_status = st.selectbox("Update Condition Status", ["Working", "Not Working"])
+        if status_col:
+            st.subheader("Manage Instrument Conditions")
+            st.write("Marking an instrument as 'Not Working' instantly blocks users from booking it.")
             
-            if st.form_submit_button("Apply Status Update", type="primary"):
-                if update_instrument_in_sheet(target_inst, {"Status": new_status}):
-                    st.success(f"✅ Instrument {target_inst} successfully marked as {new_status}.")
-                    time.sleep(1)
-                    st.rerun()
+            safe_inst_cols = [c for c in [id_col, 'Name', 'Price Rate (₹)', status_col] if c in inst_df.columns]
+            styled_inst = inst_df[safe_inst_cols].style.apply(highlight_instruments, axis=1)
+            st.dataframe(styled_inst, hide_index=True, use_container_width=True)
+            
+            st.markdown("---")
+            with st.form("update_inst_status"):
+                target_inst = st.selectbox("Select Instrument to Update", inst_df[id_col].tolist())
+                new_status = st.selectbox("Update Condition Status", ["Working", "Not Working"])
+                
+                if st.form_submit_button("Apply Status Update", type="primary"):
+                    if update_instrument_in_sheet(target_inst, {status_col: new_status}):
+                        st.success(f"✅ Instrument {target_inst} successfully marked as {new_status}.")
+                        time.sleep(1)
+                        st.rerun()
+        else:
+            st.error("⚠️ The 'Status' column is missing from your Instruments database.")
+            st.write("🔍 **Debug Info: Exact Headers Seen by App:**")
+            st.code(list(inst_df.columns))
+            st.info("Please ensure one of these headers contains the word 'Status'.")
     else:
-        st.info("No instruments currently in the database, or the 'Instrument ID' column is missing from the Google Sheet.")
+        st.info("No instruments currently in the database.")
 
 # ==========================================
 # ⚙️ ADMIN DASHBOARD
@@ -575,7 +597,10 @@ def admin_dashboard():
         st.subheader("Current Instruments Database")
         inst_df = get_clean_dataframe("Instruments")
         if not inst_df.empty:
-            safe_inst_cols = [c for c in ['Instrument ID', 'Name', 'Price Rate (₹)', 'Available Slots', 'Status'] if c in inst_df.columns]
+            status_col_name = next((c for c in inst_df.columns if 'status' in str(c).lower()), None)
+            id_col = inst_df.columns[0]
+            
+            safe_inst_cols = [c for c in [id_col, 'Name', 'Price Rate (₹)', 'Available Slots', status_col_name] if c in inst_df.columns]
             styled_inst_admin = inst_df[safe_inst_cols].style.apply(highlight_instruments, axis=1)
             st.dataframe(styled_inst_admin, hide_index=True, use_container_width=True)
         else:

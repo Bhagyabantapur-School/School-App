@@ -242,7 +242,6 @@ def update_instrument_in_sheet(inst_id, updates_dict):
     
     row_to_update = None
     for i, row in enumerate(live_values):
-        # Always assumes ID is in the first column (index 0)
         if i > 0 and str(row[0]).strip() == str(inst_id).strip():
             row_to_update = i + 1 
             break
@@ -611,7 +610,12 @@ def admin_dashboard():
         st.markdown("---")
         st.subheader("➕ Add New Instrument")
         
-        # Structure changed to horizontal rows to force left-to-right stacking on mobile phones
+        # --- NEW LOGIC: Dynamic Incharge Dropdown ---
+        users_df = get_clean_dataframe("Users")
+        incharge_list = []
+        if not users_df.empty and 'Role' in users_df.columns and 'User ID' in users_df.columns:
+            incharge_list = users_df[users_df['Role'] == 'Instrument Incharge']['User ID'].tolist()
+            
         with st.form("add_instrument"):
             
             r1c1, r1c2, r1c3 = st.columns(3)
@@ -630,15 +634,23 @@ def admin_dashboard():
             with r3c3: inst_room = st.text_input("Building / Floor / Room No.")
             
             r4c1, r4c2, r4c3 = st.columns(3)
-            with r4c1: inst_incharge = st.text_input("Instrument Incharge")
+            with r4c1: 
+                if incharge_list:
+                    inst_incharge = st.selectbox("Instrument Incharge", ["Select Incharge..."] + incharge_list)
+                else:
+                    inst_incharge = st.selectbox("Instrument Incharge", ["No Incharge Found"])
+                    st.caption("⚠️ Add an Instrument Incharge user first.")
             with r4c2: inst_desig = st.text_input("Designation of In-charge")
             with r4c3: inst_email = st.text_input("Contact Email")
             
             if st.form_submit_button("Add Instrument", type="primary"):
                 if inst_id and inst_name:
+                    
+                    final_incharge = inst_incharge if inst_incharge not in ["Select Incharge...", "No Incharge Found"] else ""
+                    
                     sh.worksheet("Instruments").append_row([
                         inst_id, inst_name, inst_make, inst_serial, inst_unit, 
-                        inst_campus, inst_dept, inst_room, inst_incharge, 
+                        inst_campus, inst_dept, inst_room, final_incharge, 
                         inst_desig, inst_email, inst_price, "Open", "Working"
                     ])
                     st.success(f"✅ {inst_name} added to the system.")

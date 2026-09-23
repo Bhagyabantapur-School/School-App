@@ -346,13 +346,32 @@ try:
                         time_str = " ".join(time_parts)
                         
                         time_text = f"Overdue by {time_str}" if is_overdue else f"Due in {time_str}"
-                        upcoming_ui_elements_raw.append((due_dt, r, time_text, is_overdue))
+                        
+                        # PRIORITY & ENERGY PARSING FOR MATRIX
+                        u_flag = str(r.get('Urgent', '')).strip().lower() == 'true'
+                        i_flag = str(r.get('Important', '')).strip().lower() == 'true'
+                        
+                        if u_flag and i_flag:
+                            p_score, p_icon = 4, "🔥⭐ Do First"
+                        elif not u_flag and i_flag:
+                            p_score, p_icon = 3, "⭐ Schedule"
+                        elif u_flag and not i_flag:
+                            p_score, p_icon = 2, "🔥 Delegate"
+                        else:
+                            p_score, p_icon = 1, "☕ Backlog"
+                            
+                        try: e_score = int(float(r.get('Energy_Level', 0)))
+                        except: e_score = 0
+                        
+                        upcoming_ui_elements_raw.append((due_dt, r, time_text, is_overdue, p_score, e_score, p_icon))
                         
                     if hours_until_due <= 0 and str(r['Activity']).strip().upper() == current_activity:
                         if r['Type'] == 'Sub-Activity': sub_list.append(formatted_task)
                         elif r['Type'] == 'Checklist': chk_list.append(formatted_task)
                 except: continue
-        upcoming_ui_elements_raw.sort(key=lambda x: x[0])
+        
+        # Sort by: Overdue first, Priority high->low, Energy high->low, Time closest->furthest
+        upcoming_ui_elements_raw.sort(key=lambda x: (not x[3], -x[4], -x[5], x[0]))
         due_overdue_tasks_count = len(upcoming_ui_elements_raw)
         
         if not payment_df.empty:
@@ -506,7 +525,7 @@ try:
             c_dur = str(curr_row.get('Duration', ''))
             
             st.markdown(f'''
-            <div style="background-color: #2e7b32; color: white; padding: 8px 12px; border-radius: 6px; margin-top: 10px; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); display: flex; justify-content: space-between; align-items: center;">
+            <div style="background-color: #2e7b32; color: white; padding: 8px 12px; border-radius: 6px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.2); display: flex; justify-content: space-between; align-items: center;">
                 <div style="flex-grow: 1; padding-right: 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;">
                     <strong style="font-size: 14px;">{c_act}</strong>
                     <span style="font-size: 13px; opacity: 0.9; margin-left: 4px;">{c_sub}</span>
@@ -650,10 +669,21 @@ try:
                 header_text = f"🔴 Upcoming Special Tasks - OVERDUE ({len(upcoming_ui_elements_raw)})" if is_urgent_overdue else f"🟠 Upcoming Special Tasks ({len(upcoming_ui_elements_raw)})"
                 
                 with st.expander(header_text, expanded=False):
-                    for idx_task, (dt, r, time_text, is_overdue) in enumerate(upcoming_ui_elements_raw):
-                        item_bg = "#d32f2f" if is_overdue else "#0068c9" 
+                    for idx_task, (dt, r, time_text, is_overdue, p_score, e_score, p_icon) in enumerate(upcoming_ui_elements_raw):
+                        item_bg = "#d32f2f" if is_overdue else ("#0068c9" if p_score >= 3 else "#546e7a") 
                         
-                        st.markdown(f'<div style="background-color: {item_bg}; color: white; padding: 8px 12px; border-radius: 6px; margin-bottom: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);"><strong style="font-size: 15px;">{r["Task_Name"]} - {time_text}</strong> <span style="font-size: 13px; opacity: 0.9;">({r["Activity"]})</span></div>', unsafe_allow_html=True)
+                        st.markdown(f'''
+                        <div style="background-color: {item_bg}; color: white; padding: 8px 12px; border-radius: 6px; margin-bottom: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                                <strong style="font-size: 15px;">{r["Task_Name"]}</strong>
+                                <span style="font-size: 11px; background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 10px;">{p_icon} | ⚡ {e_score}</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="font-size: 13px; opacity: 0.9;">{r["Activity"]}</span>
+                                <span style="font-size: 13px; font-weight: bold;">{time_text}</span>
+                            </div>
+                        </div>
+                        ''', unsafe_allow_html=True)
                         
                         col_run, col_manage = st.columns(2)
                         with col_run:

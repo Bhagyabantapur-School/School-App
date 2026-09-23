@@ -17,7 +17,7 @@ st.set_page_config(
 # 2. APP DICTIONARIES
 personal_apps = [
     "Live Routine Hub", "Money App", "Money Incomplete", "Location App", "Money Utilities", "Strong Tracker", 
-    "Project App", "AI Video Tracker", "Courses", "Election Duty", "Notes", "Solar Proposal", "Monthly Tracker", "Money Tracker", 
+    "Project App", "AI Video Tracker", "Courses", "Election Duty", "Notes", "Solar Proposal", "CU IMS", "Monthly Tracker", "Money Tracker", 
     "Product Inventory", "Health Hub", "Backup Tracker", "Routine Audit", 
     "Routine Editor", "MDM Returns", "Video Manager", "Speech Mastery", "Portal Registry", "Image Resizer", "Trace Inventory", 
     "Sleep & Water", "Packing Tracker", "App Updater", "Visual Dashboard"
@@ -157,7 +157,8 @@ ai_video_tracker = st.Page("ai_video_tracker.py", title="AI Video Tracker", icon
 courses_app = st.Page("courses.py", title="Courses", icon="🎓", default=is_default("Courses", "Personal Hub")) 
 election = st.Page("election_duty.py", title="Election Duty", icon="🗳️", default=is_default("Election Duty", "Personal Hub"))
 notes_app = st.Page("notes.py", title="Notes", icon="📝", default=is_default("Notes", "Personal Hub"))
-solar_app = st.Page("solar_proposal_app.py", title="Solar Proposal", icon="☀️", default=is_default("Solar Proposal", "Personal Hub")) # <-- Defined here
+solar_app = st.Page("solar_proposal_app.py", title="Solar Proposal", icon="☀️", default=is_default("Solar Proposal", "Personal Hub"))
+cu_ims_app = st.Page("CU_IMS.py", title="CU IMS", icon="🗃️", default=is_default("CU IMS", "Personal Hub")) # <-- Defined here
 monthly = st.Page("monthly_app.py", title="Monthly Tracker", icon="📆", default=is_default("Monthly Tracker", "Personal Hub"))
 money_tracker = st.Page("money_tracker.py", title="Money Tracker", icon="💵", default=is_default("Money Tracker", "Personal Hub"))
 product_inventory = st.Page("product_inventory.py", title="Product Inventory", icon="📦", default=is_default("Product Inventory", "Personal Hub"))
@@ -205,21 +206,14 @@ if system_choice == 'Personal Hub':
         "HOME": [trace_app, monthly],
         "HARDWARE": [backup],
         "BALANCE": [strong],
-        "ONES": [election, app_updater, notes_app, solar_app], # <-- Added here
+        "ONES": [election, app_updater, notes_app, solar_app, cu_ims_app], # <-- Added here
         "DASHBOARD": [visual_dashboard]
     }
     
-    # 2. Attractive Grand Total Display
-    total_personal_apps = sum(len(apps) for apps in personal_nav.values())
-    st.sidebar.markdown(f"""
-        <div style="background: linear-gradient(135deg, #1e3c72, #2a5298); padding: 15px; border-radius: 10px; text-align: center; color: white; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-            <h2 style="margin: 0; font-size: 26px; font-weight: 800; color: white;">🚀 {total_personal_apps} Apps</h2>
-            <p style="margin: 0; font-size: 14px; opacity: 0.9; font-weight: 500;">Personal Hub Active</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # 3. Format Section Headers with Counters
+    # 2. Format Section Headers with Counters
     pg = st.navigation({f"{k} ({len(v)})": v for k, v in personal_nav.items()})
+    
+    st.sidebar.caption("🔒 Personal Workspace Active")
 
 else:
     # 1. Define Dictionary
@@ -231,16 +225,7 @@ else:
         "Operations": [leave, distribution, returns, form_manager, grocery_app]
     }
     
-    # 2. Attractive Grand Total Display
-    total_bps_apps = sum(len(apps) for apps in bps_nav.values())
-    st.sidebar.markdown(f"""
-        <div style="background: linear-gradient(135deg, #11998e, #38ef7d); padding: 15px; border-radius: 10px; text-align: center; color: white; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-            <h2 style="margin: 0; font-size: 26px; font-weight: 800; color: white;">🏫 {total_bps_apps} Apps</h2>
-            <p style="margin: 0; font-size: 14px; opacity: 0.9; font-weight: 500;">BPS System Active</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # 3. Format Section Headers with Counters
+    # 2. Format Section Headers with Counters
     pg = st.navigation({f"{k} ({len(v)})": v for k, v in bps_nav.items()})
     
     st.sidebar.markdown("#### Bhagyabantapur Primary School")

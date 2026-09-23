@@ -156,7 +156,7 @@ def setup_database():
         ws_book = sh.add_worksheet(title="Bookings", rows="1000", cols="25")
         ws_book.append_row(['Booking ID', 'Timestamp', 'User Name', 'Role', 'Instrument', 'Date', 'Time Slot', 'Recommending Faculty', 'Payment Reference', 'Payment Date', 'Payment Status', 'Booking Status'])
 
-    # Spaces & Halls (NEW)
+    # Spaces & Halls
     try: sh.worksheet("Spaces")
     except WorksheetNotFound: 
         ws_space = sh.add_worksheet(title="Spaces", rows="100", cols="20")
@@ -280,7 +280,6 @@ def render_global_header():
     else:
         rusa_img_html = '<div style="font-size: 10px;">RUSA Logo Missing</div>'
 
-    # Safely concatenated string avoids long-line copy/paste breaks in Streamlit Cloud
     header_html = (
         '<div style="display: flex; justify-content: space-between; align-items: center; width: 100%; '
         'padding-bottom: 15px; border-bottom: 2px solid #f0f2f6; margin-bottom: 25px;">'
@@ -475,7 +474,6 @@ def render_space_booking_form():
         
         slot = st.selectbox("Select Time Slot", [
             "09:00 AM - 02:00 PM IST (5 Hours)", 
-            "10:00 AM - 04:00 PM IST (6 Hours)", 
             "02:00 PM - 07:00 PM IST (5 Hours)"
         ])
         
@@ -886,25 +884,26 @@ def admin_dashboard():
             with r1c3: space_price = st.number_input("Price Rate/Slot (₹)*", min_value=0)
             
             r2c1, r2c2, r2c3 = st.columns(3)
-            with r2c1: space_campus = st.text_input("Campus Name")
-            with r2c2: space_room = st.text_input("Building / Floor / Room No.")
-            with r2c3: space_capacity = st.number_input("Max Capacity (Persons)", min_value=1, value=50)
-            
-            r3c1, r3c2, r3c3 = st.columns(3)
-            with r3c1: 
+            with r2c1: space_room = st.text_input("Building / Floor / Room No.")
+            with r2c2: space_capacity = st.number_input("Max Capacity (Persons)", min_value=1, value=50)
+            with r2c3: 
                 if incharge_list:
                     space_incharge = st.selectbox("Space Incharge", ["Select Incharge..."] + incharge_list)
                 else:
                     space_incharge = st.selectbox("Space Incharge", ["No Incharge Found"])
                     st.caption("⚠️ Add an Instrument Incharge user first.")
-            with r3c2: space_email = st.text_input("Contact Email")
+            
+            r3c1, r3c2, r3c3 = st.columns(3)
+            with r3c1: space_email = st.text_input("Contact Email")
+            with r3c2: st.write("") # Spacer
             with r3c3: st.write("") # Spacer
             
             if st.form_submit_button("Add Space", type="primary"):
                 if space_id and space_name:
                     final_space_incharge = space_incharge if space_incharge not in ["Select Incharge...", "No Incharge Found"] else ""
+                    # "N/A" is automatically inserted into the 'Campus Name' index position
                     sh.worksheet("Spaces").append_row([
-                        space_id, space_name, space_campus, space_room, 
+                        space_id, space_name, "N/A", space_room, 
                         space_capacity, final_space_incharge, space_email, 
                         space_price, "Available"
                     ])

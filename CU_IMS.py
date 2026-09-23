@@ -884,26 +884,25 @@ def admin_dashboard():
             with r1c3: space_price = st.number_input("Price Rate/Slot (₹)*", min_value=0)
             
             r2c1, r2c2, r2c3 = st.columns(3)
-            with r2c1: space_room = st.text_input("Building / Floor / Room No.")
-            with r2c2: space_capacity = st.number_input("Max Capacity (Persons)", min_value=1, value=50)
-            with r2c3: 
+            with r2c1: space_campus = st.text_input("Campus Name")
+            with r2c2: space_room = st.text_input("Building / Floor / Room No.")
+            with r2c3: space_capacity = st.number_input("Max Capacity (Persons)", min_value=1, value=50)
+            
+            r3c1, r3c2, r3c3 = st.columns(3)
+            with r3c1: 
                 if incharge_list:
                     space_incharge = st.selectbox("Space Incharge", ["Select Incharge..."] + incharge_list)
                 else:
                     space_incharge = st.selectbox("Space Incharge", ["No Incharge Found"])
                     st.caption("⚠️ Add an Instrument Incharge user first.")
-            
-            r3c1, r3c2, r3c3 = st.columns(3)
-            with r3c1: space_email = st.text_input("Contact Email")
-            with r3c2: st.write("") # Spacer
+            with r3c2: space_email = st.text_input("Contact Email")
             with r3c3: st.write("") # Spacer
             
             if st.form_submit_button("Add Space", type="primary"):
                 if space_id and space_name:
                     final_space_incharge = space_incharge if space_incharge not in ["Select Incharge...", "No Incharge Found"] else ""
-                    # "N/A" is automatically inserted into the 'Campus Name' index position
                     sh.worksheet("Spaces").append_row([
-                        space_id, space_name, "N/A", space_room, 
+                        space_id, space_name, space_campus, space_room, 
                         space_capacity, final_space_incharge, space_email, 
                         space_price, "Available"
                     ])

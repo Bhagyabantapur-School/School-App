@@ -242,6 +242,7 @@ def update_instrument_in_sheet(inst_id, updates_dict):
     
     row_to_update = None
     for i, row in enumerate(live_values):
+        # Always assumes ID is in the first column (index 0)
         if i > 0 and str(row[0]).strip() == str(inst_id).strip():
             row_to_update = i + 1 
             break
@@ -276,15 +277,17 @@ def login_page():
                                       ((users_df['Password'] == hashed_input) | (users_df['Password'] == str(password).strip()))]
                 
                 if not user_match.empty:
-                    role = user_match.iloc[0]['Role']
+                    role = user_match.iloc[0]['Role'].strip()
                     st.session_state.logged_in = True
                     st.session_state.user_role = role
                     st.session_state.user_name = user_id
                     
-                    if role in CU_USERS: st.session_state.user_category = "CU User"
+                    # Enhanced Categorization for dynamic custom roles
+                    if role == "Admin": st.session_state.user_category = "System Admin"
+                    elif role in CU_USERS: st.session_state.user_category = "CU User"
                     elif role in NON_CU_USERS: st.session_state.user_category = "Non-CU User"
                     elif role in STAFF_USERS: st.session_state.user_category = "Staff"
-                    else: st.session_state.user_category = "System Admin"
+                    else: st.session_state.user_category = "Custom User"
                     
                     st.rerun()
                 else:
@@ -610,7 +613,6 @@ def admin_dashboard():
         st.markdown("---")
         st.subheader("➕ Add New Instrument")
         
-        # --- NEW LOGIC: Dynamic Incharge Dropdown ---
         users_df = get_clean_dataframe("Users")
         incharge_list = []
         if not users_df.empty and 'Role' in users_df.columns and 'User ID' in users_df.columns:
@@ -673,22 +675,32 @@ def admin_dashboard():
             st.subheader("Add New System User")
             new_uid = st.text_input("New User ID")
             new_pass = st.text_input("Temporary Password")
-            new_role = st.selectbox("Select Role", ALL_ROLES)
             
-            if new_role in CU_USERS: st.caption("🗂️ This role is categorized as a **CU User**.")
-            elif new_role in NON_CU_USERS: st.caption("🗂️ This role is categorized as a **Non-CU User**.")
-            elif new_role in STAFF_USERS: st.caption("🗂️ This role is categorized as **Staff**.")
+            # --- NEW LOGIC: Dynamic Custom Role System ---
+            existing_roles = users_df['Role'].unique().tolist() if not users_df.empty and 'Role' in users_df.columns else []
+            combined_roles = sorted(list(set(ALL_ROLES + existing_roles)))
+            combined_roles.append("➕ Create New Role...")
+            
+            selected_role = st.selectbox("Select Role", combined_roles)
+            custom_role = st.text_input("Type New Role Name (Required only if '➕ Create New Role...' is selected)")
+            
+            st.caption("💡 *Note: Predefined roles have specialized dashboards. New custom roles will receive the Standard User portal.*")
             
             if st.form_submit_button("Add User", type="primary"):
+                
+                final_role = custom_role.strip() if selected_role == "➕ Create New Role..." else selected_role.strip()
+                
                 ws_users = sh.worksheet("Users")
                 existing = pd.DataFrame(ws_users.get_all_records())
                 if not existing.empty and str(new_uid).strip() in existing['User ID'].astype(str).str.strip().tolist():
                     st.error("🚨 User ID already exists.")
                 elif not new_uid or not new_pass:
                     st.error("🚨 ID and Password required.")
+                elif not final_role:
+                    st.error("🚨 Role name cannot be empty.")
                 else:
-                    ws_users.append_row([new_uid.strip(), hash_password(new_pass.strip()), new_role])
-                    st.success(f"🎉 {new_uid} added as {new_role}!")
+                    ws_users.append_row([new_uid.strip(), hash_password(new_pass.strip()), final_role])
+                    st.success(f"🎉 {new_uid} added as {final_role}!")
                     get_clean_dataframe.clear()
                     time.sleep(1)
                     st.rerun()

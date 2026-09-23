@@ -8,7 +8,7 @@ from google.oauth2.service_account import Credentials
 import time
 import hashlib
 import os
-from PIL import Image
+import base64
 
 # ==========================================
 # ⚙️ CONFIGURATION & SETUP
@@ -258,33 +258,52 @@ def update_instrument_in_sheet(inst_id, updates_dict):
     return False
 
 # ==========================================
-# 🖼️ GLOBAL HEADER (Local Logos & Titles)
+# 🖼️ GLOBAL HEADER (MOBILE RESPONSIVE FLEXBOX)
 # ==========================================
+def get_image_base64(image_path):
+    """Converts a local image to a Base64 string for HTML embedding."""
+    try:
+        with open(image_path, "rb") as img_file:
+            return base64.b64encode(img_file.read()).decode()
+    except Exception:
+        return ""
+
 def render_global_header():
-    """Renders the top branding header with logos strictly from local files."""
-    col1, col2, col3 = st.columns([1.2, 6, 1.2])
+    """Renders a flexbox HTML header that will NEVER stack on mobile."""
     
-    with col1:
-        try:
-            # Uses Python's PIL library to read the exact local file safely
-            img_cu = Image.open("CU_Logo.jpg")
-            st.image(img_cu, use_container_width=True)
-        except Exception as e:
-            st.caption(f"Logo missing: Please ensure 'CU_Logo.jpg' is in your repository.")
-            
-    with col2:
-        st.markdown("<h2 style='text-align: center; color: #002147; margin-bottom: 0px; padding-bottom: 0px;'>University of Calcutta</h2>", unsafe_allow_html=True)
-        st.markdown("<h4 style='text-align: center; margin-top: 5px; padding-top: 0px;'>Instrument Booking & Priority Portal</h4>", unsafe_allow_html=True)
+    # 1. Convert images to Base64 strings
+    cu_b64 = get_image_base64("CU_Logo.jpg")
+    rusa_b64 = get_image_base64("RUSA_Logo.jpg")
+    
+    # 2. Prepare HTML image tags (or fallback text if image is missing)
+    cu_img_html = f'<img src="data:image/jpeg;base64,{cu_b64}" style="width: 100%; max-width: 80px; height: auto;" alt="CU Logo">' if cu_b64 else '<div style="font-size: 10px;">CU Logo Missing</div>'
+    rusa_img_html = f'<img src="data:image/jpeg;base64,{rusa_b64}" style="width: 100%; max-width: 80px; height: auto;" alt="RUSA Logo">' if rusa_b64 else '<div style="font-size: 10px;">RUSA Logo Missing</div>'
+
+    # 3. Create the unbreakable Flexbox layout
+    header_html = f"""
+    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; padding-bottom: 15px; border-bottom: 2px solid #f0f2f6; margin-bottom: 25px;">
         
-    with col3:
-        try:
-            # Corrected to RUSA_Logo.jpg
-            img_rusa = Image.open("RUSA_Logo.jpg")
-            st.image(img_rusa, use_container_width=True)
-        except Exception as e:
-            st.caption(f"Logo missing: Please ensure 'RUSA_Logo.jpg' is in your repository.")
-            
-    st.markdown("---")
+        <!-- Left Logo Container -->
+        <div style="flex: 0 0 auto; min-width: 60px;">
+            {cu_img_html}
+        </div>
+        
+        <!-- Center Titles Container -->
+        <div style="flex: 1 1 auto; text-align: center; padding: 0 10px;">
+            <h2 style="color: #002147; margin: 0; padding: 0; font-size: clamp(1.1rem, 3.5vw, 2.2rem);">University of Calcutta</h2>
+            <h4 style="margin: 5px 0 0 0; padding: 0; font-size: clamp(0.8rem, 2vw, 1.2rem);">Instrument Booking & Priority Portal</h4>
+        </div>
+        
+        <!-- Right Logo Container -->
+        <div style="flex: 0 0 auto; min-width: 60px; text-align: right;">
+            {rusa_img_html}
+        </div>
+        
+    </div>
+    """
+    
+    # 4. Render exactly as HTML into Streamlit
+    st.markdown(header_html, unsafe_allow_html=True)
 
 # ==========================================
 # 🖥️ LOGIN SYSTEM

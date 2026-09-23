@@ -7,6 +7,8 @@ from gspread.exceptions import WorksheetNotFound
 from google.oauth2.service_account import Credentials
 import time
 import hashlib
+import os
+from PIL import Image
 
 # ==========================================
 # ⚙️ CONFIGURATION & SETUP
@@ -256,18 +258,19 @@ def update_instrument_in_sheet(inst_id, updates_dict):
     return False
 
 # ==========================================
-# 🖼️ GLOBAL HEADER (Logos & Titles)
+# 🖼️ GLOBAL HEADER (Local Logos & Titles)
 # ==========================================
 def render_global_header():
-    """Renders the top branding header with logos on left and right."""
+    """Renders the top branding header with logos strictly from local files."""
     col1, col2, col3 = st.columns([1.2, 6, 1.2])
     
     with col1:
         try:
-            # Reads image relative to the app directory via GitHub repository
-            st.image("CU_Logo.jpg", use_container_width=True)
-        except Exception:
-            pass # Suppresses error if image is missing/loading
+            # Uses Python's PIL library to read the exact local file safely
+            img_cu = Image.open("CU_Logo.jpg")
+            st.image(img_cu, use_container_width=True)
+        except Exception as e:
+            st.caption(f"Logo missing: Please ensure 'CU_Logo.jpg' is in your repository.")
             
     with col2:
         st.markdown("<h2 style='text-align: center; color: #002147; margin-bottom: 0px; padding-bottom: 0px;'>University of Calcutta</h2>", unsafe_allow_html=True)
@@ -275,10 +278,11 @@ def render_global_header():
         
     with col3:
         try:
-            # Reads image relative to the app directory via GitHub repository
-            st.image("RUSA_Loga.jpg", use_container_width=True)
-        except Exception:
-            pass # Suppresses error if image is missing/loading
+            # Uses Python's PIL library to read the exact local file safely
+            img_rusa = Image.open("RUSA_Loga.jpg")
+            st.image(img_rusa, use_container_width=True)
+        except Exception as e:
+            st.caption(f"Logo missing: Please ensure 'RUSA_Loga.jpg' is in your repository.")
             
     st.markdown("---")
 

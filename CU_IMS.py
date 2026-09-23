@@ -242,7 +242,6 @@ def update_instrument_in_sheet(inst_id, updates_dict):
     
     row_to_update = None
     for i, row in enumerate(live_values):
-        # Always assumes ID is in the first column (index 0)
         if i > 0 and str(row[0]).strip() == str(inst_id).strip():
             row_to_update = i + 1 
             break
@@ -257,13 +256,38 @@ def update_instrument_in_sheet(inst_id, updates_dict):
     return False
 
 # ==========================================
+# 🖼️ GLOBAL HEADER (Logos & Titles)
+# ==========================================
+def render_global_header():
+    """Renders the top branding header with logos on left and right."""
+    col1, col2, col3 = st.columns([1.2, 6, 1.2])
+    
+    with col1:
+        try:
+            # Reads image relative to the app directory via GitHub repository
+            st.image("CU_Logo.jpg", use_container_width=True)
+        except Exception:
+            pass # Suppresses error if image is missing/loading
+            
+    with col2:
+        st.markdown("<h2 style='text-align: center; color: #002147; margin-bottom: 0px; padding-bottom: 0px;'>University of Calcutta</h2>", unsafe_allow_html=True)
+        st.markdown("<h4 style='text-align: center; margin-top: 5px; padding-top: 0px;'>Instrument Booking & Priority Portal</h4>", unsafe_allow_html=True)
+        
+    with col3:
+        try:
+            # Reads image relative to the app directory via GitHub repository
+            st.image("RUSA_Loga.jpg", use_container_width=True)
+        except Exception:
+            pass # Suppresses error if image is missing/loading
+            
+    st.markdown("---")
+
+# ==========================================
 # 🖥️ LOGIN SYSTEM
 # ==========================================
 def login_page():
-    st.markdown("<h2 style='text-align: center; color: #002147;'>University of Calcutta</h2>", unsafe_allow_html=True)
-    st.markdown("<h4 style='text-align: center;'>Instrument Booking & Priority Portal</h4>", unsafe_allow_html=True)
-    
     with st.form("login_form"):
+        st.write("### Sign In")
         user_id = st.text_input("User ID")
         password = st.text_input("Password", type="password")
         if st.form_submit_button("Login", use_container_width=True):
@@ -282,7 +306,6 @@ def login_page():
                     st.session_state.user_role = role
                     st.session_state.user_name = user_id
                     
-                    # Enhanced Categorization for dynamic custom roles
                     if role == "Admin": st.session_state.user_category = "System Admin"
                     elif role in CU_USERS: st.session_state.user_category = "CU User"
                     elif role in NON_CU_USERS: st.session_state.user_category = "Non-CU User"
@@ -619,7 +642,6 @@ def admin_dashboard():
             incharge_list = users_df[users_df['Role'] == 'Instrument Incharge']['User ID'].tolist()
             
         with st.form("add_instrument"):
-            
             r1c1, r1c2, r1c3 = st.columns(3)
             with r1c1: inst_id = st.text_input("Instrument ID*")
             with r1c2: inst_name = st.text_input("Instrument Name*")
@@ -676,7 +698,6 @@ def admin_dashboard():
             new_uid = st.text_input("New User ID")
             new_pass = st.text_input("Temporary Password")
             
-            # --- NEW LOGIC: Dynamic Custom Role System ---
             existing_roles = users_df['Role'].unique().tolist() if not users_df.empty and 'Role' in users_df.columns else []
             combined_roles = sorted(list(set(ALL_ROLES + existing_roles)))
             combined_roles.append("➕ Create New Role...")
@@ -687,7 +708,6 @@ def admin_dashboard():
             st.caption("💡 *Note: Predefined roles have specialized dashboards. New custom roles will receive the Standard User portal.*")
             
             if st.form_submit_button("Add User", type="primary"):
-                
                 final_role = custom_role.strip() if selected_role == "➕ Create New Role..." else selected_role.strip()
                 
                 ws_users = sh.worksheet("Users")
@@ -708,6 +728,8 @@ def admin_dashboard():
 # ==========================================
 # 🚀 APP ROUTING
 # ==========================================
+render_global_header()
+
 if not st.session_state.logged_in:
     login_page()
 else:

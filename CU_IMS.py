@@ -278,11 +278,11 @@ def render_global_header():
         
     with col3:
         try:
-            # Uses Python's PIL library to read the exact local file safely
-            img_rusa = Image.open("RUSA_Loga.jpg")
+            # Corrected to RUSA_Logo.jpg
+            img_rusa = Image.open("RUSA_Logo.jpg")
             st.image(img_rusa, use_container_width=True)
         except Exception as e:
-            st.caption(f"Logo missing: Please ensure 'RUSA_Loga.jpg' is in your repository.")
+            st.caption(f"Logo missing: Please ensure 'RUSA_Logo.jpg' is in your repository.")
             
     st.markdown("---")
 

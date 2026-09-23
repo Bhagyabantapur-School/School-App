@@ -299,7 +299,14 @@ def render_global_header():
 # ==========================================
 def login_page():
     with st.form("login_form"):
-        st.write("### Sign In")
+        # Colorful Sign-In Header
+        st.markdown(
+            "<h3 style='background: linear-gradient(to right, #b92b27, #1565C0); "
+            "-webkit-background-clip: text; -webkit-text-fill-color: transparent; "
+            "font-size: 1.8rem; font-weight: 800; text-align: center; margin-bottom: 15px;'>"
+            "🔐 Sign In</h3>", 
+            unsafe_allow_html=True
+        )
         user_id = st.text_input("User ID")
         password = st.text_input("Password", type="password")
         if st.form_submit_button("Login", use_container_width=True):
@@ -609,7 +616,15 @@ def render_my_status():
 # 🎓 STANDARD USER DASHBOARD
 # ==========================================
 def standard_user_dashboard():
-    st.title(f"Portal: {st.session_state.user_name} | {st.session_state.user_role} ({st.session_state.user_category})")
+    # Colorful User Heading
+    st.markdown(
+        f"<h3 style='background: linear-gradient(to right, #f77062, #fe5196); "
+        f"-webkit-background-clip: text; -webkit-text-fill-color: transparent; "
+        f"font-size: 1.8rem; font-weight: 800; margin-bottom: 20px;'>"
+        f"🎓 Portal: {st.session_state.user_name} | {st.session_state.user_role} ({st.session_state.user_category})</h3>", 
+        unsafe_allow_html=True
+    )
+    
     tab1, tab2, tab3, tab4 = st.tabs(["📝 Book Instrument", "🏛️ Book Space", "💳 Make Payment", "🔔 My Status"])
     with tab1: render_instrument_booking_form()
     with tab2: render_space_booking_form()
@@ -620,7 +635,15 @@ def standard_user_dashboard():
 # 🧑‍🏫 FACULTY DASHBOARD
 # ==========================================
 def faculty_dashboard():
-    st.title(f"Faculty Portal: {st.session_state.user_name} ({st.session_state.user_category})")
+    # Colorful Faculty Heading
+    st.markdown(
+        f"<h3 style='background: linear-gradient(to right, #11998e, #38ef7d); "
+        f"-webkit-background-clip: text; -webkit-text-fill-color: transparent; "
+        f"font-size: 1.8rem; font-weight: 800; margin-bottom: 20px;'>"
+        f"🧑‍🏫 Faculty Portal: {st.session_state.user_name} ({st.session_state.user_category})</h3>", 
+        unsafe_allow_html=True
+    )
+    
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["✅ Review Scholars", "📝 Book Instrument", "🏛️ Book Space", "💳 Make Payment", "🔔 My Status"])
     
     with tab1:
@@ -675,7 +698,14 @@ def faculty_dashboard():
 # 🔧 FACILITY INCHARGE DASHBOARD
 # ==========================================
 def incharge_dashboard():
-    st.title(f"Facility Incharge Portal: {st.session_state.user_name} ({st.session_state.user_category})")
+    # Colorful Incharge Heading
+    st.markdown(
+        f"<h3 style='background: linear-gradient(to right, #4facfe, #00f2fe); "
+        f"-webkit-background-clip: text; -webkit-text-fill-color: transparent; "
+        f"font-size: 1.8rem; font-weight: 800; margin-bottom: 20px;'>"
+        f"🔧 Facility Incharge Portal: {st.session_state.user_name} ({st.session_state.user_category})</h3>", 
+        unsafe_allow_html=True
+    )
     
     manage_type = st.radio("Select Category to Manage", ["Instruments", "Spaces"])
     
@@ -741,7 +771,15 @@ def incharge_dashboard():
 # ⚙️ ADMIN DASHBOARD
 # ==========================================
 def admin_dashboard():
-    st.title("Admin Control Panel")
+    # Colorful Admin Heading
+    st.markdown(
+        "<h3 style='background: linear-gradient(to right, #833ab4, #fd1d1d, #fcb045); "
+        "-webkit-background-clip: text; -webkit-text-fill-color: transparent; "
+        "font-size: 1.8rem; font-weight: 800; margin-bottom: 20px;'>"
+        "👑 Admin Control Panel</h3>", 
+        unsafe_allow_html=True
+    )
+    
     tab1, tab2, tab3, tab4 = st.tabs(["🚦 Approvals Queue", "🔬 Manage Instruments", "🏛️ Manage Spaces", "👥 Manage Users"])
     
     with tab1:

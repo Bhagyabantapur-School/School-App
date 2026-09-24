@@ -66,7 +66,6 @@ def hash_password(password):
 # 🎨 TABLE STYLING HELPERS
 # ==========================================
 def highlight_rows(row):
-    """Applies CSS background colors to a pandas row based on Booking Status."""
     status = str(row.get('Booking Status', '')).strip()
     
     if status in ['Instrument Assigned', 'Space Assigned', 'Completed']:
@@ -93,7 +92,6 @@ def highlight_rows(row):
     return [''] * len(row)
 
 def highlight_assets(row):
-    """Dynamically checks for 'Status' in any column name and applies red if Not Working/Unavailable."""
     status = ''
     for col in row.index:
         if 'status' in str(col).lower():
@@ -130,50 +128,56 @@ def init_sheet():
         st.error(f"⚠️ Connection Error: {e}")
         st.stop()
 
+@st.cache_resource
 def setup_database():
+    """Optimized to use a single API call for checking tabs to prevent rate limiting."""
     sh = init_sheet()
     
-    # Instruments
-    try: sh.worksheet("Instruments")
-    except WorksheetNotFound: 
-        ws_inst = sh.add_worksheet(title="Instruments", rows="100", cols="25")
-        ws_inst.append_row([
-            'Instrument ID', 'Name', 'Make / Manufacturer', 'Serial No.', 'Unit No.', 
-            'Campus Name', 'Department / Centre', 'Building / Floor / Room No.', 
-            'Instrument Incharge', 'Designation of In-charge', 'Contact Email', 
-            'Price Rate (₹)', 'Available Slots', 'Status'
-        ])
+    try:
+        # Fetch all existing tabs at once (1 API call instead of 5)
+        existing_tabs = [ws.title for ws in sh.worksheets()]
+        
+        # Instruments
+        if "Instruments" not in existing_tabs:
+            ws_inst = sh.add_worksheet(title="Instruments", rows="100", cols="25")
+            ws_inst.append_row([
+                'Instrument ID', 'Name', 'Make / Manufacturer', 'Serial No.', 'Unit No.', 
+                'Campus Name', 'Department / Centre', 'Building / Floor / Room No.', 
+                'Instrument Incharge', 'Designation of In-charge', 'Contact Email', 
+                'Price Rate (₹)', 'Available Slots', 'Status'
+            ])
 
-    try: sh.worksheet("Bookings")
-    except WorksheetNotFound: 
-        ws_book = sh.add_worksheet(title="Bookings", rows="1000", cols="25")
-        ws_book.append_row(['Booking ID', 'Timestamp', 'User Name', 'Role', 'Instrument', 'Date', 'Time Slot', 'Recommending Faculty', 'Payment Reference', 'Payment Date', 'Payment Status', 'Booking Status'])
+        # Bookings
+        if "Bookings" not in existing_tabs:
+            ws_book = sh.add_worksheet(title="Bookings", rows="1000", cols="25")
+            ws_book.append_row(['Booking ID', 'Timestamp', 'User Name', 'Role', 'Instrument', 'Date', 'Time Slot', 'Recommending Faculty', 'Payment Reference', 'Payment Date', 'Payment Status', 'Booking Status'])
 
-    # Spaces & Halls
-    try: sh.worksheet("Spaces")
-    except WorksheetNotFound: 
-        ws_space = sh.add_worksheet(title="Spaces", rows="100", cols="20")
-        ws_space.append_row([
-            'Space ID', 'Name', 'Campus Name', 'Building / Floor / Room No.', 
-            'Capacity', 'Space Incharge', 'Contact Email', 'Price Rate (₹)', 'Status'
-        ])
+        # Spaces & Halls
+        if "Spaces" not in existing_tabs:
+            ws_space = sh.add_worksheet(title="Spaces", rows="100", cols="20")
+            ws_space.append_row([
+                'Space ID', 'Name', 'Campus Name', 'Building / Floor / Room No.', 
+                'Capacity', 'Space Incharge', 'Contact Email', 'Price Rate (₹)', 'Status'
+            ])
 
-    try: sh.worksheet("Space Bookings")
-    except WorksheetNotFound: 
-        ws_sbook = sh.add_worksheet(title="Space Bookings", rows="1000", cols="25")
-        ws_sbook.append_row(['Booking ID', 'Timestamp', 'User Name', 'Role', 'Space', 'Date', 'Time Slot', 'Recommending Faculty', 'Payment Reference', 'Payment Date', 'Payment Status', 'Booking Status'])
+        # Space Bookings
+        if "Space Bookings" not in existing_tabs:
+            ws_sbook = sh.add_worksheet(title="Space Bookings", rows="1000", cols="25")
+            ws_sbook.append_row(['Booking ID', 'Timestamp', 'User Name', 'Role', 'Space', 'Date', 'Time Slot', 'Recommending Faculty', 'Payment Reference', 'Payment Date', 'Payment Status', 'Booking Status'])
 
-    # Users
-    try: sh.worksheet("Users")
-    except WorksheetNotFound: 
-        ws_users = sh.add_worksheet(title="Users", rows="100", cols="20")
-        ws_users.append_row(['User ID', 'Password', 'Role'])
-        ws_users.append_row(['admin', hash_password('admin123'), 'Admin'])
-        ws_users.append_row(['faculty1', hash_password('fac123'), 'Faculty'])
-        ws_users.append_row(['scholar1', hash_password('sch123'), 'Research Scholar'])
-        ws_users.append_row(['institute1', hash_password('inst123'), 'Research Institute'])
-        ws_users.append_row(['industry1', hash_password('ind123'), 'Industry partner'])
-        ws_users.append_row(['incharge1', hash_password('inc123'), 'Instrument Incharge'])
+        # Users
+        if "Users" not in existing_tabs:
+            ws_users = sh.add_worksheet(title="Users", rows="100", cols="20")
+            ws_users.append_row(['User ID', 'Password', 'Role'])
+            ws_users.append_row(['admin', hash_password('admin123'), 'Admin'])
+            ws_users.append_row(['faculty1', hash_password('fac123'), 'Faculty'])
+            ws_users.append_row(['scholar1', hash_password('sch123'), 'Research Scholar'])
+            ws_users.append_row(['institute1', hash_password('inst123'), 'Research Institute'])
+            ws_users.append_row(['industry1', hash_password('ind123'), 'Industry partner'])
+            ws_users.append_row(['incharge1', hash_password('inc123'), 'Instrument Incharge'])
+            
+    except Exception as e:
+        st.error(f"⚠️ Error verifying database structure: {e}")
         
     return sh
 
@@ -389,7 +393,6 @@ def login_page():
                     elif role in STAFF_USERS: st.session_state.user_category = "Staff"
                     else: st.session_state.user_category = "Custom User"
                     
-                    # Set the persistent cookie to remember the user for 30 days
                     cookie_manager.set("cu_ims_user", user_id, max_age=2592000)
                     time.sleep(0.5)
                     st.rerun()
@@ -1070,7 +1073,6 @@ else:
     with col2:
         st.markdown('<div id="logout_marker"></div>', unsafe_allow_html=True)
         if st.button("Logout", use_container_width=True):
-            # Delete the persistent cookie to truly log out
             cookie_manager.delete("cu_ims_user")
             for key in st.session_state.keys():
                 del st.session_state[key]

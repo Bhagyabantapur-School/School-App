@@ -133,18 +133,31 @@ def setup_database():
     sh = init_sheet()
     try:
         existing_tabs = [ws.title for ws in sh.worksheets()]
+        
         if "Instruments" not in existing_tabs:
             ws_inst = sh.add_worksheet(title="Instruments", rows="100", cols="25")
-            ws_inst.append_row(['Instrument ID', 'Name', 'Make / Manufacturer', 'Serial No.', 'Unit No.', 'Campus Name', 'Department / Centre', 'Building / Floor / Room No.', 'Instrument Incharge', 'Designation of In-charge', 'Contact Email', 'Price Rate (₹)', 'Available Slots', 'Status'])
+            ws_inst.append_row([
+                'Instrument ID', 'Name', 'Make / Manufacturer', 'Serial No.', 'Unit No.', 
+                'Campus Name', 'Department / Centre', 'Building / Floor / Room No.', 
+                'Instrument Incharge', 'Designation of In-charge', 'Contact Email', 
+                'Price Rate (₹)', 'Available Slots', 'Status'
+            ])
+
         if "Bookings" not in existing_tabs:
             ws_book = sh.add_worksheet(title="Bookings", rows="1000", cols="25")
             ws_book.append_row(['Booking ID', 'Timestamp', 'User Name', 'Role', 'Instrument', 'Date', 'Time Slot', 'Recommending Faculty', 'Payment Reference', 'Payment Date', 'Payment Status', 'Booking Status'])
+
         if "Spaces" not in existing_tabs:
             ws_space = sh.add_worksheet(title="Spaces", rows="100", cols="20")
-            ws_space.append_row(['Space ID', 'Name', 'Campus Name', 'Building / Floor / Room No.', 'Capacity', 'Space Incharge', 'Contact Email', 'Price Rate (₹)', 'Status'])
+            ws_space.append_row([
+                'Space ID', 'Name', 'Campus Name', 'Building / Floor / Room No.', 
+                'Capacity', 'Space Incharge', 'Contact Email', 'Price Rate (₹)', 'Status'
+            ])
+
         if "Space Bookings" not in existing_tabs:
             ws_sbook = sh.add_worksheet(title="Space Bookings", rows="1000", cols="25")
             ws_sbook.append_row(['Booking ID', 'Timestamp', 'User Name', 'Role', 'Space', 'Date', 'Time Slot', 'Recommending Faculty', 'Payment Reference', 'Payment Date', 'Payment Status', 'Booking Status'])
+
         if "Users" not in existing_tabs:
             ws_users = sh.add_worksheet(title="Users", rows="100", cols="20")
             ws_users.append_row(['User ID', 'Password', 'Role'])
@@ -154,8 +167,10 @@ def setup_database():
             ws_users.append_row(['institute1', hash_password('inst123'), 'Research Institute'])
             ws_users.append_row(['industry1', hash_password('ind123'), 'Industry partner'])
             ws_users.append_row(['incharge1', hash_password('inc123'), 'Instrument Incharge'])
+            
     except Exception as e:
         st.error(f"⚠️ Error verifying database structure: {e}")
+        
     return sh
 
 sh = setup_database()
@@ -221,39 +236,11 @@ def update_record_in_sheet(sheet_tab, id_col_index, target_id, updates_dict):
     return False
 
 # ==========================================
-# 🧠 SESSION STATE & COOKIE MANAGER
+# 🧠 SESSION STATE INITIALIZATION
 # ==========================================
-try:
-    import extra_streamlit_components as stx
-    cookie_manager = stx.CookieManager()
-except ImportError:
-    st.error("🚨 Please add 'extra-streamlit-components' to your requirements.txt file.")
-    st.stop()
-
-# Initialize core states
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-if 'explicit_logout' not in st.session_state:
-    st.session_state.explicit_logout = False
-
-# Auto-Login Evaluation (Only runs if user hasn't explicitly logged out)
-if not st.session_state.logged_in and not st.session_state.explicit_logout:
-    cached_user = cookie_manager.get(cookie="cu_ims_user")
-    if cached_user and isinstance(cached_user, str) and cached_user.strip() != "":
-        users_df = get_clean_dataframe("Users")
-        if not users_df.empty and 'User ID' in users_df.columns:
-            user_match = users_df[users_df['User ID'] == cached_user.strip()]
-            if not user_match.empty:
-                role = user_match.iloc[0]['Role'].strip()
-                st.session_state.logged_in = True
-                st.session_state.user_role = role
-                st.session_state.user_name = cached_user.strip()
-                
-                if role == "Admin": st.session_state.user_category = "System Admin"
-                elif role in CU_USERS: st.session_state.user_category = "CU User"
-                elif role in NON_CU_USERS: st.session_state.user_category = "Non-CU User"
-                elif role in STAFF_USERS: st.session_state.user_category = "Staff"
-                else: st.session_state.user_category = "Custom User"
+for state in ['logged_in', 'user_role', 'user_name', 'user_category']:
+    if state not in st.session_state:
+        st.session_state[state] = False if state == 'logged_in' else None
 
 # ==========================================
 # 🖼️ GLOBAL HEADER
@@ -318,6 +305,49 @@ def render_footer():
     </div>
     """
     st.markdown(footer_html, unsafe_allow_html=True)
+
+# ==========================================
+# 🖥️ LOGIN SYSTEM
+# ==========================================
+def login_page():
+    with st.form("login_form"):
+        st.markdown(
+            "<h3 style='background: linear-gradient(to right, #b92b27, #1565C0); "
+            "-webkit-background-clip: text; -webkit-text-fill-color: transparent; "
+            "font-size: 1.8rem; font-weight: 800; text-align: center; margin-bottom: 15px;'>"
+            "🔐 Sign In</h3>", 
+            unsafe_allow_html=True
+        )
+        user_id = st.text_input("User ID")
+        password = st.text_input("Password", type="password")
+        
+        if st.form_submit_button("Login", use_container_width=True):
+            users_df = get_clean_dataframe("Users")
+            if not users_df.empty and 'User ID' in users_df.columns:
+                users_df['User ID'] = users_df['User ID'].astype(str).str.strip()
+                users_df['Password'] = users_df['Password'].astype(str).str.strip()
+                hashed_input = hash_password(str(password).strip())
+                
+                user_match = users_df[(users_df['User ID'] == str(user_id).strip()) & ((users_df['Password'] == hashed_input) | (users_df['Password'] == str(password).strip()))]
+                
+                if not user_match.empty:
+                    role = user_match.iloc[0]['Role'].strip()
+                    
+                    st.session_state.logged_in = True
+                    st.session_state.user_role = role
+                    st.session_state.user_name = user_id.strip()
+                    
+                    if role == "Admin": st.session_state.user_category = "System Admin"
+                    elif role in CU_USERS: st.session_state.user_category = "CU User"
+                    elif role in NON_CU_USERS: st.session_state.user_category = "Non-CU User"
+                    elif role in STAFF_USERS: st.session_state.user_category = "Staff"
+                    else: st.session_state.user_category = "Custom User"
+                    
+                    st.rerun()
+                else:
+                    st.error("🚨 Invalid User ID or Password")
+            else:
+                st.error("⚠️ Database Error: 'Users' tab is empty or invalid.")
 
 # ==========================================
 # 🛠️ SHARED USER INTERFACES
@@ -821,81 +851,61 @@ def admin_dashboard():
 # ==========================================
 render_global_header()
 
-# Create an empty placeholder container for the UI 
-# This prevents form-flickering and allows seamless transitions without st.rerun() during login
-main_ui = st.empty()
-
 if not st.session_state.logged_in:
-    with main_ui.container():
-        with st.form("login_form"):
-            st.markdown("<h3 style='background: linear-gradient(to right, #b92b27, #1565C0); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 1.8rem; font-weight: 800; text-align: center; margin-bottom: 15px;'>🔐 Sign In</h3>", unsafe_allow_html=True)
-            user_id = st.text_input("User ID")
-            password = st.text_input("Password", type="password")
-            
-            if st.form_submit_button("Login", use_container_width=True):
-                users_df = get_clean_dataframe("Users")
-                if not users_df.empty and 'User ID' in users_df.columns:
-                    users_df['User ID'] = users_df['User ID'].astype(str).str.strip()
-                    users_df['Password'] = users_df['Password'].astype(str).str.strip()
-                    hashed_input = hash_password(str(password).strip())
-                    
-                    user_match = users_df[(users_df['User ID'] == str(user_id).strip()) & ((users_df['Password'] == hashed_input) | (users_df['Password'] == str(password).strip()))]
-                    
-                    if not user_match.empty:
-                        role = user_match.iloc[0]['Role'].strip()
-                        
-                        # Set Browser Cookie 
-                        cookie_manager.set("cu_ims_user", user_id.strip(), max_age=2592000)
-                        
-                        # Safely Update State
-                        st.session_state.logged_in = True
-                        st.session_state.explicit_logout = False
-                        st.session_state.user_role = role
-                        st.session_state.user_name = user_id.strip()
-                        
-                        if role == "Admin": st.session_state.user_category = "System Admin"
-                        elif role in CU_USERS: st.session_state.user_category = "CU User"
-                        elif role in NON_CU_USERS: st.session_state.user_category = "Non-CU User"
-                        elif role in STAFF_USERS: st.session_state.user_category = "Staff"
-                        else: st.session_state.user_category = "Custom User"
-                        
-                        # Instantly clear the login form without restarting the script!
-                        main_ui.empty()
-                    else:
-                        st.error("🚨 Invalid User ID or Password")
-                else:
-                    st.error("⚠️ Database Error: 'Users' tab is empty or invalid.")
-
-# If Login was just successful above, or already true, render Dashboard directly!
-if st.session_state.logged_in:
-    with main_ui.container():
+    with st.form("login_form"):
+        st.markdown("<h3 style='background: linear-gradient(to right, #b92b27, #1565C0); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 1.8rem; font-weight: 800; text-align: center; margin-bottom: 15px;'>🔐 Sign In</h3>", unsafe_allow_html=True)
+        user_id = st.text_input("User ID")
+        password = st.text_input("Password", type="password")
         
-        # Safe Logout Flow
-        col1, col2 = st.columns([9, 1])
-        with col2:
-            st.markdown('<div id="logout_marker"></div>', unsafe_allow_html=True)
-            if st.button("Logout", use_container_width=True):
-                cookie_manager.delete("cu_ims_user")
-                st.session_state.explicit_logout = True # Prevents old cookie from triggering auto-login
-                for key in ['logged_in', 'user_role', 'user_name', 'user_category']:
-                    if key in st.session_state:
-                        del st.session_state[key]
-                st.rerun()
+        if st.form_submit_button("Login", use_container_width=True):
+            users_df = get_clean_dataframe("Users")
+            if not users_df.empty and 'User ID' in users_df.columns:
+                hashed_input = hash_password(str(password).strip())
+                user_match = users_df[(users_df['User ID'] == str(user_id).strip()) & ((users_df['Password'] == hashed_input) | (users_df['Password'] == str(password).strip()))]
                 
-        # Load correct dashboard
-        if st.session_state.user_role == "Admin": admin_dashboard()
-        elif st.session_state.user_role == "Faculty": faculty_dashboard()
-        elif st.session_state.user_role == "Instrument Incharge": incharge_dashboard()
-        else: standard_user_dashboard()
+                if not user_match.empty:
+                    role = user_match.iloc[0]['Role'].strip()
+                    
+                    st.session_state.logged_in = True
+                    st.session_state.user_role = role
+                    st.session_state.user_name = user_id.strip()
+                    
+                    if role == "Admin": st.session_state.user_category = "System Admin"
+                    elif role in CU_USERS: st.session_state.user_category = "CU User"
+                    elif role in NON_CU_USERS: st.session_state.user_category = "Non-CU User"
+                    elif role in STAFF_USERS: st.session_state.user_category = "Staff"
+                    else: st.session_state.user_category = "Custom User"
+                    
+                    st.rerun()
+                else:
+                    st.error("🚨 Invalid User ID or Password")
+            else:
+                st.error("⚠️ Database Error: 'Users' tab is empty or invalid.")
+else:
+    # 🚪 Logout Button
+    col1, col2 = st.columns([9, 1])
+    with col2:
+        st.markdown('<div id="logout_marker"></div>', unsafe_allow_html=True)
+        if st.button("Logout", use_container_width=True):
+            for key in ['logged_in', 'user_role', 'user_name', 'user_category']:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.rerun()
             
-        st.markdown("<br><br>", unsafe_allow_html=True)
-        st.markdown("---")
+    # Load correct dashboard
+    if st.session_state.user_role == "Admin": admin_dashboard()
+    elif st.session_state.user_role == "Faculty": faculty_dashboard()
+    elif st.session_state.user_role == "Instrument Incharge": incharge_dashboard()
+    else: standard_user_dashboard()
         
-        col_s1, col_s2, col_s3 = st.columns([4, 2, 4])
-        with col_s2:
-            st.markdown('<div id="sync_marker"></div>', unsafe_allow_html=True)
-            if st.button("🔄 Sync Application Data", use_container_width=True):
-                get_clean_dataframe.clear()
-                st.rerun()
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    st.markdown("---")
+    
+    col_s1, col_s2, col_s3 = st.columns([4, 2, 4])
+    with col_s2:
+        st.markdown('<div id="sync_marker"></div>', unsafe_allow_html=True)
+        if st.button("🔄 Sync Application Data", use_container_width=True):
+            get_clean_dataframe.clear()
+            st.rerun()
 
 render_footer()

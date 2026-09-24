@@ -238,12 +238,10 @@ def update_record_in_sheet(sheet_tab, id_col_index, target_id, updates_dict):
 # ==========================================
 # 🧠 SESSION STATE & NATIVE AUTO-LOGIN
 # ==========================================
-# 1. Initialize empty session state
 for state in ['logged_in', 'user_role', 'user_name', 'user_category']:
     if state not in st.session_state:
         st.session_state[state] = False if state == 'logged_in' else None
 
-# 2. Check Streamlit's Native URL Parameters (Survives F5 Refresh!)
 if not st.session_state.logged_in:
     if "user" in st.query_params:
         url_user = st.query_params["user"]
@@ -327,17 +325,25 @@ def render_footer():
     st.markdown(footer_html, unsafe_allow_html=True)
 
 # ==========================================
-# 🖥️ LOGIN SYSTEM
+# 🖥️ LOGIN SYSTEM (WITH SKY BLUE BANNER)
 # ==========================================
 def login_page():
     with st.form("login_form"):
         st.markdown(
-            "<h3 style='background: linear-gradient(to right, #b92b27, #1565C0); "
-            "-webkit-background-clip: text; -webkit-text-fill-color: transparent; "
-            "font-size: 1.8rem; font-weight: 800; text-align: center; margin-bottom: 15px;'>"
-            "🔐 Sign In</h3>", 
+            """
+            <div style='background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); padding: 20px; border-radius: 12px; text-align: center; margin-bottom: 20px; box-shadow: 0px 4px 15px rgba(0, 242, 254, 0.4);'>
+                <div style='background-color: white; width: 65px; height: 65px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 10px auto; box-shadow: 0px 4px 10px rgba(0,0,0,0.1);'>
+                    <svg width="35" height="35" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 12C14.7614 12 17 9.76142 17 7C17 4.23858 14.7614 2 12 2C9.23858 2 7 4.23858 7 7C7 9.76142 9.23858 12 12 12Z" fill="#00f2fe"/>
+                        <path d="M12.0002 14.5C6.99016 14.5 2.91016 17.86 2.91016 22C2.91016 22.28 3.13016 22.5 3.41016 22.5H20.5902C20.8702 22.5 21.0902 22.28 21.0902 22C21.0902 17.86 17.0102 14.5 12.0002 14.5Z" fill="#00f2fe"/>
+                    </svg>
+                </div>
+                <h3 style='color: white; margin: 0; font-size: 1.8rem; font-weight: 800; letter-spacing: 1px;'>Sign In</h3>
+            </div>
+            """, 
             unsafe_allow_html=True
         )
+        
         user_id = st.text_input("User ID")
         password = st.text_input("Password", type="password")
         
@@ -363,7 +369,6 @@ def login_page():
                     elif role in STAFF_USERS: st.session_state.user_category = "Staff"
                     else: st.session_state.user_category = "Custom User"
                     
-                    # NATIVE FIX: Save the user ID in the URL to survive page refreshes
                     st.query_params["user"] = user_id.strip()
                     st.rerun()
                 else:
@@ -875,46 +880,14 @@ def admin_dashboard():
 render_global_header()
 
 if not st.session_state.logged_in:
-    with st.form("login_form"):
-        st.markdown("<h3 style='background: linear-gradient(to right, #b92b27, #1565C0); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 1.8rem; font-weight: 800; text-align: center; margin-bottom: 15px;'>🔐 Sign In</h3>", unsafe_allow_html=True)
-        user_id = st.text_input("User ID")
-        password = st.text_input("Password", type="password")
-        
-        if st.form_submit_button("Login", use_container_width=True):
-            users_df = get_clean_dataframe("Users")
-            if not users_df.empty and 'User ID' in users_df.columns:
-                hashed_input = hash_password(str(password).strip())
-                user_match = users_df[(users_df['User ID'] == str(user_id).strip()) & ((users_df['Password'] == hashed_input) | (users_df['Password'] == str(password).strip()))]
-                
-                if not user_match.empty:
-                    role = user_match.iloc[0]['Role'].strip()
-                    
-                    st.session_state.logged_in = True
-                    st.session_state.user_role = role
-                    st.session_state.user_name = user_id.strip()
-                    
-                    if role == "Admin": st.session_state.user_category = "System Admin"
-                    elif role in CU_USERS: st.session_state.user_category = "CU User"
-                    elif role in NON_CU_USERS: st.session_state.user_category = "Non-CU User"
-                    elif role in STAFF_USERS: st.session_state.user_category = "Staff"
-                    else: st.session_state.user_category = "Custom User"
-                    
-                    # NATIVE FIX: Save the user ID in the URL to survive page refreshes
-                    st.query_params["user"] = user_id.strip()
-                    st.rerun()
-                else:
-                    st.error("🚨 Invalid User ID or Password")
-            else:
-                st.error("⚠️ Database Error: 'Users' tab is empty or invalid.")
+    login_page()
 else:
     # 🚪 NATIVE LOGOUT BUTTON
     col1, col2 = st.columns([9, 1])
     with col2:
         st.markdown('<div id="logout_marker"></div>', unsafe_allow_html=True)
         if st.button("Logout", use_container_width=True):
-            # NATIVE FIX: Instantly clear the URL marker so you can't be logged back in
             st.query_params.clear()
-            
             for key in ['logged_in', 'user_role', 'user_name', 'user_category']:
                 if key in st.session_state:
                     del st.session_state[key]

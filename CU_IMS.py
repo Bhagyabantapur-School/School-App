@@ -130,42 +130,21 @@ def init_sheet():
 
 @st.cache_resource
 def setup_database():
-    """Optimized to use a single API call for checking tabs to prevent rate limiting."""
     sh = init_sheet()
-    
     try:
-        # Fetch all existing tabs at once (1 API call instead of 5)
         existing_tabs = [ws.title for ws in sh.worksheets()]
-        
-        # Instruments
         if "Instruments" not in existing_tabs:
             ws_inst = sh.add_worksheet(title="Instruments", rows="100", cols="25")
-            ws_inst.append_row([
-                'Instrument ID', 'Name', 'Make / Manufacturer', 'Serial No.', 'Unit No.', 
-                'Campus Name', 'Department / Centre', 'Building / Floor / Room No.', 
-                'Instrument Incharge', 'Designation of In-charge', 'Contact Email', 
-                'Price Rate (₹)', 'Available Slots', 'Status'
-            ])
-
-        # Bookings
+            ws_inst.append_row(['Instrument ID', 'Name', 'Make / Manufacturer', 'Serial No.', 'Unit No.', 'Campus Name', 'Department / Centre', 'Building / Floor / Room No.', 'Instrument Incharge', 'Designation of In-charge', 'Contact Email', 'Price Rate (₹)', 'Available Slots', 'Status'])
         if "Bookings" not in existing_tabs:
             ws_book = sh.add_worksheet(title="Bookings", rows="1000", cols="25")
             ws_book.append_row(['Booking ID', 'Timestamp', 'User Name', 'Role', 'Instrument', 'Date', 'Time Slot', 'Recommending Faculty', 'Payment Reference', 'Payment Date', 'Payment Status', 'Booking Status'])
-
-        # Spaces & Halls
         if "Spaces" not in existing_tabs:
             ws_space = sh.add_worksheet(title="Spaces", rows="100", cols="20")
-            ws_space.append_row([
-                'Space ID', 'Name', 'Campus Name', 'Building / Floor / Room No.', 
-                'Capacity', 'Space Incharge', 'Contact Email', 'Price Rate (₹)', 'Status'
-            ])
-
-        # Space Bookings
+            ws_space.append_row(['Space ID', 'Name', 'Campus Name', 'Building / Floor / Room No.', 'Capacity', 'Space Incharge', 'Contact Email', 'Price Rate (₹)', 'Status'])
         if "Space Bookings" not in existing_tabs:
             ws_sbook = sh.add_worksheet(title="Space Bookings", rows="1000", cols="25")
             ws_sbook.append_row(['Booking ID', 'Timestamp', 'User Name', 'Role', 'Space', 'Date', 'Time Slot', 'Recommending Faculty', 'Payment Reference', 'Payment Date', 'Payment Status', 'Booking Status'])
-
-        # Users
         if "Users" not in existing_tabs:
             ws_users = sh.add_worksheet(title="Users", rows="100", cols="20")
             ws_users.append_row(['User ID', 'Password', 'Role'])
@@ -175,10 +154,8 @@ def setup_database():
             ws_users.append_row(['institute1', hash_password('inst123'), 'Research Institute'])
             ws_users.append_row(['industry1', hash_password('ind123'), 'Industry partner'])
             ws_users.append_row(['incharge1', hash_password('inc123'), 'Instrument Incharge'])
-            
     except Exception as e:
         st.error(f"⚠️ Error verifying database structure: {e}")
-        
     return sh
 
 sh = setup_database()
@@ -202,20 +179,16 @@ def get_processed_bookings(sheet_name="Bookings", assigned_status="Instrument As
     df = get_clean_dataframe(sheet_name).copy()
     if not df.empty and 'Date' in df.columns and 'Time Slot' in df.columns and 'Booking Status' in df.columns:
         current_time = datetime.now(IST)
-        
         for idx, row in df.iterrows():
             if str(row['Booking Status']).strip() == assigned_status:
                 try:
                     date_str = str(row['Date']).strip()
                     time_slot = str(row['Time Slot']).strip()
-                    
                     if " - " in time_slot:
                         end_time_str = time_slot.split(" - ")[1].split("IST")[0].strip()
                         dt_str = f"{date_str} {end_time_str}"
-                        
                         naive_dt = datetime.strptime(dt_str, "%Y-%m-%d %I:%M %p")
                         aware_dt = IST.localize(naive_dt)
-                        
                         if current_time > aware_dt:
                             df.at[idx, 'Booking Status'] = 'Expired'
                 except Exception:
@@ -233,13 +206,11 @@ def update_record_in_sheet(sheet_tab, id_col_index, target_id, updates_dict):
     ws = sh.worksheet(sheet_tab)
     live_values = ws.get_all_values()
     headers = [str(c).strip() for c in live_values[0]]
-    
     row_to_update = None
     for i, row in enumerate(live_values):
         if i > 0 and str(row[id_col_index]).strip() == str(target_id).strip():
             row_to_update = i + 1 
             break
-            
     if row_to_update:
         for col_name, new_val in updates_dict.items():
             if col_name in headers:
@@ -259,31 +230,30 @@ except ImportError:
     st.error("🚨 Please add 'extra-streamlit-components' to your requirements.txt file.")
     st.stop()
 
-for state in ['logged_in', 'user_role', 'user_name', 'user_category']:
-    if state not in st.session_state:
-        st.session_state[state] = False if state == 'logged_in' else None
+# Initialize core states
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+if 'explicit_logout' not in st.session_state:
+    st.session_state.explicit_logout = False
 
-# Auto-Login Logic via Cookie Persistence
-if not st.session_state.logged_in:
+# Auto-Login Evaluation (Only runs if user hasn't explicitly logged out)
+if not st.session_state.logged_in and not st.session_state.explicit_logout:
     cached_user = cookie_manager.get(cookie="cu_ims_user")
-    if cached_user:
+    if cached_user and isinstance(cached_user, str) and cached_user.strip() != "":
         users_df = get_clean_dataframe("Users")
         if not users_df.empty and 'User ID' in users_df.columns:
-            user_match = users_df[users_df['User ID'] == str(cached_user).strip()]
+            user_match = users_df[users_df['User ID'] == cached_user.strip()]
             if not user_match.empty:
                 role = user_match.iloc[0]['Role'].strip()
                 st.session_state.logged_in = True
                 st.session_state.user_role = role
-                st.session_state.user_name = str(cached_user).strip()
+                st.session_state.user_name = cached_user.strip()
                 
                 if role == "Admin": st.session_state.user_category = "System Admin"
                 elif role in CU_USERS: st.session_state.user_category = "CU User"
                 elif role in NON_CU_USERS: st.session_state.user_category = "Non-CU User"
                 elif role in STAFF_USERS: st.session_state.user_category = "Staff"
                 else: st.session_state.user_category = "Custom User"
-                
-                time.sleep(0.2)
-                st.rerun()
 
 # ==========================================
 # 🖼️ GLOBAL HEADER
@@ -299,15 +269,8 @@ def render_global_header():
     cu_b64 = get_image_base64("CU_Logo.jpg")
     rusa_b64 = get_image_base64("RUSA_Logo.jpg")
     
-    if cu_b64:
-        cu_img_html = f'<img src="data:image/jpeg;base64,{cu_b64}" style="width: 100%; max-width: 80px; height: auto;" alt="CU Logo">'
-    else:
-        cu_img_html = '<div style="font-size: 10px;">CU Logo Missing</div>'
-        
-    if rusa_b64:
-        rusa_img_html = f'<img src="data:image/jpeg;base64,{rusa_b64}" style="width: 100%; max-width: 80px; height: auto;" alt="RUSA Logo">'
-    else:
-        rusa_img_html = '<div style="font-size: 10px;">RUSA Logo Missing</div>'
+    cu_img_html = f'<img src="data:image/jpeg;base64,{cu_b64}" style="width: 100%; max-width: 80px; height: auto;" alt="CU Logo">' if cu_b64 else '<div style="font-size: 10px;">CU Logo Missing</div>'
+    rusa_img_html = f'<img src="data:image/jpeg;base64,{rusa_b64}" style="width: 100%; max-width: 80px; height: auto;" alt="RUSA Logo">' if rusa_b64 else '<div style="font-size: 10px;">RUSA Logo Missing</div>'
 
     header_html = (
         '<div style="display: flex; justify-content: space-between; align-items: center; width: 100%; '
@@ -320,7 +283,6 @@ def render_global_header():
         f'<div style="flex: 0 0 auto; min-width: 60px; text-align: right;">{rusa_img_html}</div>'
         '</div>'
     )
-    
     st.markdown(header_html, unsafe_allow_html=True)
 
 # ==========================================
@@ -358,50 +320,6 @@ def render_footer():
     st.markdown(footer_html, unsafe_allow_html=True)
 
 # ==========================================
-# 🖥️ LOGIN SYSTEM
-# ==========================================
-def login_page():
-    with st.form("login_form"):
-        st.markdown(
-            "<h3 style='background: linear-gradient(to right, #b92b27, #1565C0); "
-            "-webkit-background-clip: text; -webkit-text-fill-color: transparent; "
-            "font-size: 1.8rem; font-weight: 800; text-align: center; margin-bottom: 15px;'>"
-            "🔐 Sign In</h3>", 
-            unsafe_allow_html=True
-        )
-        user_id = st.text_input("User ID")
-        password = st.text_input("Password", type="password")
-        if st.form_submit_button("Login", use_container_width=True):
-            users_df = get_clean_dataframe("Users")
-            if not users_df.empty and 'User ID' in users_df.columns:
-                users_df['User ID'] = users_df['User ID'].astype(str).str.strip()
-                users_df['Password'] = users_df['Password'].astype(str).str.strip()
-                hashed_input = hash_password(str(password).strip())
-                
-                user_match = users_df[(users_df['User ID'] == str(user_id).strip()) & 
-                                      ((users_df['Password'] == hashed_input) | (users_df['Password'] == str(password).strip()))]
-                
-                if not user_match.empty:
-                    role = user_match.iloc[0]['Role'].strip()
-                    st.session_state.logged_in = True
-                    st.session_state.user_role = role
-                    st.session_state.user_name = user_id
-                    
-                    if role == "Admin": st.session_state.user_category = "System Admin"
-                    elif role in CU_USERS: st.session_state.user_category = "CU User"
-                    elif role in NON_CU_USERS: st.session_state.user_category = "Non-CU User"
-                    elif role in STAFF_USERS: st.session_state.user_category = "Staff"
-                    else: st.session_state.user_category = "Custom User"
-                    
-                    cookie_manager.set("cu_ims_user", user_id, max_age=2592000)
-                    time.sleep(0.5)
-                    st.rerun()
-                else:
-                    st.error("🚨 Invalid User ID or Password")
-            else:
-                st.error("⚠️ Database Error: 'Users' tab is empty or invalid.")
-
-# ==========================================
 # 🛠️ SHARED USER INTERFACES
 # ==========================================
 def render_instrument_booking_form():
@@ -428,10 +346,7 @@ def render_instrument_booking_form():
         st.warning("No Faculty members found in the system. You cannot request recommendations until an Admin adds Faculty users.")
         return
         
-    if status_col_name:
-        working_insts = inst_df[~inst_df[status_col_name].isin(['Not Working', 'Maintenance', 'Unavailable'])]
-    else:
-        working_insts = inst_df
+    working_insts = inst_df[~inst_df[status_col_name].isin(['Not Working', 'Maintenance', 'Unavailable'])] if status_col_name else inst_df
     
     if working_insts.empty:
         st.error("🛑 All instruments are currently unavailable.")
@@ -454,25 +369,15 @@ def render_instrument_booking_form():
         min_allowed_date = today_ist + timedelta(days=3)
         date = st.date_input("Select Date (Min 3 Days Advance)", value=min_allowed_date, min_value=min_allowed_date)
         
-        slot = st.selectbox("Select Time Slot", [
-            "10:00 AM - 11:00 AM IST", 
-            "11:00 AM - 12:00 PM IST", 
-            "02:00 PM - 03:00 PM IST"
-        ])
+        slot = st.selectbox("Select Time Slot", ["10:00 AM - 11:00 AM IST", "11:00 AM - 12:00 PM IST", "02:00 PM - 03:00 PM IST"])
         
-        selected_faculty = None
-        if is_scholar:
-            selected_faculty = st.selectbox("Send Recommendation Request To (Faculty)", faculty_list)
+        selected_faculty = st.selectbox("Send Recommendation Request To (Faculty)", faculty_list) if is_scholar else None
             
         if st.form_submit_button("Submit Request", type="primary"):
             all_bookings = get_processed_bookings("Bookings", "Instrument Assigned")
             conflict = False
-            
             if not all_bookings.empty and 'Date' in all_bookings.columns:
-                existing = all_bookings[(all_bookings['Instrument'] == selected_inst) & 
-                                        (all_bookings['Date'] == str(date)) & 
-                                        (all_bookings['Time Slot'] == slot) &
-                                        (all_bookings['Booking Status'].isin(['Awaiting Faculty Recommendation', 'Pending Admin Approval', 'Approved, Awaiting Payment', 'Payment Submitted, Awaiting Verification', 'Instrument Assigned']))]
+                existing = all_bookings[(all_bookings['Instrument'] == selected_inst) & (all_bookings['Date'] == str(date)) & (all_bookings['Time Slot'] == slot) & (all_bookings['Booking Status'].isin(['Awaiting Faculty Recommendation', 'Pending Admin Approval', 'Approved, Awaiting Payment', 'Payment Submitted, Awaiting Verification', 'Instrument Assigned']))]
                 if not existing.empty: conflict = True
             
             if conflict:
@@ -490,10 +395,7 @@ def render_instrument_booking_form():
                     init_status = "Pending Admin Approval"
                     msg = "✅ Booking submitted directly to Admin for approval!"
                     
-                row_data = [booking_id, timestamp, st.session_state.user_name, st.session_state.user_role, 
-                            selected_inst, str(date), slot, rec_faculty, "N/A", "N/A", "Pending", init_status]
-                
-                sh.worksheet("Bookings").append_row(row_data)
+                sh.worksheet("Bookings").append_row([booking_id, timestamp, st.session_state.user_name, st.session_state.user_role, selected_inst, str(date), slot, rec_faculty, "N/A", "N/A", "Pending", init_status])
                 st.success(msg)
                 get_clean_dataframe.clear()
                 time.sleep(1)
@@ -523,10 +425,7 @@ def render_space_booking_form():
         st.warning("No Faculty members found in the system. You cannot request recommendations until an Admin adds Faculty users.")
         return
         
-    if status_col_name:
-        working_spaces = space_df[~space_df[status_col_name].isin(['Not Working', 'Maintenance', 'Unavailable'])]
-    else:
-        working_spaces = space_df
+    working_spaces = space_df[~space_df[status_col_name].isin(['Not Working', 'Maintenance', 'Unavailable'])] if status_col_name else space_df
     
     if working_spaces.empty:
         st.error("🛑 All spaces are currently marked as unavailable.")
@@ -549,24 +448,15 @@ def render_space_booking_form():
         min_allowed_date = today_ist + timedelta(days=3)
         date = st.date_input("Select Date (Min 3 Days Advance)", value=min_allowed_date, min_value=min_allowed_date)
         
-        slot = st.selectbox("Select Time Slot", [
-            "09:00 AM - 02:00 PM IST (5 Hours)", 
-            "02:00 PM - 07:00 PM IST (5 Hours)"
-        ])
+        slot = st.selectbox("Select Time Slot", ["09:00 AM - 02:00 PM IST (5 Hours)", "02:00 PM - 07:00 PM IST (5 Hours)"])
         
-        selected_faculty = None
-        if is_scholar:
-            selected_faculty = st.selectbox("Send Recommendation Request To (Faculty)", faculty_list)
+        selected_faculty = st.selectbox("Send Recommendation Request To (Faculty)", faculty_list) if is_scholar else None
             
         if st.form_submit_button("Submit Request", type="primary"):
             all_s_bookings = get_processed_bookings("Space Bookings", "Space Assigned")
             conflict = False
-            
             if not all_s_bookings.empty and 'Date' in all_s_bookings.columns:
-                existing = all_s_bookings[(all_s_bookings['Space'] == selected_space) & 
-                                        (all_s_bookings['Date'] == str(date)) & 
-                                        (all_s_bookings['Time Slot'] == slot) &
-                                        (all_s_bookings['Booking Status'].isin(['Awaiting Faculty Recommendation', 'Pending Admin Approval', 'Approved, Awaiting Payment', 'Payment Submitted, Awaiting Verification', 'Space Assigned']))]
+                existing = all_s_bookings[(all_s_bookings['Space'] == selected_space) & (all_s_bookings['Date'] == str(date)) & (all_s_bookings['Time Slot'] == slot) & (all_s_bookings['Booking Status'].isin(['Awaiting Faculty Recommendation', 'Pending Admin Approval', 'Approved, Awaiting Payment', 'Payment Submitted, Awaiting Verification', 'Space Assigned']))]
                 if not existing.empty: conflict = True
             
             if conflict:
@@ -584,10 +474,7 @@ def render_space_booking_form():
                     init_status = "Pending Admin Approval"
                     msg = "✅ Booking submitted directly to Admin for approval!"
                     
-                row_data = [booking_id, timestamp, st.session_state.user_name, st.session_state.user_role, 
-                            selected_space, str(date), slot, rec_faculty, "N/A", "N/A", "Pending", init_status]
-                
-                sh.worksheet("Space Bookings").append_row(row_data)
+                sh.worksheet("Space Bookings").append_row([booking_id, timestamp, st.session_state.user_name, st.session_state.user_role, selected_space, str(date), slot, rec_faculty, "N/A", "N/A", "Pending", init_status])
                 st.success(msg)
                 get_clean_dataframe.clear()
                 time.sleep(1)
@@ -604,12 +491,9 @@ def render_payment_form():
     
     all_bookings = get_processed_bookings(sheet_target, assigned_tag)
     if not all_bookings.empty and 'User Name' in all_bookings.columns:
-        my_approved = all_bookings[(all_bookings['User Name'] == st.session_state.user_name) & 
-                                   (all_bookings['Booking Status'] == 'Approved, Awaiting Payment')].copy()
-        
+        my_approved = all_bookings[(all_bookings['User Name'] == st.session_state.user_name) & (all_bookings['Booking Status'] == 'Approved, Awaiting Payment')].copy()
         if not my_approved.empty:
             st.dataframe(my_approved[['Booking ID', item_col, 'Date', 'Time Slot', 'Booking Status']], hide_index=True)
-            
             with st.form("payment_submission"):
                 target_bkg = st.selectbox("Select Booking ID", my_approved['Booking ID'].tolist())
                 pay_ref = st.text_input("Payment Reference Number (Transaction ID)")
@@ -619,11 +503,7 @@ def render_payment_form():
                     if not pay_ref:
                         st.error("🚨 Payment Reference Number is required.")
                     else:
-                        updates = {
-                            "Payment Reference": pay_ref,
-                            "Payment Date": str(pay_date),
-                            "Booking Status": "Payment Submitted, Awaiting Verification"
-                        }
+                        updates = {"Payment Reference": pay_ref, "Payment Date": str(pay_date), "Booking Status": "Payment Submitted, Awaiting Verification"}
                         if update_record_in_sheet(sheet_target, 0, target_bkg, updates):
                             st.success(f"✅ Payment details sent to Admin for {target_bkg}.")
                             time.sleep(1)
@@ -640,19 +520,14 @@ def render_my_status():
     st.markdown("**🔬 Instrument Bookings**")
     all_bookings = get_processed_bookings("Bookings", "Instrument Assigned")
     inst_df = get_clean_dataframe("Instruments")
-    
-    price_map = {}
-    if not inst_df.empty and 'Name' in inst_df.columns:
-        price_map = dict(zip(inst_df['Name'], inst_df.get('Price Rate (₹)', ['0']*len(inst_df))))
+    price_map = dict(zip(inst_df['Name'], inst_df.get('Price Rate (₹)', ['0']*len(inst_df)))) if not inst_df.empty and 'Name' in inst_df.columns else {}
         
     if not all_bookings.empty and 'User Name' in all_bookings.columns:
         my_bookings = all_bookings[all_bookings['User Name'] == st.session_state.user_name].copy()
         if not my_bookings.empty:
             my_bookings['Price (₹/hr)'] = my_bookings['Instrument'].map(price_map).fillna("N/A")
-            desired_cols = ['Date', 'Instrument', 'Price (₹/hr)', 'Time Slot', 'Payment Reference', 'Payment Status', 'Booking Status']
-            safe_cols = [col for col in desired_cols if col in my_bookings.columns]
-            styled_df = my_bookings[safe_cols].style.apply(highlight_rows, axis=1)
-            st.dataframe(styled_df, hide_index=True, use_container_width=True)
+            safe_cols = [col for col in ['Date', 'Instrument', 'Price (₹/hr)', 'Time Slot', 'Payment Reference', 'Payment Status', 'Booking Status'] if col in my_bookings.columns]
+            st.dataframe(my_bookings[safe_cols].style.apply(highlight_rows, axis=1), hide_index=True, use_container_width=True)
         else:
             st.info("No instrument booking history.")
     else:
@@ -664,59 +539,35 @@ def render_my_status():
     st.markdown("**🏛️ Space / Hall Bookings**")
     all_s_bookings = get_processed_bookings("Space Bookings", "Space Assigned")
     space_df = get_clean_dataframe("Spaces")
-    
-    s_price_map = {}
-    if not space_df.empty and 'Name' in space_df.columns:
-        s_price_map = dict(zip(space_df['Name'], space_df.get('Price Rate (₹)', ['0']*len(space_df))))
+    s_price_map = dict(zip(space_df['Name'], space_df.get('Price Rate (₹)', ['0']*len(space_df)))) if not space_df.empty and 'Name' in space_df.columns else {}
         
     if not all_s_bookings.empty and 'User Name' in all_s_bookings.columns:
         my_s_bookings = all_s_bookings[all_s_bookings['User Name'] == st.session_state.user_name].copy()
         if not my_s_bookings.empty:
             my_s_bookings['Price (₹/Slot)'] = my_s_bookings['Space'].map(s_price_map).fillna("N/A")
-            s_desired_cols = ['Date', 'Space', 'Price (₹/Slot)', 'Time Slot', 'Payment Reference', 'Payment Status', 'Booking Status']
-            s_safe_cols = [col for col in s_desired_cols if col in my_s_bookings.columns]
-            styled_s_df = my_s_bookings[s_safe_cols].style.apply(highlight_rows, axis=1)
-            st.dataframe(styled_s_df, hide_index=True, use_container_width=True)
+            s_safe_cols = [col for col in ['Date', 'Space', 'Price (₹/Slot)', 'Time Slot', 'Payment Reference', 'Payment Status', 'Booking Status'] if col in my_s_bookings.columns]
+            st.dataframe(my_s_bookings[s_safe_cols].style.apply(highlight_rows, axis=1), hide_index=True, use_container_width=True)
         else:
             st.info("No space booking history.")
     else:
         st.info("No space booking history.")
 
 # ==========================================
-# 🎓 STANDARD USER DASHBOARD
+# 🎓 DASHBOARD ROUTING FUNCTIONS
 # ==========================================
 def standard_user_dashboard():
-    st.markdown(
-        f"<h3 style='background: linear-gradient(to right, #f77062, #fe5196); "
-        f"-webkit-background-clip: text; -webkit-text-fill-color: transparent; "
-        f"font-size: 1.8rem; font-weight: 800; margin-bottom: 20px;'>"
-        f"🎓 Portal: {st.session_state.user_name} | {st.session_state.user_role} ({st.session_state.user_category})</h3>", 
-        unsafe_allow_html=True
-    )
-    
+    st.markdown(f"<h3 style='background: linear-gradient(to right, #f77062, #fe5196); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 1.8rem; font-weight: 800; margin-bottom: 20px;'>🎓 Portal: {st.session_state.user_name} | {st.session_state.user_role} ({st.session_state.user_category})</h3>", unsafe_allow_html=True)
     tab1, tab2, tab3, tab4 = st.tabs(["📝 Book Instrument", "🏛️ Book Space", "💳 Make Payment", "🔔 My Status"])
     with tab1: render_instrument_booking_form()
     with tab2: render_space_booking_form()
     with tab3: render_payment_form()
     with tab4: render_my_status()
 
-# ==========================================
-# 🧑‍🏫 FACULTY DASHBOARD
-# ==========================================
 def faculty_dashboard():
-    st.markdown(
-        f"<h3 style='background: linear-gradient(to right, #11998e, #38ef7d); "
-        f"-webkit-background-clip: text; -webkit-text-fill-color: transparent; "
-        f"font-size: 1.8rem; font-weight: 800; margin-bottom: 20px;'>"
-        f"🧑‍🏫 Faculty Portal: {st.session_state.user_name} ({st.session_state.user_category})</h3>", 
-        unsafe_allow_html=True
-    )
-    
+    st.markdown(f"<h3 style='background: linear-gradient(to right, #11998e, #38ef7d); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 1.8rem; font-weight: 800; margin-bottom: 20px;'>🧑‍🏫 Faculty Portal: {st.session_state.user_name} ({st.session_state.user_category})</h3>", unsafe_allow_html=True)
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["✅ Review Scholars", "📝 Book Instrument", "🏛️ Book Space", "💳 Make Payment", "🔔 My Status"])
-    
     with tab1:
         st.subheader("Research Scholar Requests Awaiting Recommendation")
-        
         req_type = st.radio("Select Request Type", ["Instruments", "Spaces"])
         sheet_target = "Bookings" if req_type == "Instruments" else "Space Bookings"
         assigned_tag = "Instrument Assigned" if req_type == "Instruments" else "Space Assigned"
@@ -726,126 +577,78 @@ def faculty_dashboard():
         
         bookings_df = get_processed_bookings(sheet_target, assigned_tag)
         ref_df = get_clean_dataframe(ref_sheet)
-        
-        price_map = {}
-        if not ref_df.empty and 'Name' in ref_df.columns:
-            price_map = dict(zip(ref_df['Name'], ref_df.get('Price Rate (₹)', ['0']*len(ref_df))))
+        price_map = dict(zip(ref_df['Name'], ref_df.get('Price Rate (₹)', ['0']*len(ref_df)))) if not ref_df.empty and 'Name' in ref_df.columns else {}
         
         if not bookings_df.empty and 'Recommending Faculty' in bookings_df.columns:
-            pending_reqs = bookings_df[(bookings_df['Recommending Faculty'] == st.session_state.user_name) & 
-                                       (bookings_df['Booking Status'] == 'Awaiting Faculty Recommendation')].copy()
-            
+            pending_reqs = bookings_df[(bookings_df['Recommending Faculty'] == st.session_state.user_name) & (bookings_df['Booking Status'] == 'Awaiting Faculty Recommendation')].copy()
             if not pending_reqs.empty:
                 pending_reqs[price_label] = pending_reqs[item_col].map(price_map).fillna("N/A")
                 safe_cols = [c for c in ['Booking ID', 'User Name', item_col, price_label, 'Date', 'Time Slot'] if c in pending_reqs.columns]
-                
-                styled_reqs = pending_reqs[safe_cols].style.apply(highlight_rows, axis=1)
-                st.dataframe(styled_reqs, hide_index=True)
+                st.dataframe(pending_reqs[safe_cols].style.apply(highlight_rows, axis=1), hide_index=True)
                 
                 with st.form("faculty_review"):
                     target_bkg = st.selectbox("Select Booking ID to Review", pending_reqs['Booking ID'].tolist())
                     decision = st.selectbox("Action", ["Recommend to Admin", "Reject Request"])
-                    
                     if st.form_submit_button("Submit Decision", type="primary"):
                         new_status = "Pending Admin Approval" if decision == "Recommend to Admin" else "Rejected by Faculty"
                         if update_record_in_sheet(sheet_target, 0, target_bkg, {"Booking Status": new_status}):
                             st.success(f"✅ {target_bkg} updated to: {new_status}")
                             time.sleep(1)
                             st.rerun()
-            else:
-                st.info(f"No pending {req_type.lower()} recommendations.")
-        else:
-            st.info("No bookings found in the system.")
+            else: st.info(f"No pending {req_type.lower()} recommendations.")
+        else: st.info("No bookings found in the system.")
             
     with tab2: render_instrument_booking_form()
     with tab3: render_space_booking_form()
     with tab4: render_payment_form()
     with tab5: render_my_status()
 
-# ==========================================
-# 🔧 FACILITY INCHARGE DASHBOARD
-# ==========================================
 def incharge_dashboard():
-    st.markdown(
-        f"<h3 style='background: linear-gradient(to right, #4facfe, #00f2fe); "
-        f"-webkit-background-clip: text; -webkit-text-fill-color: transparent; "
-        f"font-size: 1.8rem; font-weight: 800; margin-bottom: 20px;'>"
-        f"🔧 Facility Incharge Portal: {st.session_state.user_name} ({st.session_state.user_category})</h3>", 
-        unsafe_allow_html=True
-    )
-    
+    st.markdown(f"<h3 style='background: linear-gradient(to right, #4facfe, #00f2fe); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 1.8rem; font-weight: 800; margin-bottom: 20px;'>🔧 Facility Incharge Portal: {st.session_state.user_name} ({st.session_state.user_category})</h3>", unsafe_allow_html=True)
     manage_type = st.radio("Select Category to Manage", ["Instruments", "Spaces"])
-    
     if manage_type == "Instruments":
         inst_df = get_clean_dataframe("Instruments")
         if not inst_df.empty:
             id_col = inst_df.columns[0]
             status_col = next((c for c in inst_df.columns if 'status' in str(c).lower()), None)
-            
             if status_col:
                 st.subheader("Manage Instrument Conditions")
-                st.write("Marking an instrument as 'Not Working' instantly blocks users from booking it.")
-                
                 safe_inst_cols = [c for c in [id_col, 'Name', 'Price Rate (₹)', status_col] if c in inst_df.columns]
-                styled_inst = inst_df[safe_inst_cols].style.apply(highlight_assets, axis=1)
-                st.dataframe(styled_inst, hide_index=True, use_container_width=True)
-                
+                st.dataframe(inst_df[safe_inst_cols].style.apply(highlight_assets, axis=1), hide_index=True, use_container_width=True)
                 st.markdown("---")
                 with st.form("update_inst_status"):
                     target_inst = st.selectbox("Select Instrument to Update", inst_df[id_col].tolist())
                     new_status = st.selectbox("Update Condition Status", ["Working", "Not Working"])
-                    
                     if st.form_submit_button("Apply Status Update", type="primary"):
                         if update_record_in_sheet("Instruments", 0, target_inst, {status_col: new_status}):
                             st.success(f"✅ Instrument {target_inst} successfully marked as {new_status}.")
                             time.sleep(1)
                             st.rerun()
-            else:
-                st.error("⚠️ The 'Status' column is missing from your Instruments database.")
-        else:
-            st.info("No instruments currently in the database.")
-            
+            else: st.error("⚠️ The 'Status' column is missing from your Instruments database.")
+        else: st.info("No instruments currently in the database.")
     else:
         space_df = get_clean_dataframe("Spaces")
         if not space_df.empty:
             id_col = space_df.columns[0]
             status_col = next((c for c in space_df.columns if 'status' in str(c).lower()), None)
-            
             if status_col:
                 st.subheader("Manage Space Conditions")
-                st.write("Marking a space as 'Unavailable' instantly blocks users from booking it.")
-                
                 safe_space_cols = [c for c in [id_col, 'Name', 'Capacity', status_col] if c in space_df.columns]
-                styled_space = space_df[safe_space_cols].style.apply(highlight_assets, axis=1)
-                st.dataframe(styled_space, hide_index=True, use_container_width=True)
-                
+                st.dataframe(space_df[safe_space_cols].style.apply(highlight_assets, axis=1), hide_index=True, use_container_width=True)
                 st.markdown("---")
                 with st.form("update_space_status"):
                     target_space = st.selectbox("Select Space to Update", space_df[id_col].tolist())
                     new_status = st.selectbox("Update Condition Status", ["Available", "Unavailable", "Maintenance"])
-                    
                     if st.form_submit_button("Apply Status Update", type="primary"):
                         if update_record_in_sheet("Spaces", 0, target_space, {status_col: new_status}):
                             st.success(f"✅ Space {target_space} successfully marked as {new_status}.")
                             time.sleep(1)
                             st.rerun()
-            else:
-                st.error("⚠️ The 'Status' column is missing from your Spaces database.")
-        else:
-            st.info("No spaces currently in the database.")
+            else: st.error("⚠️ The 'Status' column is missing from your Spaces database.")
+        else: st.info("No spaces currently in the database.")
 
-# ==========================================
-# ⚙️ ADMIN DASHBOARD
-# ==========================================
 def admin_dashboard():
-    st.markdown(
-        "<h3 style='background: linear-gradient(to right, #833ab4, #fd1d1d, #fcb045); "
-        "-webkit-background-clip: text; -webkit-text-fill-color: transparent; "
-        "font-size: 1.8rem; font-weight: 800; margin-bottom: 20px;'>"
-        "👑 Admin Control Panel</h3>", 
-        unsafe_allow_html=True
-    )
-    
+    st.markdown("<h3 style='background: linear-gradient(to right, #833ab4, #fd1d1d, #fcb045); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 1.8rem; font-weight: 800; margin-bottom: 20px;'>👑 Admin Control Panel</h3>", unsafe_allow_html=True)
     tab1, tab2, tab3, tab4 = st.tabs(["🚦 Approvals Queue", "🔬 Manage Instruments", "🏛️ Manage Spaces", "👥 Manage Users"])
     
     with tab1:
@@ -858,50 +661,32 @@ def admin_dashboard():
         
         bookings_df = get_processed_bookings(sheet_target, assigned_tag)
         ref_df = get_clean_dataframe(ref_sheet)
-        
-        price_map = {}
-        if not ref_df.empty and 'Name' in ref_df.columns:
-            price_map = dict(zip(ref_df['Name'], ref_df.get('Price Rate (₹)', ['0']*len(ref_df))))
+        price_map = dict(zip(ref_df['Name'], ref_df.get('Price Rate (₹)', ['0']*len(ref_df)))) if not ref_df.empty and 'Name' in ref_df.columns else {}
             
         if not bookings_df.empty:
             st.subheader(f"Task Queue: {req_type}")
             action_statuses = ["Pending Admin Approval", "Payment Submitted, Awaiting Verification", "Waitlisted"]
             actionable = bookings_df[bookings_df['Booking Status'].isin(action_statuses)].copy()
-            
             if not actionable.empty:
                 actionable[price_label] = actionable[item_col].map(price_map).fillna("N/A")
                 safe_display_cols = [c for c in ['Booking ID', 'User Name', item_col, price_label, 'Date', 'Time Slot', 'Payment Reference', 'Payment Date', 'Booking Status'] if c in actionable.columns]
-                
-                styled_actionable = actionable[safe_display_cols].sort_values(by=['Date']).style.apply(highlight_rows, axis=1)
-                st.dataframe(styled_actionable, hide_index=True)
-            else:
-                st.info("Task Queue is currently empty.")
+                st.dataframe(actionable[safe_display_cols].sort_values(by=['Date']).style.apply(highlight_rows, axis=1), hide_index=True)
+            else: st.info("Task Queue is currently empty.")
             
             st.markdown("---")
             st.subheader("Process a Booking")
             with st.form("admin_approval_form"):
                 target_bkg = st.selectbox("Select Booking ID", bookings_df['Booking ID'].tolist())
-                
                 col1, col2 = st.columns(2)
-                with col1:
-                    new_payment = st.selectbox("Update Payment Status", ["Pending", "Paid", "Failed/Refunded"])
-                with col2:
-                    new_status = st.selectbox(
-                        "Update Booking Status", 
-                        ["Pending Admin Approval", "Approved, Awaiting Payment", "Payment Submitted, Awaiting Verification", "Waitlisted", "Rejected", assigned_tag, "Completed", "Expired"]
-                    )
-                
+                with col1: new_payment = st.selectbox("Update Payment Status", ["Pending", "Paid", "Failed/Refunded"])
+                with col2: new_status = st.selectbox("Update Booking Status", ["Pending Admin Approval", "Approved, Awaiting Payment", "Payment Submitted, Awaiting Verification", "Waitlisted", "Rejected", assigned_tag, "Completed", "Expired"])
                 if st.form_submit_button("Apply Updates", type="primary"):
-                    updates = {
-                        "Payment Status": new_payment,
-                        "Booking Status": new_status
-                    }
+                    updates = {"Payment Status": new_payment, "Booking Status": new_status}
                     if update_record_in_sheet(sheet_target, 0, target_bkg, updates):
                         st.success(f"✅ Booking {target_bkg} securely updated.")
                         time.sleep(1)
                         st.rerun()
-        else:
-            st.info(f"No {req_type.lower()} bookings in system.")
+        else: st.info(f"No {req_type.lower()} bookings in system.")
 
     with tab2:
         st.subheader("Current Instruments Database")
@@ -909,20 +694,14 @@ def admin_dashboard():
         if not inst_df.empty:
             status_col_name = next((c for c in inst_df.columns if 'status' in str(c).lower()), None)
             id_col = inst_df.columns[0]
-            
             safe_inst_cols = [c for c in [id_col, 'Name', 'Make / Manufacturer', 'Department / Centre', 'Instrument Incharge', 'Price Rate (₹)', status_col_name] if c in inst_df.columns]
-            styled_inst_admin = inst_df[safe_inst_cols].style.apply(highlight_assets, axis=1)
-            st.dataframe(styled_inst_admin, hide_index=True, use_container_width=True)
-        else:
-            st.info("No instruments found.")
+            st.dataframe(inst_df[safe_inst_cols].style.apply(highlight_assets, axis=1), hide_index=True, use_container_width=True)
+        else: st.info("No instruments found.")
 
         st.markdown("---")
         st.subheader("➕ Add New Instrument")
-        
         users_df = get_clean_dataframe("Users")
-        incharge_list = []
-        if not users_df.empty and 'Role' in users_df.columns and 'User ID' in users_df.columns:
-            incharge_list = users_df[users_df['Role'] == 'Instrument Incharge']['User ID'].tolist()
+        incharge_list = users_df[users_df['Role'] == 'Instrument Incharge']['User ID'].tolist() if not users_df.empty and 'Role' in users_df.columns and 'User ID' in users_df.columns else []
             
         with st.form("add_instrument"):
             r1c1, r1c2, r1c3 = st.columns(3)
@@ -939,32 +718,26 @@ def admin_dashboard():
             with r3c1: inst_dept = st.text_input("Department / Centre")
             with r3c2: inst_room = st.text_input("Building / Floor / Room No.")
             with r3c3: 
-                if incharge_list:
-                    inst_incharge = st.selectbox("Instrument Incharge", ["Select Incharge..."] + incharge_list)
-                else:
+                if incharge_list: inst_incharge = st.selectbox("Instrument Incharge", ["Select Incharge..."] + incharge_list)
+                else: 
                     inst_incharge = st.selectbox("Instrument Incharge", ["No Incharge Found"])
                     st.caption("⚠️ Add an Instrument Incharge user first.")
             
             r4c1, r4c2, r4c3 = st.columns(3)
             with r4c1: inst_desig = st.text_input("Designation of In-charge")
             with r4c2: inst_email = st.text_input("Contact Email")
-            with r4c3: st.write("") # Spacer
+            with r4c3: st.write("") 
             
             if st.form_submit_button("Add Instrument", type="primary"):
                 if inst_name:
                     inst_id = f"INST-{int(datetime.now(IST).timestamp())}"
                     final_incharge = inst_incharge if inst_incharge not in ["Select Incharge...", "No Incharge Found"] else ""
-                    sh.worksheet("Instruments").append_row([
-                        inst_id, inst_name, inst_make, inst_serial, inst_unit, 
-                        inst_campus, inst_dept, inst_room, final_incharge, 
-                        inst_desig, inst_email, inst_price, "Open", "Working"
-                    ])
+                    sh.worksheet("Instruments").append_row([inst_id, inst_name, inst_make, inst_serial, inst_unit, inst_campus, inst_dept, inst_room, final_incharge, inst_desig, inst_email, inst_price, "Open", "Working"])
                     st.success(f"✅ {inst_name} added to the system.")
                     get_clean_dataframe.clear()
                     time.sleep(1)
                     st.rerun()
-                else:
-                    st.error("Please provide at least an Instrument Name.")
+                else: st.error("Please provide at least an Instrument Name.")
 
     with tab3:
         st.subheader("Current Spaces & Halls Database")
@@ -972,16 +745,12 @@ def admin_dashboard():
         if not space_df.empty:
             status_col_name = next((c for c in space_df.columns if 'status' in str(c).lower()), None)
             id_col = space_df.columns[0]
-            
             safe_space_cols = [c for c in [id_col, 'Name', 'Capacity', 'Campus Name', 'Space Incharge', 'Price Rate (₹)', status_col_name] if c in space_df.columns]
-            styled_space_admin = space_df[safe_space_cols].style.apply(highlight_assets, axis=1)
-            st.dataframe(styled_space_admin, hide_index=True, use_container_width=True)
-        else:
-            st.info("No spaces found.")
+            st.dataframe(space_df[safe_space_cols].style.apply(highlight_assets, axis=1), hide_index=True, use_container_width=True)
+        else: st.info("No spaces found.")
 
         st.markdown("---")
         st.subheader("➕ Add New Space / Hall")
-        
         with st.form("add_space"):
             r1c1, r1c2, r1c3 = st.columns(3)
             with r1c1: space_name = st.text_input("Space / Hall Name*")
@@ -992,39 +761,32 @@ def admin_dashboard():
             with r2c1: space_room = st.text_input("Building / Floor / Room No.")
             with r2c2: space_capacity = st.number_input("Max Capacity (Persons)", min_value=1, value=50)
             with r2c3: 
-                if incharge_list:
-                    space_incharge = st.selectbox("Space Incharge", ["Select Incharge..."] + incharge_list)
-                else:
+                if incharge_list: space_incharge = st.selectbox("Space Incharge", ["Select Incharge..."] + incharge_list)
+                else: 
                     space_incharge = st.selectbox("Space Incharge", ["No Incharge Found"])
                     st.caption("⚠️ Add an Instrument Incharge user first.")
             
             r3c1, r3c2, r3c3 = st.columns(3)
             with r3c1: space_email = st.text_input("Contact Email")
-            with r3c2: st.write("") # Spacer
-            with r3c3: st.write("") # Spacer
+            with r3c2: st.write("") 
+            with r3c3: st.write("") 
             
             if st.form_submit_button("Add Space", type="primary"):
                 if space_name:
                     space_id = f"SPC-{int(datetime.now(IST).timestamp())}"
                     final_space_incharge = space_incharge if space_incharge not in ["Select Incharge...", "No Incharge Found"] else ""
-                    sh.worksheet("Spaces").append_row([
-                        space_id, space_name, space_campus, space_room, 
-                        space_capacity, final_space_incharge, space_email, 
-                        space_price, "Available"
-                    ])
+                    sh.worksheet("Spaces").append_row([space_id, space_name, space_campus, space_room, space_capacity, final_space_incharge, space_email, space_price, "Available"])
                     st.success(f"✅ {space_name} added to the system.")
                     get_clean_dataframe.clear()
                     time.sleep(1)
                     st.rerun()
-                else:
-                    st.error("Please provide at least a Space Name.")
+                else: st.error("Please provide at least a Space Name.")
 
     with tab4:
         users_df = get_clean_dataframe("Users")
         if not users_df.empty:
             display_users = users_df.copy()
-            if 'Password' in display_users.columns:
-                display_users['Password'] = '******'
+            if 'Password' in display_users.columns: display_users['Password'] = '******'
             st.dataframe(display_users, use_container_width=True, hide_index=True)
             
         st.markdown("---")
@@ -1039,64 +801,101 @@ def admin_dashboard():
             
             selected_role = st.selectbox("Select Role", combined_roles)
             custom_role = st.text_input("Type New Role Name (Required only if '➕ Create New Role...' is selected)")
-            
             st.caption("💡 *Note: Predefined roles have specialized dashboards. New custom roles will receive the Standard User portal.*")
             
             if st.form_submit_button("Add User", type="primary"):
                 final_role = custom_role.strip() if selected_role == "➕ Create New Role..." else selected_role.strip()
-                
-                ws_users = sh.worksheet("Users")
-                existing = pd.DataFrame(ws_users.get_all_records())
-                if not existing.empty and str(new_uid).strip() in existing['User ID'].astype(str).str.strip().tolist():
-                    st.error("🚨 User ID already exists.")
-                elif not new_uid or not new_pass:
-                    st.error("🚨 ID and Password required.")
-                elif not final_role:
-                    st.error("🚨 Role name cannot be empty.")
+                existing = pd.DataFrame(sh.worksheet("Users").get_all_records())
+                if not existing.empty and str(new_uid).strip() in existing['User ID'].astype(str).str.strip().tolist(): st.error("🚨 User ID already exists.")
+                elif not new_uid or not new_pass: st.error("🚨 ID and Password required.")
+                elif not final_role: st.error("🚨 Role name cannot be empty.")
                 else:
-                    ws_users.append_row([new_uid.strip(), hash_password(new_pass.strip()), final_role])
+                    sh.worksheet("Users").append_row([new_uid.strip(), hash_password(new_pass.strip()), final_role])
                     st.success(f"🎉 {new_uid} added as {final_role}!")
                     get_clean_dataframe.clear()
                     time.sleep(1)
                     st.rerun()
 
 # ==========================================
-# 🚀 APP ROUTING
+# 🚀 ROOT APPLICATION EXECUTION
 # ==========================================
 render_global_header()
 
+# Create an empty placeholder container for the UI 
+# This prevents form-flickering and allows seamless transitions without st.rerun() during login
+main_ui = st.empty()
+
 if not st.session_state.logged_in:
-    login_page()
-else:
-    # 🚪 Logout Button (Top Right)
-    col1, col2 = st.columns([9, 1])
-    with col2:
-        st.markdown('<div id="logout_marker"></div>', unsafe_allow_html=True)
-        if st.button("Logout", use_container_width=True):
-            cookie_manager.delete("cu_ims_user")
-            for key in st.session_state.keys():
-                del st.session_state[key]
-            time.sleep(0.5)
-            st.rerun()
+    with main_ui.container():
+        with st.form("login_form"):
+            st.markdown("<h3 style='background: linear-gradient(to right, #b92b27, #1565C0); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 1.8rem; font-weight: 800; text-align: center; margin-bottom: 15px;'>🔐 Sign In</h3>", unsafe_allow_html=True)
+            user_id = st.text_input("User ID")
+            password = st.text_input("Password", type="password")
             
-    # 🖥️ Render the respective dashboard
-    if st.session_state.user_role == "Admin": 
-        admin_dashboard()
-    elif st.session_state.user_role == "Faculty": 
-        faculty_dashboard()
-    elif st.session_state.user_role == "Instrument Incharge":
-        incharge_dashboard()
-    else: 
-        standard_user_dashboard()
+            if st.form_submit_button("Login", use_container_width=True):
+                users_df = get_clean_dataframe("Users")
+                if not users_df.empty and 'User ID' in users_df.columns:
+                    users_df['User ID'] = users_df['User ID'].astype(str).str.strip()
+                    users_df['Password'] = users_df['Password'].astype(str).str.strip()
+                    hashed_input = hash_password(str(password).strip())
+                    
+                    user_match = users_df[(users_df['User ID'] == str(user_id).strip()) & ((users_df['Password'] == hashed_input) | (users_df['Password'] == str(password).strip()))]
+                    
+                    if not user_match.empty:
+                        role = user_match.iloc[0]['Role'].strip()
+                        
+                        # Set Browser Cookie 
+                        cookie_manager.set("cu_ims_user", user_id.strip(), max_age=2592000)
+                        
+                        # Safely Update State
+                        st.session_state.logged_in = True
+                        st.session_state.explicit_logout = False
+                        st.session_state.user_role = role
+                        st.session_state.user_name = user_id.strip()
+                        
+                        if role == "Admin": st.session_state.user_category = "System Admin"
+                        elif role in CU_USERS: st.session_state.user_category = "CU User"
+                        elif role in NON_CU_USERS: st.session_state.user_category = "Non-CU User"
+                        elif role in STAFF_USERS: st.session_state.user_category = "Staff"
+                        else: st.session_state.user_category = "Custom User"
+                        
+                        # Instantly clear the login form without restarting the script!
+                        main_ui.empty()
+                    else:
+                        st.error("🚨 Invalid User ID or Password")
+                else:
+                    st.error("⚠️ Database Error: 'Users' tab is empty or invalid.")
+
+# If Login was just successful above, or already true, render Dashboard directly!
+if st.session_state.logged_in:
+    with main_ui.container():
         
-    # 🔄 Sync Button (Very Bottom)
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    st.markdown("---")
-    col_s1, col_s2, col_s3 = st.columns([4, 2, 4])
-    with col_s2:
-        st.markdown('<div id="sync_marker"></div>', unsafe_allow_html=True)
-        if st.button("🔄 Sync Application Data", use_container_width=True):
-            get_clean_dataframe.clear()
-            st.rerun()
+        # Safe Logout Flow
+        col1, col2 = st.columns([9, 1])
+        with col2:
+            st.markdown('<div id="logout_marker"></div>', unsafe_allow_html=True)
+            if st.button("Logout", use_container_width=True):
+                cookie_manager.delete("cu_ims_user")
+                st.session_state.explicit_logout = True # Prevents old cookie from triggering auto-login
+                for key in ['logged_in', 'user_role', 'user_name', 'user_category']:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                st.rerun()
+                
+        # Load correct dashboard
+        if st.session_state.user_role == "Admin": admin_dashboard()
+        elif st.session_state.user_role == "Faculty": faculty_dashboard()
+        elif st.session_state.user_role == "Instrument Incharge": incharge_dashboard()
+        else: standard_user_dashboard()
             
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        st.markdown("---")
+        
+        col_s1, col_s2, col_s3 = st.columns([4, 2, 4])
+        with col_s2:
+            st.markdown('<div id="sync_marker"></div>', unsafe_allow_html=True)
+            if st.button("🔄 Sync Application Data", use_container_width=True):
+                get_clean_dataframe.clear()
+                st.rerun()
+
 render_footer()

@@ -236,11 +236,42 @@ def update_record_in_sheet(sheet_tab, id_col_index, target_id, updates_dict):
     return False
 
 # ==========================================
-# 🧠 SESSION STATE INITIALIZATION
+# 🧠 SMART SESSION & COOKIE MANAGER
 # ==========================================
-for state in ['logged_in', 'user_role', 'user_name', 'user_category']:
-    if state not in st.session_state:
-        st.session_state[state] = False if state == 'logged_in' else None
+try:
+    import extra_streamlit_components as stx
+    cookie_manager = stx.CookieManager(key="cookie_manager")
+except ImportError:
+    st.error("🚨 Please add 'extra-streamlit-components' to your requirements.txt file.")
+    st.stop()
+
+# Initialize safe states
+if 'logged_in' not in st.session_state: st.session_state.logged_in = False
+if 'logout_triggered' not in st.session_state: st.session_state.logout_triggered = False
+
+for key in ['user_role', 'user_name', 'user_category']:
+    if key not in st.session_state: st.session_state[key] = None
+
+# Auto-Login Evaluation (Only runs if user hasn't explicitly clicked Logout!)
+if not st.session_state.logged_in and not st.session_state.logout_triggered:
+    cached_user = cookie_manager.get(cookie="cu_ims_user")
+    
+    if cached_user and isinstance(cached_user, str) and cached_user.strip() != "":
+        users_df = get_clean_dataframe("Users")
+        if not users_df.empty and 'User ID' in users_df.columns:
+            user_match = users_df[users_df['User ID'] == cached_user.strip()]
+            if not user_match.empty:
+                role = user_match.iloc[0]['Role'].strip()
+                st.session_state.logged_in = True
+                st.session_state.user_role = role
+                st.session_state.user_name = cached_user.strip()
+                
+                if role == "Admin": st.session_state.user_category = "System Admin"
+                elif role in CU_USERS: st.session_state.user_category = "CU User"
+                elif role in NON_CU_USERS: st.session_state.user_category = "Non-CU User"
+                elif role in STAFF_USERS: st.session_state.user_category = "Staff"
+                else: st.session_state.user_category = "Custom User"
+                st.rerun()
 
 # ==========================================
 # 🖼️ GLOBAL HEADER
@@ -324,16 +355,14 @@ def login_page():
         if st.form_submit_button("Login", use_container_width=True):
             users_df = get_clean_dataframe("Users")
             if not users_df.empty and 'User ID' in users_df.columns:
-                users_df['User ID'] = users_df['User ID'].astype(str).str.strip()
-                users_df['Password'] = users_df['Password'].astype(str).str.strip()
                 hashed_input = hash_password(str(password).strip())
-                
                 user_match = users_df[(users_df['User ID'] == str(user_id).strip()) & ((users_df['Password'] == hashed_input) | (users_df['Password'] == str(password).strip()))]
                 
                 if not user_match.empty:
                     role = user_match.iloc[0]['Role'].strip()
                     
                     st.session_state.logged_in = True
+                    st.session_state.logout_triggered = False # Reset the logout flag
                     st.session_state.user_role = role
                     st.session_state.user_name = user_id.strip()
                     
@@ -343,6 +372,9 @@ def login_page():
                     elif role in STAFF_USERS: st.session_state.user_category = "Staff"
                     else: st.session_state.user_category = "Custom User"
                     
+                    # Set cookie for 1 Day (86400 seconds)
+                    cookie_manager.set("cu_ims_user", user_id.strip(), max_age=86400)
+                    time.sleep(0.5) # Wait half a second for browser to save cookie before rerunning
                     st.rerun()
                 else:
                     st.error("🚨 Invalid User ID or Password")
@@ -868,6 +900,9 @@ if not st.session_state.logged_in:
                     role = user_match.iloc[0]['Role'].strip()
                     
                     st.session_state.logged_in = True
+                    # Set flag back to False on manual login to re-enable auto-login against refreshes
+                    st.session_state.logout_triggered = False 
+                    
                     st.session_state.user_role = role
                     st.session_state.user_name = user_id.strip()
                     
@@ -877,6 +912,8 @@ if not st.session_state.logged_in:
                     elif role in STAFF_USERS: st.session_state.user_category = "Staff"
                     else: st.session_state.user_category = "Custom User"
                     
+                    cookie_manager.set("cu_ims_user", user_id.strip(), max_age=86400) # Save cookie for 1 day
+                    time.sleep(0.5) # Give the browser a split second to save the cookie
                     st.rerun()
                 else:
                     st.error("🚨 Invalid User ID or Password")
@@ -888,9 +925,13 @@ else:
     with col2:
         st.markdown('<div id="logout_marker"></div>', unsafe_allow_html=True)
         if st.button("Logout", use_container_width=True):
+            cookie_manager.delete("cu_ims_user") # Delete the cookie!
+            st.session_state.logout_triggered = True # 🛡️ This smart flag blocks ghost cookies!
+            
             for key in ['logged_in', 'user_role', 'user_name', 'user_category']:
                 if key in st.session_state:
                     del st.session_state[key]
+            time.sleep(0.5)
             st.rerun()
             
     # Load correct dashboard

@@ -295,7 +295,31 @@ def render_global_header():
 # ==========================================
 def render_footer():
     footer_html = """
-    <div style="position: fixed; bottom: 15px; left: 15px; font-size: 12px; color: #888888; z-index: 1000;">
+    <style>
+    .attribution-footer {
+        position: fixed;
+        bottom: 15px;
+        left: 15px;
+        font-size: 12px;
+        color: #888888;
+        z-index: 1000;
+        background-color: rgba(255, 255, 255, 0.9);
+        padding: 4px 8px;
+        border-radius: 4px;
+        max-width: 70%;
+        line-height: 1.4;
+    }
+    /* Responsive adjustment for Mobile screens to avoid 'Manage App' button */
+    @media (max-width: 768px) {
+        .attribution-footer {
+            bottom: 65px; 
+            left: 10px;
+            font-size: 11px;
+            max-width: 85%;
+        }
+    }
+    </style>
+    <div class="attribution-footer">
         Concept and development led by Dr. Subhamay Kisku, with associates
     </div>
     """

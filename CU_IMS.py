@@ -385,7 +385,10 @@ def render_instrument_booking_form():
     with st.form("instrument_booking_form"):
         selected_display = st.selectbox("Select Instrument", inst_options)
         selected_inst = inst_map[selected_display]
-        date = st.date_input("Select Date")
+        
+        # Enforce IST date handling to prevent timezone mismatch on server
+        today_ist = datetime.now(IST).date()
+        date = st.date_input("Select Date", value=today_ist, min_value=today_ist)
         
         slot = st.selectbox("Select Time Slot", [
             "10:00 AM - 11:00 AM IST", 
@@ -477,7 +480,10 @@ def render_space_booking_form():
     with st.form("space_booking_form"):
         selected_display = st.selectbox("Select Space / Hall", space_options)
         selected_space = space_map[selected_display]
-        date = st.date_input("Select Date")
+        
+        # Enforce IST date handling to prevent timezone mismatch on server
+        today_ist = datetime.now(IST).date()
+        date = st.date_input("Select Date", value=today_ist, min_value=today_ist)
         
         slot = st.selectbox("Select Time Slot", [
             "09:00 AM - 02:00 PM IST (5 Hours)", 
@@ -543,7 +549,9 @@ def render_payment_form():
             with st.form("payment_submission"):
                 target_bkg = st.selectbox("Select Booking ID", my_approved['Booking ID'].tolist())
                 pay_ref = st.text_input("Payment Reference Number (Transaction ID)")
-                pay_date = st.date_input("Date of Payment")
+                
+                # Enforce IST date handling to prevent timezone mismatch on server
+                pay_date = st.date_input("Date of Payment", value=datetime.now(IST).date())
                 
                 if st.form_submit_button("Submit Payment", type="primary"):
                     if not pay_ref:

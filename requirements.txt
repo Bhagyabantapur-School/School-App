@@ -13,4 +13,3 @@ streamlit-autorefresh
 opencv-python-headless
 numpy
 pyspellchecker
-extra-streamlit-components

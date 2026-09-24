@@ -213,7 +213,6 @@ def get_processed_bookings(sheet_name="Bookings", assigned_status="Instrument As
                     time_slot = str(row['Time Slot']).strip()
                     
                     if " - " in time_slot:
-                        # Extract the end time safely, even if it has (5 Hours) attached after IST
                         end_time_str = time_slot.split(" - ")[1].split("IST")[0].strip()
                         dt_str = f"{date_str} {end_time_str}"
                         
@@ -254,10 +253,9 @@ def update_record_in_sheet(sheet_tab, id_col_index, target_id, updates_dict):
     return False
 
 # ==========================================
-# 🖼️ GLOBAL HEADER (Dynamic Base64 Flexbox)
+# 🖼️ GLOBAL HEADER
 # ==========================================
 def get_image_base64(image_path):
-    """Dynamically converts a local image to a Base64 string for HTML embedding."""
     try:
         with open(image_path, "rb") as img_file:
             return base64.b64encode(img_file.read()).decode()
@@ -265,8 +263,6 @@ def get_image_base64(image_path):
         return ""
 
 def render_global_header():
-    """Renders a flexbox HTML header built securely to avoid editor line-truncation errors."""
-    
     cu_b64 = get_image_base64("CU_Logo.jpg")
     rusa_b64 = get_image_base64("RUSA_Logo.jpg")
     
@@ -295,11 +291,21 @@ def render_global_header():
     st.markdown(header_html, unsafe_allow_html=True)
 
 # ==========================================
+# 📝 ATTRIBUTION FOOTER
+# ==========================================
+def render_footer():
+    footer_html = """
+    <div style="position: fixed; bottom: 10px; right: 10px; font-size: 12px; color: #888888; z-index: 1000;">
+        Concept and development led by Dr. Subhamay Kisku, with associates
+    </div>
+    """
+    st.markdown(footer_html, unsafe_allow_html=True)
+
+# ==========================================
 # 🖥️ LOGIN SYSTEM
 # ==========================================
 def login_page():
     with st.form("login_form"):
-        # Colorful Sign-In Header
         st.markdown(
             "<h3 style='background: linear-gradient(to right, #b92b27, #1565C0); "
             "-webkit-background-clip: text; -webkit-text-fill-color: transparent; "
@@ -386,7 +392,6 @@ def render_instrument_booking_form():
         selected_display = st.selectbox("Select Instrument", inst_options)
         selected_inst = inst_map[selected_display]
         
-        # Minimum 3 days in advance booking constraint
         today_ist = datetime.now(IST).date()
         min_allowed_date = today_ist + timedelta(days=3)
         date = st.date_input("Select Date (Min 3 Days Advance)", value=min_allowed_date, min_value=min_allowed_date)
@@ -482,7 +487,6 @@ def render_space_booking_form():
         selected_display = st.selectbox("Select Space / Hall", space_options)
         selected_space = space_map[selected_display]
         
-        # Minimum 3 days in advance booking constraint
         today_ist = datetime.now(IST).date()
         min_allowed_date = today_ist + timedelta(days=3)
         date = st.date_input("Select Date (Min 3 Days Advance)", value=min_allowed_date, min_value=min_allowed_date)
@@ -624,7 +628,6 @@ def render_my_status():
 # 🎓 STANDARD USER DASHBOARD
 # ==========================================
 def standard_user_dashboard():
-    # Colorful User Heading
     st.markdown(
         f"<h3 style='background: linear-gradient(to right, #f77062, #fe5196); "
         f"-webkit-background-clip: text; -webkit-text-fill-color: transparent; "
@@ -643,7 +646,6 @@ def standard_user_dashboard():
 # 🧑‍🏫 FACULTY DASHBOARD
 # ==========================================
 def faculty_dashboard():
-    # Colorful Faculty Heading
     st.markdown(
         f"<h3 style='background: linear-gradient(to right, #11998e, #38ef7d); "
         f"-webkit-background-clip: text; -webkit-text-fill-color: transparent; "
@@ -706,7 +708,6 @@ def faculty_dashboard():
 # 🔧 FACILITY INCHARGE DASHBOARD
 # ==========================================
 def incharge_dashboard():
-    # Colorful Incharge Heading
     st.markdown(
         f"<h3 style='background: linear-gradient(to right, #4facfe, #00f2fe); "
         f"-webkit-background-clip: text; -webkit-text-fill-color: transparent; "
@@ -779,7 +780,6 @@ def incharge_dashboard():
 # ⚙️ ADMIN DASHBOARD
 # ==========================================
 def admin_dashboard():
-    # Colorful Admin Heading
     st.markdown(
         "<h3 style='background: linear-gradient(to right, #833ab4, #fd1d1d, #fcb045); "
         "-webkit-background-clip: text; -webkit-text-fill-color: transparent; "
@@ -1038,3 +1038,5 @@ else:
         if st.button("🔄 Sync Application Data", use_container_width=True):
             get_clean_dataframe.clear()
             st.rerun()
+            
+render_footer()

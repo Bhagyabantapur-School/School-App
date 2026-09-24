@@ -17,7 +17,7 @@ st.set_page_config(
 # 2. APP DICTIONARIES
 personal_apps = [
     "Live Routine Hub", "Money App", "Money Incomplete", "Location App", "Money Utilities", "Strong Tracker", 
-    "Project App", "AI Video Tracker", "Courses", "Election Duty", "Notes", "Solar Proposal", "CU IMS", "Monthly Tracker", "Money Tracker", 
+    "Project App", "AI Video Tracker", "Courses", "Tasks", "Election Duty", "Notes", "Solar Proposal", "CU IMS", "Monthly Tracker", "Money Tracker", 
     "Product Inventory", "Health Hub", "Backup Tracker", "Routine Audit", 
     "Routine Editor", "MDM Returns", "Video Manager", "Speech Mastery", "Portal Registry", "Image Resizer", "Trace Inventory", 
     "Sleep & Water", "Packing Tracker", "App Updater", "Visual Dashboard"
@@ -155,10 +155,11 @@ strong = st.Page("strong.py", title="Strong Tracker", icon="💪", default=is_de
 project = st.Page("project_app.py", title="Project App", icon="🚀", default=is_default("Project App", "Personal Hub"))
 ai_video_tracker = st.Page("ai_video_tracker.py", title="AI Video Tracker", icon="🤖", default=is_default("AI Video Tracker", "Personal Hub"))
 courses_app = st.Page("courses.py", title="Courses", icon="🎓", default=is_default("Courses", "Personal Hub")) 
+tasks_app = st.Page("tasks.py", title="Tasks", icon="📋", default=is_default("Tasks", "Personal Hub")) # <-- Defined here
 election = st.Page("election_duty.py", title="Election Duty", icon="🗳️", default=is_default("Election Duty", "Personal Hub"))
 notes_app = st.Page("notes.py", title="Notes", icon="📝", default=is_default("Notes", "Personal Hub"))
 solar_app = st.Page("solar_proposal_app.py", title="Solar Proposal", icon="☀️", default=is_default("Solar Proposal", "Personal Hub"))
-cu_ims_app = st.Page("CU_IMS.py", title="CU IMS", icon="🗃️", default=is_default("CU IMS", "Personal Hub")) # <-- Defined here
+cu_ims_app = st.Page("CU_IMS.py", title="CU IMS", icon="🗃️", default=is_default("CU IMS", "Personal Hub"))
 monthly = st.Page("monthly_app.py", title="Monthly Tracker", icon="📆", default=is_default("Monthly Tracker", "Personal Hub"))
 money_tracker = st.Page("money_tracker.py", title="Money Tracker", icon="💵", default=is_default("Money Tracker", "Personal Hub"))
 product_inventory = st.Page("product_inventory.py", title="Product Inventory", icon="📦", default=is_default("Product Inventory", "Personal Hub"))
@@ -200,13 +201,13 @@ if system_choice == 'Personal Hub':
     personal_nav = {
         "MONEY": [money_app, money_incomplete_app, money_utilities, money_tracker, product_inventory],
         "LOCATION": [location_app, packing_tracker],
-        "ROUTINE": [routine_hub, routine_audit, routine_editor, project, ai_video_tracker, courses_app], 
+        "ROUTINE": [routine_hub, routine_audit, routine_editor, project, ai_video_tracker, courses_app, tasks_app], # <-- Added here
         "HEALTH": [health, sleep_water],
         "SCH WORK": [mdm_return, ytfb_videos, speech_prep, portal_registry, resizer_app],
         "HOME": [trace_app, monthly],
         "HARDWARE": [backup],
         "BALANCE": [strong],
-        "ONES": [election, app_updater, notes_app, solar_app, cu_ims_app], # <-- Added here
+        "ONES": [election, app_updater, notes_app, solar_app, cu_ims_app],
         "DASHBOARD": [visual_dashboard]
     }
     

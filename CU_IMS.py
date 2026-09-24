@@ -213,6 +213,7 @@ def get_processed_bookings(sheet_name="Bookings", assigned_status="Instrument As
                     time_slot = str(row['Time Slot']).strip()
                     
                     if " - " in time_slot:
+                        # Extract the end time safely, even if it has (5 Hours) attached after IST
                         end_time_str = time_slot.split(" - ")[1].split("IST")[0].strip()
                         dt_str = f"{date_str} {end_time_str}"
                         
@@ -320,7 +321,7 @@ def render_footer():
     }
     </style>
     <div class="attribution-footer">
-        Concept and development led by Dr. Subhamay Kisku, with associates
+        Concept and development led by Dr. Subhamay Kisku, with associates.
     </div>
     """
     st.markdown(footer_html, unsafe_allow_html=True)

@@ -905,56 +905,6 @@ try:
                         get_all_ecosystem_data.clear() 
                         st.rerun()
 
-            with st.expander("🗓️ Schedule Future Task"):
-                with st.form("schedule_future_form", clear_on_submit=True):
-                    f_act_list = [act for act in df['Activity'].unique() if act.strip()]
-                    f_act = st.selectbox("Parent Category", f_act_list, key="f_act")
-                    f_act_custom = st.text_input("New Parent Category (Leave blank to use selected above)", placeholder="Type custom category here...", key="f_act_custom")
-                    
-                    f_type = st.radio("Task Type", ["Checklist", "Sub-Activity"], horizontal=True, key="f_type")
-                    f_name = st.text_input("Task Details", placeholder="e.g., Pay Electricity Bill", key="f_name")
-                    
-                    st.markdown("**Context & Expected Energy**")
-                    col_f1, col_f2, col_f3 = st.columns([2, 1, 1])
-                    with col_f1:
-                        f_role = st.selectbox("Role Context", ["Head Teacher (BPS)", "Developer (BPS Digital)", "YouTube Creator", "Personal / Yoga", "Transition"], key="f_role")
-                    with col_f2: f_urg = st.checkbox("🔥 Urgent", key="f_urg")
-                    with col_f3: f_imp = st.checkbox("⭐ Important", key="f_imp")
-                    
-                    f_energy = st.slider("Expected Energy Requirement", 1, 10, 5, key="f_energy", help="1 = Routine/Draining, 10 = High Focus/Creative")
-                    st.markdown("<hr style='margin: 10px 0px;'>", unsafe_allow_html=True)
-
-                    time_opts = [f"{str(h).zfill(2)}:{str(m).zfill(2)}" for h in range(24) for m in range(60)]
-                    col1, col2 = st.columns(2)
-                    with col1: f_date = st.date_input("Due Date", value=now.date(), key="f_date")
-                    with col2: f_time = datetime.strptime(st.selectbox("Due Time", options=time_opts, index=time_opts.index(clean_now.strftime('%H:%M')), key="f_time"), '%H:%M').time()
-                        
-                    if st.form_submit_button("Schedule Task", use_container_width=True):
-                        final_act = f_act_custom.strip().upper() if f_act_custom.strip() else f_act.strip().upper()
-                        if f_name:
-                            main_ss = get_cached_sheet("MY ROUTINE 2026")
-                            
-                            smart_append_row(main_ss.worksheet("future_tasks"), [
-                                f_date.strftime('%Y-%m-%d'), 
-                                f_time.strftime('%H:%M'), 
-                                final_act, 
-                                f_type, 
-                                f_name.strip(), 
-                                "Personal", 
-                                "Pending", 
-                                "",
-                                f_role,         
-                                str(f_urg),     
-                                str(f_imp),     
-                                f_energy        
-                            ])
-                            get_all_ecosystem_data.clear() 
-                            st.success("Future Task Scheduled with Matrix Data!")
-                            time.sleep(1.0)
-                            st.rerun()
-                        else: 
-                            st.error("Please enter task details.")
-
             with st.expander("📝 Manual Log Activity"):
                 unique_acts = sorted(list(set([a.strip().upper() for a in df['Activity'] if a.strip()])))
                 log_date = st.date_input("Date", value=now.date(), key="log_date")

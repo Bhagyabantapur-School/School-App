@@ -295,7 +295,7 @@ def render_global_header():
 # ==========================================
 def render_footer():
     footer_html = """
-    <div style="position: fixed; bottom: 10px; right: 10px; font-size: 12px; color: #888888; z-index: 1000;">
+    <div style="position: fixed; bottom: 15px; left: 15px; font-size: 12px; color: #888888; z-index: 1000;">
         Concept and development led by Dr. Subhamay Kisku, with associates
     </div>
     """

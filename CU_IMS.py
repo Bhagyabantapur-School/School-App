@@ -110,13 +110,6 @@ def highlight_assets(row):
     return [''] * len(row)
 
 # ==========================================
-# 🧠 SESSION STATE
-# ==========================================
-for state in ['logged_in', 'user_role', 'user_name', 'user_category']:
-    if state not in st.session_state:
-        st.session_state[state] = False if state == 'logged_in' else None
-
-# ==========================================
 # 🔌 GOOGLE SHEETS CONNECTOR & AUTO-SETUP
 # ==========================================
 @st.cache_resource
@@ -213,7 +206,6 @@ def get_processed_bookings(sheet_name="Bookings", assigned_status="Instrument As
                     time_slot = str(row['Time Slot']).strip()
                     
                     if " - " in time_slot:
-                        # Extract the end time safely, even if it has (5 Hours) attached after IST
                         end_time_str = time_slot.split(" - ")[1].split("IST")[0].strip()
                         dt_str = f"{date_str} {end_time_str}"
                         
@@ -252,6 +244,42 @@ def update_record_in_sheet(sheet_tab, id_col_index, target_id, updates_dict):
         get_clean_dataframe.clear()
         return True
     return False
+
+# ==========================================
+# 🧠 SESSION STATE & COOKIE MANAGER
+# ==========================================
+try:
+    import extra_streamlit_components as stx
+    cookie_manager = stx.CookieManager()
+except ImportError:
+    st.error("🚨 Please add 'extra-streamlit-components' to your requirements.txt file.")
+    st.stop()
+
+for state in ['logged_in', 'user_role', 'user_name', 'user_category']:
+    if state not in st.session_state:
+        st.session_state[state] = False if state == 'logged_in' else None
+
+# Auto-Login Logic via Cookie Persistence
+if not st.session_state.logged_in:
+    cached_user = cookie_manager.get(cookie="cu_ims_user")
+    if cached_user:
+        users_df = get_clean_dataframe("Users")
+        if not users_df.empty and 'User ID' in users_df.columns:
+            user_match = users_df[users_df['User ID'] == str(cached_user).strip()]
+            if not user_match.empty:
+                role = user_match.iloc[0]['Role'].strip()
+                st.session_state.logged_in = True
+                st.session_state.user_role = role
+                st.session_state.user_name = str(cached_user).strip()
+                
+                if role == "Admin": st.session_state.user_category = "System Admin"
+                elif role in CU_USERS: st.session_state.user_category = "CU User"
+                elif role in NON_CU_USERS: st.session_state.user_category = "Non-CU User"
+                elif role in STAFF_USERS: st.session_state.user_category = "Staff"
+                else: st.session_state.user_category = "Custom User"
+                
+                time.sleep(0.2)
+                st.rerun()
 
 # ==========================================
 # 🖼️ GLOBAL HEADER
@@ -310,7 +338,6 @@ def render_footer():
         max-width: 70%;
         line-height: 1.4;
     }
-    /* Responsive adjustment for Mobile screens to avoid 'Manage App' button */
     @media (max-width: 768px) {
         .attribution-footer {
             bottom: 65px; 
@@ -362,6 +389,9 @@ def login_page():
                     elif role in STAFF_USERS: st.session_state.user_category = "Staff"
                     else: st.session_state.user_category = "Custom User"
                     
+                    # Set the persistent cookie to remember the user for 30 days
+                    cookie_manager.set("cu_ims_user", user_id, max_age=2592000)
+                    time.sleep(0.5)
                     st.rerun()
                 else:
                     st.error("🚨 Invalid User ID or Password")
@@ -1040,8 +1070,11 @@ else:
     with col2:
         st.markdown('<div id="logout_marker"></div>', unsafe_allow_html=True)
         if st.button("Logout", use_container_width=True):
+            # Delete the persistent cookie to truly log out
+            cookie_manager.delete("cu_ims_user")
             for key in st.session_state.keys():
                 del st.session_state[key]
+            time.sleep(0.5)
             st.rerun()
             
     # 🖥️ Render the respective dashboard

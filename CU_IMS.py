@@ -860,32 +860,33 @@ def admin_dashboard():
             
         with st.form("add_instrument"):
             r1c1, r1c2, r1c3 = st.columns(3)
-            with r1c1: inst_id = st.text_input("Instrument ID*")
-            with r1c2: inst_name = st.text_input("Instrument Name*")
-            with r1c3: inst_price = st.number_input("Price Rate/hr (₹)*", min_value=0)
+            with r1c1: inst_name = st.text_input("Instrument Name*")
+            with r1c2: inst_price = st.number_input("Price Rate/hr (₹)*", min_value=0)
+            with r1c3: inst_make = st.text_input("Make / Manufacturer")
             
             r2c1, r2c2, r2c3 = st.columns(3)
-            with r2c1: inst_make = st.text_input("Make / Manufacturer")
-            with r2c2: inst_serial = st.text_input("Serial No.")
-            with r2c3: inst_unit = st.text_input("Unit No.")
+            with r2c1: inst_serial = st.text_input("Serial No.")
+            with r2c2: inst_unit = st.text_input("Unit No.")
+            with r2c3: inst_campus = st.text_input("Campus Name")
             
             r3c1, r3c2, r3c3 = st.columns(3)
-            with r3c1: inst_campus = st.text_input("Campus Name")
-            with r3c2: inst_dept = st.text_input("Department / Centre")
-            with r3c3: inst_room = st.text_input("Building / Floor / Room No.")
-            
-            r4c1, r4c2, r4c3 = st.columns(3)
-            with r4c1: 
+            with r3c1: inst_dept = st.text_input("Department / Centre")
+            with r3c2: inst_room = st.text_input("Building / Floor / Room No.")
+            with r3c3: 
                 if incharge_list:
                     inst_incharge = st.selectbox("Instrument Incharge", ["Select Incharge..."] + incharge_list)
                 else:
                     inst_incharge = st.selectbox("Instrument Incharge", ["No Incharge Found"])
                     st.caption("⚠️ Add an Instrument Incharge user first.")
-            with r4c2: inst_desig = st.text_input("Designation of In-charge")
-            with r4c3: inst_email = st.text_input("Contact Email")
+            
+            r4c1, r4c2, r4c3 = st.columns(3)
+            with r4c1: inst_desig = st.text_input("Designation of In-charge")
+            with r4c2: inst_email = st.text_input("Contact Email")
+            with r4c3: st.write("") # Spacer
             
             if st.form_submit_button("Add Instrument", type="primary"):
-                if inst_id and inst_name:
+                if inst_name:
+                    inst_id = f"INST-{int(datetime.now(IST).timestamp())}"
                     final_incharge = inst_incharge if inst_incharge not in ["Select Incharge...", "No Incharge Found"] else ""
                     sh.worksheet("Instruments").append_row([
                         inst_id, inst_name, inst_make, inst_serial, inst_unit, 
@@ -897,7 +898,7 @@ def admin_dashboard():
                     time.sleep(1)
                     st.rerun()
                 else:
-                    st.error("Please provide at least an Instrument ID and Name.")
+                    st.error("Please provide at least an Instrument Name.")
 
     with tab3:
         st.subheader("Current Spaces & Halls Database")
@@ -917,27 +918,28 @@ def admin_dashboard():
         
         with st.form("add_space"):
             r1c1, r1c2, r1c3 = st.columns(3)
-            with r1c1: space_id = st.text_input("Space ID*")
-            with r1c2: space_name = st.text_input("Space / Hall Name*")
-            with r1c3: space_price = st.number_input("Price Rate/Slot (₹)*", min_value=0)
+            with r1c1: space_name = st.text_input("Space / Hall Name*")
+            with r1c2: space_price = st.number_input("Price Rate/Slot (₹)*", min_value=0)
+            with r1c3: space_campus = st.text_input("Campus Name")
             
             r2c1, r2c2, r2c3 = st.columns(3)
-            with r2c1: space_campus = st.text_input("Campus Name")
-            with r2c2: space_room = st.text_input("Building / Floor / Room No.")
-            with r2c3: space_capacity = st.number_input("Max Capacity (Persons)", min_value=1, value=50)
-            
-            r3c1, r3c2, r3c3 = st.columns(3)
-            with r3c1: 
+            with r2c1: space_room = st.text_input("Building / Floor / Room No.")
+            with r2c2: space_capacity = st.number_input("Max Capacity (Persons)", min_value=1, value=50)
+            with r2c3: 
                 if incharge_list:
                     space_incharge = st.selectbox("Space Incharge", ["Select Incharge..."] + incharge_list)
                 else:
                     space_incharge = st.selectbox("Space Incharge", ["No Incharge Found"])
                     st.caption("⚠️ Add an Instrument Incharge user first.")
-            with r3c2: space_email = st.text_input("Contact Email")
+            
+            r3c1, r3c2, r3c3 = st.columns(3)
+            with r3c1: space_email = st.text_input("Contact Email")
+            with r3c2: st.write("") # Spacer
             with r3c3: st.write("") # Spacer
             
             if st.form_submit_button("Add Space", type="primary"):
-                if space_id and space_name:
+                if space_name:
+                    space_id = f"SPC-{int(datetime.now(IST).timestamp())}"
                     final_space_incharge = space_incharge if space_incharge not in ["Select Incharge...", "No Incharge Found"] else ""
                     sh.worksheet("Spaces").append_row([
                         space_id, space_name, space_campus, space_room, 
@@ -949,7 +951,7 @@ def admin_dashboard():
                     time.sleep(1)
                     st.rerun()
                 else:
-                    st.error("Please provide at least a Space ID and Name.")
+                    st.error("Please provide at least a Space Name.")
 
     with tab4:
         users_df = get_clean_dataframe("Users")

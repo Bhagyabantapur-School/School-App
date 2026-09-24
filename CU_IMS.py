@@ -620,7 +620,15 @@ def render_my_status():
 # 🎓 DASHBOARD ROUTING FUNCTIONS
 # ==========================================
 def standard_user_dashboard():
-    st.markdown(f"<h3 style='background: linear-gradient(to right, #f77062, #fe5196); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 1.8rem; font-weight: 800; margin-bottom: 20px;'>🎓 Portal: {st.session_state.user_name} | {st.session_state.user_role} ({st.session_state.user_category})</h3>", unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div style="background-color: #002147; padding: 15px 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; display: flex; align-items: center;">
+            <span style="font-size: 1.8rem; margin-right: 12px;">🎓</span>
+            <h3 style="margin: 0; color: white; font-size: 1.5rem; font-weight: 600; letter-spacing: 0.5px;">Portal: {st.session_state.user_name} | {st.session_state.user_role} ({st.session_state.user_category})</h3>
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
     tab1, tab2, tab3, tab4 = st.tabs(["📝 Book Instrument", "🏛️ Book Space", "💳 Make Payment", "🔔 My Status"])
     with tab1: render_instrument_booking_form()
     with tab2: render_space_booking_form()
@@ -628,7 +636,15 @@ def standard_user_dashboard():
     with tab4: render_my_status()
 
 def faculty_dashboard():
-    st.markdown(f"<h3 style='background: linear-gradient(to right, #11998e, #38ef7d); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 1.8rem; font-weight: 800; margin-bottom: 20px;'>🧑‍🏫 Faculty Portal: {st.session_state.user_name} ({st.session_state.user_category})</h3>", unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div style="background-color: #002147; padding: 15px 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; display: flex; align-items: center;">
+            <span style="font-size: 1.8rem; margin-right: 12px;">🧑‍🏫</span>
+            <h3 style="margin: 0; color: white; font-size: 1.5rem; font-weight: 600; letter-spacing: 0.5px;">Faculty Portal: {st.session_state.user_name} ({st.session_state.user_category})</h3>
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["✅ Review Scholars", "📝 Book Instrument", "🏛️ Book Space", "💳 Make Payment", "🔔 My Status"])
     with tab1:
         st.subheader("Research Scholar Requests Awaiting Recommendation")
@@ -668,7 +684,15 @@ def faculty_dashboard():
     with tab5: render_my_status()
 
 def incharge_dashboard():
-    st.markdown(f"<h3 style='background: linear-gradient(to right, #4facfe, #00f2fe); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 1.8rem; font-weight: 800; margin-bottom: 20px;'>🔧 Facility Incharge Portal: {st.session_state.user_name} ({st.session_state.user_category})</h3>", unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div style="background-color: #002147; padding: 15px 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; display: flex; align-items: center;">
+            <span style="font-size: 1.8rem; margin-right: 12px;">🔧</span>
+            <h3 style="margin: 0; color: white; font-size: 1.5rem; font-weight: 600; letter-spacing: 0.5px;">Facility Incharge Portal: {st.session_state.user_name} ({st.session_state.user_category})</h3>
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
     manage_type = st.radio("Select Category to Manage", ["Instruments", "Spaces"])
     if manage_type == "Instruments":
         inst_df = get_clean_dataframe("Instruments")
@@ -712,7 +736,15 @@ def incharge_dashboard():
         else: st.info("No spaces currently in the database.")
 
 def admin_dashboard():
-    st.markdown("<h3 style='background: linear-gradient(to right, #833ab4, #fd1d1d, #fcb045); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 1.8rem; font-weight: 800; margin-bottom: 20px;'>👑 Admin Control Panel</h3>", unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div style="background-color: #002147; padding: 15px 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; display: flex; align-items: center;">
+            <span style="font-size: 1.8rem; margin-right: 12px;">🛡️</span>
+            <h3 style="margin: 0; color: white; font-size: 1.5rem; font-weight: 600; letter-spacing: 0.5px;">Admin Control Panel</h3>
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
     tab1, tab2, tab3, tab4 = st.tabs(["🚦 Approvals Queue", "🔬 Manage Instruments", "🏛️ Manage Spaces", "👥 Manage Users"])
     
     with tab1:

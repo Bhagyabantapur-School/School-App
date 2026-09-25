@@ -168,11 +168,9 @@ if st.sidebar.button("Log Out", use_container_width=True):
 st.sidebar.markdown("---")
 
 # ==========================================
-# 8. LIVE ROUTINE TRACKER BANNER (COMPACT CARD UI)
+# 8. LIVE ROUTINE TRACKER BANNER (SIDE-BY-SIDE ALL CLASSES)
 # ==========================================
 def render_tracker():
-    st.markdown("#### ⏱️ My Live Class")
-    
     utc_now = datetime.now(timezone.utc)
     now = utc_now + timedelta(hours=5, minutes=30)
     curr_time = now.time()
@@ -235,56 +233,41 @@ def render_tracker():
     if sd:
         ms = pd.concat([ms, pd.DataFrame(sd)], ignore_index=True)
     
-    prev_rows, curr_rows, next_rows = [], [], []
-    
     if not ms.empty:
         ms['Start_Obj'] = ms['Start_Time'].apply(parse_time_safe)
         ms['End_Obj'] = ms['End_Time'].apply(parse_time_safe)
         ms = ms.dropna(subset=['Start_Obj', 'End_Obj']).sort_values('Start_Obj')
         
-        past_slots = ms[ms['End_Obj'] < curr_time]['Start_Obj']
-        latest_past_slot = past_slots.max() if not past_slots.empty else None
-        
-        future_slots = ms[ms['Start_Obj'] > curr_time]['Start_Obj']
-        earliest_future_slot = future_slots.min() if not future_slots.empty else None
-        
-        for _, r in ms.iterrows():
-            st_obj = r['Start_Obj']
-            et_obj = r['End_Obj']
+        # Helper to determine card state
+        def get_card_class(start_obj, end_obj):
+            if end_obj < curr_time: return 'card-past'
+            if start_obj <= curr_time <= end_obj: return 'card-current'
+            return 'card-future'
             
-            if st_obj <= curr_time <= et_obj:
-                curr_rows.append(r)
-            elif latest_past_slot and st_obj == latest_past_slot and et_obj < curr_time:
-                prev_rows.append(r)
-            elif earliest_future_slot and st_obj == earliest_future_slot:
-                next_rows.append(r)
-                
-    # STRIcT SINGLE-LINE HTML GENERATOR: Omits empty boxes entirely
-    def generate_card_html(rows_list, css_class):
-        if not rows_list:
-            return "" # Return nothing if there is no class
+        # Helper to render single horizontal card
+        def generate_row_html(r, css_class):
+            sub_text = "<span style='font-size:11px; font-weight:bold; color:#d9534f; margin-left:8px;'>(SUB)</span>" if r.get('Is_Sub', False) else ""
+            time_str = str(r.get('Start_Time', ''))
+            cls_str = f"Class {r.get('Class', '')} '{r.get('Section', 'A')}'"
+            subj_str = f"<strong>{r.get('Subject', '')}</strong>{sub_text}"
+            return f"<div class='tracker-card {css_class}'><div class='tc-time'>{time_str}</div><div class='tc-info'>{cls_str}</div><div class='tc-subj'>{subj_str}</div></div>"
+            
+        # Build all cards for the entire day
+        cards_html = ""
+        for _, r in ms.iterrows():
+            css_class = get_card_class(r['Start_Obj'], r['End_Obj'])
+            cards_html += generate_row_html(r, css_class)
+            
+        # Single-Line strict CSS for Flex Row layouts
+        css_string = "<style>.tracker-container { display: flex; flex-direction: column; gap: 8px; width: 100%; margin-bottom: 25px; } .tracker-card { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; border-radius: 8px; transition: transform 0.2s ease-in-out; } .tc-time { font-size: 16px; font-weight: 900; font-family: monospace; width: 25%; text-align: left; } .tc-info { font-size: 15px; font-weight: 500; width: 35%; text-align: left; } .tc-subj { font-size: 15px; width: 40%; text-align: right; } .card-past { background-color: #e2e3e5; color: #6c757d; border-left: 5px solid #adb5bd; opacity: 0.85; } .card-current { background-color: #d4edda; color: #155724; border-left: 5px solid #28a745; border: 1px solid #c3e6cb; box-shadow: 0 4px 12px rgba(40,167,69,0.15); transform: scale(1.01); } .card-future { background-color: #f8f9fa; color: #495057; border-left: 5px solid #0d6efd; border: 1px solid #e9ecef; }</style>"
         
-        r = rows_list[0]
-        sub_text = "<br><span style='font-size:12px; font-weight:bold; color:#d9534f;'>(SUB)</span>" if r.get('Is_Sub', False) else ""
-        time_str = str(r.get('Start_Time', ''))
-        details = f"Class {r.get('Class', '')} '{r.get('Section', 'A')}'<br><strong>{r.get('Subject', '')}</strong>{sub_text}"
-        
-        return f"<div class='tracker-card {css_class}'><div class='tc-time'>{time_str}</div><div class='tc-details'>{details}</div></div>"
-
-    # STRICT SINGLE-LINE CSS: Removed the labels styling
-    css_string = "<style>.tracker-container { display: flex; gap: 15px; width: 100%; margin-bottom: 25px; flex-wrap: wrap; } .tracker-card { flex: 1 1 250px; padding: 15px 20px; border-radius: 12px; text-align: center; display: flex; flex-direction: column; justify-content: center; transition: transform 0.2s ease-in-out; } .tracker-card:hover { transform: translateY(-2px); } .tc-time { font-size: 24px; font-weight: 900; margin-bottom: 8px; font-family: monospace; } .tc-details { font-size: 16px; line-height: 1.5; } .card-past { background-color: #e2e3e5; color: #6c757d; border-left: 6px solid #adb5bd; box-shadow: inset 0 0 10px rgba(0,0,0,0.02); opacity: 0.85; } .card-current { background-color: #d4edda; color: #155724; border-left: 6px solid #28a745; border: 1px solid #c3e6cb; box-shadow: 0 4px 12px rgba(40, 167, 69, 0.15); } .card-future { background-color: #f8f9fa; color: #495057; border-left: 6px solid #0d6efd; border: 1px solid #e9ecef; box-shadow: 0 2px 4px rgba(0,0,0,0.03); }</style>"
-    
-    # CONSTRUCT FINAL HTML STRING
-    cards_html = generate_card_html(prev_rows, 'card-past') + generate_card_html(curr_rows, 'card-current') + generate_card_html(next_rows, 'card-future')
-    
-    if cards_html:
         html_content = css_string + f"<div class='tracker-container'>{cards_html}</div>"
         st.markdown(html_content, unsafe_allow_html=True)
     else:
-        st.markdown("<p style='color:#adb5bd; font-style:italic;'>No classes scheduled at this time.</p>", unsafe_allow_html=True)
+        st.info("No classes scheduled for you today.")
 
 # ==========================================
-# 9. HOME PORTAL & NAVIGATION LOGIC
+# 9. HOME PORTAL & TABBED NAVIGATION LOGIC
 # ==========================================
 app_page = st.Page("bps_digital.py", title="BPS Digital App", icon="🏫")
 fees_page = st.Page("sch_exam_fees.py", title="Exam Fees", icon="💰")
@@ -298,47 +281,56 @@ cookpro_page = st.Page("cookpro_tracker.py", title="CookPro Tracker", icon="👩
 def home_page_ui():
     st.markdown(f"<h3 style='margin-bottom: 5px;'>👋 Welcome, {st.session_state.user_name}</h3>", unsafe_allow_html=True)
     
-    if st.session_state.user_role in ["teacher", "admin"]:
-        render_tracker()
-        
-    st.markdown("#### 🚀 Select Application")
+    # --- UI UPDATE: Creating Tabs ---
+    tab1, tab2 = st.tabs(["📅 Today's Schedule", "🚀 Applications"])
     
-    # Primary Applications
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🏫 BPS Digital App", type="primary", use_container_width=True):
-            st.switch_page(app_page)
-    with col2:
-        if st.button("📝 BPS Exams", type="primary", use_container_width=True):
-            st.switch_page(exam_page)
+    # --- TAB 1: Live Schedule Tracker ---
+    with tab1:
+        if st.session_state.user_role in ["teacher", "admin"]:
+            render_tracker()
+        else:
+            st.info("Schedules are only available for teachers and admins.")
             
-    # Secondary Applications
-    col3, col4 = st.columns(2)
-    with col3:
-        if st.button("💰 Funds & Fees", type="secondary", use_container_width=True):
-            st.switch_page(fees_page)
-    with col4:
-        if st.button("🎊 Celebrations", type="secondary", use_container_width=True):
-            st.switch_page(celeb_page)
-            
-    col7, col8 = st.columns(2)
-    with col7:
-        if st.button("👩‍🍳 CookPro Tracker", type="secondary", use_container_width=True):
-            st.switch_page(cookpro_page)
-
-    # Admin-only Applications
-    if st.session_state.user_role == "admin":
-        st.markdown("#### 🛠️ Admin Controls")
-        col5, col6 = st.columns(2)
-        with col5:
-            if st.button("🎙️ Assembly Planner", type="secondary", use_container_width=True): 
-                st.switch_page(assembly_page)
-        with col6:
-            if st.button("🎓 UDISE+ Progression", type="secondary", use_container_width=True):
-                st.switch_page(udise_page)
+    # --- TAB 2: Application Buttons ---
+    with tab2:
+        st.markdown("#### Select Application")
+        
+        # Primary Applications
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🏫 BPS Digital App", type="primary", use_container_width=True):
+                st.switch_page(app_page)
+        with col2:
+            if st.button("📝 BPS Exams", type="primary", use_container_width=True):
+                st.switch_page(exam_page)
                 
-        if st.button("🛢️ Gas Tracker", type="secondary", use_container_width=True):
-            st.switch_page(gas_page)
+        # Secondary Applications
+        col3, col4 = st.columns(2)
+        with col3:
+            if st.button("💰 Funds & Fees", type="secondary", use_container_width=True):
+                st.switch_page(fees_page)
+        with col4:
+            if st.button("🎊 Celebrations", type="secondary", use_container_width=True):
+                st.switch_page(celeb_page)
+                
+        col7, col8 = st.columns(2)
+        with col7:
+            if st.button("👩‍🍳 CookPro Tracker", type="secondary", use_container_width=True):
+                st.switch_page(cookpro_page)
+
+        # Admin-only Applications
+        if st.session_state.user_role == "admin":
+            st.markdown("#### 🛠️ Admin Controls")
+            col5, col6 = st.columns(2)
+            with col5:
+                if st.button("🎙️ Assembly Planner", type="secondary", use_container_width=True): 
+                    st.switch_page(assembly_page)
+            with col6:
+                if st.button("🎓 UDISE+ Progression", type="secondary", use_container_width=True):
+                    st.switch_page(udise_page)
+                    
+            if st.button("🛢️ Gas Tracker", type="secondary", use_container_width=True):
+                st.switch_page(gas_page)
 
 home_page = st.Page(home_page_ui, title="Home Portal", icon="🏠", default=True)
 

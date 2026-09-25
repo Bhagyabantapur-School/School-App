@@ -248,6 +248,23 @@ def update_record_in_sheet(sheet_tab, id_col_index, target_id, updates_dict):
         return True
     return False
 
+def delete_record_from_sheet(sheet_tab, id_col_index, target_id):
+    """Finds a row by ID and completely deletes it from the Google Sheet."""
+    ws = sh.worksheet(sheet_tab)
+    live_values = ws.get_all_values()
+    row_to_delete = None
+    
+    for i, row in enumerate(live_values):
+        if i > 0 and str(row[id_col_index]).strip() == str(target_id).strip():
+            row_to_delete = i + 1 
+            break
+            
+    if row_to_delete:
+        ws.delete_rows(row_to_delete)
+        get_clean_dataframe.clear()
+        return True
+    return False
+
 # ==========================================
 # 🧠 SESSION STATE & NATIVE AUTO-LOGIN
 # ==========================================
@@ -346,16 +363,10 @@ def login_page():
             """
             <div style='background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%); padding: 20px; border-radius: 12px; text-align: center; margin-bottom: 20px; box-shadow: 0px 4px 15px rgba(0, 114, 255, 0.3);'>
                 <div style='background-color: white; width: 70px; height: 70px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 10px auto; box-shadow: 0px 4px 10px rgba(0,0,0,0.15);'>
-                    <svg width="42" height="42" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <!-- Lock Base -->
-                        <rect x="2" y="10" width="11" height="12" rx="3" fill="#00c6ff"/>
-                        <!-- Lock Shackle -->
-                        <path d="M4 10V6C4 3.79 5.567 2 7.5 2C9.433 2 11 3.79 11 6V10" stroke="#00c6ff" stroke-width="2.5" stroke-linecap="round"/>
-                        <!-- Lock Hole -->
-                        <circle cx="7.5" cy="15" r="1.5" fill="white"/>
-                        <path d="M6.5 15.5L6 18H9L8.5 15.5Z" fill="white"/>
-                        <!-- Key -->
-                        <path d="M22 13.5C22 11.567 20.433 10 18.5 10C16.567 10 15 11.567 15 13.5C15 14.887 15.808 16.082 17 16.66V20H19V22H21V20H19V18H21V16.324C21.696 15.69 22 14.654 22 13.5ZM18.5 14.5C17.948 14.5 17.5 14.052 17.5 13.5C17.5 12.948 17.948 12.5 18.5 12.5C19.052 12.5 19.5 12.948 19.5 13.5C19.5 14.052 19.052 14.5 18.5 14.5Z" fill="#0072ff"/>
+                    <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#0072ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+                        <polyline points="10 17 15 12 10 7"></polyline>
+                        <line x1="15" y1="12" x2="3" y2="12"></line>
                     </svg>
                 </div>
                 <h3 style='color: white; margin: 0; font-size: 1.8rem; font-weight: 800; letter-spacing: 1px;'>Sign In</h3>
@@ -925,6 +936,32 @@ def admin_dashboard():
                     get_clean_dataframe.clear()
                     time.sleep(1)
                     st.rerun()
+                    
+        st.markdown("---")
+        st.subheader("❌ Remove User")
+        
+        # Hide the currently logged-in Admin to prevent accidental self-deletion
+        safe_to_delete = []
+        if not users_df.empty and 'User ID' in users_df.columns:
+            safe_to_delete = [uid for uid in users_df['User ID'].astype(str).str.strip().tolist() if uid != st.session_state.user_name]
+            
+        if safe_to_delete:
+            with st.form("remove_user_form"):
+                user_to_remove = st.selectbox("Select User to Remove", safe_to_delete)
+                confirm_remove = st.checkbox("I confirm I want to permanently delete this user.")
+                
+                if st.form_submit_button("Remove User", type="primary"):
+                    if not confirm_remove:
+                        st.error("Please check the confirmation box to proceed.")
+                    else:
+                        if delete_record_from_sheet("Users", 0, user_to_remove):
+                            st.success(f"✅ User '{user_to_remove}' has been successfully removed.")
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error("⚠️ Error: Could not find user to delete.")
+        else:
+            st.info("No other users available to remove.")
 
 # ==========================================
 # 🚀 ROOT APPLICATION EXECUTION

@@ -198,7 +198,12 @@ def render_tracker():
         st.warning(f"🏖️ You are marked on leave today ({leave_type}). Regular classes are hidden.")
         return
 
-    ms = rout[(rout['Teacher'] == mc) & (rout['Day'] == tdy)].copy() if not rout.empty else pd.DataFrame()
+    # --- UPDATED: Fetch Teacher's specific classes AND any class marked as "ALL" for Tiffin ---
+    if not rout.empty:
+        ms = rout[((rout['Teacher'] == mc) | (rout['Teacher'].astype(str).str.strip().str.upper() == 'ALL')) & (rout['Day'] == tdy)].copy()
+    else:
+        ms = pd.DataFrame()
+        
     if not ms.empty:
         ms['Is_Sub'] = False
         if given_away_slots:
@@ -249,6 +254,11 @@ def render_tracker():
             sub_text = "<span style='font-size:11px; font-weight:bold; color:#d9534f; margin-left:8px;'>(SUB)</span>" if r.get('Is_Sub', False) else ""
             time_str = str(r.get('Start_Time', ''))
             cls_str = f"Class {r.get('Class', '')} '{r.get('Section', 'A')}'"
+            
+            # Formatting exception to make "Break/Tiffin" look cleaner (hides the Section 'A' part)
+            if str(r.get('Teacher', '')).strip().upper() == 'ALL':
+                cls_str = f"{r.get('Class', 'Break')}"
+                
             subj_str = f"<strong>{r.get('Subject', '')}</strong>{sub_text}"
             return f"<div class='tracker-card {css_class}'><div class='tc-time'>{time_str}</div><div class='tc-info'>{cls_str}</div><div class='tc-subj'>{subj_str}</div></div>"
             

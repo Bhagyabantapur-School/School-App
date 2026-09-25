@@ -326,7 +326,6 @@ def render_upcoming_holiday():
         ist_now = utc_now + timedelta(hours=5, minutes=30)
         today = ist_now.date()
         
-        # Safely parse dates formatted as 15.10.2026, 15/10/2026, or 15-10-2026
         holidays_df['ParsedDate'] = pd.to_datetime(holidays_df['Date'].astype(str).str.replace('.', '-').str.replace('/', '-'), format='%d-%m-%Y', errors='coerce')
         valid_holidays = holidays_df.dropna(subset=['ParsedDate']).sort_values('ParsedDate')
         
@@ -349,29 +348,20 @@ def render_upcoming_holiday():
             """, unsafe_allow_html=True)
 
 # ==========================================
-# 8.6 DURGA PUJA COUNTDOWN BANNER
+# 8.6 DURGA PUJA WIDGET COUNTDOWN
 # ==========================================
 def render_durga_puja_countdown():
     utc_now = datetime.now(timezone.utc)
     ist_now = utc_now + timedelta(hours=5, minutes=30)
     today = ist_now.date()
     
-    # Target date: 15th October 2026
     dp_start = datetime(2026, 10, 15).date()
     days_left = (dp_start - today).days
     
     if days_left > 0:
-        st.markdown(f"""
-        <div style='background: linear-gradient(90deg, #ff9a9e 0%, #fecfef 99%, #fecfef 100%); padding: 10px; border-radius: 8px; margin-bottom: 15px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #ffdde1;'>
-            <span style='font-size: 16px; font-weight: 800; color: #d63384; letter-spacing: 0.5px;'>✨ {days_left} Days Until Durga Puja Vacation! ✨</span>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f"<div style='background-color: #fff9fa; border: 1px solid #ffe4e8; border-radius: 10px; padding: 10px 15px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.02); margin-bottom: 15px;'><div style='font-size: 12px; color: #d63384; text-transform: uppercase; font-weight: 800; letter-spacing: 1px; margin-bottom: 3px;'>Durga Puja Vacation</div><div style='font-size: 26px; font-weight: 900; color: #b02a6b;'>{days_left} DAYS</div></div>", unsafe_allow_html=True)
     elif days_left == 0:
-        st.markdown(f"""
-        <div style='background: linear-gradient(90deg, #a18cd1 0%, #fbc2eb 100%); padding: 10px; border-radius: 8px; margin-bottom: 15px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05);'>
-            <span style='font-size: 16px; font-weight: 800; color: #6610f2; letter-spacing: 0.5px;'>🎉 Durga Puja Vacation Begins Today! 🎉</span>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f"<div style='background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 10px; padding: 10px 15px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.02); margin-bottom: 15px;'><div style='font-size: 12px; color: #6c757d; text-transform: uppercase; font-weight: 800; letter-spacing: 1px; margin-bottom: 3px;'>Durga Puja Vacation</div><div style='font-size: 20px; font-weight: 900; color: #28a745;'>STARTS TODAY! 🎉</div></div>", unsafe_allow_html=True)
 
 # ==========================================
 # 9. HOME PORTAL & TABBED NAVIGATION LOGIC
@@ -388,7 +378,7 @@ cookpro_page = st.Page("cookpro_tracker.py", title="CookPro Tracker", icon="👩
 def home_page_ui():
     st.markdown(f"<h3 style='margin-bottom: 10px;'>👋 Welcome, {st.session_state.user_name}</h3>", unsafe_allow_html=True)
     
-    # ⏳ Render Durga Puja Countdown at the very top
+    # ⏳ Render Durga Puja Widget Countdown
     render_durga_puja_countdown()
     
     # --- UI UPDATE: Creating Tabs ---
@@ -406,7 +396,6 @@ def home_page_ui():
     with tab2:
         st.markdown("#### Select Application")
         
-        # Primary Applications
         col1, col2 = st.columns(2)
         with col1:
             if st.button("🏫 BPS Digital App", type="primary", use_container_width=True):
@@ -415,7 +404,6 @@ def home_page_ui():
             if st.button("📝 BPS Exams", type="primary", use_container_width=True):
                 st.switch_page(exam_page)
                 
-        # Secondary Applications
         col3, col4 = st.columns(2)
         with col3:
             if st.button("💰 Funds & Fees", type="secondary", use_container_width=True):
@@ -429,7 +417,6 @@ def home_page_ui():
             if st.button("👩‍🍳 CookPro Tracker", type="secondary", use_container_width=True):
                 st.switch_page(cookpro_page)
 
-        # Admin-only Applications
         if st.session_state.user_role == "admin":
             st.markdown("#### 🛠️ Admin Controls")
             col5, col6 = st.columns(2)

@@ -66,6 +66,13 @@ def init_database_gsheet():
     except Exception:
         return None
 
+@st.cache_resource
+def init_holiday_gsheet():
+    try:
+        return gspread.authorize(get_google_credentials()).open("MY ROUTINE 2026")
+    except Exception:
+        return None
+
 @st.cache_data(ttl=300)
 def fetch_routine_data():
     try:
@@ -85,6 +92,19 @@ def fetch_leave_data():
         if db_sh:
             ws = db_sh.worksheet("teacher_leave")
             df = pd.DataFrame(ws.get_all_records()).replace({'TRUE': True, 'FALSE': False, 'True': True, 'False': False}).infer_objects(copy=False)
+            df.columns = [str(c).strip() for c in df.columns]
+            return df
+    except Exception:
+        pass
+    return pd.DataFrame()
+
+@st.cache_data(ttl=3600)
+def fetch_holiday_data():
+    try:
+        h_sh = init_holiday_gsheet()
+        if h_sh:
+            ws = h_sh.worksheet("holidays")
+            df = pd.DataFrame(ws.get_all_records()).infer_objects(copy=False)
             df.columns = [str(c).strip() for c in df.columns]
             return df
     except Exception:
@@ -113,7 +133,6 @@ if 'user_id' not in st.session_state: st.session_state.user_id = None
 if not st.session_state.authenticated:
     if "user" in st.query_params:
         url_user = st.query_params["user"]
-        # Validate the user from the URL against our dictionary
         if url_user in USERS:
             st.session_state.authenticated = True
             st.session_state.user_role = USERS[url_user]["role"]
@@ -138,14 +157,10 @@ if not st.session_state.authenticated:
                 st.session_state.user_role = USERS[ui]["role"]
                 st.session_state.user_name = USERS[ui]["name"]
                 st.session_state.user_id = ui
-                
-                # Push the User ID to the URL to enable session survival on refresh
                 st.query_params["user"] = ui
-                
                 st.rerun() 
             else: 
                 st.error("❌ Incorrect Credentials")
-    
     st.stop()
 
 # ==========================================
@@ -156,6 +171,7 @@ st.sidebar.success(f"👋 Welcome, {st.session_state.user_name}")
 if st.sidebar.button("🔄 Sync Schedule", use_container_width=True, key="sync_routine_btn"):
     fetch_routine_data.clear()
     fetch_leave_data.clear()
+    fetch_holiday_data.clear()
     st.rerun()
 
 if st.sidebar.button("Log Out", use_container_width=True): 
@@ -167,7 +183,6 @@ if st.sidebar.button("Log Out", use_container_width=True):
     st.rerun()
 
 st.sidebar.markdown("---")
-# --- SIDEBAR FOOTER CREDIT ---
 st.sidebar.markdown("""
 <div style="text-align: center; padding-top: 10px;">
     <span style="color: #6c757d; font-size: 12px;">Designed & Developed by</span><br>
@@ -206,7 +221,6 @@ def render_tracker():
         st.warning(f"🏖️ You are marked on leave today ({leave_type}). Regular classes are hidden.")
         return
 
-    # Fetch Teacher's specific classes AND any class marked as "ALL" for Tiffin
     if not rout.empty:
         ms = rout[((rout['Teacher'] == mc) | (rout['Teacher'].astype(str).str.strip().str.upper() == 'ALL')) & (rout['Day'] == tdy)].copy()
     else:
@@ -251,15 +265,12 @@ def render_tracker():
         ms['End_Obj'] = ms['End_Time'].apply(parse_time_safe)
         ms = ms.dropna(subset=['Start_Obj', 'End_Obj']).sort_values('Start_Obj')
         
-        # AUTO LEISURE PERIOD GENERATOR
         schedule_with_leisure = []
         ms_records = ms.to_dict('records')
         
         for i in range(len(ms_records)):
             curr_cls = ms_records[i]
             schedule_with_leisure.append(curr_cls)
-            
-            # Check for gaps between classes
             if i < len(ms_records) - 1:
                 next_cls = ms_records[i+1]
                 if curr_cls['End_Obj'] < next_cls['Start_Obj']:
@@ -278,41 +289,89 @@ def render_tracker():
                     
         ms = pd.DataFrame(schedule_with_leisure)
         
-        # Helper to determine card state
         def get_card_class(start_obj, end_obj):
             if end_obj < curr_time: return 'card-past'
             if start_obj <= curr_time <= end_obj: return 'card-current'
             return 'card-future'
             
-        # Helper to render single horizontal card
         def generate_row_html(r, css_class):
             sub_text = "<span style='font-size:11px; font-weight:bold; color:#d9534f; margin-left:5px;'>(SUB)</span>" if r.get('Is_Sub', False) else ""
             time_str = str(r.get('Start_Time', ''))
-            
             cls_str = f"{r.get('Class', '')} '{r.get('Section', 'A')}'"
-            
-            # Formatting exceptions for Tiffin and Leisure
             if str(r.get('Teacher', '')).strip().upper() == 'ALL':
                 cls_str = f"{r.get('Class', 'Break')}"
             elif r.get('Class') == 'Leisure':
                 cls_str = "Leisure Period"
-                
             subj_str = f"<strong>{r.get('Subject', '')}</strong>{sub_text}"
             return f"<div class='tracker-card {css_class}'><div class='tc-time'>{time_str}</div><div class='tc-info'>{cls_str}</div><div class='tc-subj'>{subj_str}</div></div>"
             
-        # Build all cards for the entire day
         cards_html = ""
         for _, r in ms.iterrows():
             css_class = get_card_class(r['Start_Obj'], r['End_Obj'])
             cards_html += generate_row_html(r, css_class)
             
-        # CSS Update: Reduced vertical padding (6px) and gap (4px) for maximum compactness
-        css_string = "<style>.tracker-container { display: flex; flex-direction: column; gap: 4px; width: 100%; margin-bottom: 25px; } .tracker-card { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; border-radius: 8px; white-space: nowrap; overflow: hidden; } .tc-time { font-size: 15px; font-weight: 900; font-family: monospace; width: 20%; text-align: left; } .tc-info { font-size: 14px; font-weight: 600; width: 45%; text-align: center; overflow: hidden; text-overflow: ellipsis; } .tc-subj { font-size: 14px; width: 35%; text-align: right; overflow: hidden; text-overflow: ellipsis; } .card-past { background-color: #e2e3e5; color: #6c757d; border-left: 4px solid #adb5bd; opacity: 0.85; } .card-current { background-color: #d4edda; color: #155724; border-left: 4px solid #28a745; border: 1px solid #c3e6cb; box-shadow: 0 4px 12px rgba(40,167,69,0.15); } .card-future { background-color: #f8f9fa; color: #495057; border-left: 4px solid #0d6efd; border: 1px solid #e9ecef; }</style>"
-        
+        css_string = "<style>.tracker-container { display: flex; flex-direction: column; gap: 4px; width: 100%; margin-bottom: 15px; } .tracker-card { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; border-radius: 8px; white-space: nowrap; overflow: hidden; } .tc-time { font-size: 15px; font-weight: 900; font-family: monospace; width: 20%; text-align: left; } .tc-info { font-size: 14px; font-weight: 600; width: 45%; text-align: center; overflow: hidden; text-overflow: ellipsis; } .tc-subj { font-size: 14px; width: 35%; text-align: right; overflow: hidden; text-overflow: ellipsis; } .card-past { background-color: #e2e3e5; color: #6c757d; border-left: 4px solid #adb5bd; opacity: 0.85; } .card-current { background-color: #d4edda; color: #155724; border-left: 4px solid #28a745; border: 1px solid #c3e6cb; box-shadow: 0 4px 12px rgba(40,167,69,0.15); } .card-future { background-color: #f8f9fa; color: #495057; border-left: 4px solid #0d6efd; border: 1px solid #e9ecef; }</style>"
         html_content = css_string + f"<div class='tracker-container'>{cards_html}</div>"
         st.markdown(html_content, unsafe_allow_html=True)
     else:
         st.info("No classes scheduled for you today.")
+
+# ==========================================
+# 8.5 UPCOMING HOLIDAY BANNER
+# ==========================================
+def render_upcoming_holiday():
+    holidays_df = fetch_holiday_data()
+    if not holidays_df.empty and 'Date' in holidays_df.columns and 'Occasion' in holidays_df.columns:
+        utc_now = datetime.now(timezone.utc)
+        ist_now = utc_now + timedelta(hours=5, minutes=30)
+        today = ist_now.date()
+        
+        # Safely parse dates formatted as 15.10.2026, 15/10/2026, or 15-10-2026
+        holidays_df['ParsedDate'] = pd.to_datetime(holidays_df['Date'].astype(str).str.replace('.', '-').str.replace('/', '-'), format='%d-%m-%Y', errors='coerce')
+        valid_holidays = holidays_df.dropna(subset=['ParsedDate']).sort_values('ParsedDate')
+        
+        upcoming = valid_holidays[valid_holidays['ParsedDate'].dt.date >= today]
+        
+        if not upcoming.empty:
+            next_hol = upcoming.iloc[0]
+            h_date = next_hol['ParsedDate'].date()
+            h_occ = next_hol['Occasion']
+            days_until = (h_date - today).days
+            
+            timing_str = "Today" if days_until == 0 else "Tomorrow" if days_until == 1 else f"in {days_until} days"
+                
+            st.markdown(f"""
+            <div style='background-color: #f8f9fa; border-left: 4px solid #17a2b8; padding: 10px 15px; border-radius: 5px; margin-top: 5px;'>
+                <span style='font-size: 13px; font-weight: 700; color: #495057; text-transform: uppercase; letter-spacing: 0.5px;'>🗓️ Upcoming Holiday</span><br>
+                <span style='font-size: 15px; font-weight: 700; color: #17a2b8;'>{h_occ}</span> 
+                <span style='font-size: 14px; color: #6c757d; font-weight: 500;'> • {h_date.strftime('%d %b %Y')} ({timing_str})</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+# ==========================================
+# 8.6 DURGA PUJA COUNTDOWN BANNER
+# ==========================================
+def render_durga_puja_countdown():
+    utc_now = datetime.now(timezone.utc)
+    ist_now = utc_now + timedelta(hours=5, minutes=30)
+    today = ist_now.date()
+    
+    # Target date: 15th October 2026
+    dp_start = datetime(2026, 10, 15).date()
+    days_left = (dp_start - today).days
+    
+    if days_left > 0:
+        st.markdown(f"""
+        <div style='background: linear-gradient(90deg, #ff9a9e 0%, #fecfef 99%, #fecfef 100%); padding: 10px; border-radius: 8px; margin-bottom: 15px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #ffdde1;'>
+            <span style='font-size: 16px; font-weight: 800; color: #d63384; letter-spacing: 0.5px;'>✨ {days_left} Days Until Durga Puja Vacation! ✨</span>
+        </div>
+        """, unsafe_allow_html=True)
+    elif days_left == 0:
+        st.markdown(f"""
+        <div style='background: linear-gradient(90deg, #a18cd1 0%, #fbc2eb 100%); padding: 10px; border-radius: 8px; margin-bottom: 15px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05);'>
+            <span style='font-size: 16px; font-weight: 800; color: #6610f2; letter-spacing: 0.5px;'>🎉 Durga Puja Vacation Begins Today! 🎉</span>
+        </div>
+        """, unsafe_allow_html=True)
 
 # ==========================================
 # 9. HOME PORTAL & TABBED NAVIGATION LOGIC
@@ -327,7 +386,10 @@ celeb_page = st.Page("bps_celebration.py", title="Celebrations", icon="🎊")
 cookpro_page = st.Page("cookpro_tracker.py", title="CookPro Tracker", icon="👩‍🍳")
 
 def home_page_ui():
-    st.markdown(f"<h3 style='margin-bottom: 5px;'>👋 Welcome, {st.session_state.user_name}</h3>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='margin-bottom: 10px;'>👋 Welcome, {st.session_state.user_name}</h3>", unsafe_allow_html=True)
+    
+    # ⏳ Render Durga Puja Countdown at the very top
+    render_durga_puja_countdown()
     
     # --- UI UPDATE: Creating Tabs ---
     tab1, tab2 = st.tabs(["📅 Today's Schedule", "🚀 Applications"])
@@ -336,6 +398,7 @@ def home_page_ui():
     with tab1:
         if st.session_state.user_role in ["teacher", "admin"]:
             render_tracker()
+            render_upcoming_holiday()
         else:
             st.info("Schedules are only available for teachers and admins.")
             

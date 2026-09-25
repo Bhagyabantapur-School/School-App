@@ -165,7 +165,15 @@ if st.sidebar.button("Log Out", use_container_width=True):
     st.session_state.user_name = None
     st.session_state.user_id = None
     st.rerun()
+
 st.sidebar.markdown("---")
+# --- SIDEBAR FOOTER CREDIT ---
+st.sidebar.markdown("""
+<div style="text-align: center; padding-top: 10px;">
+    <span style="color: #6c757d; font-size: 12px;">Designed & Developed by</span><br>
+    <span style="color: #0d6efd; font-size: 14px; font-weight: 700; letter-spacing: 0.5px;">Sukhamay Kisku</span>
+</div>
+""", unsafe_allow_html=True)
 
 # ==========================================
 # 8. LIVE ROUTINE TRACKER BANNER
@@ -372,6 +380,14 @@ def home_page_ui():
                     
             if st.button("🛢️ Gas Tracker", type="secondary", use_container_width=True):
                 st.switch_page(gas_page)
+                
+    # --- MAIN DASHBOARD FOOTER CREDIT ---
+    st.markdown("""
+    <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e9ecef; text-align: center;">
+        <span style="color: #6c757d; font-size: 14px; font-weight: 500;">✨ Designed & Developed by </span>
+        <span style="color: #0d6efd; font-size: 15px; font-weight: 700; letter-spacing: 0.5px;">Sukhamay Kisku</span>
+    </div>
+    """, unsafe_allow_html=True)
 
 home_page = st.Page(home_page_ui, title="Home Portal", icon="🏠", default=True)
 

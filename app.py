@@ -168,7 +168,7 @@ if st.sidebar.button("Log Out", use_container_width=True):
 st.sidebar.markdown("---")
 
 # ==========================================
-# 8. LIVE ROUTINE TRACKER BANNER (CARD UI)
+# 8. LIVE ROUTINE TRACKER BANNER (COMPACT CARD UI)
 # ==========================================
 def render_tracker():
     st.markdown("#### ⏱️ My Live Class")
@@ -259,25 +259,29 @@ def render_tracker():
             elif earliest_future_slot and st_obj == earliest_future_slot:
                 next_rows.append(r)
                 
-    # STRIcT SINGLE-LINE HTML GENERATOR TO PREVENT MARKDOWN ISSUES
-    def generate_card_html(label, rows_list, css_class):
+    # STRIcT SINGLE-LINE HTML GENERATOR: Omits empty boxes entirely
+    def generate_card_html(rows_list, css_class):
         if not rows_list:
-            return f"<div class='tracker-card {css_class}'><div class='tc-label'>{label}</div><div class='tc-time'>---</div><div class='tc-details' style='color: #adb5bd;'>No Class Scheduled</div></div>"
+            return "" # Return nothing if there is no class
         
         r = rows_list[0]
-        sub_text = "<br><span style='font-size:12px; font-weight:bold; color:#d9534f;'>(SUBSTITUTION)</span>" if r.get('Is_Sub', False) else ""
-        time_str = f"{r.get('Start_Time', '')} - {r.get('End_Time', '')}" if 'End_Time' in r else str(r.get('Start_Time', ''))
+        sub_text = "<br><span style='font-size:12px; font-weight:bold; color:#d9534f;'>(SUB)</span>" if r.get('Is_Sub', False) else ""
+        time_str = str(r.get('Start_Time', ''))
         details = f"Class {r.get('Class', '')} '{r.get('Section', 'A')}'<br><strong>{r.get('Subject', '')}</strong>{sub_text}"
         
-        return f"<div class='tracker-card {css_class}'><div class='tc-label'>{label}</div><div class='tc-time'>{time_str}</div><div class='tc-details'>{details}</div></div>"
+        return f"<div class='tracker-card {css_class}'><div class='tc-time'>{time_str}</div><div class='tc-details'>{details}</div></div>"
 
-    # STRICT SINGLE-LINE CSS TO AVOID INDENTATION ERRORS
-    css_string = "<style>.tracker-container { display: flex; gap: 15px; width: 100%; margin-bottom: 25px; flex-wrap: wrap; } .tracker-card { flex: 1 1 250px; padding: 15px 20px; border-radius: 12px; text-align: center; display: flex; flex-direction: column; justify-content: center; transition: transform 0.2s ease-in-out; } .tracker-card:hover { transform: translateY(-2px); } .tc-label { font-size: 13px; font-weight: 800; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.5px; } .tc-time { font-size: 22px; font-weight: 900; margin-bottom: 8px; font-family: monospace; } .tc-details { font-size: 15px; line-height: 1.5; } .card-past { background-color: #e2e3e5; color: #6c757d; border-left: 6px solid #adb5bd; box-shadow: inset 0 0 10px rgba(0,0,0,0.02); opacity: 0.85; } .card-current { background-color: #d4edda; color: #155724; border-left: 6px solid #28a745; border: 1px solid #c3e6cb; box-shadow: 0 4px 12px rgba(40, 167, 69, 0.15); } .card-future { background-color: #f8f9fa; color: #495057; border-left: 6px solid #0d6efd; border: 1px solid #e9ecef; box-shadow: 0 2px 4px rgba(0,0,0,0.03); }</style>"
+    # STRICT SINGLE-LINE CSS: Removed the labels styling
+    css_string = "<style>.tracker-container { display: flex; gap: 15px; width: 100%; margin-bottom: 25px; flex-wrap: wrap; } .tracker-card { flex: 1 1 250px; padding: 15px 20px; border-radius: 12px; text-align: center; display: flex; flex-direction: column; justify-content: center; transition: transform 0.2s ease-in-out; } .tracker-card:hover { transform: translateY(-2px); } .tc-time { font-size: 24px; font-weight: 900; margin-bottom: 8px; font-family: monospace; } .tc-details { font-size: 16px; line-height: 1.5; } .card-past { background-color: #e2e3e5; color: #6c757d; border-left: 6px solid #adb5bd; box-shadow: inset 0 0 10px rgba(0,0,0,0.02); opacity: 0.85; } .card-current { background-color: #d4edda; color: #155724; border-left: 6px solid #28a745; border: 1px solid #c3e6cb; box-shadow: 0 4px 12px rgba(40, 167, 69, 0.15); } .card-future { background-color: #f8f9fa; color: #495057; border-left: 6px solid #0d6efd; border: 1px solid #e9ecef; box-shadow: 0 2px 4px rgba(0,0,0,0.03); }</style>"
     
-    # CONSTRUCT FINAL HTML STRING ON ONE LINE
-    html_content = css_string + f"<div class='tracker-container'>{generate_card_html('⬅️ Finished', prev_rows, 'card-past')}{generate_card_html('🟢 Ongoing Now', curr_rows, 'card-current')}{generate_card_html('➡️ Coming Up', next_rows, 'card-future')}</div>"
+    # CONSTRUCT FINAL HTML STRING
+    cards_html = generate_card_html(prev_rows, 'card-past') + generate_card_html(curr_rows, 'card-current') + generate_card_html(next_rows, 'card-future')
     
-    st.markdown(html_content, unsafe_allow_html=True)
+    if cards_html:
+        html_content = css_string + f"<div class='tracker-container'>{cards_html}</div>"
+        st.markdown(html_content, unsafe_allow_html=True)
+    else:
+        st.markdown("<p style='color:#adb5bd; font-style:italic;'>No classes scheduled at this time.</p>", unsafe_allow_html=True)
 
 # ==========================================
 # 9. HOME PORTAL & NAVIGATION LOGIC

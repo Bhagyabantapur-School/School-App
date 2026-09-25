@@ -168,7 +168,7 @@ if st.sidebar.button("Log Out", use_container_width=True):
 st.sidebar.markdown("---")
 
 # ==========================================
-# 8. LIVE ROUTINE TRACKER BANNER (SIDE-BY-SIDE ALL CLASSES)
+# 8. LIVE ROUTINE TRACKER BANNER (SIDE-BY-SIDE ALL CLASSES & LEISURE)
 # ==========================================
 def render_tracker():
     utc_now = datetime.now(timezone.utc)
@@ -198,7 +198,7 @@ def render_tracker():
         st.warning(f"🏖️ You are marked on leave today ({leave_type}). Regular classes are hidden.")
         return
 
-    # --- UPDATED: Fetch Teacher's specific classes AND any class marked as "ALL" for Tiffin ---
+    # Fetch Teacher's specific classes AND any class marked as "ALL" for Tiffin
     if not rout.empty:
         ms = rout[((rout['Teacher'] == mc) | (rout['Teacher'].astype(str).str.strip().str.upper() == 'ALL')) & (rout['Day'] == tdy)].copy()
     else:
@@ -243,6 +243,34 @@ def render_tracker():
         ms['End_Obj'] = ms['End_Time'].apply(parse_time_safe)
         ms = ms.dropna(subset=['Start_Obj', 'End_Obj']).sort_values('Start_Obj')
         
+        # --- 🚀 NEW: AUTO LEISURE PERIOD GENERATOR ---
+        schedule_with_leisure = []
+        ms_records = ms.to_dict('records')
+        
+        for i in range(len(ms_records)):
+            curr_cls = ms_records[i]
+            schedule_with_leisure.append(curr_cls)
+            
+            # Check if there is a gap between this class's End Time and next class's Start Time
+            if i < len(ms_records) - 1:
+                next_cls = ms_records[i+1]
+                if curr_cls['End_Obj'] < next_cls['Start_Obj']:
+                    leisure_cls = {
+                        'Start_Time': curr_cls['End_Time'],
+                        'End_Time': next_cls['Start_Time'],
+                        'Start_Obj': curr_cls['End_Obj'],
+                        'End_Obj': next_cls['Start_Obj'],
+                        'Class': 'Leisure',
+                        'Section': '-',
+                        'Subject': '☕ Free Period',
+                        'Teacher': mc,
+                        'Is_Sub': False
+                    }
+                    schedule_with_leisure.append(leisure_cls)
+                    
+        ms = pd.DataFrame(schedule_with_leisure)
+        # ---------------------------------------------
+        
         # Helper to determine card state
         def get_card_class(start_obj, end_obj):
             if end_obj < curr_time: return 'card-past'
@@ -253,11 +281,14 @@ def render_tracker():
         def generate_row_html(r, css_class):
             sub_text = "<span style='font-size:11px; font-weight:bold; color:#d9534f; margin-left:8px;'>(SUB)</span>" if r.get('Is_Sub', False) else ""
             time_str = str(r.get('Start_Time', ''))
+            
             cls_str = f"Class {r.get('Class', '')} '{r.get('Section', 'A')}'"
             
-            # Formatting exception to make "Break/Tiffin" look cleaner (hides the Section 'A' part)
+            # Formatting exceptions for Tiffin and Leisure
             if str(r.get('Teacher', '')).strip().upper() == 'ALL':
                 cls_str = f"{r.get('Class', 'Break')}"
+            elif r.get('Class') == 'Leisure':
+                cls_str = "Leisure Period"
                 
             subj_str = f"<strong>{r.get('Subject', '')}</strong>{sub_text}"
             return f"<div class='tracker-card {css_class}'><div class='tc-time'>{time_str}</div><div class='tc-info'>{cls_str}</div><div class='tc-subj'>{subj_str}</div></div>"

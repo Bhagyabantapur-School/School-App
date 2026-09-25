@@ -171,7 +171,7 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("""
 <div style="text-align: center; padding-top: 10px;">
     <span style="color: #6c757d; font-size: 12px;">Designed & Developed by</span><br>
-    <span style="color: #0d6efd; font-size: 14px; font-weight: 700; letter-spacing: 0.5px;">Sukhamay Kisku</span>
+    <span style="color: #00008B; font-size: 14px; font-weight: 700; letter-spacing: 0.5px;">Sukhamay Kisku</span>
 </div>
 """, unsafe_allow_html=True)
 
@@ -385,7 +385,7 @@ def home_page_ui():
     st.markdown("""
     <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e9ecef; text-align: center;">
         <span style="color: #6c757d; font-size: 14px; font-weight: 500;">✨ Designed & Developed by </span>
-        <span style="color: #0d6efd; font-size: 15px; font-weight: 700; letter-spacing: 0.5px;">Sukhamay Kisku</span>
+        <span style="color: #00008B; font-size: 15px; font-weight: 700; letter-spacing: 0.5px;">Sukhamay Kisku</span>
     </div>
     """, unsafe_allow_html=True)
 

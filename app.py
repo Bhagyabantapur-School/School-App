@@ -168,7 +168,7 @@ if st.sidebar.button("Log Out", use_container_width=True):
 st.sidebar.markdown("---")
 
 # ==========================================
-# 8. LIVE ROUTINE TRACKER BANNER (SIDE-BY-SIDE ALL CLASSES & LEISURE)
+# 8. LIVE ROUTINE TRACKER BANNER
 # ==========================================
 def render_tracker():
     utc_now = datetime.now(timezone.utc)
@@ -243,7 +243,7 @@ def render_tracker():
         ms['End_Obj'] = ms['End_Time'].apply(parse_time_safe)
         ms = ms.dropna(subset=['Start_Obj', 'End_Obj']).sort_values('Start_Obj')
         
-        # --- 🚀 NEW: AUTO LEISURE PERIOD GENERATOR ---
+        # AUTO LEISURE PERIOD GENERATOR
         schedule_with_leisure = []
         ms_records = ms.to_dict('records')
         
@@ -251,7 +251,7 @@ def render_tracker():
             curr_cls = ms_records[i]
             schedule_with_leisure.append(curr_cls)
             
-            # Check if there is a gap between this class's End Time and next class's Start Time
+            # Check for gaps between classes
             if i < len(ms_records) - 1:
                 next_cls = ms_records[i+1]
                 if curr_cls['End_Obj'] < next_cls['Start_Obj']:
@@ -269,7 +269,6 @@ def render_tracker():
                     schedule_with_leisure.append(leisure_cls)
                     
         ms = pd.DataFrame(schedule_with_leisure)
-        # ---------------------------------------------
         
         # Helper to determine card state
         def get_card_class(start_obj, end_obj):
@@ -279,10 +278,11 @@ def render_tracker():
             
         # Helper to render single horizontal card
         def generate_row_html(r, css_class):
-            sub_text = "<span style='font-size:11px; font-weight:bold; color:#d9534f; margin-left:8px;'>(SUB)</span>" if r.get('Is_Sub', False) else ""
+            sub_text = "<span style='font-size:11px; font-weight:bold; color:#d9534f; margin-left:5px;'>(SUB)</span>" if r.get('Is_Sub', False) else ""
             time_str = str(r.get('Start_Time', ''))
             
-            cls_str = f"Class {r.get('Class', '')} '{r.get('Section', 'A')}'"
+            # Removed the redundant word 'Class' to save space for mobile view
+            cls_str = f"{r.get('Class', '')} '{r.get('Section', 'A')}'"
             
             # Formatting exceptions for Tiffin and Leisure
             if str(r.get('Teacher', '')).strip().upper() == 'ALL':
@@ -299,8 +299,8 @@ def render_tracker():
             css_class = get_card_class(r['Start_Obj'], r['End_Obj'])
             cards_html += generate_row_html(r, css_class)
             
-        # Single-Line strict CSS for Flex Row layouts
-        css_string = "<style>.tracker-container { display: flex; flex-direction: column; gap: 8px; width: 100%; margin-bottom: 25px; } .tracker-card { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; border-radius: 8px; transition: transform 0.2s ease-in-out; } .tc-time { font-size: 16px; font-weight: 900; font-family: monospace; width: 25%; text-align: left; } .tc-info { font-size: 15px; font-weight: 500; width: 35%; text-align: left; } .tc-subj { font-size: 15px; width: 40%; text-align: right; } .card-past { background-color: #e2e3e5; color: #6c757d; border-left: 5px solid #adb5bd; opacity: 0.85; } .card-current { background-color: #d4edda; color: #155724; border-left: 5px solid #28a745; border: 1px solid #c3e6cb; box-shadow: 0 4px 12px rgba(40,167,69,0.15); transform: scale(1.01); } .card-future { background-color: #f8f9fa; color: #495057; border-left: 5px solid #0d6efd; border: 1px solid #e9ecef; }</style>"
+        # Single-Line strict CSS for fully responsive, non-wrapping mobile Flex Row layouts
+        css_string = "<style>.tracker-container { display: flex; flex-direction: column; gap: 8px; width: 100%; margin-bottom: 25px; } .tracker-card { display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; border-radius: 8px; white-space: nowrap; overflow: hidden; } .tc-time { font-size: 15px; font-weight: 900; font-family: monospace; width: 20%; text-align: left; } .tc-info { font-size: 14px; font-weight: 600; width: 45%; text-align: center; overflow: hidden; text-overflow: ellipsis; } .tc-subj { font-size: 14px; width: 35%; text-align: right; overflow: hidden; text-overflow: ellipsis; } .card-past { background-color: #e2e3e5; color: #6c757d; border-left: 4px solid #adb5bd; opacity: 0.85; } .card-current { background-color: #d4edda; color: #155724; border-left: 4px solid #28a745; border: 1px solid #c3e6cb; box-shadow: 0 4px 12px rgba(40,167,69,0.15); } .card-future { background-color: #f8f9fa; color: #495057; border-left: 4px solid #0d6efd; border: 1px solid #e9ecef; }</style>"
         
         html_content = css_string + f"<div class='tracker-container'>{cards_html}</div>"
         st.markdown(html_content, unsafe_allow_html=True)

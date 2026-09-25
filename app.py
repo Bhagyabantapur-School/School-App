@@ -259,7 +259,7 @@ def render_tracker():
             elif earliest_future_slot and st_obj == earliest_future_slot:
                 next_rows.append(r)
                 
-    # Function to generate the HTML for a single compact card (Compressed to prevent Markdown Code-Block rendering)
+    # STRIcT SINGLE-LINE HTML GENERATOR TO PREVENT MARKDOWN ISSUES
     def generate_card_html(label, rows_list, css_class):
         if not rows_list:
             return f"<div class='tracker-card {css_class}'><div class='tc-label'>{label}</div><div class='tc-time'>---</div><div class='tc-details' style='color: #adb5bd;'>No Class Scheduled</div></div>"
@@ -271,23 +271,11 @@ def render_tracker():
         
         return f"<div class='tracker-card {css_class}'><div class='tc-label'>{label}</div><div class='tc-time'>{time_str}</div><div class='tc-details'>{details}</div></div>"
 
-    # Injecting the CSS and HTML for the 3-Card Layout (Compressed to prevent Markdown Code-Block rendering)
-    html_content = f"""<style>
-    .tracker-container {{ display: flex; gap: 15px; width: 100%; margin-bottom: 25px; flex-wrap: wrap; }}
-    .tracker-card {{ flex: 1 1 250px; padding: 15px 20px; border-radius: 12px; text-align: center; display: flex; flex-direction: column; justify-content: center; transition: transform 0.2s ease-in-out; }}
-    .tracker-card:hover {{ transform: translateY(-2px); }}
-    .tc-label {{ font-size: 13px; font-weight: 800; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.5px; }}
-    .tc-time {{ font-size: 22px; font-weight: 900; margin-bottom: 8px; font-family: monospace; }}
-    .tc-details {{ font-size: 15px; line-height: 1.5; }}
-    .card-past {{ background-color: #e2e3e5; color: #6c757d; border-left: 6px solid #adb5bd; box-shadow: inset 0 0 10px rgba(0,0,0,0.02); opacity: 0.85; }}
-    .card-current {{ background-color: #d4edda; color: #155724; border-left: 6px solid #28a745; border: 1px solid #c3e6cb; box-shadow: 0 4px 12px rgba(40, 167, 69, 0.15); }}
-    .card-future {{ background-color: #f8f9fa; color: #495057; border-left: 6px solid #0d6efd; border: 1px solid #e9ecef; box-shadow: 0 2px 4px rgba(0,0,0,0.03); }}
-    </style>
-    <div class="tracker-container">
-    {generate_card_html("⬅️ Finished", prev_rows, "card-past")}
-    {generate_card_html("🟢 Ongoing Now", curr_rows, "card-current")}
-    {generate_card_html("➡️ Coming Up", next_rows, "card-future")}
-    </div>"""
+    # STRICT SINGLE-LINE CSS TO AVOID INDENTATION ERRORS
+    css_string = "<style>.tracker-container { display: flex; gap: 15px; width: 100%; margin-bottom: 25px; flex-wrap: wrap; } .tracker-card { flex: 1 1 250px; padding: 15px 20px; border-radius: 12px; text-align: center; display: flex; flex-direction: column; justify-content: center; transition: transform 0.2s ease-in-out; } .tracker-card:hover { transform: translateY(-2px); } .tc-label { font-size: 13px; font-weight: 800; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.5px; } .tc-time { font-size: 22px; font-weight: 900; margin-bottom: 8px; font-family: monospace; } .tc-details { font-size: 15px; line-height: 1.5; } .card-past { background-color: #e2e3e5; color: #6c757d; border-left: 6px solid #adb5bd; box-shadow: inset 0 0 10px rgba(0,0,0,0.02); opacity: 0.85; } .card-current { background-color: #d4edda; color: #155724; border-left: 6px solid #28a745; border: 1px solid #c3e6cb; box-shadow: 0 4px 12px rgba(40, 167, 69, 0.15); } .card-future { background-color: #f8f9fa; color: #495057; border-left: 6px solid #0d6efd; border: 1px solid #e9ecef; box-shadow: 0 2px 4px rgba(0,0,0,0.03); }</style>"
+    
+    # CONSTRUCT FINAL HTML STRING ON ONE LINE
+    html_content = css_string + f"<div class='tracker-container'>{generate_card_html('⬅️ Finished', prev_rows, 'card-past')}{generate_card_html('🟢 Ongoing Now', curr_rows, 'card-current')}{generate_card_html('➡️ Coming Up', next_rows, 'card-future')}</div>"
     
     st.markdown(html_content, unsafe_allow_html=True)
 

@@ -348,7 +348,7 @@ def render_upcoming_holiday():
             """, unsafe_allow_html=True)
 
 # ==========================================
-# 8.6 DURGA PUJA WIDGET COUNTDOWN
+# 8.6 DURGA PUJA WIDGET COUNTDOWN (PULSE EFFECT)
 # ==========================================
 def render_durga_puja_countdown():
     utc_now = datetime.now(timezone.utc)
@@ -359,9 +359,13 @@ def render_durga_puja_countdown():
     days_left = (dp_start - today).days
     
     if days_left > 0:
-        st.markdown(f"<div style='background-color: #fff9fa; border: 1px solid #ffe4e8; border-radius: 10px; padding: 10px 15px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.02); margin-bottom: 15px;'><div style='font-size: 12px; color: #d63384; text-transform: uppercase; font-weight: 800; letter-spacing: 1px; margin-bottom: 3px;'>Durga Puja Vacation</div><div style='font-size: 26px; font-weight: 900; color: #b02a6b;'>{days_left} DAYS</div></div>", unsafe_allow_html=True)
+        css_string = "<style>@keyframes pulse-pink { 0% { box-shadow: 0 0 0 0 rgba(214,51,132,0.4); transform: scale(1); } 70% { box-shadow: 0 0 0 10px rgba(214,51,132,0); transform: scale(1.02); } 100% { box-shadow: 0 0 0 0 rgba(214,51,132,0); transform: scale(1); } } .puja-wrap { text-align: center; margin-bottom: 20px; margin-top: 5px; } .puja-widget { display: inline-flex; align-items: center; gap: 12px; background: linear-gradient(135deg, #fff0f3 0%, #ffe4e8 100%); border: 1px solid #ffc9d2; border-radius: 50px; padding: 6px 16px 6px 20px; animation: pulse-pink 2s infinite; box-shadow: 0 4px 12px rgba(214,51,132,0.15); } .puja-title { font-size: 13px; color: #d63384; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; margin: 0; } .puja-days { font-size: 16px; font-weight: 900; color: #b02a6b; background: rgba(255,255,255,0.7); padding: 4px 12px; border-radius: 30px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }</style>"
+        html_content = css_string + f"<div class='puja-wrap'><div class='puja-widget'><span class='puja-title'>Durga Puja</span><span class='puja-days'>{days_left} DAYS</span></div></div>"
+        st.markdown(html_content, unsafe_allow_html=True)
     elif days_left == 0:
-        st.markdown(f"<div style='background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 10px; padding: 10px 15px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.02); margin-bottom: 15px;'><div style='font-size: 12px; color: #6c757d; text-transform: uppercase; font-weight: 800; letter-spacing: 1px; margin-bottom: 3px;'>Durga Puja Vacation</div><div style='font-size: 20px; font-weight: 900; color: #28a745;'>STARTS TODAY! 🎉</div></div>", unsafe_allow_html=True)
+        css_string = "<style>@keyframes pulse-green { 0% { box-shadow: 0 0 0 0 rgba(40,167,69,0.4); transform: scale(1); } 70% { box-shadow: 0 0 0 10px rgba(40,167,69,0); transform: scale(1.02); } 100% { box-shadow: 0 0 0 0 rgba(40,167,69,0); transform: scale(1); } } .puja-wrap { text-align: center; margin-bottom: 20px; margin-top: 5px; } .puja-widget-green { display: inline-flex; align-items: center; gap: 12px; background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border: 1px solid #bbf7d0; border-radius: 50px; padding: 6px 16px 6px 20px; animation: pulse-green 2s infinite; box-shadow: 0 4px 12px rgba(40,167,69,0.15); } .puja-title-green { font-size: 13px; color: #166534; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; margin: 0; } .puja-days-green { font-size: 16px; font-weight: 900; color: #15803d; background: rgba(255,255,255,0.7); padding: 4px 12px; border-radius: 30px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }</style>"
+        html_content = css_string + f"<div class='puja-wrap'><div class='puja-widget-green'><span class='puja-title-green'>Durga Puja</span><span class='puja-days-green'>STARTS TODAY! 🎉</span></div></div>"
+        st.markdown(html_content, unsafe_allow_html=True)
 
 # ==========================================
 # 9. HOME PORTAL & TABBED NAVIGATION LOGIC
@@ -376,9 +380,9 @@ celeb_page = st.Page("bps_celebration.py", title="Celebrations", icon="🎊")
 cookpro_page = st.Page("cookpro_tracker.py", title="CookPro Tracker", icon="👩‍🍳")
 
 def home_page_ui():
-    st.markdown(f"<h3 style='margin-bottom: 10px;'>👋 Welcome, {st.session_state.user_name}</h3>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='margin-bottom: 0px;'>👋 Welcome, {st.session_state.user_name}</h3>", unsafe_allow_html=True)
     
-    # ⏳ Render Durga Puja Widget Countdown
+    # ⏳ Render Durga Puja Floating Pulse Widget
     render_durga_puja_countdown()
     
     # --- UI UPDATE: Creating Tabs ---

@@ -289,7 +289,6 @@ def render_tracker():
             sub_text = "<span style='font-size:11px; font-weight:bold; color:#d9534f; margin-left:5px;'>(SUB)</span>" if r.get('Is_Sub', False) else ""
             time_str = str(r.get('Start_Time', ''))
             
-            # Removed the redundant word 'Class' to save space for mobile view
             cls_str = f"{r.get('Class', '')} '{r.get('Section', 'A')}'"
             
             # Formatting exceptions for Tiffin and Leisure
@@ -307,8 +306,8 @@ def render_tracker():
             css_class = get_card_class(r['Start_Obj'], r['End_Obj'])
             cards_html += generate_row_html(r, css_class)
             
-        # Single-Line strict CSS for fully responsive, non-wrapping mobile Flex Row layouts
-        css_string = "<style>.tracker-container { display: flex; flex-direction: column; gap: 8px; width: 100%; margin-bottom: 25px; } .tracker-card { display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; border-radius: 8px; white-space: nowrap; overflow: hidden; } .tc-time { font-size: 15px; font-weight: 900; font-family: monospace; width: 20%; text-align: left; } .tc-info { font-size: 14px; font-weight: 600; width: 45%; text-align: center; overflow: hidden; text-overflow: ellipsis; } .tc-subj { font-size: 14px; width: 35%; text-align: right; overflow: hidden; text-overflow: ellipsis; } .card-past { background-color: #e2e3e5; color: #6c757d; border-left: 4px solid #adb5bd; opacity: 0.85; } .card-current { background-color: #d4edda; color: #155724; border-left: 4px solid #28a745; border: 1px solid #c3e6cb; box-shadow: 0 4px 12px rgba(40,167,69,0.15); } .card-future { background-color: #f8f9fa; color: #495057; border-left: 4px solid #0d6efd; border: 1px solid #e9ecef; }</style>"
+        # CSS Update: Reduced vertical padding (6px) and gap (4px) for maximum compactness
+        css_string = "<style>.tracker-container { display: flex; flex-direction: column; gap: 4px; width: 100%; margin-bottom: 25px; } .tracker-card { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; border-radius: 8px; white-space: nowrap; overflow: hidden; } .tc-time { font-size: 15px; font-weight: 900; font-family: monospace; width: 20%; text-align: left; } .tc-info { font-size: 14px; font-weight: 600; width: 45%; text-align: center; overflow: hidden; text-overflow: ellipsis; } .tc-subj { font-size: 14px; width: 35%; text-align: right; overflow: hidden; text-overflow: ellipsis; } .card-past { background-color: #e2e3e5; color: #6c757d; border-left: 4px solid #adb5bd; opacity: 0.85; } .card-current { background-color: #d4edda; color: #155724; border-left: 4px solid #28a745; border: 1px solid #c3e6cb; box-shadow: 0 4px 12px rgba(40,167,69,0.15); } .card-future { background-color: #f8f9fa; color: #495057; border-left: 4px solid #0d6efd; border: 1px solid #e9ecef; }</style>"
         
         html_content = css_string + f"<div class='tracker-container'>{cards_html}</div>"
         st.markdown(html_content, unsafe_allow_html=True)
